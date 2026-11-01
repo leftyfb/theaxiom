@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://theaxiom.example/schemas/poc-build-update-report.schema.json",
+  "title": "Vancouver Offline Library POC build/update report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["fixture_checksum", "service_version", "catalog_result", "http_verification", "transfer_performed"],
+  "properties": {
+    "fixture_checksum": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "service_version": {"type": "string", "minLength": 1},
+    "catalog_result": {"type": "string", "enum": ["passed", "failed"]},
+    "http_verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fixture_status", "fixture_body_sha256"],
+      "properties": {
+        "fixture_status": {"type": "integer", "const": 200},
+        "fixture_body_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+      }
+    },
+    "transfer_performed": {"type": "boolean", "const": false}
+  }
+}

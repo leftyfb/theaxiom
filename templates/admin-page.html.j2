@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Admin · Offline Emergency Library</title>
+  <style>
+    :root { font-family: ui-sans-serif, system-ui, sans-serif; color:#17332b; background:#eef4f0; --green:#176b4d; --dark:#123c32; --line:#d4e4db; --muted:#587067; --paper:#fff; --accent:#e2f2e9; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 280px; }
+    a { color: var(--green); }
+    a:focus-visible, button:focus-visible { outline: 3px solid #f1b84b; outline-offset: 3px; }
+    .skip { position: fixed; left: 1rem; top: -5rem; z-index: 20; padding: .75rem 1rem; color: #fff; background: var(--dark); border-radius: .45rem; }
+    .skip:focus { top: 1rem; }
+    .site-header { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: .75rem; padding: .75rem 1rem; background: rgba(255,255,255,.97); border-bottom: 1px solid var(--line); }
+    .brand { margin-right: auto; color: var(--dark); font-size: 1.05rem; font-weight: 800; text-decoration: none; }
+    main { width: min(100% - 2rem, 70rem); margin: 0 auto; padding: 1.5rem 0 3rem; }
+    h1 { margin: 0 0 1.5rem; font-size: clamp(1.6rem, 5vw, 2.4rem); }
+    .admin-table { width: 100%; border-collapse: collapse; background: var(--paper); border: 1px solid var(--line); border-radius: .8rem; overflow: hidden; }
+    .admin-table th, .admin-table td { padding: .75rem 1rem; text-align: left; border-bottom: 1px solid var(--line); }
+    .admin-table th { background: var(--accent); font-weight: 700; font-size: .85rem; text-transform: uppercase; letter-spacing: .05em; }
+    .admin-table tr:last-child td { border-bottom: none; }
+    .admin-table td.actions { display: flex; flex-wrap: wrap; gap: .4rem; }
+    .button { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: .5rem .85rem; border: 1px solid #aac5b7; border-radius: .6rem; background: #fff; color: var(--green); font: inherit; font-weight: 700; cursor: pointer; text-decoration: none; }
+    .badge { display: inline-block; padding: .15rem .5rem; border-radius: .35rem; font-size: .75rem; font-weight: 700; }
+    .badge.enabled { color: #176b4d; background: #e2f2e9; }
+    .badge.disabled { color: #c0392b; background: #fceaea; }
+    .empty { padding: 1.5rem; text-align: center; color: var(--muted); }
+    @media (max-width: 700px) { .admin-table th, .admin-table td { padding: .5rem .6rem; font-size: .85rem; } }
+    @media print { .site-header { display: none; } }
+  </style>
+</head>
+<body>
+  <a class="skip" href="#main-content">Skip to admin table</a>
+  <header class="site-header">
+    <a class="brand" href="/">← Offline Emergency Library</a>
+    <span class="brand">Admin</span>
+  </header>
+  <main id="main-content">
+    <h1>Manage offline sources</h1>
+    {% if offline_library_content_manifest or (offline_library_kiwix_zim_enabled) %}
+    <table class="admin-table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Status</th>
+          <th>Last check</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% if offline_library_kiwix_zim_enabled %}
+        <tr class="zim-row" data-zim-row="true" data-source-id="wikipedia-en">
+          <td>{{ offline_library_kiwix_zim.title }}</td>
+          <td>zim</td>
+          <td><span class="badge {{ 'enabled' if offline_library_kiwix_zim_enabled else 'disabled' }}">{{ 'enabled' if offline_library_kiwix_zim_enabled else 'disabled' }}</span></td>
+          <td>{{ offline_library_kiwix_zim.catalog_date or '—' }}</td>
+          <td class="actions">
+            <button class="button" type="button" data-action="download-zim"
+              data-url="{{ offline_library_kiwix_zim.source_url }}"
+              data-dest="{{ offline_library_storage_mount }}/staging/{{ offline_library_kiwix_zim.filename }}"
+              data-bytes="{{ offline_library_kiwix_zim.bytes }}"
+              data-sha256="{{ offline_library_kiwix_zim.sha256 }}">Download</button>
+            <button class="button" type="button" data-action="redownload-zim"
+              data-url="{{ offline_library_kiwix_zim.source_url }}"
+              data-dest="{{ offline_library_storage_mount }}/staging/{{ offline_library_kiwix_zim.filename }}"
+              data-bytes="{{ offline_library_kiwix_zim.bytes }}"
+              data-sha256="{{ offline_library_kiwix_zim.sha256 }}">Re-download</button>
+            <button class="button" type="button" data-action="update-zim"
+              data-url="{{ offline_library_kiwix_zim.source_url }}"
+              data-dest="{{ offline_library_storage_mount }}/staging/{{ offline_library_kiwix_zim.filename }}"
+              data-bytes="{{ offline_library_kiwix_zim.bytes }}"
+              data-sha256="{{ offline_library_kiwix_zim.sha256 }}">Update</button>
+            <span class="action-status" role="status" aria-live="polite" hidden></span>
+          </td>
+        </tr>
+      {% endif %}
+
+      {% for source in offline_library_content_manifest %}
+        <tr>
+          <td>{{ source.title }}</td>
+          <td>{{ source.kind }}</td>
+          <td><span class="badge {{ 'enabled' if source.retrieved and source.retrieved >= '2026-09-14' else 'disabled' }}">{{ 'current' if source.retrieved and source.retrieved >= '2026-09-14' else ('up-to-date' if source.retrieved and source.retrieved >= '2025-10-14' else ('stale' if source.retrieved else 'unknown')) }}</span></td>
+          <td>{{ source.retrieved or '—' }}</td>
+          <td class="actions">
+            <button class="button" type="button">Download</button>
+            <button class="button" type="button">Re-download</button>
+            <button class="button" type="button">Update</button>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="empty">No managed sources configured.</p>
+    {% endif %}
+  </main>
+  <script>
+    document.querySelectorAll('[data-zim-row="true"] [data-action]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const row = button.closest('[data-zim-row="true"]');
+        const action = button.dataset.action.replace(/-zim$/, '');
+        const status = row.querySelector?.('.action-status');
+        if (status) {
+          status.textContent = `${button.textContent.trim()} request pending…`;
+          status.hidden = false;
+        }
+        try {
+          const response = await fetch('/api/action', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ source_id: row.dataset.sourceId, action }),
+          });
+          if (!response.ok) throw new Error(`Request failed (${response.status})`);
+          const result = await response.json();
+          if (result.skipped) {
+            if (status) status.textContent = `${button.textContent.trim()} complete: source is already current.`;
+            return;
+          }
+          if (!result.accepted || !/^[a-f0-9]{32}$/.test(result.job_id || '')) {
+            throw new Error(result.error || 'The server did not accept the request.');
+          }
+          const jobId = result.job_id;
+          const maxAttempts = 60;
+          for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+            await new Promise((resolve) => window.setTimeout(resolve, 2000));
+            const jobResponse = await fetch(`/api/jobs/${jobId}`);
+            if (!jobResponse.ok) throw new Error(`Status check failed (${jobResponse.status})`);
+            const job = await jobResponse.json();
+            if (job.status === 'completed') {
+              if (status) status.textContent = `${button.textContent.trim()} completed successfully.`;
+              return;
+            }
+            if (job.status === 'failed') {
+              throw new Error(`Acquisition failed${job.returncode == null ? '' : ` (exit ${job.returncode})`}.`);
+            }
+            if (job.status !== 'pending') throw new Error('The server returned an unknown job status.');
+          }
+          throw new Error('Timed out while waiting for the acquisition to finish.');
+        } catch (error) {
+          if (status) status.textContent = `${button.textContent.trim()} failed: ${error.message}`;
+        }
+      });
+    });
+  </script>
+</body>
+</html>

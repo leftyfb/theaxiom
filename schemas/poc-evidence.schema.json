@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Vancouver offline-library POC evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["fixture", "report", "status", "verification"],
+  "properties": {
+    "fixture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+      }
+    },
+    "report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": {"path": {"type": "string", "minLength": 1}}
+    },
+    "status": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["returncode", "json"],
+      "properties": {
+        "returncode": {"type": "integer"},
+        "json": {"type": "object"}
+      }
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["returncode", "output"],
+      "properties": {
+        "returncode": {"type": "integer"},
+        "output": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}

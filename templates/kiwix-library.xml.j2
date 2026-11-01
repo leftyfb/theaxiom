@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<library version="2">
+{% if offline_library_kiwix_zim_enabled %}
+  <book id="{{ offline_library_kiwix_zim.id }}" path="{{ offline_library_kiwix_zim_destination }}" title="{{ offline_library_kiwix_zim.title }}" language="eng" />
+{% endif %}
+</library>

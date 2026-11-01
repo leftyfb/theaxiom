@@ -1,0 +1,21 @@
+{
+  "suite": {
+    "result": "passed",
+    "report": {
+      "fixture_checksum": "d7f3147ded63e205af5a5aecd1ee99050bfd8c8895492520b2c0a5c656a91056",
+      "service_version": "fixture-poc/1.0",
+      "catalog_result": "passed",
+      "http_verification": {
+        "fixture_status": 200,
+        "fixture_body_sha256": "d7f3147ded63e205af5a5aecd1ee99050bfd8c8895492520b2c0a5c656a91056"
+      },
+      "transfer_performed": false
+    }
+  },
+  "role": {
+    "service_version": "fixture-poc/1.0",
+    "commit": "6d9f65f5ace9e653e39aa92c8179aa35d95ffe4c"
+  },
+  "fixture_checksum": "d7f3147ded63e205af5a5aecd1ee99050bfd8c8895492520b2c0a5c656a91056",
+  "bulk_acquisition_enabled": false
+}

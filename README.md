@@ -24,7 +24,19 @@ Content quality matters, especially for emergency, health, water, sanitation, an
 
 The Axiom is in early development. Its goals include reliable preparation and local serving of curated reference materials, with clear provenance and explicit operator control over what is published. It is not yet a production-ready appliance or a finished, universally supported installation package.
 
-This repository is being established as the standalone home for the project. Installation instructions, supported platforms, release practices, and other operational documentation will be added as the project develops.
+This repository is the standalone home for the project. The current migration preserves the application and proof-of-concept tooling while intentionally excluding Ansible, host inventory, nginx/systemd deployment files, and Projectwright integration. See `docs/architecture.md` and `docs/backlog.md` for boundaries and next work.
+
+## Development
+
+The supported development baseline is Ubuntu 24.04 LTS and Ubuntu 26.04 LTS with Python 3.10 or newer:
+
+```shell
+python3 -m venv .venv
+.venv/bin/python -m pip install -e '.[dev]'
+.venv/bin/python -m pytest
+```
+
+The test suite is local and deterministic by default. Fixtures and generated reports are used to exercise the preserved POC behavior without requiring Ansible, nginx, systemd, Projectwright, or outbound network access.
 
 ## License
 

@@ -1,0 +1,5 @@
+Vancouver Offline Library POC fixture
+
+This deterministic repository-local text is synthetic test content for exercising the approved offline Kiwix path. It contains no downloaded or licensed bulk content.
+
+Fixture version: 1

@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://theaxiom.example/schemas/poc-status.schema.json",
+  "title": "Vancouver Offline Library POC status",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["service", "fixture", "report"],
+  "properties": {
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "requested", "checked", "active", "state"],
+      "properties": {
+        "name": {"type": ["string", "null"]},
+        "requested": {"type": "boolean"},
+        "checked": {"type": "boolean"},
+        "active": {"type": ["boolean", "null"]},
+        "state": {"type": "string"}
+      }
+    },
+    "fixture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+      }
+    },
+    "report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "service_version", "catalog_result", "fixture_checksum", "transfer_performed"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "service_version": {"type": "string", "minLength": 1},
+        "catalog_result": {"type": "string", "enum": ["passed", "failed"]},
+        "fixture_checksum": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "transfer_performed": {"type": "boolean", "const": false}
+      }
+    }
+  }
+}

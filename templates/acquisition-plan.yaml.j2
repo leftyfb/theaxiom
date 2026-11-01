@@ -1,0 +1,5 @@
+{
+  "bulk_acquisition_approved": true,
+  "transfer_performed": false,
+  "content": {{ content_manifest | default([]) | selectattr('enabled', 'equalto', true) | list | tojson(indent=2) }}
+}

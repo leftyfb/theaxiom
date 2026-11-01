@@ -1,0 +1,19 @@
+{
+  "fixture": {
+    "path": "fixtures/kiwix/offline-library-fixture",
+    "sha256": "d7f3147ded63e205af5a5aecd1ee99050bfd8c8895492520b2c0a5c656a91056"
+  },
+  "report": {
+    "path": "fixtures/kiwix/poc-build-update-report.json"
+  },
+  "status": {
+    "returncode": 0,
+    "json": {
+      "service": {"active": true}
+    }
+  },
+  "verification": {
+    "returncode": 0,
+    "output": ["fixture_status: passed"]
+  }
+}
