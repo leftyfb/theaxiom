@@ -16,17 +16,12 @@
     .brand { margin-right: auto; color: var(--dark); font-size: 1.05rem; font-weight: 800; text-decoration: none; }
     main { width: min(100% - 2rem, 70rem); margin: 0 auto; padding: 1.5rem 0 3rem; }
     h1 { margin: 0 0 1.5rem; font-size: clamp(1.6rem, 5vw, 2.4rem); }
-    .admin-table { width: 100%; border-collapse: collapse; background: var(--paper); border: 1px solid var(--line); border-radius: .8rem; overflow: hidden; }
-    .admin-table th, .admin-table td { padding: .75rem 1rem; text-align: left; border-bottom: 1px solid var(--line); }
-    .admin-table th { background: var(--accent); font-weight: 700; font-size: .85rem; text-transform: uppercase; letter-spacing: .05em; }
-    .admin-table tr:last-child td { border-bottom: none; }
     .admin-table td.actions { display: flex; flex-wrap: wrap; gap: .4rem; }
     .button { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: .5rem .85rem; border: 1px solid #aac5b7; border-radius: .6rem; background: #fff; color: var(--green); font: inherit; font-weight: 700; cursor: pointer; text-decoration: none; }
     .badge { display: inline-block; padding: .15rem .5rem; border-radius: .35rem; font-size: .75rem; font-weight: 700; }
     .badge.enabled { color: #176b4d; background: #e2f2e9; }
     .badge.disabled { color: #c0392b; background: #fceaea; }
     .empty { padding: 1.5rem; text-align: center; color: var(--muted); }
-    @media (max-width: 700px) { .admin-table th, .admin-table td { padding: .5rem .6rem; font-size: .85rem; } }
     @media print { .site-header { display: none; } }
     .settings-panel { background: var(--paper); border: 1px solid var(--line); border-radius: .8rem; padding: 1.25rem; margin: 1rem 0 2rem; }
     .settings-panel fieldset { border: 0; margin: 0; padding: 0; }
@@ -37,10 +32,26 @@
     .storage-status dt { font-weight: 650; }
     .storage-status dd { margin: 0; overflow-wrap: anywhere; }
     @media (max-width: 500px) { .storage-status { grid-template-columns: 1fr; } .storage-status dd { margin-bottom: .5rem; } }
+    .source-card { background: var(--paper); border: 1px solid var(--line); border-radius: .8rem; padding: 1.25rem; margin: 1rem 0; }
+    .source-header { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
+    .source-header h3 { margin: 0; overflow-wrap: anywhere; }
+    .source-header > div { flex: 1; min-width: 0; }
+    .source-symbol { background: var(--accent); border-radius: .6rem; padding: .65rem; font-weight: 800; }
+    .source-subtitle, .source-note { color: var(--muted); margin: .35rem 0; }
+    .source-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .75rem; }
+    .button:disabled { opacity: .55; cursor: not-allowed; }
+    .source-card progress { width: 100%; accent-color: var(--green); height: .9rem; }
+    .source-card details { margin-top: 1rem; border-top: 1px solid var(--line); padding-top: .6rem; }
+    .source-card summary { cursor: pointer; font-weight: 650; min-height: 44px; padding: .55rem 0; color: var(--green); }
+    .source-card summary:focus-visible { outline: 3px solid #f1b84b; }
+    .source-card [hidden] { display: none !important; }
+    .source-live { margin-top: 1rem; }
+    .source-live p { margin: .4rem 0; }
+    .source-details { overflow-wrap: anywhere; }
   </style>
 </head>
 <body>
-  <a class="skip" href="#main-content">Skip to admin table</a>
+  <a class="skip" href="#main-content">Skip to administration</a>
   <header class="site-header">
     <a class="brand" href="/">← Offline Emergency Library</a>
     <span class="brand">Admin</span>
@@ -104,132 +115,107 @@
       <p id="password-feedback" role="status" aria-live="polite"></p>
     </section>
     {% endif %}
-    <section aria-labelledby="acquisition-heading" class="settings-panel">
-      <h2 id="acquisition-heading">Acquisition progress</h2>
-      <p>Read-only status of the external Wikipedia acquisition service.</p>
-      <p id="acquisition-status" role="status">Waiting for first sample…</p>
-      <progress id="acquisition-progress" max="100" value="0" aria-label="Download progress" hidden style="width:100%"></progress>
-      <p id="acquisition-metrics"></p>
-      <p id="acquisition-detail"></p>
-    </section>
     <h2 id="sources">Content sources</h2>
-    <p>Downloads are temporarily unavailable while storage safety is being implemented.</p>
-
-    {% if offline_library_content_manifest or (offline_library_kiwix_zim_enabled) %}
-    <table class="admin-table">
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th>Type</th>
-          <th>Status</th>
-          <th>Last check</th>
-          <th>Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-      {% if offline_library_kiwix_zim_enabled %}
-        <tr class="zim-row" data-zim-row="true" data-source-id="wikipedia-en">
-          <td>{{ offline_library_kiwix_zim.title }}</td>
-          <td>zim</td>
-          <td><span class="badge {{ 'enabled' if offline_library_kiwix_zim_enabled else 'disabled' }}">{{ 'enabled' if offline_library_kiwix_zim_enabled else 'disabled' }}</span></td>
-          <td>{{ offline_library_kiwix_zim.catalog_date or '—' }}</td>
-          <td class="actions">
-            <button class="button" type="button" data-action="download-zim"
-              data-url="{{ offline_library_kiwix_zim.source_url }}"
-              
-              data-bytes="{{ offline_library_kiwix_zim.bytes }}"
-              data-sha256="{{ offline_library_kiwix_zim.sha256 }}">Download</button>
-            <button class="button" type="button" data-action="redownload-zim"
-              data-url="{{ offline_library_kiwix_zim.source_url }}"
-              
-              data-bytes="{{ offline_library_kiwix_zim.bytes }}"
-              data-sha256="{{ offline_library_kiwix_zim.sha256 }}">Re-download</button>
-            <button class="button" type="button" data-action="update-zim"
-              data-url="{{ offline_library_kiwix_zim.source_url }}"
-              
-              data-bytes="{{ offline_library_kiwix_zim.bytes }}"
-              data-sha256="{{ offline_library_kiwix_zim.sha256 }}">Update</button>
-            <span class="action-status" role="status" aria-live="polite" hidden></span>
-          </td>
-        </tr>
-      {% endif %}
-
-      {% for source in offline_library_content_manifest %}
-        <tr>
-          <td>{{ source.title }}</td>
-          <td>{{ source.kind }}</td>
-          <td><span class="badge {{ 'enabled' if source.retrieved and source.retrieved >= '2026-09-14' else 'disabled' }}">{{ 'current' if source.retrieved and source.retrieved >= '2026-09-14' else ('up-to-date' if source.retrieved and source.retrieved >= '2025-10-14' else ('stale' if source.retrieved else 'unknown')) }}</span></td>
-          <td>{{ source.retrieved or '—' }}</td>
-          <td class="actions">
-            <button class="button" type="button">Download</button>
-            <button class="button" type="button">Re-download</button>
-            <button class="button" type="button">Update</button>
-          </td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-    {% else %}
-    <p class="empty">No managed sources configured.</p>
+    <p class="source-note">Acquisition controls are disabled until safe download and recovery support is ready.</p>
+    <div id="source-cards">
+    {% if offline_library_kiwix_zim_enabled %}
+      {% set source = offline_library_kiwix_zim %}
+      <article class="source-card" data-source-id="wikipedia-en" aria-labelledby="wikipedia-title">
+        <header class="source-header">
+          <span class="source-symbol" aria-hidden="true">W</span>
+          <div>
+            <h3 id="wikipedia-title">{{ source.title }}</h3>
+            <p class="source-subtitle">Kiwix ZIM · English · {{ (source.bytes / 1073741824)|round(2) }} GiB</p>
+          </div>
+          <span class="badge" data-field="status" role="status">Waiting for status…</span>
+        </header>
+        <div class="source-live">
+          <p data-field="metrics" hidden></p>
+          <progress data-field="transfer" max="100" value="0" aria-label="Archive download progress" hidden></progress>
+          <p data-field="verification-label" hidden>Checksum verification in progress — percentage unavailable.</p>
+          <progress data-field="verification" aria-label="Checksum verification in progress" hidden></progress>
+          <p class="source-note" data-field="rate" hidden></p>
+          <p data-field="detail" class="source-note" hidden></p>
+        </div>
+        <div class="source-actions" aria-label="Source actions">
+          <button class="button" type="button" data-action="download-zim" disabled>Download</button>
+          <button class="button" type="button" data-action="redownload-zim" disabled>Re-download</button>
+          <button class="button" type="button" data-action="update-zim" disabled>Update</button>
+        </div>
+        <details>
+          <summary>Source details</summary>
+          <dl class="storage-status source-details">
+            <dt>Archive filename</dt><dd>{{ source.filename }}</dd>
+            <dt>Catalog date</dt><dd>{{ source.catalog_date or '—' }}</dd>
+            <dt>Publisher</dt><dd>{{ source.publisher or '—' }}</dd>
+            <dt>Language</dt><dd>{{ source.language or '—' }}</dd>
+            <dt>Source URL</dt><dd>{{ source.source_url }}</dd>
+            <dt>Expected SHA-256</dt><dd>{{ source.sha256 }}</dd>
+            <dt>License</dt><dd>{{ source.license or '—' }}</dd>
+            <dt>Verification</dt><dd data-field="verified">Not confirmed</dd>
+            <dt>Last sample</dt><dd data-field="sample">—</dd>
+          </dl>
+        </details>
+      </article>
     {% endif %}
+    {% for source in offline_library_content_manifest %}
+      <article class="source-card">
+        <header class="source-header">
+          <div><h3>{{ source.title }}</h3><p class="source-subtitle">{{ source.kind }}</p></div>
+          <span class="badge">Status unavailable</span>
+        </header>
+        <div class="source-actions">
+          <button class="button" type="button" disabled>Download</button>
+          <button class="button" type="button" disabled>Re-download</button>
+          <button class="button" type="button" disabled>Update</button>
+        </div>
+        <details><summary>Source details</summary><dl class="storage-status"><dt>Retrieved (catalog)</dt><dd>{{ source.retrieved or '—' }}</dd></dl></details>
+      </article>
+    {% endfor %}
+    {% if not offline_library_content_manifest and not offline_library_kiwix_zim_enabled %}
+      <p class="empty">No managed sources configured.</p>
+    {% endif %}
+    </div>
   </main>
-  <script>
-    document.querySelectorAll('[data-zim-row="true"] [data-action]').forEach((button) => {
-      button.addEventListener('click', async () => {
-        const row = button.closest('[data-zim-row="true"]');
-        const action = button.dataset.action.replace(/-zim$/, '');
-        const status = row.querySelector?.('.action-status');
-        if (status) {
-          status.textContent = `${button.textContent.trim()} request pending…`;
-          status.hidden = false;
-        }
-        try {
-          const response = await fetch('/api/action', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ source_id: row.dataset.sourceId, action }),
-          });
-          const result = await response.json();
-          if (!response.ok) throw new Error(result.error || `Request failed (${response.status})`);
-          if (result.skipped) {
-            if (status) status.textContent = `${button.textContent.trim()} complete: source is already current.`;
-            return;
-          }
-          if (!result.accepted || !/^[a-f0-9]{32}$/.test(result.job_id || '')) {
-            throw new Error(result.error || 'The server did not accept the request.');
-          }
-          const jobId = result.job_id;
-          const maxAttempts = 60;
-          for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-            await new Promise((resolve) => window.setTimeout(resolve, 2000));
-            const jobResponse = await fetch(`/api/jobs/${jobId}`);
-            if (!jobResponse.ok) throw new Error(`Status check failed (${jobResponse.status})`);
-            const job = await jobResponse.json();
-            if (job.status === 'completed') {
-              if (status) status.textContent = `${button.textContent.trim()} completed successfully.`;
-              return;
-            }
-            if (job.status === 'failed') {
-              throw new Error(`Acquisition failed${job.returncode == null ? '' : ` (exit ${job.returncode})`}.`);
-            }
-            if (job.status !== 'pending') throw new Error('The server returned an unknown job status.');
-          }
-          throw new Error('Timed out while waiting for the acquisition to finish.');
-        } catch (error) {
-          if (status) status.textContent = `${button.textContent.trim()} failed: ${error.message}`;
-        }
-      });
-    });
-  </script>
   <script id="acquisition-monitor-script">
     (() => {
-      const byId = id => document.getElementById(id);
-      const progress = byId('acquisition-progress');
+      const cards = Array.from(document.querySelectorAll('.source-card[data-source-id]'));
+      if (!cards.length) return;
       const labels = {downloading: 'Downloading', verifying: 'Verifying checksum',
         publishing: 'Publishing / verifying final file', completed: 'Verified and published',
         retrying: 'Waiting to retry', failed: 'Failed', interrupted: 'Interrupted',
         not_started: 'Not started', unavailable: 'Service not installed', unknown: 'Status unknown'};
       const gib = bytes => (bytes / 1073741824).toFixed(2) + ' GiB';
+      function render(card, job, stale, unavailable = false) {
+        const field = name => card.querySelector('[data-field="' + name + '"]');
+        const put = (name, value) => {
+          const node = field(name);
+          node.textContent = value;
+          node.hidden = !value;
+        };
+        const status = unavailable ? 'Status unavailable' : !job ? 'Waiting for status' :
+          stale ? 'Stale sample — status unknown' : (labels[job.state] || 'Status unknown');
+        put('status', status);
+        field('status').className = 'badge' + (!stale && job?.state === 'completed' && job.verified === true ?
+          ' enabled' : !stale && job?.state === 'failed' ? ' disabled' : '');
+        const progress = field('transfer');
+        const valid = Number.isFinite(job?.downloaded_bytes) && job.downloaded_bytes >= 0 &&
+          Number.isFinite(job.expected_bytes) && job.expected_bytes > 0 && job.downloaded_bytes <= job.expected_bytes;
+        progress.hidden = !valid;
+        progress.value = valid ? 100 * job.downloaded_bytes / job.expected_bytes : 0;
+        put('metrics', valid ? (stale ? 'Last observed download: ' : 'Download: ') +
+          progress.value.toFixed(2) + '% · ' + gib(job.downloaded_bytes) + ' / ' + gib(job.expected_bytes) : '');
+        const checking = !stale && (job?.state === 'verifying' || job?.state === 'publishing');
+        field('verification').hidden = !checking;
+        put('verification-label', checking ? 'Checksum / publishing in progress — percentage unavailable.' : '');
+        const rate = !stale && job?.state === 'downloading' && job.speed_bytes_per_second > 0 ?
+          (job.speed_bytes_per_second / 1048576).toFixed(2) + ' MiB/s' +
+          (Number.isFinite(job.eta_seconds) ? ' · ' + Math.ceil(job.eta_seconds / 60) + ' min remaining (transfer only)' : '') : '';
+        put('rate', rate);
+        put('detail', job?.detail || '');
+        put('verified', !stale && job?.verified === true ? 'Confirmed by acquisition service' : 'Not confirmed');
+        put('sample', Number.isFinite(job?.sampled_at) ? new Date(job.sampled_at * 1000).toLocaleString() : '—');
+      }
       async function refresh() {
         const controller = new AbortController();
         const timer = window.setTimeout(() => controller.abort(), 5000);
@@ -237,25 +223,10 @@
           const response = await fetch('/api/acquisitions', {cache: 'no-store', signal: controller.signal});
           if (!response.ok) throw new Error('Status unavailable');
           const data = await response.json();
-          const job = data.acquisitions?.[0];
-          byId('acquisition-status').textContent = job ?
-            (data.stale ? 'Stale sample — status unknown' : (labels[job.state] || 'Status unknown')) :
-            'Waiting for acquisition status';
-          progress.hidden = !job || !Number.isFinite(job.downloaded_bytes) || !(job.expected_bytes > 0);
-          progress.value = progress.hidden ? 0 : 100 * job.downloaded_bytes / job.expected_bytes;
-          const metrics = progress.hidden ? [] : [progress.value.toFixed(2) + '%',
-            gib(job.downloaded_bytes) + ' / ' + gib(job.expected_bytes)];
-          if (!data.stale && job?.speed_bytes_per_second > 0) {
-            metrics.push((job.speed_bytes_per_second / 1048576).toFixed(2) + ' MiB/s');
-            metrics.push(Math.ceil(job.eta_seconds / 60) + ' min remaining (transfer only)');
-          }
-          byId('acquisition-metrics').textContent = metrics.join(' · ');
-          byId('acquisition-detail').textContent = job?.detail || '';
+          const jobs = new Map((data.acquisitions || []).map(job => [job.source_id, job]));
+          cards.forEach(card => render(card, jobs.get(card.dataset.sourceId), data.stale !== false));
         } catch (_) {
-          byId('acquisition-status').textContent = 'Acquisition status unavailable';
-          progress.hidden = true;
-          byId('acquisition-metrics').textContent = '';
-          byId('acquisition-detail').textContent = '';
+          cards.forEach(card => render(card, null, true, true));
         } finally {
           window.clearTimeout(timer);
           window.setTimeout(refresh, 2000);
