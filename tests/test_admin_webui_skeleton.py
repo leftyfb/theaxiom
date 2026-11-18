@@ -27,11 +27,16 @@ class AdminWebUISkeletonTests(unittest.TestCase):
             'data-action="update-zim"',
             'data-source-id="wikipedia-en"',
             "data-url=",
-            "data-dest=",
             "data-bytes=",
             "data-sha256=",
         ):
             self.assertIn(marker, text)
+
+    def test_acquisition_destination_is_not_embedded_in_client_markup(self):
+        text = TEMPLATE.read_text(encoding="utf-8")
+        self.assertNotIn("data-dest=", text)
+        self.assertIn('id="status-staging"', text)
+        self.assertIn('id="status-library"', text)
 
     def test_template_handles_empty_and_manifest_backed_states(self):
         text = TEMPLATE.read_text(encoding="utf-8")
