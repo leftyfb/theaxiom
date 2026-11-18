@@ -13,6 +13,7 @@ Endpoints (Phase B):
 from __future__ import annotations
 
 import json
+import importlib
 import os
 import re
 import subprocess
@@ -28,6 +29,9 @@ if __package__:
     from .freshness_probe import probe_source
 else:
     from freshness_probe import probe_source
+storage_settings = importlib.import_module(
+    f"{__package__}.storage_settings" if __package__ else "storage_settings"
+)
 
 BIND_HOST = "127.0.0.1"
 BIND_PORT = 8080
@@ -222,6 +226,11 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             self._send_admin_page()
         elif self.path.rstrip("/") == "/api/freshness":
             self._send_json(200, freshness_response())
+        elif self.path.rstrip("/") == "/api/storage-settings":
+            try:
+                self._send_json(200, storage_settings.load_settings())
+            except ValueError:
+                self._send_json(500, {"error": "stored settings are invalid"})
         elif re.fullmatch(r"/api/jobs/[a-f0-9]{32}", self.path.rstrip("/")):
             job_id = self.path.rstrip("/").rsplit("/", 1)[-1]
             response = job_status_response(job_id)
@@ -252,7 +261,15 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self) -> None:  # noqa: N802 - http.server convention
-        if self.path.rstrip("/") == "/api/action":
+        if self.path.rstrip("/") == "/api/storage-settings":
+            data = self._read_body()
+            try:
+                settings = storage_settings.save_settings(data)
+            except (ValueError, OSError):
+                self._send_json(400, {"error": "invalid storage settings"})
+                return
+            self._send_json(200, settings)
+        elif self.path.rstrip("/") == "/api/action":
             data = self._read_body()
             source_id = str(data.get("source_id", "")).strip()
             action = str(data.get("action", "")).strip()

@@ -33,9 +33,9 @@ class AdminAPIValidationTests(unittest.TestCase):
         cls.server.server_close()
         cls.thread.join(timeout=5)
 
-    def post_raw(self, data, content_type="application/json"):
+    def post_raw(self, data, content_type="application/json", path="/api/action"):
         request = urllib.request.Request(
-            f"http://127.0.0.1:{self.port}/api/action",
+            f"http://127.0.0.1:{self.port}{path}",
             data=data,
             headers={"Content-Type": content_type},
             method="POST",
@@ -64,6 +64,47 @@ class AdminAPIValidationTests(unittest.TestCase):
             parsed = body
 
         return status, parsed
+
+    def test_storage_settings_get_and_save_persist(self):
+        from tempfile import TemporaryDirectory
+        from pathlib import Path
+        from theaxiom import admin_api
+
+        with TemporaryDirectory() as directory, mock.patch.object(
+            admin_api.storage_settings, "SETTINGS_PATH", Path(directory) / "storage.json"
+        ):
+            defaults = admin_api.storage_settings.DEFAULT_SETTINGS
+            updated = dict(defaults, storage_source="/dev/test", minimum_free_bytes=1234)
+            status, saved = self.post_raw(
+                json.dumps(updated).encode(), path="/api/storage-settings"
+            )
+            self.assertEqual(status, 200)
+            self.assertEqual(saved, updated)
+            with urllib.request.urlopen(
+                f"http://127.0.0.1:{self.port}/api/storage-settings", timeout=5
+            ) as response:
+                status = response.status
+                loaded = json.loads(response.read())
+            self.assertEqual(status, 200)
+            self.assertEqual(loaded, updated)
+
+    def test_invalid_storage_settings_save_does_not_replace_existing(self):
+        from tempfile import TemporaryDirectory
+        from pathlib import Path
+        from theaxiom import admin_api
+
+        with TemporaryDirectory() as directory, mock.patch.object(
+            admin_api.storage_settings, "SETTINGS_PATH", Path(directory) / "storage.json"
+        ):
+            valid = admin_api.storage_settings.DEFAULT_SETTINGS.copy()
+            admin_api.storage_settings.save_settings(valid)
+            invalid = dict(valid, storage_mount="/../escape")
+            status, body = self.post_raw(
+                json.dumps(invalid).encode(), path="/api/storage-settings"
+            )
+            self.assertEqual(status, 400)
+            self.assertEqual(body, {"error": "invalid storage settings"})
+            self.assertEqual(admin_api.storage_settings.load_settings(), valid)
 
     def post_action(self, source_id, action):
         return self.post_raw(
