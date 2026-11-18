@@ -1,14 +1,5 @@
 #!/usr/bin/env python3
-"""Offline library admin API backend.
-
-A small standard-library HTTP server that exposes bounded admin endpoints
-for the offline library WebUI. Listens on localhost only so nginx proxies
-the authenticated /admin route to it.
-
-Endpoints (Phase B):
-  GET  /health      — fixed JSON liveness response
-  POST /api/action  — launch a trusted acquisition for a source ID
-"""
+"""Offline library admin API and trusted-LAN development server."""
 
 from __future__ import annotations
 
@@ -18,7 +9,6 @@ import os
 import re
 import subprocess
 import threading
-import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -35,6 +25,7 @@ storage_settings = importlib.import_module(
 
 storage = importlib.import_module(f"{__package__}.storage" if __package__ else "theaxiom.storage")
 
+security = importlib.import_module(f"{__package__}.admin_security" if __package__ else "theaxiom.admin_security")
 BIND_HOST = "127.0.0.1"
 BIND_PORT = 8080
 ADMIN_TEMPLATE_DIR = Path(__file__).resolve().parents[2] / "templates"
@@ -162,6 +153,56 @@ def action_response(source_id: str, action: str) -> dict[str, Any]:
 class AdminAPIHandler(BaseHTTPRequestHandler):
     """Minimal HTTP handler for the admin API."""
 
+    def end_headers(self) -> None:
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
+        super().end_headers()
+
+    def _guard(self, *, post: bool = False) -> bool:
+        # The plain server used by legacy local tests must never authorize
+        # an unauthenticated non-loopback listener.
+        config = getattr(self.server, "axiom_config", None)
+        if config is None:
+            host, port = self.server.server_address[:2]
+            config = security.ServerConfig(host, port, frozenset({
+                f"{host}:{port}", f"localhost:{port}"
+            }))
+        hosts = self.headers.get_all("Host", [])
+        if len(hosts) != 1 or hosts[0].lower() not in config.allowed_hosts:
+            self._send_json(400, {"error": "invalid host"})
+            return False
+        if not post and self.path.rstrip("/") == "/health":
+            return True
+        auth = self.headers.get_all("Authorization", [])
+        if len(auth) > 1 or not config.authorized(auth[0] if auth else None):
+            self.send_response(401)
+            self.send_header("WWW-Authenticate", 'Basic realm="The Axiom", charset="UTF-8"')
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return False
+        if post:
+            origins = self.headers.get_all("Origin", [])
+            if (len(origins) > 1 or
+                (origins and origins[0] != "http://" + hosts[0].lower()) or
+                self.headers.get("Sec-Fetch-Site") in {"cross-site", "same-site"}):
+                self._send_json(403, {"error": "cross-origin request rejected"})
+                return False
+            if self.headers.get_content_type() != "application/json":
+                self._send_json(415, {"error": "application/json required"})
+                return False
+            lengths = self.headers.get_all("Content-Length", [])
+            if (len(lengths) != 1 or not re.fullmatch(r"[0-9]{1,6}", lengths[0]) or
+                    int(lengths[0]) > 16384 or self.headers.get("Transfer-Encoding")):
+                self._send_json(400, {"error": "invalid request length"})
+                return False
+        return True
+
+    def setup(self) -> None:
+        self.request.settimeout(15)
+        super().setup()
+
     def _send_json(self, status: int, payload: dict[str, Any]) -> None:
         body = json.dumps(payload).encode("utf-8")
         self.send_response(status)
@@ -182,7 +223,14 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         return data if isinstance(data, dict) else {}
 
     def do_GET(self) -> None:  # noqa: N802 - http.server convention
-        if self.path.rstrip("/") == "/health":
+        if not self._guard():
+            return
+        if self.path == "/":
+            self.send_response(302)
+            self.send_header("Location", "/admin")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+        elif self.path.rstrip("/") == "/health":
             self._send_json(200, health_response())
         elif self.path.rstrip("/") == "/admin":
             self._send_admin_page()
@@ -227,6 +275,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self) -> None:  # noqa: N802 - http.server convention
+        if not self._guard(post=True):
+            return
         if self.path.rstrip("/") == "/api/storage-settings":
             data = self._read_body()
             try:
@@ -261,7 +311,9 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
 
 def main() -> None:
     """Start the admin API server."""
-    server = ThreadingHTTPServer((BIND_HOST, BIND_PORT), AdminAPIHandler)
+    config = security.load_config()
+    server = ThreadingHTTPServer((config.host, config.port), AdminAPIHandler)
+    server.axiom_config = config
     try:
         server.serve_forever()
     except KeyboardInterrupt:
