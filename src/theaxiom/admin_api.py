@@ -219,7 +219,6 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             offline_library_content_manifest=[],
             offline_library_kiwix_zim_enabled=True,
             offline_library_kiwix_zim=WIKIPEDIA_SOURCE,
-            offline_library_storage_mount=str(ACQUISITION_STAGING_DIR.parent),
         ).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")

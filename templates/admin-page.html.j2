@@ -28,6 +28,15 @@
     .empty { padding: 1.5rem; text-align: center; color: var(--muted); }
     @media (max-width: 700px) { .admin-table th, .admin-table td { padding: .5rem .6rem; font-size: .85rem; } }
     @media print { .site-header { display: none; } }
+    .settings-panel { background: var(--paper); border: 1px solid var(--line); border-radius: .8rem; padding: 1.25rem; margin: 1rem 0 2rem; }
+    .settings-panel fieldset { border: 0; margin: 0; padding: 0; }
+    .settings-panel label { display: block; font-weight: 650; margin: .8rem 0 .35rem; }
+    .settings-panel input, .settings-panel select { font: inherit; width: min(100%, 40rem); padding: .65rem; border: 1px solid #aac5b7; border-radius: .4rem; background: #fff; color: var(--dark); }
+    .settings-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: 1rem; }
+    .storage-status { display: grid; grid-template-columns: minmax(9rem, 1fr) 2fr; gap: .5rem 1rem; }
+    .storage-status dt { font-weight: 650; }
+    .storage-status dd { margin: 0; overflow-wrap: anywhere; }
+    @media (max-width: 500px) { .storage-status { grid-template-columns: 1fr; } .storage-status dd { margin-bottom: .5rem; } }
   </style>
 </head>
 <body>
@@ -38,6 +47,48 @@
   </header>
   <main id="main-content">
     <h1>Manage offline sources</h1>
+    <nav aria-label="Administration"><a href="#storage-settings">Storage settings</a> · <a href="#sources">Content sources</a></nav>
+    <section class="settings-panel" id="storage-settings" aria-labelledby="storage-title">
+      <h2 id="storage-title">Storage preferences</h2>
+      <p>Choose an existing directory on the server. For network or removable storage, require the expected mount so a missing drive cannot redirect downloads to the operating system disk.</p>
+      <form id="storage-form">
+        <fieldset id="storage-fields" disabled>
+          <label for="storage-root">Storage root</label>
+          <input id="storage-root" type="text" placeholder="/path/to/library" autocomplete="off" required>
+          <label for="storage-mode">Storage type</label>
+          <select id="storage-mode"><option value="local">Local directory (no required mount)</option><option value="mounted">Require a specific mounted filesystem</option></select>
+          <div id="mount-fields" hidden>
+            <label for="storage-mount">Expected mount target</label>
+            <input id="storage-mount" type="text" placeholder="/path/to/mount" autocomplete="off">
+            <label for="storage-source">Expected mount source</label>
+            <input id="storage-source" type="text" placeholder="server:/export or device source" autocomplete="off">
+          </div>
+          <label for="minimum-free">Minimum available bytes (optional; 0 uses content size)</label>
+          <input id="minimum-free" type="number" min="0" max="9007199254740991" step="1" value="0">
+          <div class="settings-actions">
+            <button class="button" type="submit">Save and validate</button>
+            <button class="button" type="button" id="storage-refresh">Reload saved settings</button>
+          </div>
+        </fieldset>
+      </form>
+      <p id="storage-feedback" role="status" aria-live="polite">Loading storage preferences…</p>
+      <h3>Saved storage status</h3>
+      <dl id="storage-status" class="storage-status" aria-live="polite">
+        <dt>Readiness</dt><dd id="status-ready">Not checked</dd>
+        <dt>Configured root</dt><dd id="status-root">—</dd>
+        <dt>Detected mount</dt><dd id="status-mount">—</dd>
+        <dt>Filesystem / source</dt><dd id="status-source">—</dd>
+        <dt>Total capacity</dt><dd id="status-total">—</dd>
+        <dt>Available capacity</dt><dd id="status-free">—</dd>
+        <dt>Write readiness (advisory)</dt><dd id="status-write">—</dd>
+        <dt>Staging directory</dt><dd id="status-staging">—</dd>
+        <dt>Verified library directory</dt><dd id="status-library">—</dd>
+      </dl>
+      <p>Readiness is advisory. Saving settings does not move or create content. Acquisitions remain disabled until safe download and recovery support is implemented.</p>
+    </section>
+    <h2 id="sources">Content sources</h2>
+    <p>Downloads are temporarily unavailable while storage safety is being implemented.</p>
+
     {% if offline_library_content_manifest or (offline_library_kiwix_zim_enabled) %}
     <table class="admin-table">
       <thead>
@@ -59,17 +110,17 @@
           <td class="actions">
             <button class="button" type="button" data-action="download-zim"
               data-url="{{ offline_library_kiwix_zim.source_url }}"
-              data-dest="{{ offline_library_storage_mount }}/staging/{{ offline_library_kiwix_zim.filename }}"
+              
               data-bytes="{{ offline_library_kiwix_zim.bytes }}"
               data-sha256="{{ offline_library_kiwix_zim.sha256 }}">Download</button>
             <button class="button" type="button" data-action="redownload-zim"
               data-url="{{ offline_library_kiwix_zim.source_url }}"
-              data-dest="{{ offline_library_storage_mount }}/staging/{{ offline_library_kiwix_zim.filename }}"
+              
               data-bytes="{{ offline_library_kiwix_zim.bytes }}"
               data-sha256="{{ offline_library_kiwix_zim.sha256 }}">Re-download</button>
             <button class="button" type="button" data-action="update-zim"
               data-url="{{ offline_library_kiwix_zim.source_url }}"
-              data-dest="{{ offline_library_storage_mount }}/staging/{{ offline_library_kiwix_zim.filename }}"
+              
               data-bytes="{{ offline_library_kiwix_zim.bytes }}"
               data-sha256="{{ offline_library_kiwix_zim.sha256 }}">Update</button>
             <span class="action-status" role="status" aria-live="polite" hidden></span>
@@ -112,8 +163,8 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ source_id: row.dataset.sourceId, action }),
           });
-          if (!response.ok) throw new Error(`Request failed (${response.status})`);
           const result = await response.json();
+          if (!response.ok) throw new Error(result.error || `Request failed (${response.status})`);
           if (result.skipped) {
             if (status) status.textContent = `${button.textContent.trim()} complete: source is already current.`;
             return;
@@ -143,6 +194,125 @@
         }
       });
     });
+  </script>
+  <script id="storage-settings-script">
+    (() => {
+      const byId = (id) => document.getElementById(id);
+      const form = byId('storage-form');
+      const fields = byId('storage-fields');
+      const feedback = byId('storage-feedback');
+      const root = byId('storage-root');
+      const mode = byId('storage-mode');
+      const mount = byId('storage-mount');
+      const source = byId('storage-source');
+      const minimum = byId('minimum-free');
+      const errors = {
+        storage_not_configured: 'Choose and save a storage root first.',
+        required_mount_missing_or_replaced: 'The expected filesystem is missing or has been replaced.',
+        read_only_filesystem: 'The filesystem is read-only.',
+        nested_or_replaced_mount: 'A managed directory is on an unexpected mount.',
+        storage_root_missing: 'The storage root does not exist.',
+        symlink_not_allowed: 'Symbolic links are not allowed in managed paths.',
+        storage_path_not_directory: 'A storage path is not a directory.',
+        storage_not_writable: 'The application cannot write to the selected directory.',
+        insufficient_capacity: 'Not enough free space for the configured minimum or selected content.',
+        mount_changed_during_inspection: 'The mount changed during validation. Check again.',
+        storage_io_error: 'Storage is unavailable or could not be inspected.'
+      };
+      function syncMode() {
+        const required = mode.value === 'mounted';
+        byId('mount-fields').hidden = !required;
+        mount.disabled = source.disabled = !required;
+        mount.required = source.required = required;
+      }
+      function size(bytes) {
+        if (typeof bytes !== 'number' || !Number.isFinite(bytes)) return '—';
+        const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB', 'EiB'];
+        let value = bytes, unit = 0;
+        while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit++; }
+        return value.toFixed(unit ? 2 : 0) + ' ' + units[unit];
+      }
+      function renderStatus(status) {
+        const put = (id, value) => { byId(id).textContent = value || '—'; };
+        put('status-ready', status.ready === true ? 'Ready (advisory)' :
+          (status.error ? 'Not ready: ' + (errors[status.error] || status.error) : 'Not checked'));
+        put('status-root', status.root);
+        put('status-mount', status.mount?.target);
+        put('status-source', status.mount ? status.mount.type + ' · ' + status.mount.source : '');
+        put('status-total', size(status.total_bytes));
+        put('status-free', size(status.free_bytes));
+        put('status-write', status.ready === true && status.write_ready === true ? 'Writable (advisory)' : 'Not verified');
+        put('status-staging', status.paths?.staging);
+        put('status-library', status.paths?.library);
+      }
+      async function json(url, options) {
+        const response = await fetch(url, {...options, cache: 'no-store'});
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.error || 'Request failed (' + response.status + ')');
+        return body;
+      }
+      async function statusCheck() {
+        renderStatus({});
+        try {
+          const status = await json('/api/storage-status');
+          renderStatus(status);
+          return status.ready === true;
+        } catch (error) {
+          renderStatus({error: error.message});
+          return false;
+        }
+      }
+      function populate(settings) {
+        root.value = settings.storage_root;
+        mode.value = settings.storage_mount ? 'mounted' : 'local';
+        mount.value = settings.storage_mount;
+        source.value = settings.storage_source;
+        minimum.value = String(settings.minimum_free_bytes);
+        syncMode();
+      }
+      async function load() {
+        fields.disabled = true;
+        feedback.textContent = 'Loading saved preferences…';
+        try {
+          populate(await json('/api/storage-settings'));
+          const ready = await statusCheck();
+          feedback.textContent = ready ? 'Saved preferences loaded.' : 'Saved preferences loaded; storage is not ready.';
+        } catch (error) {
+          renderStatus({error: error.message});
+          feedback.textContent = 'Could not load saved preferences: ' + error.message + '. Enter a new configuration and save explicitly to replace it.';
+        } finally {
+          fields.disabled = false;
+        }
+      }
+      mode.addEventListener('change', syncMode);
+      byId('storage-refresh').addEventListener('click', load);
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const bytes = Number(minimum.value || '0');
+        if (!Number.isSafeInteger(bytes) || bytes < 0) {
+          feedback.textContent = 'Minimum available bytes must be a non-negative whole number within the supported range.';
+          return;
+        }
+        const settings = {storage_root: root.value.trim(),
+          storage_mount: mode.value === 'mounted' ? mount.value.trim() : '',
+          storage_source: mode.value === 'mounted' ? source.value.trim() : '',
+          minimum_free_bytes: bytes, directories: ['staging', 'library']};
+        fields.disabled = true;
+        feedback.textContent = 'Saving preferences…';
+        try {
+          populate(await json('/api/storage-settings', {method: 'POST',
+            headers: {'Content-Type': 'application/json'}, body: JSON.stringify(settings)}));
+          const ready = await statusCheck();
+          feedback.textContent = ready ? 'Preferences saved. Storage is ready (advisory).' :
+            'Preferences saved, but storage is not ready. See the status below.';
+        } catch (error) {
+          feedback.textContent = 'Save failed: ' + error.message + '. Previously saved preferences were not confirmed changed.';
+        } finally {
+          fields.disabled = false;
+        }
+      });
+      load();
+    })();
   </script>
 </body>
 </html>
