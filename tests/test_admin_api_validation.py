@@ -133,7 +133,15 @@ class AdminAPIValidationTests(unittest.TestCase):
             self.assertIn("text/html", response.headers["Content-Type"])
         self.assertIn("Manage offline sources", body)
         self.assertIn('data-source-id="wikipedia-en"', body)
-        self.assertIn("fetch('/api/action'", body)
+        self.assertIn("fetch('/api/acquisitions'", body)
+        self.assertNotIn("fetch('/api/action'", body)
+        for action in ("download", "redownload", "update"):
+            self.assertIn(f'data-action="{action}-zim" disabled', body)
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{self.port}/api/acquisitions", timeout=5
+        ) as response:
+            self.assertEqual(response.status, 200)
+            self.assertEqual(json.loads(response.read()), {"acquisitions": [], "stale": True})
 
     def test_unknown_source_id(self):
         status, _ = self.post_action("nonexistent-source", "download")
