@@ -4,7 +4,7 @@
 
 The Axiom is a standalone Python application and content-preparation toolkit for serving a curated offline reference library. This repository contains the application code, HTML/YAML templates, release and verification scripts, schemas, fixtures, and tests migrated from earlier offline-library development.
 
-The repository deliberately does **not** contain Ansible roles or playbooks, nginx configuration, systemd units, host inventory, Vancouver-specific settings, or Projectwright integration. Deployment is an external concern and must consume the standalone application through a future documented adapter.
+The repository contains standard Nginx, systemd and public web-root examples under `deploy/`. Host inventory, Ansible roles, secrets and Projectwright integration remain external. Nginx is the standard frontend; the Python backend owns administrative authentication and dynamic API functionality.
 
 ## Runtime boundaries
 
@@ -17,7 +17,7 @@ The repository deliberately does **not** contain Ansible roles or playbooks, ngi
 
 ## Supported host baseline
 
-The application targets Ubuntu 24.04 LTS and Ubuntu 26.04 LTS on supported Python versions (Python 3.10+). The application itself is user-space Python and does not assume Ansible, a particular init system, nginx, or a fixed `/usr/local` installation path. Operators provide the HTTP server, process supervision, storage paths, and Kiwix installation as environment-specific integration.
+The application targets Ubuntu 24.04 LTS and Ubuntu 26.04 LTS on supported Python versions (Python 3.10+). The application itself is user-space Python, with standalone loopback development support. Standard LAN hosting uses Nginx and systemd; operators select host-specific listening addresses, storage paths, and Kiwix installation as content serving is implemented.
 
 ## Data flow
 
@@ -29,7 +29,7 @@ The application targets Ubuntu 24.04 LTS and Ubuntu 26.04 LTS on supported Pytho
 
 ## Configuration and paths
 
-No Ansible variable namespace is part of the standalone runtime contract. Catalog metadata lives in `config/catalog.yaml`. The acquisition daemon reads `$XDG_CONFIG_HOME/theaxiom/acquisition.yaml` (or `THEAXIOM_MANIFEST`); its data, cache, and state default under the corresponding XDG user directories. `THEAXIOM_STAGING_DIR`, `THEAXIOM_SOURCES_DIR`, `THEAXIOM_QUARANTINE_DIR`, and `THEAXIOM_STATUS_PATH` can override those locations. The admin API also supports `THEAXIOM_ACQUISITION_SCRIPT`. `config/acquisition.example.yaml` is an inert template with bulk acquisition disabled and no items. Repository fixtures are used only by tests. Deployment-specific choices such as service users, mounts, reverse-proxy routes, and process supervision belong outside this repository.
+No Ansible variable namespace is part of the standalone runtime contract. Catalog metadata lives in `config/catalog.yaml`. The acquisition daemon reads `$XDG_CONFIG_HOME/theaxiom/acquisition.yaml` (or `THEAXIOM_MANIFEST`); its data, cache, and state default under the corresponding XDG user directories. `THEAXIOM_STAGING_DIR`, `THEAXIOM_SOURCES_DIR`, `THEAXIOM_QUARANTINE_DIR`, and `THEAXIOM_STATUS_PATH` can override those locations. The admin API also supports `THEAXIOM_ACQUISITION_SCRIPT`. `config/acquisition.example.yaml` is an inert template with bulk acquisition disabled and no items. Repository fixtures are used only by tests. Standard route and process supervision examples are in `deploy/`; host-specific service identities, mount definitions and secrets remain operator-controlled.
 
 ## Preserved incomplete work
 

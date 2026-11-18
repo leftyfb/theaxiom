@@ -47,7 +47,7 @@
   </header>
   <main id="main-content">
     <h1>Manage offline sources</h1>
-    <nav aria-label="Administration"><a href="#storage-settings">Storage settings</a> · <a href="#sources">Content sources</a></nav>
+    <nav aria-label="Administration"><a href="#storage-settings">Storage settings</a> · <a href="#sources">Content sources</a>{% if password_change_enabled %} · <a href="#admin-password">Admin password</a>{% endif %}</nav>
     <section class="settings-panel" id="storage-settings" aria-labelledby="storage-title">
       <h2 id="storage-title">Storage preferences</h2>
       <p>Choose an existing directory on the server. For network or removable storage, require the expected mount so a missing drive cannot redirect downloads to the operating system disk.</p>
@@ -86,6 +86,24 @@
       </dl>
       <p>Readiness is advisory. Saving settings does not move or create content. Acquisitions remain disabled until safe download and recovery support is implemented.</p>
     </section>
+    {% if password_change_enabled %}
+    <section class="settings-panel" id="admin-password" aria-labelledby="password-title">
+      <h2 id="password-title">Change administrator password</h2>
+      <p>Choose a unique password of 16–256 printable non-space ASCII characters. Changing it immediately invalidates the old password. On this HTTP development site, credentials are not encrypted in transit.</p>
+      <form id="password-form">
+        <fieldset id="password-fields">
+          <label for="current-password">Current password</label>
+          <input id="current-password" type="password" autocomplete="current-password" required maxlength="256">
+          <label for="new-password">New password</label>
+          <input id="new-password" type="password" autocomplete="new-password" required minlength="16" maxlength="256">
+          <label for="confirm-password">Confirm new password</label>
+          <input id="confirm-password" type="password" autocomplete="new-password" required minlength="16" maxlength="256">
+          <div class="settings-actions"><button class="button" type="submit">Change password</button></div>
+        </fieldset>
+      </form>
+      <p id="password-feedback" role="status" aria-live="polite"></p>
+    </section>
+    {% endif %}
     <h2 id="sources">Content sources</h2>
     <p>Downloads are temporarily unavailable while storage safety is being implemented.</p>
 
@@ -314,5 +332,40 @@
       load();
     })();
   </script>
+  {% if password_change_enabled %}
+  <script id="admin-password-script">
+    (() => {
+      const byId = id => document.getElementById(id);
+      const form = byId('password-form');
+      const feedback = byId('password-feedback');
+      const fields = byId('password-fields');
+      form.addEventListener('submit', async event => {
+        event.preventDefault();
+        const current = byId('current-password'), next = byId('new-password'), confirm = byId('confirm-password');
+        if (next.value !== confirm.value) {
+          feedback.textContent = 'New passwords do not match.';
+          return;
+        }
+        fields.disabled = true;
+        feedback.textContent = 'Changing password…';
+        try {
+          const response = await fetch('/api/admin/password', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            cache: 'no-store', body: JSON.stringify({current_password: current.value,
+              new_password: next.value, confirm_password: confirm.value})
+          });
+          const result = await response.json();
+          if (!response.ok || result.changed !== true) throw new Error(result.error || 'Password change failed');
+          feedback.textContent = 'Password changed. Reload the admin page and sign in with the new password. If your browser keeps the old credentials, close its session or use a private window.';
+        } catch (error) {
+          feedback.textContent = 'Could not confirm password change: ' + error.message;
+        } finally {
+          current.value = next.value = confirm.value = '';
+          fields.disabled = false;
+        }
+      });
+    })();
+  </script>
+  {% endif %}
 </body>
 </html>

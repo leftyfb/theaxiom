@@ -24,7 +24,7 @@ Content quality matters, especially for emergency, health, water, sanitation, an
 
 The Axiom is in early development. Its goals include reliable preparation and local serving of curated reference materials, with clear provenance and explicit operator control over what is published. It is not yet a production-ready appliance or a finished, universally supported installation package.
 
-This repository is the standalone home for the project. The current migration preserves the application and proof-of-concept tooling while intentionally excluding Ansible, host inventory, nginx/systemd deployment files, and Projectwright integration. See `docs/architecture.md` and `docs/backlog.md` for boundaries and next work.
+This repository is the standalone home for the project. The current migration preserves the application and proof-of-concept tooling while intentionally excluding Ansible, host inventory and Projectwright integration; standard nginx/systemd deployment examples now live in `deploy/`. See `docs/architecture.md` and `docs/backlog.md` for boundaries and next work.
 
 ## Development
 
@@ -54,20 +54,17 @@ curl http://127.0.0.1:8080/health
 
 The backend defaults to `127.0.0.1:8080` and serves the admin UI at `http://127.0.0.1:8080/admin`. Acquisition actions currently fail closed while storage safety integration is under development. This repository does not yet provide a complete installation package or a preloaded content library; local access is not a production deployment.
 
-### Trusted LAN development hosting
+### Standard Nginx hosting
 
-The standard-library server supports explicit configuration via environment variables:
-
-- THEAXIOM_BIND_HOST: specific private IPv4 address (default 127.0.0.1; wildcard/public binding rejected).
-- THEAXIOM_BIND_PORT: TCP port (default 8080).
-- THEAXIOM_ALLOWED_HOSTS: comma-separated additional hostnames, without ports.
-- THEAXIOM_ADMIN_USER: administrator username.
-- THEAXIOM_ADMIN_PASSWORD_FILE: private regular file (mode 0600 or stricter) containing a strong randomly generated printable ASCII password, at least 16 characters.
-- THEAXIOM_ALLOW_INSECURE_LAN_HTTP=1: explicit opt-in required for non-loopback HTTP.
-
-Non-loopback startup fails unless authentication and the HTTP opt-in are configured. All administration endpoints and the root redirect require HTTP Basic authentication; /health is public. Host validation and same-origin JSON POST restrictions protect against common cross-origin and DNS-rebinding requests. The development loopback default remains unauthenticated when credentials are not configured.
-
-**HTTP Basic credentials are transmitted without encryption.** Use only a trusted, isolated development LAN, never reuse passwords, do not forward ports or expose publicly, and restrict access through host/network firewall rules. HTTPS is required for production or untrusted networks. Run as an unprivileged account; for port 80 grant only CAP_NET_BIND_SERVICE to the service process via systemd, not the Python executable. No Nginx required. Do not enable the standalone acquisition daemon or script.
+Nginx serves the public library homepage without credentials and proxies the
+administration page and API to the unprivileged loopback-only Python backend.
+See [standard deployment instructions](deploy/README.md) for the Nginx site,
+systemd unit, initial credential setup and instance configuration. The admin
+password is stored as a salted PBKDF2-HMAC-SHA256 hash and can be changed in the
+administration interface without restarting services. HTTP development hosting
+does not encrypt credentials; use a trusted isolated LAN and HTTPS for production.
+The local loopback development server remains available for tests without credentials
+when no Nginx mode is configured. Real acquisitions remain disabled.
 
 ### Storage configuration (development)
 

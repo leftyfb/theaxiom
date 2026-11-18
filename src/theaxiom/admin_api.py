@@ -173,10 +173,14 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         if len(hosts) != 1 or hosts[0].lower() not in config.allowed_hosts:
             self._send_json(400, {"error": "invalid host"})
             return False
-        if not post and self.path.rstrip("/") == "/health":
+        if not post and self.path in {"/", "/health", "/health/"}:
             return True
         auth = self.headers.get_all("Authorization", [])
-        if len(auth) > 1 or not config.authorized(auth[0] if auth else None):
+        local_hosts = {f"{config.host}:{config.port}", f"localhost:{config.port}"}
+        if config.port == 80:
+            local_hosts.update({config.host, "localhost"})
+        if (len(auth) > 1 or (config.store is None and hosts[0].lower() not in local_hosts)
+                or not config.authorized(auth[0] if auth else None)):
             self.send_response(401)
             self.send_header("WWW-Authenticate", 'Basic realm="The Axiom", charset="UTF-8"')
             self.send_header("Content-Length", "0")
@@ -184,8 +188,12 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             return False
         if post:
             origins = self.headers.get_all("Origin", [])
+            scheme = self.headers.get("X-Forwarded-Proto", "") if config.proxied else "http"
+            if scheme not in {"http", "https"}:
+                self._send_json(400, {"error": "invalid proxy scheme"})
+                return False
             if (len(origins) > 1 or
-                (origins and origins[0] != "http://" + hosts[0].lower()) or
+                (origins and origins[0] != scheme + "://" + hosts[0].lower()) or
                 self.headers.get("Sec-Fetch-Site") in {"cross-site", "same-site"}):
                 self._send_json(403, {"error": "cross-origin request rejected"})
                 return False
@@ -226,10 +234,12 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         if not self._guard():
             return
         if self.path == "/":
-            self.send_response(302)
-            self.send_header("Location", "/admin")
-            self.send_header("Content-Length", "0")
+            body = (ADMIN_TEMPLATE_DIR.parent / "deploy/www/index.html").read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
             self.end_headers()
+            self.wfile.write(body)
         elif self.path.rstrip("/") == "/health":
             self._send_json(200, health_response())
         elif self.path.rstrip("/") == "/admin":
@@ -267,6 +277,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             offline_library_content_manifest=[],
             offline_library_kiwix_zim_enabled=True,
             offline_library_kiwix_zim=WIKIPEDIA_SOURCE,
+            password_change_enabled=bool(getattr(getattr(self.server, "axiom_config", None), "store", None)),
         ).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -277,7 +288,34 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802 - http.server convention
         if not self._guard(post=True):
             return
-        if self.path.rstrip("/") == "/api/storage-settings":
+        if self.path.rstrip("/") == "/api/admin/password":
+            config = getattr(self.server, "axiom_config", None)
+            if config is None or config.store is None:
+                self._send_json(503, {"error": "admin authentication is not configured"})
+                return
+            # A browser password change must explicitly originate from this page.
+            if not self.headers.get("Origin"):
+                self._send_json(403, {"error": "same-origin request required"})
+                return
+            data = self._read_body()
+            if (set(data) != {"current_password", "new_password", "confirm_password"}
+                    or any(not isinstance(value, str) for value in data.values())
+                    or data["new_password"] != data["confirm_password"]):
+                self._send_json(400, {"error": "password confirmation does not match"})
+                return
+            try:
+                changed = config.store.change(data["current_password"], data["new_password"])
+            except ValueError:
+                self._send_json(400, {"error": "choose a different password of 16–256 printable non-space ASCII characters"})
+                return
+            except OSError:
+                self._send_json(503, {"error": "credential update failed"})
+                return
+            if not changed:
+                self._send_json(403, {"error": "current password is incorrect"})
+                return
+            self._send_json(200, {"changed": True})
+        elif self.path.rstrip("/") == "/api/storage-settings":
             data = self._read_body()
             try:
                 settings = storage_settings.save_settings(data)
