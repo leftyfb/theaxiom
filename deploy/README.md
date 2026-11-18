@@ -53,3 +53,25 @@ the scheme forwarded by the configured local Nginx proxy when checking Origin.
 The example IP and host names are deployment examples, not application defaults.
 Ansible may consume these files from the application repository. Keep actual
 host inventory, custom firewall rules and secrets outside Git.
+
+## External acquisition monitoring
+
+The admin page polls GET /api/acquisitions every two seconds. A single
+background sampler queries the allowlisted acquire-wikipedia-zim.service
+and file metadata, never reads archive content or controls the service.
+The initial adapter is specific to the existing Wikipedia service at
+/media/offline; other configurations report unavailable or unknown.
+Completion requires successful current-invocation journal evidence, not
+file size alone. After a reboot or journal rotation, verification evidence
+may be unavailable; the UI must not claim verification. Rate samples are
+in memory and rebuild after backend restart. A hard NFS hang may stall
+the sampler; the endpoint still returns promptly with stale status.
+The independent storage-readiness endpoint is unchanged.
+Acquisition POST remains disabled.
+
+Preserve any existing theaxiom UID, primary group, supplementary groups,
+and local state ownership during updates. For NFS AUTH_SYS, configure
+a dedicated server-side identity with appropriate share permissions and
+match its numeric UID on the application host; check group requirements
+and test access as the service account. Do not recursively chmod/chown
+the share or map all clients to an administrator.

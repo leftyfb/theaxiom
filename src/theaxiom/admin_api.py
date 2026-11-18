@@ -26,6 +26,7 @@ storage_settings = importlib.import_module(
 storage = importlib.import_module(f"{__package__}.storage" if __package__ else "theaxiom.storage")
 
 security = importlib.import_module(f"{__package__}.admin_security" if __package__ else "theaxiom.admin_security")
+monitoring = importlib.import_module(f"{__package__}.acquisition_monitor" if __package__ else "theaxiom.acquisition_monitor")
 BIND_HOST = "127.0.0.1"
 BIND_PORT = 8080
 ADMIN_TEMPLATE_DIR = Path(__file__).resolve().parents[2] / "templates"
@@ -246,6 +247,9 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             self._send_admin_page()
         elif self.path.rstrip("/") == "/api/freshness":
             self._send_json(200, freshness_response())
+        elif self.path.rstrip("/") == "/api/acquisitions":
+            monitor = getattr(self.server, "acquisition_monitor", None)
+            self._send_json(200, monitor.snapshot() if monitor else {"acquisitions": [], "stale": True})
         elif self.path.rstrip("/") == "/api/storage-status":
             try:
                 self._send_json(200, storage.inspect_storage(storage_settings.load_settings(), required_bytes=WIKIPEDIA_SOURCE["bytes"]))
@@ -352,11 +356,14 @@ def main() -> None:
     config = security.load_config()
     server = ThreadingHTTPServer((config.host, config.port), AdminAPIHandler)
     server.axiom_config = config
+    server.acquisition_monitor = monitoring.Monitor(WIKIPEDIA_SOURCE)
+    server.acquisition_monitor.start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
+        server.acquisition_monitor.stop.set()
         server.server_close()
 
 

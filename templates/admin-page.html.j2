@@ -104,6 +104,14 @@
       <p id="password-feedback" role="status" aria-live="polite"></p>
     </section>
     {% endif %}
+    <section aria-labelledby="acquisition-heading" class="settings-panel">
+      <h2 id="acquisition-heading">Acquisition progress</h2>
+      <p>Read-only status of the external Wikipedia acquisition service.</p>
+      <p id="acquisition-status" role="status">Waiting for first sample…</p>
+      <progress id="acquisition-progress" max="100" value="0" aria-label="Download progress" hidden style="width:100%"></progress>
+      <p id="acquisition-metrics"></p>
+      <p id="acquisition-detail"></p>
+    </section>
     <h2 id="sources">Content sources</h2>
     <p>Downloads are temporarily unavailable while storage safety is being implemented.</p>
 
@@ -212,6 +220,49 @@
         }
       });
     });
+  </script>
+  <script id="acquisition-monitor-script">
+    (() => {
+      const byId = id => document.getElementById(id);
+      const progress = byId('acquisition-progress');
+      const labels = {downloading: 'Downloading', verifying: 'Verifying checksum',
+        publishing: 'Publishing / verifying final file', completed: 'Verified and published',
+        retrying: 'Waiting to retry', failed: 'Failed', interrupted: 'Interrupted',
+        not_started: 'Not started', unavailable: 'Service not installed', unknown: 'Status unknown'};
+      const gib = bytes => (bytes / 1073741824).toFixed(2) + ' GiB';
+      async function refresh() {
+        const controller = new AbortController();
+        const timer = window.setTimeout(() => controller.abort(), 5000);
+        try {
+          const response = await fetch('/api/acquisitions', {cache: 'no-store', signal: controller.signal});
+          if (!response.ok) throw new Error('Status unavailable');
+          const data = await response.json();
+          const job = data.acquisitions?.[0];
+          byId('acquisition-status').textContent = job ?
+            (data.stale ? 'Stale sample — status unknown' : (labels[job.state] || 'Status unknown')) :
+            'Waiting for acquisition status';
+          progress.hidden = !job || !Number.isFinite(job.downloaded_bytes) || !(job.expected_bytes > 0);
+          progress.value = progress.hidden ? 0 : 100 * job.downloaded_bytes / job.expected_bytes;
+          const metrics = progress.hidden ? [] : [progress.value.toFixed(2) + '%',
+            gib(job.downloaded_bytes) + ' / ' + gib(job.expected_bytes)];
+          if (!data.stale && job?.speed_bytes_per_second > 0) {
+            metrics.push((job.speed_bytes_per_second / 1048576).toFixed(2) + ' MiB/s');
+            metrics.push(Math.ceil(job.eta_seconds / 60) + ' min remaining (transfer only)');
+          }
+          byId('acquisition-metrics').textContent = metrics.join(' · ');
+          byId('acquisition-detail').textContent = job?.detail || '';
+        } catch (_) {
+          byId('acquisition-status').textContent = 'Acquisition status unavailable';
+          progress.hidden = true;
+          byId('acquisition-metrics').textContent = '';
+          byId('acquisition-detail').textContent = '';
+        } finally {
+          window.clearTimeout(timer);
+          window.setTimeout(refresh, 2000);
+        }
+      }
+      refresh();
+    })();
   </script>
   <script id="storage-settings-script">
     (() => {
