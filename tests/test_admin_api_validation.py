@@ -74,7 +74,7 @@ class AdminAPIValidationTests(unittest.TestCase):
             admin_api.storage_settings, "SETTINGS_PATH", Path(directory) / "storage.json"
         ):
             defaults = admin_api.storage_settings.DEFAULT_SETTINGS
-            updated = dict(defaults, storage_source="/dev/test", minimum_free_bytes=1234)
+            updated = dict(defaults, storage_root="/tmp/library", minimum_free_bytes=1234)
             status, saved = self.post_raw(
                 json.dumps(updated).encode(), path="/api/storage-settings"
             )
@@ -113,6 +113,12 @@ class AdminAPIValidationTests(unittest.TestCase):
                 "action": action,
             }).encode("utf-8")
         )
+
+    def test_valid_action_is_disabled_without_subprocess(self):
+        for action in ("download", "redownload", "update"):
+            status, body = self.post_action("wikipedia-en", action)
+            self.assertEqual(status, 503)
+            self.assertIn("acquisition disabled", body["error"])
 
     def test_unknown_action(self):
         status, _ = self.post_action("wikipedia-en", "delete")

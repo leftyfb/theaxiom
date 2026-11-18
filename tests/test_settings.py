@@ -17,7 +17,7 @@ class StorageSettingsTests(unittest.TestCase):
     def test_save_load_round_trip_and_restrictive_mode(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "nested" / "settings.json"
-            settings = dict(DEFAULT_SETTINGS, storage_source="/dev/test", minimum_free_bytes=4096)
+            settings = dict(DEFAULT_SETTINGS, storage_root="/tmp/library", minimum_free_bytes=4096)
             saved = save_settings(settings, path)
             self.assertEqual(saved, settings)
             self.assertEqual(load_settings(path), settings)

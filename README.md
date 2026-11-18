@@ -52,7 +52,15 @@ For a local admin UI and API development check, start the backend and open the a
 curl http://127.0.0.1:8080/health
 ```
 
-The backend binds only to `127.0.0.1:8080` and serves the admin UI at `http://127.0.0.1:8080/admin`. Its acquisition action can launch a real download, so do not invoke that endpoint as a smoke check. This repository does not yet provide deployment proxy/authentication configuration, a complete installation package, or a preloaded content library; local access is not a production deployment.
+The backend binds only to `127.0.0.1:8080` and serves the admin UI at `http://127.0.0.1:8080/admin`. Acquisition actions currently fail closed while storage safety integration is under development. This repository does not yet provide deployment proxy/authentication configuration, a complete installation package, or a preloaded content library; local access is not a production deployment.
+
+### Storage configuration (development)
+
+GET and POST /api/storage-settings read and save the complete configuration object. The default is unconfigured, with empty storage_root, storage_mount and storage_source, minimum_free_bytes set to zero, and fixed directories ["staging", "library"]. Select an existing absolute non-root storage_root. For mounted storage, specify both its exact mount target and expected source; leave both empty for intentionally local storage. Managed destinations are staging/ and library/zim/ under the root. Configuration is saved atomically under XDG_CONFIG_HOME/theaxiom/storage.json (or THEAXIOM_STORAGE_SETTINGS). Older or corrupt configuration must be explicitly replaced, not automatically activated.
+
+GET /api/storage-status reports advisory readiness, detected mount, capacity and blocking errors. It makes no directories or probe writes. It checks the Linux mount table before inspecting filesystem paths, rejects symlinks and nested mounts, and checks available capacity against the selected source size. Hard NFS mounts can still block filesystem metadata operations. The checks cannot protect a subsequent writer from mount disappearance, replacement, or concurrent changes. Acquisition is therefore disabled, including when readiness passes. Existing staging environment overrides do not authorize acquisition. Persistent jobs, verified-local freshness, safe promotion and recovery remain outstanding.
+
+Node.js is required for the JavaScript tests in the full development suite.
 
 ## License
 

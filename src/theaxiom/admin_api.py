@@ -33,6 +33,8 @@ storage_settings = importlib.import_module(
     f"{__package__}.storage_settings" if __package__ else "storage_settings"
 )
 
+storage = importlib.import_module(f"{__package__}.storage" if __package__ else "theaxiom.storage")
+
 BIND_HOST = "127.0.0.1"
 BIND_PORT = 8080
 ADMIN_TEMPLATE_DIR = Path(__file__).resolve().parents[2] / "templates"
@@ -149,52 +151,12 @@ def build_acquisition_args(source_id: str) -> list[str] | None:
 
 
 def action_response(source_id: str, action: str) -> dict[str, Any]:
-    """Skip current sources; otherwise launch trusted acquisition."""
-    args = build_acquisition_args(source_id)
-    if args is None:
+    """Fail closed until verified storage and safe acquisition are integrated."""
+    if resolve_source(source_id) is None:
         return {"accepted": False, "error": "unknown source_id"}
-    if action != "redownload":
-        entry = resolve_source(source_id)
-        assert entry is not None
-        freshness = probe_source(entry["source_url"], entry["sha256"], entry["bytes"])
-        if freshness.get("local_current"):
-            return {
-                "accepted": True,
-                "source_id": source_id,
-                "action": action,
-                "status": "current",
-                "skipped": True,
-            }
-    with _active_downloads_lock:
-        process = _active_downloads.get(source_id)
-        if process is not None and process.poll() is None:
-            return {"accepted": False, "error": "download already active for source_id"}
-        _active_downloads.pop(source_id, None)
-        job_id = uuid.uuid4().hex
-        try:
-            command = ["/bin/bash", ACQUISITION_SCRIPT, *args]
-            if action == "redownload":
-                command.append("--overwrite")
-            process = subprocess.Popen(
-                command,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True,
-            )
-        except OSError as exc:
-            return {"accepted": False, "error": f"acquisition launch rejected: {exc}"}
-        _active_downloads[source_id] = process
-        _jobs[job_id] = {"source_id": source_id, "action": action, "process": process}
-        while len(_jobs) > MAX_RETAINED_JOBS:
-            _jobs.pop(next(iter(_jobs)))
-    return {
-        "accepted": True,
-        "job_id": job_id,
-        "source_id": source_id,
-        "action": action,
-        "status": "pending",
-    }
+    if action not in VALID_ACTIONS:
+        return {"accepted": False, "error": "unknown action"}
+    return {"accepted": False, "error": "acquisition disabled pending storage safety integration"}
 
 
 class AdminAPIHandler(BaseHTTPRequestHandler):
@@ -226,6 +188,11 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             self._send_admin_page()
         elif self.path.rstrip("/") == "/api/freshness":
             self._send_json(200, freshness_response())
+        elif self.path.rstrip("/") == "/api/storage-status":
+            try:
+                self._send_json(200, storage.inspect_storage(storage_settings.load_settings(), required_bytes=WIKIPEDIA_SOURCE["bytes"]))
+            except ValueError:
+                self._send_json(503, {"ready": False, "error": "stored settings are invalid"})
         elif self.path.rstrip("/") == "/api/storage-settings":
             try:
                 self._send_json(200, storage_settings.load_settings())
