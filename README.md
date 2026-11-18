@@ -38,6 +38,22 @@ python3 -m venv .venv
 
 The test suite is local and deterministic by default. Fixtures and generated reports are used to exercise the preserved POC behavior without requiring Ansible, nginx, systemd, Projectwright, or outbound network access.
 
+To run the fixture-backed smoke checks and full test suite after installation:
+
+```shell
+.venv/bin/python -m pytest -q tests/test_offline_verification.py tests/test_live_poc_verify.py tests/test_live_poc_verify_json.py
+.venv/bin/python scripts/test_poc_suite.py
+```
+
+For a local API development check, start the backend in one terminal and query its health endpoint from another:
+
+```shell
+.venv/bin/python -m theaxiom.admin_api
+curl http://127.0.0.1:8080/health
+```
+
+The backend binds only to `127.0.0.1:8080`; it is not directly reachable from other devices and is not a standalone browser UI. Its acquisition action can launch a real download, so do not invoke that endpoint as a smoke check. This repository does not yet provide the deployment proxy/authentication configuration, a complete installation package, or a preloaded content library; local API access is not a production deployment.
+
 ## License
 
 A project license has not yet been selected. Until a license is added, do not assume that the project may be redistributed or reused under open-source terms. Third-party library content may have separate rights and license terms.
