@@ -77,6 +77,17 @@ class AdminAPIValidationTests(unittest.TestCase):
         status, _ = self.post_action("wikipedia-en", "delete")
         self.assertEqual(status, 400)
 
+    def test_admin_page_is_served_and_connects_to_api(self):
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{self.port}/admin", timeout=5
+        ) as response:
+            body = response.read().decode("utf-8")
+            self.assertEqual(response.status, 200)
+            self.assertIn("text/html", response.headers["Content-Type"])
+        self.assertIn("Manage offline sources", body)
+        self.assertIn('data-source-id="wikipedia-en"', body)
+        self.assertIn("fetch('/api/action'", body)
+
     def test_unknown_source_id(self):
         status, _ = self.post_action("nonexistent-source", "download")
         self.assertEqual(status, 400)

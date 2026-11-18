@@ -22,6 +22,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+from jinja2 import Environment, FileSystemLoader, select_autoescape
+
 if __package__:
     from .freshness_probe import probe_source
 else:
@@ -29,6 +31,7 @@ else:
 
 BIND_HOST = "127.0.0.1"
 BIND_PORT = 8080
+ADMIN_TEMPLATE_DIR = Path(__file__).resolve().parents[2] / "templates"
 
 VALID_ACTIONS = frozenset({"download", "redownload", "update"})
 VALID_SOURCE_IDS = frozenset({"wikipedia-en"})
@@ -215,6 +218,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802 - http.server convention
         if self.path.rstrip("/") == "/health":
             self._send_json(200, health_response())
+        elif self.path.rstrip("/") == "/admin":
+            self._send_admin_page()
         elif self.path.rstrip("/") == "/api/freshness":
             self._send_json(200, freshness_response())
         elif re.fullmatch(r"/api/jobs/[a-f0-9]{32}", self.path.rstrip("/")):
@@ -226,6 +231,25 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 self._send_json(200, response)
         else:
             self._send_json(404, {"error": "not found"})
+
+    def _send_admin_page(self) -> None:
+        """Render the standalone admin page using trusted source metadata."""
+        environment = Environment(
+            loader=FileSystemLoader(ADMIN_TEMPLATE_DIR),
+            autoescape=select_autoescape(["html", "htm", "xml"]),
+        )
+        template = environment.get_template("admin-page.html.j2")
+        body = template.render(
+            offline_library_content_manifest=[],
+            offline_library_kiwix_zim_enabled=True,
+            offline_library_kiwix_zim=WIKIPEDIA_SOURCE,
+            offline_library_storage_mount=str(ACQUISITION_STAGING_DIR.parent),
+        ).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def do_POST(self) -> None:  # noqa: N802 - http.server convention
         if self.path.rstrip("/") == "/api/action":

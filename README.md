@@ -45,14 +45,14 @@ To run the fixture-backed smoke checks and full test suite after installation:
 .venv/bin/python scripts/test_poc_suite.py
 ```
 
-For a local API development check, start the backend in one terminal and query its health endpoint from another:
+For a local admin UI and API development check, start the backend and open the admin page in a browser. The API is also available at `/health`:
 
 ```shell
 .venv/bin/python -m theaxiom.admin_api
 curl http://127.0.0.1:8080/health
 ```
 
-The backend binds only to `127.0.0.1:8080`; it is not directly reachable from other devices and is not a standalone browser UI. Its acquisition action can launch a real download, so do not invoke that endpoint as a smoke check. This repository does not yet provide the deployment proxy/authentication configuration, a complete installation package, or a preloaded content library; local API access is not a production deployment.
+The backend binds only to `127.0.0.1:8080` and serves the admin UI at `http://127.0.0.1:8080/admin`. Its acquisition action can launch a real download, so do not invoke that endpoint as a smoke check. This repository does not yet provide deployment proxy/authentication configuration, a complete installation package, or a preloaded content library; local access is not a production deployment.
 
 ## License
 
