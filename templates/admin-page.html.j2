@@ -46,7 +46,7 @@
     .source-card { padding: 0; margin: .65rem 0; }
     .source-card > summary { padding: .8rem 1rem; list-style: none; }
     .source-card > summary::-webkit-details-marker { display: none; }
-    .source-card > summary::after { content: '▾'; color: var(--green); margin-left: auto; }
+    .source-card > summary::after { content: '▾'; color: var(--green); margin-left: .25rem; }
     .source-card[open] > summary::after { content: '▴'; }
     .source-expanded { padding: .8rem 1rem 1rem; border-top: 1px solid var(--line); }
     .source-card > summary .source-subtitle { font-weight: 400; font-size: .9rem; }
@@ -55,7 +55,7 @@
     .source-card > summary .badge { flex-shrink: 0; }
     .compact-publication { font-size: .8rem; color: var(--muted); }
     .source-card details { margin-top: 1rem; border-top: 1px solid var(--line); padding-top: .6rem; }
-    .source-card summary { cursor: pointer; font-weight: 650; min-height: 44px; padding: .55rem 0; color: var(--green); }
+    .source-card summary { cursor: pointer; font-weight: 650; min-height: 44px; color: var(--green); }
     .source-card summary:focus-visible { outline: 3px solid #f1b84b; }
     .source-card [hidden] { display: none !important; }
     .source-live { margin-top: 1rem; }
@@ -187,11 +187,11 @@
     {% for source in offline_library_content_manifest %}
       <details class="source-card">
         <summary class="source-header">
-          <div><h3>{{ source.title }}</h3><p class="source-subtitle">{{ 'Planned collection' if source.kind == 'planned' else source.kind }}</p></div>
-          <span class="badge">{{ 'Coming soon' if source.kind == 'planned' else 'Status unavailable' }}</span>
+          <div><h3>{{ source.title }}</h3><p class="source-subtitle">{{ source.description or ('Offline reference collection' if source.kind == 'planned' else source.kind) }}</p></div>
+          <span class="badge">{{ 'Not downloaded' if source.kind == 'planned' else 'Status unavailable' }}</span>
         </summary>
         <div class="source-expanded">
-          {% if source.kind == 'planned' %}<p class="source-note">Acquisition and reader support are not yet implemented.</p>{% else %}
+          {% if source.kind == 'planned' %}<p class="source-note">Download not supported yet.</p>{% else %}
           <div class="source-actions">
             <button class="button" type="button" disabled>Download</button>
             <button class="button" type="button" disabled>Re-download</button>
@@ -216,7 +216,7 @@
       const labels = {downloading: 'Downloading', verifying: 'Verifying checksum',
         publishing: 'Promoting / verifying final file', completed: 'Archive verified',
         retrying: 'Waiting to retry', failed: 'Failed', interrupted: 'Interrupted',
-        not_started: 'Not started', unavailable: 'Service not installed', unknown: 'Status unknown'};
+        not_started: 'Not downloaded', unavailable: 'Service not installed', unknown: 'Status unknown'};
       const gib = bytes => (bytes / 1073741824).toFixed(2) + ' GiB';
       function render(card, job, stale, unavailable = false) {
         const field = name => card.querySelector('[data-field="' + name + '"]');
@@ -291,6 +291,7 @@
       const button = document.getElementById('publication-toggle');
       const browse = document.getElementById('publication-browse');
       const label = document.getElementById('publication-status');
+      const summary = document.getElementById('publication-summary');
       let state, busy = false;
       async function refresh() {
         if (busy) return;
