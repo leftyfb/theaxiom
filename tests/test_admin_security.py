@@ -101,6 +101,18 @@ class HTTPAuthTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertNotIn("Location", headers)
 
+    def test_public_search_and_validation(self):
+        code, headers, body = self.request("/search?q=water")
+        self.assertEqual(code, 200)
+        self.assertNotIn("WWW-Authenticate", headers)
+        self.assertIn(b"Results for", body)
+        self.assertIn(b"No published collections", body)
+        for path in ("/search?q=a&q=b", "/search?q=%00", "/search?other=x",
+                     "/search?q=" + "x" * 161):
+            self.assertEqual(self.request(path)[0], 400)
+        self.assertEqual(self.request("/search?q=x", headers={"Host":"attacker.invalid"})[0], 400)
+        self.assertIn(b'action="/search"', self.request("/")[2])
+
     def test_admin_pages_are_separate(self):
         for path in ("/admin", "/admin/sources", "/admin/sources/"):
             code, _, body = self.request(path, auth=self.auth)
