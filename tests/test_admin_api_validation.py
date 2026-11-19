@@ -106,6 +106,70 @@ class AdminAPIValidationTests(unittest.TestCase):
             self.assertEqual(body, {"error": "invalid storage settings"})
             self.assertEqual(admin_api.storage_settings.load_settings(), valid)
 
+    def post_source(self, payload, headers=None):
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/api/sources",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json", "Origin": f"http://127.0.0.1:{self.port}", **(headers or {})},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=5) as response:
+                return response.status, json.loads(response.read())
+        except urllib.error.HTTPError as exc:
+            return exc.code, json.loads(exc.read())
+
+    def test_source_catalog_api_crud_persists_and_preserves_content(self):
+        from tempfile import TemporaryDirectory
+        from pathlib import Path
+        from theaxiom import admin_api, catalog_store
+
+        with TemporaryDirectory() as directory, mock.patch.object(
+            admin_api, "SOURCE_CATALOG", catalog_store.CatalogStore(Path(directory) / "sources.json")
+        ):
+            with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/api/sources") as response:
+                initial = json.loads(response.read())
+            status, added = self.post_source({
+                "operation": "add", "source_id": "field-guide", "revision": initial["revision"],
+                "fields": {"title": "Field Guide", "description": "Candidate", "source_url": "https://example.org/guide.pdf", "publisher": "Example", "edition": "2026 edition", "language": "en", "expected_size_bytes": "1536", "sha256": "b" * 64, "provenance": "Publisher catalog", "license": "CC BY 4.0"},
+            })
+            self.assertEqual(status, 200)
+            self.assertTrue(next(s for s in added["sources"] if s["source_id"] == "field-guide")["candidate_only"])
+            status, stale = self.post_source({"operation": "edit", "source_id": "field-guide", "revision": initial["revision"], "fields": {"title": "Stale"}})
+            self.assertEqual(status, 409)
+            self.assertEqual(stale, {"error": "catalog revision changed"})
+            status, edited = self.post_source({"operation": "edit", "source_id": "field-guide", "revision": added["revision"], "fields": {"title": "Updated Guide"}})
+            self.assertEqual(status, 200)
+            self.assertEqual(next(s for s in edited["sources"] if s["source_id"] == "field-guide")["title"], "Updated Guide")
+            status, removed = self.post_source({"operation": "remove", "source_id": "field-guide", "revision": edited["revision"], "fields": {}})
+            self.assertEqual(status, 200)
+            self.assertNotIn("field-guide", [s["source_id"] for s in removed["sources"]])
+
+    def test_source_catalog_api_rejects_cross_origin_and_invalid_fields(self):
+        payload = {"operation": "add", "source_id": "candidate", "fields": {"title": "Candidate"}, "revision": 0}
+        status, body = self.post_source(payload, {"Origin": "https://evil.example"})
+        self.assertEqual(status, 403)
+        self.assertEqual(body, {"error": "cross-origin request rejected"})
+        status, body = self.post_source({**payload, "source_id": "../bad"})
+        self.assertEqual(status, 400)
+        self.assertIn("invalid source ID", body["error"])
+
+    def test_source_catalog_api_rejects_busy_source(self):
+        from tempfile import TemporaryDirectory
+        from pathlib import Path
+        from theaxiom import admin_api, catalog_store
+
+        class Busy:
+            def snapshot(self):
+                return {"stale": False, "acquisitions": [{"source_id": "field-guide", "state": "downloading", "active": True}]}
+
+        with TemporaryDirectory() as directory, mock.patch.object(
+            admin_api, "SOURCE_CATALOG", catalog_store.CatalogStore(Path(directory) / "sources.json")
+        ), mock.patch.object(self.server, "acquisition_monitor", Busy(), create=True):
+            status, body = self.post_source({"operation": "add", "source_id": "field-guide", "revision": 0, "fields": {"title": "Guide"}})
+        self.assertEqual(status, 400)
+        self.assertIn("active or unresolved", body["error"])
+
     def post_action(self, source_id, action):
         return self.post_raw(
             json.dumps({

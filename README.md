@@ -66,6 +66,14 @@ does not encrypt credentials; use a trusted isolated LAN and HTTPS for productio
 The local loopback development server remains available for tests without credentials
 when no Nginx mode is configured. Real acquisitions remain disabled.
 
+### Persistent source catalog (AC-054)
+
+Source configuration is stored separately from content at `${XDG_CONFIG_HOME:-~/.config}/theaxiom/sources.json`; set `THEAXIOM_SOURCE_CATALOG` to select an explicit file. The catalog is versioned, revision-checked, atomically replaced, and created with owner-only permissions. A malformed, oversized, unknown-version, or unreadable catalog fails closed rather than being silently reset. Back up this file with configuration; it does not contain or move downloaded content.
+
+`GET /api/sources` returns the stable source IDs, catalog revision, shipped entries, operator overrides, and custom candidate entries. `POST /api/sources` accepts exactly `operation`, `source_id`, `fields`, and `revision`; supported operations are `add`, `edit`, and `remove`. Mutations require same-origin authenticated requests and the current revision. Conflicting revisions return HTTP 409. IDs and editable text/HTTP(S) candidate URLs are validated; the form records publisher, edition, language, expected byte size, SHA-256, provenance, and license/rights notes. URL and integrity metadata are never fetched or verified and are not acquisition instructions. Custom entries are explicitly marked candidate-only and cannot be used by the downloader. No arbitrary command or filesystem path can be supplied through this API.
+
+Removing a source removes its catalog metadata (shipped entries are hidden via a persisted tombstone); it does not delete, move, or alter installed content. A source with an active or unresolved acquisition cannot be edited or removed. Acquisition itself remains disabled. Review third-party provenance and redistribution rights before relying on candidate metadata; an operator-entered license string is not legal verification.
+
 ### Storage configuration (development)
 
 Open `/admin` and select Storage settings. Enter an existing storage root, select local or required mounted storage, and enter the expected mount target/source when applicable. Save and validate displays the saved configuration and its detected filesystem, free space, advisory write readiness and managed paths. Reload saved settings discards unsaved form edits. Saving unavailable storage is allowed for later recovery; readiness remains false and no data is relocated.

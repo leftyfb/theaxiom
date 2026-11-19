@@ -135,6 +135,27 @@
     <h1>Manage offline sources</h1>
     <h2 id="sources">Content sources</h2>
     <p class="source-note">Acquisition controls are disabled until safe download and recovery support is ready.</p>
+    <button class="button" type="button" id="source-add">Add Source</button>
+    <p id="catalog-feedback" role="status" aria-live="polite">Candidate source metadata is not trusted or fetched.</p>
+    <dialog id="source-dialog" aria-labelledby="source-dialog-title">
+      <form id="source-form">
+        <h3 id="source-dialog-title">Add source metadata</h3>
+        <label for="catalog-id">Stable ID</label><input id="catalog-id" name="source_id" required pattern="[a-z0-9]+(?:-[a-z0-9]+)*" maxlength="64">
+        <label for="catalog-title">Title</label><input id="catalog-title" name="title" required maxlength="512">
+        <label for="catalog-description">Description</label><textarea id="catalog-description" name="description" maxlength="512"></textarea>
+        <label for="catalog-url">Candidate URL (not fetched)</label><input id="catalog-url" name="source_url" type="url" maxlength="512">
+        <label for="catalog-publisher">Publisher</label><input id="catalog-publisher" name="publisher" maxlength="512">
+        <label for="catalog-edition">Edition / release</label><input id="catalog-edition" name="edition" maxlength="512">
+        <label for="catalog-language">Language</label><input id="catalog-language" name="language" maxlength="512">
+        <label for="catalog-size">Expected size in bytes (candidate metadata)</label><input id="catalog-size" name="expected_size_bytes" inputmode="numeric" pattern="[1-9][0-9]{0,19}" maxlength="20">
+        <label for="catalog-sha256">Expected SHA-256 (candidate metadata)</label><input id="catalog-sha256" name="sha256" pattern="[a-fA-F0-9]{64}" maxlength="64">
+        <label for="catalog-provenance">Provenance / source of metadata</label><textarea id="catalog-provenance" name="provenance" maxlength="512"></textarea>
+        <label for="catalog-license">License / rights note</label><input id="catalog-license" name="license" maxlength="512">
+        <p class="source-note">This records candidate metadata only. It does not verify rights or enable acquisition.</p>
+        <button class="button" type="submit">Save source</button>
+        <button class="button" type="button" id="source-cancel">Cancel</button>
+      </form>
+    </dialog>
     <div id="source-cards">
     {% if offline_library_kiwix_zim_enabled %}
       {% set source = offline_library_kiwix_zim %}
@@ -193,13 +214,19 @@
         <div class="source-expanded">
           {% if source.kind == 'planned' %}<p class="source-note">Download not supported yet.</p>{% else %}
           <div class="source-actions">
-            <button class="button" type="button" disabled>Download</button>
+            <button class="button" type="button" data-acquisition-action="download" disabled>Download</button>
             <button class="button" type="button" disabled>Re-download</button>
             <button class="button" type="button" disabled>Update</button>
           </div>
           {% endif %}
           <h4>Source details</h4><dl class="storage-status"><dt>Retrieved (catalog)</dt><dd>{{ source.retrieved or '—' }}</dd></dl>
         </div>
+      </details>
+    {% endfor %}
+    {% for source in catalog_custom_sources %}
+      <details class="source-card" data-catalog-id="{{ source.source_id }}" data-catalog-title="{{ source.title }}" data-catalog-description="{{ source.description }}" data-catalog-source-url="{{ source.source_url }}" data-catalog-publisher="{{ source.publisher }}" data-catalog-edition="{{ source.edition }}" data-catalog-language="{{ source.language }}" data-catalog-expected-size-bytes="{{ source.expected_size_bytes }}" data-catalog-sha256="{{ source.sha256 }}" data-catalog-provenance="{{ source.provenance }}" data-catalog-license="{{ source.license }}">
+        <summary class="source-header"><div><h3>{{ source.title }}</h3><p class="source-subtitle">{{ source.description or 'Custom candidate source metadata' }}</p></div><span class="badge">Candidate only · not acquired</span></summary>
+        <div class="source-expanded"><p class="source-note">Candidate URL: {{ source.source_url or '—' }}. This metadata does not identify trusted installed content.</p><div class="source-actions"><button class="button" type="button" data-catalog-edit="{{ source.source_id }}">Edit</button><button class="button" type="button" data-catalog-remove="{{ source.source_id }}">Remove</button></div></div>
       </details>
     {% endfor %}
     {% if not offline_library_content_manifest and not offline_library_kiwix_zim_enabled %}
@@ -209,6 +236,67 @@
     {% endif %}
   </main>
   {% if page == "sources" %}
+  <script id="source-catalog-script">
+    (() => {
+      const feedback = document.getElementById('catalog-feedback');
+      let revision = null;
+      async function load() {
+        const response = await fetch('/api/sources', {cache:'no-store'});
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Catalog unavailable');
+        revision = data.revision;
+      }
+      const dialog = document.getElementById('source-dialog');
+      const form = document.getElementById('source-form');
+      const input = name => form.elements.namedItem(name);
+      const clearForm = () => {
+        form.reset();
+        input('source_id').disabled = false;
+        document.getElementById('source-dialog-title').textContent = 'Add source metadata';
+        form.dataset.operation = 'add';
+      };
+      function openForm(operation, card = null) {
+        clearForm();
+        form.dataset.operation = operation;
+        if (card) {
+          input('source_id').value = card.dataset.catalogId;
+          input('source_id').disabled = true;
+          for (const name of ['title', 'description', 'source_url', 'publisher', 'edition', 'language', 'expected_size_bytes', 'sha256', 'provenance', 'license']) {
+            input(name).value = card.dataset['catalog' + name.split('_').map(x => x[0].toUpperCase() + x.slice(1)).join('')] || '';
+          }
+          document.getElementById('source-dialog-title').textContent = 'Edit source metadata';
+        }
+        dialog.showModal();
+      }
+      async function change(operation, source_id, fields) {
+        if (revision === null) throw new Error('Catalog revision unavailable');
+        const response = await fetch('/api/sources', {method:'POST', headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({operation, source_id, fields, revision})});
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Catalog update failed');
+        window.location.reload();
+      }
+      document.getElementById('source-add').addEventListener('click', () => openForm('add'));
+      document.getElementById('source-cancel').addEventListener('click', () => dialog.close());
+      form.addEventListener('submit', async event => {
+        event.preventDefault();
+        const source_id = input('source_id').value;
+        const fields = Object.fromEntries(['title', 'description', 'source_url', 'publisher', 'edition', 'language', 'expected_size_bytes', 'sha256', 'provenance', 'license'].map(name => [name, input(name).value]));
+        try { await change(form.dataset.operation, source_id, fields); }
+        catch (error) { feedback.textContent = error.message; }
+      });
+      document.querySelectorAll('[data-catalog-edit]').forEach(button => button.addEventListener('click', () => {
+        openForm('edit', button.closest('[data-catalog-id]'));
+      }));
+      document.querySelectorAll('[data-catalog-remove]').forEach(button => button.addEventListener('click', async () => {
+        const source_id = button.dataset.catalogRemove;
+        if (!window.confirm('Remove this source metadata? Installed artifacts will not be deleted.')) return;
+        try { await change('remove', source_id, {}); }
+        catch (error) { feedback.textContent = error.message; }
+      }));
+      load().catch(error => { feedback.textContent = error.message; document.getElementById('source-add').disabled = true; });
+    })();
+  </script>
   <script id="acquisition-monitor-script">
     (() => {
       const cards = Array.from(document.querySelectorAll('.source-card[data-source-id]'));

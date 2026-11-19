@@ -63,8 +63,32 @@ def test_planned_card_has_no_action_buttons():
     assert "Download not supported yet." in page
     assert "Coming soon" not in page
     assert "Planned collection" not in page
-    assert not any(tag == "button" for tag, attrs in parser.tags)
+    assert not any(tag == "button" and attrs.get("data-acquisition-action") for tag, attrs in parser.tags)
     assert all("open" not in attrs for tag, attrs in parser.tags if tag == "details")
+
+
+def test_catalog_management_form_exposes_metadata_and_confirmation_controls():
+    page = render(
+        admin_page="sources",
+        catalog_custom_sources=[{
+            "source_id": "field-guide", "title": "Field guide", "description": "Reference",
+            "source_url": "https://example.org/guide?topic=a&part=b", "publisher": "Example",
+            "edition": "2026", "language": "en", "expected_size_bytes": "4096",
+            "sha256": "a" * 64, "provenance": "Verified metadata source", "license": "CC BY 4.0", "builtin": False,
+        }],
+    )
+    assert '<dialog id="source-dialog"' in page
+    assert 'id="source-form"' in page
+    for field in ("source_id", "title", "description", "source_url", "publisher", "edition", "language", "expected_size_bytes", "sha256", "provenance", "license"):
+        assert f'name="{field}"' in page
+    assert 'data-catalog-edit="field-guide"' in page
+    assert 'data-catalog-source-url="https://example.org/guide?topic=a&amp;part=b"' in page
+    assert 'data-catalog-expected-size-bytes="4096"' in page
+    assert 'data-catalog-sha256="' + ("a" * 64) + '"' in page
+    assert 'data-catalog-remove="field-guide"' in page
+    assert "Installed artifacts will not be deleted." in page
+    assert "window.prompt" not in page
+    assert "Candidate source metadata is not trusted or fetched." in page
 
 
 def test_admin_branding_and_favicon():

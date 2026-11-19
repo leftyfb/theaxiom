@@ -25,6 +25,7 @@ storage_settings = importlib.import_module(
 )
 
 storage = importlib.import_module(f"{__package__}.storage" if __package__ else "theaxiom.storage")
+catalog_store = importlib.import_module(f"{__package__}.catalog_store" if __package__ else "theaxiom.catalog_store")
 
 security = importlib.import_module(f"{__package__}.admin_security" if __package__ else "theaxiom.admin_security")
 monitoring = importlib.import_module(f"{__package__}.acquisition_monitor" if __package__ else "theaxiom.acquisition_monitor")
@@ -96,6 +97,9 @@ def freshness_response() -> dict[str, Any]:
 # Local development defaults follow the XDG user data location. Deployments can
 # override both values explicitly without depending on this source repository.
 DATA_HOME = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share"))
+CONFIG_HOME = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+SOURCE_CATALOG_PATH = Path(os.environ.get("THEAXIOM_SOURCE_CATALOG", CONFIG_HOME / "theaxiom/sources.json"))
+SOURCE_CATALOG = catalog_store.CatalogStore(SOURCE_CATALOG_PATH)
 ACQUISITION_STAGING_DIR = Path(
     os.environ.get("THEAXIOM_STAGING_DIR", DATA_HOME / "theaxiom/staging")
 )
@@ -320,6 +324,11 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 self._send_json(200, storage_settings.load_settings())
             except ValueError:
                 self._send_json(500, {"error": "stored settings are invalid"})
+        elif self.path.rstrip("/") == "/api/sources":
+            try:
+                self._send_json(200, SOURCE_CATALOG.get())
+            except (catalog_store.CatalogError, OSError):
+                self._send_json(503, {"error": "source catalog unavailable; stored data was not replaced"})
         elif re.fullmatch(r"/api/jobs/[a-f0-9]{32}", self.path.rstrip("/")):
             job_id = self.path.rstrip("/").rsplit("/", 1)[-1]
             response = job_status_response(job_id)
@@ -341,11 +350,14 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             autoescape=select_autoescape(["html", "htm", "xml"]),
         )
         template = environment.get_template("admin-page.html.j2")
+        catalog_sources = SOURCE_CATALOG.get()["sources"] if page == "sources" else []
         body = template.render(
             admin_page=page,
             offline_library_content_manifest=source_catalog.planned_sources() if page == "sources" else [],
             offline_library_kiwix_zim_enabled=True,
             offline_library_kiwix_zim=WIKIPEDIA_SOURCE,
+            catalog_custom_sources=[item for item in catalog_sources if not item["builtin"]],
+            source_management_enabled=page == "sources",
             password_change_enabled=bool(getattr(getattr(self.server, "axiom_config", None), "store", None)),
         ).encode("utf-8")
         self.send_response(200)
@@ -384,6 +396,37 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 self._send_json(403, {"error": "current password is incorrect"})
                 return
             self._send_json(200, {"changed": True})
+        elif self.path.rstrip("/") == "/api/sources":
+            if not self.headers.get("Origin"):
+                self._send_json(403, {"error": "same-origin request required"})
+                return
+            data = self._read_body()
+            if set(data) != {"operation", "source_id", "fields", "revision"}:
+                self._send_json(400, {"error": "invalid source mutation"})
+                return
+            sid = data.get("source_id")
+            busy = False
+            monitor = getattr(self.server, "acquisition_monitor", None)
+            if monitor:
+                try:
+                    snap = monitor.snapshot()
+                    busy = any(j.get("source_id") == sid and (snap.get("stale", True) or j.get("active") or j.get("state") not in {"completed", "not_started", "unavailable"}) for j in snap.get("acquisitions", []))
+                except Exception:
+                    busy = True
+            with _active_downloads_lock:
+                busy = busy or any(j.get("source_id") == sid and p.poll() is None for j, p in ((v, v["process"]) for v in _jobs.values()))
+            try:
+                result = SOURCE_CATALOG.mutate(data["operation"], sid, data["fields"], data["revision"], busy)
+            except catalog_store.RevisionConflict as exc:
+                self._send_json(409, {"error": str(exc)})
+                return
+            except catalog_store.CatalogError as exc:
+                self._send_json(400, {"error": str(exc)})
+                return
+            except OSError:
+                self._send_json(503, {"error": "source catalog write failed"})
+                return
+            self._send_json(200, result)
         elif self.path == "/api/publication":
             if not self.headers.get("Origin"):
                 self._send_json(403, {"error": "same-origin request required"})
