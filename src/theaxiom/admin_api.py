@@ -35,25 +35,9 @@ ADMIN_TEMPLATE_DIR = Path(__file__).resolve().parents[2] / "templates"
 VALID_ACTIONS = frozenset({"download", "redownload", "update"})
 VALID_SOURCE_IDS = frozenset({"wikipedia-en"})
 
-# Trusted manifest — canonical Wikipedia ZIM source. Values are pinned in this
-# application module until catalog loading is implemented; clients cannot supply
-# URLs or commands.
-WIKIPEDIA_SOURCE: dict[str, Any] = {
-    "source_id": "wikipedia-en",
-    "title": "Wikipedia English All Maxi (2026-08)",
-    "kind": "zim",
-    "filename": "wikipedia_en_all_maxi_2026-08.zim",
-    "source_url": "https://download.kiwix.org/zim/wikipedia/wikipedia_en_all_maxi_2026-08.zim",
-    "sha256": "34162d18b9f96f494eac48a73a309c72e0bc95d85f76be405d0f5de795854aa6",
-    "bytes": 127418087648,
-    "language": "eng",
-    "publisher": "Wikimedia contributors via Kiwix",
-    "catalog_date": "2026-07-06",
-    "license": "CC BY-SA 4.0 and GFDL for Wikipedia text; individual media licenses may vary",
-    "license_url": "https://foundation.wikimedia.org/wiki/Policy:Terms_of_Use",
-    "attribution": "Preserve article-level attribution, applicable license notices, and modification notices.",
-    "rights_review_status": "reviewed-for-whole-zim-redistribution",
-}
+# Trusted acquisition metadata is shipped separately from planned catalog entries.
+source_catalog = importlib.import_module(f"{__package__}.source_catalog" if __package__ else "theaxiom.source_catalog")
+WIKIPEDIA_SOURCE = source_catalog.WIKIPEDIA_SOURCE
 
 # Map of every resolvable source_id -> its trusted manifest entry.
 TRUSTED_SOURCES: dict[str, dict[str, Any]] = {
@@ -310,7 +294,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         template = environment.get_template("admin-page.html.j2")
         body = template.render(
             admin_page=page,
-            offline_library_content_manifest=[],
+            offline_library_content_manifest=source_catalog.planned_sources() if page == "sources" else [],
             offline_library_kiwix_zim_enabled=True,
             offline_library_kiwix_zim=WIKIPEDIA_SOURCE,
             password_change_enabled=bool(getattr(getattr(self.server, "axiom_config", None), "store", None)),
