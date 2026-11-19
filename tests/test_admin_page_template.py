@@ -40,3 +40,14 @@ def test_manifest_and_empty_cards():
                   offline_library_content_manifest=[{"title": "Fixture", "kind": "pdf"}])
     assert "Fixture" in page and "Status unavailable" in page
     assert "No managed sources configured." in render(offline_library_kiwix_zim_enabled=False)
+
+
+def test_page_specific_scripts_and_navigation():
+    sources = render(admin_page="sources", password_change_enabled=True)
+    settings = render(admin_page="settings", password_change_enabled=True)
+    assert 'href="/admin/sources" aria-current="page"' in sources
+    assert 'href="/admin/settings" aria-current="page"' in settings
+    for marker in ("acquisition-monitor-script", "publication-script", "source-cards"):
+        assert marker in sources and marker not in settings
+    for marker in ("storage-settings-script", "admin-password-script", "storage-form"):
+        assert marker in settings and marker not in sources
