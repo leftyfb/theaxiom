@@ -2,6 +2,7 @@
 import base64
 import http.client
 import json
+import subprocess
 import tempfile
 import threading
 import unittest
@@ -48,6 +49,33 @@ class ConfigTests(unittest.TestCase):
                 load_config({"THEAXIOM_BIND_HOST": host})
 
 
+class ReleaseRevisionTests(unittest.TestCase):
+    def test_release_revision_accepts_only_full_lowercase_sha(self):
+        for value, expected in [("a" * 40 + "\n", "a" * 40),
+                                ("A" * 40, None), ("a" * 39, None),
+                                ("not-a-revision", None)]:
+            with self.subTest(value=value), patch.object(
+                admin_api.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, value)
+            ) as run:
+                self.assertEqual(admin_api._release_revision(), expected)
+                self.assertEqual(run.call_args.kwargs["timeout"], 2)
+                self.assertTrue(run.call_args.kwargs["check"])
+
+    def test_release_revision_lookup_failure_is_nonfatal(self):
+        for error in (FileNotFoundError(), subprocess.TimeoutExpired("git", 2),
+                      subprocess.CalledProcessError(1, "git")):
+            with self.subTest(error=error), patch.object(admin_api.subprocess, "run", side_effect=error):
+                self.assertIsNone(admin_api._release_revision())
+
+    def test_health_uses_cached_revision_without_invoking_git(self):
+        with patch.object(admin_api, "RELEASE_REVISION", "b" * 40), patch.object(
+            admin_api.subprocess, "run", side_effect=AssertionError("unexpected Git invocation")
+        ):
+            self.assertEqual(admin_api.health_response(), {
+                "status": "ok", "service": "offline-library-admin-api", "revision": "b" * 40
+            })
+
+
 class HTTPAuthTests(unittest.TestCase):
     def setUp(self):
         self.server = admin_api.ThreadingHTTPServer(("127.0.0.1", 0), admin_api.AdminAPIHandler)
@@ -79,7 +107,13 @@ class HTTPAuthTests(unittest.TestCase):
             connection.close()
 
     def test_health_public_but_admin_routes_protected(self):
-        self.assertEqual(self.request("/health")[0], 200)
+        with patch.object(admin_api, "RELEASE_REVISION", "c" * 40):
+            status, headers, body = self.request("/health")
+        self.assertEqual(status, 200)
+        self.assertNotIn("WWW-Authenticate", headers)
+        self.assertEqual(json.loads(body), {
+            "status": "ok", "service": "offline-library-admin-api", "revision": "c" * 40
+        })
         status, headers, body = self.request("/")
         self.assertEqual(status, 200)
         self.assertNotIn("WWW-Authenticate", headers)
