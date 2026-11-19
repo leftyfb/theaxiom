@@ -9,6 +9,7 @@ import os
 import re
 import subprocess
 import threading
+from urllib.parse import parse_qs, urlsplit
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,7 @@ storage = importlib.import_module(f"{__package__}.storage" if __package__ else "
 security = importlib.import_module(f"{__package__}.admin_security" if __package__ else "theaxiom.admin_security")
 monitoring = importlib.import_module(f"{__package__}.acquisition_monitor" if __package__ else "theaxiom.acquisition_monitor")
 publication = importlib.import_module(f"{__package__}.publication" if __package__ else "theaxiom.publication")
+library_search = importlib.import_module(f"{__package__}.search" if __package__ else "theaxiom.search")
 BIND_HOST = "127.0.0.1"
 BIND_PORT = 8080
 ADMIN_TEMPLATE_DIR = Path(__file__).resolve().parents[2] / "templates"
@@ -159,7 +161,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         if len(hosts) != 1 or hosts[0].lower() not in config.allowed_hosts:
             self._send_json(400, {"error": "invalid host"})
             return False
-        if not post and self.path in {"/", "/index.html", "/health", "/health/", "/internal/publication/wikipedia-en", "/read/wikipedia-en"}:
+        if not post and (self.path.split("?", 1)[0] == "/search" or self.path in {"/", "/index.html", "/health", "/health/", "/internal/publication/wikipedia-en", "/read/wikipedia-en"}):
             return True
         auth = self.headers.get_all("Authorization", [])
         local_hosts = {f"{config.host}:{config.port}", f"localhost:{config.port}"}
@@ -227,6 +229,29 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             environment = Environment(loader=FileSystemLoader(ADMIN_TEMPLATE_DIR), autoescape=True)
             body = environment.get_template("library.html.j2").render(sources=sources).encode("utf-8")
             self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path.split("?", 1)[0] == "/search":
+            query, groups, error, code = "", [], "", 200
+            try:
+                if len(self.path) > 4096:
+                    raise ValueError("Search request too long")
+                params = parse_qs(urlsplit(self.path).query, keep_blank_values=True,
+                                  max_num_fields=2, errors="strict")
+                if set(params) - {"q"} or len(params.get("q", [""])) != 1:
+                    raise ValueError("Invalid search request")
+                query = library_search.validate_query(params.get("q", [""])[0])
+                groups = library_search.search(query, self._snapshot)
+            except (ValueError, UnicodeError):
+                error, code = "Invalid search query.", 400
+            except RuntimeError:
+                error, code = "Search is busy. Try again.", 503
+            environment = Environment(loader=FileSystemLoader(ADMIN_TEMPLATE_DIR), autoescape=True)
+            body = environment.get_template("search.html.j2").render(
+                query=query, groups=groups, error=error).encode("utf-8")
+            self.send_response(code)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
