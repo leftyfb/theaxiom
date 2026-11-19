@@ -88,3 +88,42 @@ def test_checksum_measured_pass_and_fallback():
     assert "pass 2 of 2" in states[1]["verification-label"]["textContent"]
     assert "value" not in states[2]["verification"]
     assert states[3]["verification"]["hidden"]
+
+
+def test_publication_refresh_updates_summary_and_controls():
+    script = re.search(r'<script id="publication-script">(.*?)</script>',
+                       TEMPLATE.read_text(), re.S).group(1)
+    harness = r"""
+const ids = ['publication-toggle', 'publication-browse', 'publication-status', 'publication-summary'];
+const nodes = Object.fromEntries(ids.map(id => [id, {
+  textContent: '', disabled: true, hidden: true, addEventListener() {}
+}]));
+global.document = {getElementById(id) {return nodes[id] || null;}};
+let refresh;
+let fail = false;
+global.window = {setInterval(fn) {refresh = fn;}};
+global.fetch = async () => ({
+  ok: !fail, json: async () => ({'wikipedia-en': {enabled: true, serving: true, published: true}})
+});
+""" + script + r"""
+(async () => {
+  await new Promise(resolve => setImmediate(resolve));
+  const success = JSON.parse(JSON.stringify(nodes));
+  fail = true;
+  await refresh();
+  console.log(JSON.stringify({success, failure: nodes}));
+})();
+"""
+    result = subprocess.run([shutil.which("node"), "-"], input=harness,
+                            text=True, capture_output=True, timeout=10)
+    assert result.returncode == 0, result.stderr
+    states = json.loads(result.stdout)
+    success, failure = states["success"], states["failure"]
+    assert success["publication-summary"]["textContent"] == "Published · available in library"
+    assert success["publication-status"]["textContent"] == success["publication-summary"]["textContent"]
+    assert success["publication-toggle"]["textContent"] == "Unpublish"
+    assert not success["publication-toggle"]["disabled"]
+    assert not success["publication-browse"]["hidden"]
+    assert failure["publication-summary"]["textContent"] == "Publication status unavailable"
+    assert failure["publication-toggle"]["disabled"]
+    assert failure["publication-browse"]["hidden"]
