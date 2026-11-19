@@ -25,7 +25,7 @@ class Parser(HTMLParser):
 def test_source_card_and_disabled_actions():
     parser = Parser()
     parser.feed(render())
-    assert sum(tag == "article" and attrs.get("data-source-id") == "wikipedia-en"
+    assert sum(tag == "details" and attrs.get("data-source-id") == "wikipedia-en"
                for tag, attrs in parser.tags) == 1
     actions = [attrs for tag, attrs in parser.tags if tag == "button" and "data-action" in attrs]
     assert {a["data-action"] for a in actions} == {"download-zim", "redownload-zim", "update-zim"}
@@ -51,3 +51,20 @@ def test_page_specific_scripts_and_navigation():
         assert marker in sources and marker not in settings
     for marker in ("storage-settings-script", "admin-password-script", "storage-form"):
         assert marker in settings and marker not in sources
+
+
+def test_planned_card_has_no_action_buttons():
+    page = render(offline_library_kiwix_zim_enabled=False,
+                  offline_library_content_manifest=[{"title": "Fixture", "kind": "planned"}])
+    parser = Parser()
+    parser.feed(page)
+    assert "Coming soon" in page
+    assert not any(tag == "button" for tag, attrs in parser.tags)
+    assert all("open" not in attrs for tag, attrs in parser.tags if tag == "details")
+
+
+def test_admin_branding_and_favicon():
+    page = render()
+    assert 'href="/favicon.svg"' in page
+    assert "Administration · The Axiom" in page
+    assert "← The Axiom" in page
