@@ -23,8 +23,10 @@ main{padding:20px 16px}h1{font-size:1.9rem}.intro{font-size:1rem;margin:8px 0 16
 .body h3{font-size:1.1rem;line-height:1.25;margin:3px 0;color:#176b4d}.body p{font-size:.9rem;line-height:1.4;margin:0}
 .action{border:0;padding:0;margin:5px 0 0;font-size:.78rem}.start-card{padding:12px;gap:12px;margin:16px 0}.start-card p{font-size:.9rem}.help{padding:16px}footer{margin-top:24px}
 }
+.search-form{display:flex;flex-wrap:wrap;gap:8px;max-width:720px;margin:20px 0}.search-form label{width:100%;font-weight:650}.search-form input{flex:1;min-width:0;padding:12px;font:inherit;border:1px solid #aac5b7;border-radius:8px}.search-form button{font:inherit;font-weight:700;background:#176b4d;color:white;border:0;border-radius:8px;padding:10px 16px;min-height:44px;cursor:pointer}
 </style></head><body><header><strong>The Axiom</strong><a href="/admin">Administration</a></header>
 <main><div class="eyebrow">Local knowledge · Offline access</div><h1>Your offline reference library</h1><p class="intro">Discover useful collections, reference articles and resources, available right here on your local network.</p>
+<form class="search-form" action="/search" method="get" role="search"><label for="library-search">Search all library content</label><input type="search" id="library-search" name="q" maxlength="160" placeholder="Search articles, guides and more" required><button type="submit">Search</button></form>
 <a class="card start-card" href="/#getting-started"><span class="start-icon" aria-hidden="true">i</span><div><h2>Getting Started</h2><p>Learn how to use your offline library.</p></div><span class="chevron" aria-hidden="true">›</span></a>
 <section class="collection" aria-labelledby="collection-title"><h2 id="collection-title">Explore the library</h2>
 {% if sources %}<div class="grid">{% for source in sources %}
