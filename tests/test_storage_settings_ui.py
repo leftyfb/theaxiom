@@ -12,12 +12,12 @@ TEMPLATE = Path(__file__).parents[1] / "templates/admin-page.html.j2"
 
 def test_settings_markup():
     template = Environment().from_string(TEMPLATE.read_text())
-    page = template.render(offline_library_content_manifest=[], offline_library_kiwix_zim_enabled=False)
+    page = template.render(admin_page="settings", offline_library_content_manifest=[], offline_library_kiwix_zim_enabled=False)
     for key in ("storage-root", "storage-mode", "storage-mount", "storage-source",
                 "storage-feedback", "status-free", "status-library"):
         assert f'id="{key}"' in page
     assert "Save and validate" in page
-    assert 'href="#storage-settings"' in page
+    assert 'href="/admin/settings" aria-current="page"' in page
 
 
 def run_ui(scenario):
