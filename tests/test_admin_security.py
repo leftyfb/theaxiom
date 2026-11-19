@@ -113,7 +113,7 @@ class HTTPAuthTests(unittest.TestCase):
 
     def test_password_change_verifies_current_password_and_persists(self):
         headers = {"Content-Type":"application/json", "Origin":"http://"+self.host}
-        new = "replacement-fixture-password"
+        new = "eight123"
         payload = {"current_password":"incorrect-password",
                    "new_password":new, "confirm_password":new}
         self.assertEqual(self.request("/api/admin/password", "POST", self.auth,
@@ -142,3 +142,21 @@ class HTTPAuthTests(unittest.TestCase):
                 '{"source_id":"wikipedia-en","action":"download"}')
             self.assertEqual(code, 503)
             launch.assert_not_called()
+
+
+class PasswordLengthTests(unittest.TestCase):
+    def test_initialization_and_rotation_boundary(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "credential"
+            with self.assertRaises(ValueError):
+                PasswordStore.initialize(path, "seven12")
+            self.assertFalse(path.exists())
+            PasswordStore.initialize(path, "eight123")
+            store = PasswordStore(path)
+            self.assertTrue(store.verify("eight123"))
+            with self.assertRaises(ValueError):
+                store.change("eight123", "seven12")
+            self.assertTrue(store.verify("eight123"))
+            self.assertTrue(store.change("eight123", "newpass8"))
+            self.assertTrue(store.verify("newpass8"))
+            self.assertFalse(store.verify("eight123"))

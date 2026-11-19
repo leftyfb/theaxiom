@@ -310,7 +310,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             try:
                 changed = config.store.change(data["current_password"], data["new_password"])
             except ValueError:
-                self._send_json(400, {"error": "choose a different password of 16–256 printable non-space ASCII characters"})
+                self._send_json(400, {"error": "choose a different password of 8–256 printable non-space ASCII characters"})
                 return
             except OSError:
                 self._send_json(503, {"error": "credential update failed"})

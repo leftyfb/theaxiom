@@ -23,8 +23,8 @@ ITERATIONS = 600_000
 
 
 def _password_bytes(password: str) -> bytes:
-    if not isinstance(password, str) or not 16 <= len(password) <= 256:
-        raise ValueError("password must contain 16–256 characters")
+    if not isinstance(password, str) or not 8 <= len(password) <= 256:
+        raise ValueError("password must contain 8–256 characters")
     if any(ord(c) < 33 or ord(c) > 126 for c in password):
         raise ValueError("password must use printable non-space ASCII characters")
     return password.encode("ascii")

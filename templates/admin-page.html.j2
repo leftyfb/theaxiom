@@ -100,15 +100,15 @@
     {% if password_change_enabled %}
     <section class="settings-panel" id="admin-password" aria-labelledby="password-title">
       <h2 id="password-title">Change administrator password</h2>
-      <p>Choose a unique password of 16–256 printable non-space ASCII characters. Changing it immediately invalidates the old password. On this HTTP development site, credentials are not encrypted in transit.</p>
+      <p>Choose a unique password of 8–256 printable non-space ASCII characters. Changing it immediately invalidates the old password. On this HTTP development site, credentials are not encrypted in transit.</p>
       <form id="password-form">
         <fieldset id="password-fields">
           <label for="current-password">Current password</label>
           <input id="current-password" type="password" autocomplete="current-password" required maxlength="256">
           <label for="new-password">New password</label>
-          <input id="new-password" type="password" autocomplete="new-password" required minlength="16" maxlength="256">
+          <input id="new-password" type="password" autocomplete="new-password" required minlength="8" maxlength="256">
           <label for="confirm-password">Confirm new password</label>
-          <input id="confirm-password" type="password" autocomplete="new-password" required minlength="16" maxlength="256">
+          <input id="confirm-password" type="password" autocomplete="new-password" required minlength="8" maxlength="256">
           <div class="settings-actions"><button class="button" type="submit">Change password</button></div>
         </fieldset>
       </form>
