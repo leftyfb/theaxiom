@@ -2,11 +2,13 @@
 import json
 import os
 import tempfile
+import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest import mock
 
-from theaxiom import catalog_store
+from theaxiom import catalog_store, source_catalog
 
 
 class CatalogStoreTests(unittest.TestCase):
@@ -17,6 +19,20 @@ class CatalogStoreTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp.cleanup()
+
+    def test_seeds_once_and_preserves_empty_catalog(self):
+        initial = current = self.store.get()
+        self.assertEqual(initial["revision"], 0)
+        self.assertEqual([s["source_id"] for s in initial["sources"]],
+                         [s["source_id"] for s in source_catalog.builtin_sources()])
+        before = self.path.read_bytes()
+        with mock.patch.object(source_catalog, "builtin_sources", side_effect=AssertionError("reseed")):
+            self.assertEqual(catalog_store.CatalogStore(self.path).get(), initial)
+            self.assertEqual(self.path.read_bytes(), before)
+            for source in initial["sources"]:
+                current = self.store.mutate("remove", source["source_id"], {}, current["revision"])
+            self.assertEqual(json.loads(self.path.read_bytes())["sources"], [])
+            self.assertEqual(catalog_store.CatalogStore(self.path).get(), current)
 
     def test_custom_source_crud_persists_across_store_restart(self):
         initial = self.store.get()
@@ -58,18 +74,44 @@ class CatalogStoreTests(unittest.TestCase):
         restarted = catalog_store.CatalogStore(self.path).get()
         self.assertEqual(next(s for s in restarted["sources"] if s["source_id"] == "wikipedia-en")["title"], "Reviewed title")
 
-    def test_builtin_remove_is_tombstone_and_preserves_installed_content(self):
+    def test_preloaded_remove_and_recreate_preserves_installed_content(self):
         content = Path(self.temp.name) / "content" / "wikipedia-en.zim"
         content.parent.mkdir()
         content.write_bytes(b"installed reference")
         current = self.store.get()
+        original = next(s for s in current["sources"] if s["source_id"] == "wikipedia-en")
+        record = next(s for s in json.loads(self.path.read_bytes())["sources"]
+                      if s["source_id"] == "wikipedia-en")
         result = self.store.mutate("remove", "wikipedia-en", {}, current["revision"])
         self.assertNotIn("wikipedia-en", [x["source_id"] for x in result["sources"]])
         self.assertEqual(content.read_bytes(), b"installed reference")
         state = json.loads(self.path.read_text())
-        self.assertEqual(state["tombstones"], ["wikipedia-en"])
-        self.assertEqual(state["custom"], {})
-        self.assertEqual(state["overrides"], {})
+        self.assertNotIn("tombstones", state)
+        self.assertEqual(state["schema_version"], catalog_store.SCHEMA_VERSION)
+        restarted = catalog_store.CatalogStore(self.path)
+        self.assertEqual(restarted.get(), result)
+        fields = record["profile"] | record["configuration"]
+        readded = restarted.mutate("add", "wikipedia-en", fields, result["revision"])
+        self.assertEqual(next(s for s in readded["sources"] if s["source_id"] == "wikipedia-en"), original)
+        self.assertEqual(content.read_bytes(), b"installed reference")
+
+    def test_candidate_configuration_is_origin_independent(self):
+        config = {"format": "zim", "source_url": "https://example.org/candidate.zim",
+                  "sha256": "b" * 64, "expected_size_bytes": "1234", "license": "Candidate license"}
+        edited = self.store.mutate("edit", "wikipedia-en", config, self.store.get()["revision"])
+        added = self.store.mutate("add", "manual", {"title": "Manual", **config}, edited["revision"])
+        records = {s["source_id"]: s for s in json.loads(self.path.read_bytes())["sources"]}
+        for sid in ("wikipedia-en", "manual"):
+            self.assertEqual(records[sid]["configuration"], config)
+            self.assertFalse(config.keys() & records[sid]["profile"].keys())
+            self.assertNotIn("seeded", records[sid])
+        sources = {s["source_id"]: s for s in added["sources"]}
+        wiki, manual = sources["wikipedia-en"], sources["manual"]
+        for key in config.keys() - {"format"}:
+            self.assertEqual(wiki["candidate_" + key], manual["candidate_" + key])
+        self.assertEqual(wiki["sha256"], source_catalog.WIKIPEDIA_SOURCE["sha256"])
+        self.assertEqual(wiki["bytes"], source_catalog.WIKIPEDIA_SOURCE["bytes"])
+        self.assertNotIn("bytes", manual)
 
     def test_revision_conflict_does_not_overwrite(self):
         revision = self.store.get()["revision"]
@@ -83,6 +125,106 @@ class CatalogStoreTests(unittest.TestCase):
         with self.assertRaisesRegex(catalog_store.CatalogError, "active or unresolved"):
             self.store.mutate("add", "busy", {"title": "Busy"}, 0, busy=True)
         self.assertFalse(self.path.exists())
+
+    def test_concurrent_validation_and_revision_conflict(self):
+        barrier = threading.Barrier(3, timeout=10)
+
+        def add(sid, fields):
+            store = catalog_store.CatalogStore(self.path)
+            revision = store.get()["revision"]
+            barrier.wait()
+            try:
+                store.mutate("add", sid, fields, revision)
+            except catalog_store.RevisionConflict:
+                return "conflict"
+            except catalog_store.CatalogError:
+                return "invalid"
+            return "saved"
+
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            calls = [pool.submit(add, sid, fields) for sid, fields in [
+                ("one", {"title": "One"}), ("two", {"title": "Two"}),
+                ("invalid", {"title": "Invalid", "sha256": "bad"}),
+            ]]
+            self.assertCountEqual([call.result() for call in calls], ["saved", "conflict", "invalid"])
+        saved = self.store.get()
+        self.assertEqual(saved["revision"], 1)
+        ids = {s["source_id"] for s in saved["sources"]}
+        self.assertEqual(len(ids & {"one", "two"}), 1)
+        self.assertNotIn("invalid", ids)
+
+    def test_v1_conversion_preserves_edits_deletions_and_revision(self):
+        self.path.parent.mkdir()
+        state = {"schema_version": 1, "revision": 7, "updated_at": "2026-10-01T12:00:00+00:00",
+                 "custom": {"manual": {"title": "Manual", "sha256": "a" * 64}},
+                 "overrides": {"wikipedia-en": {"title": "Edited", "sha256": "a" * 64},
+                               "wikivoyage": {"title": "Deleted"}},
+                 "tombstones": ["wikivoyage"]}
+        self.path.write_text(json.dumps(state))
+        before = self.path.read_bytes()
+        with self.assertRaises(catalog_store.RevisionConflict):
+            self.store.mutate("edit", "manual", {"title": "Stale"}, 6)
+        self.assertEqual(self.path.read_bytes(), before)
+        snapshot = self.store.get()
+        self.assertEqual(snapshot["revision"], 7)
+        self.assertEqual(snapshot["updated_at"], state["updated_at"])
+        converted = self.path.read_bytes()
+        self.assertEqual(set(json.loads(converted)), {"schema_version", "revision", "updated_at", "sources"})
+        sources = {s["source_id"]: s for s in snapshot["sources"]}
+        self.assertNotIn("wikivoyage", sources)
+        self.assertEqual(sources["wikipedia-en"]["title"], "Edited")
+        self.assertEqual(sources["wikipedia-en"]["sha256"], source_catalog.WIKIPEDIA_SOURCE["sha256"])
+        for sid in ("wikipedia-en", "manual"):
+            self.assertEqual(sources[sid]["candidate_sha256"], "a" * 64)
+        self.assertEqual(catalog_store.CatalogStore(self.path).get(), snapshot)
+        self.assertEqual(self.path.read_bytes(), converted)
+
+    def test_converts_unfinished_v2_without_trusting_saved_artifact_metadata(self):
+        self.path.parent.mkdir()
+        profile = next(s for s in source_catalog.builtin_sources() if s["source_id"] == "wikipedia-en")
+        sid = profile.pop("source_id")
+        record = {"source_id": sid, "profile": profile, "seeded": True, "configuration": {},
+                  "candidate": {"sha256": "d" * 64}}
+        state = {"schema_version": 2, "revision": 4, "updated_at": None, "sources": [record]}
+        for invalid in [record | {"seeded": 1}, record | {"configuration": {"unexpected": True}},
+                        record | {"profile": profile | {"bytes": 1}},
+                        record | {"candidate": {"sha256": "invalid"}}]:
+            with self.subTest(invalid=invalid):
+                before = json.dumps(state | {"sources": [invalid]}).encode()
+                self.path.write_bytes(before)
+                with self.assertRaises(catalog_store.CatalogError):
+                    self.store.get()
+                self.assertEqual(self.path.read_bytes(), before)
+        self.path.write_text(json.dumps(state))
+        snapshot = self.store.get()
+        self.assertEqual(snapshot["revision"], 4)
+        source, = snapshot["sources"]
+        self.assertEqual(source["sha256"], source_catalog.WIKIPEDIA_SOURCE["sha256"])
+        self.assertEqual(source["candidate_sha256"], "d" * 64)
+        converted, = json.loads(self.path.read_bytes())["sources"]
+        self.assertEqual(converted["configuration"]["sha256"], "d" * 64)
+        self.assertEqual(set(converted), {"source_id", "profile", "configuration"})
+
+    def test_invalid_v1_is_not_replaced_even_if_bad_data_would_be_dropped(self):
+        self.path.parent.mkdir()
+        valid = {"schema_version": 1, "revision": 6, "updated_at": None,
+                 "custom": {}, "overrides": {}, "tombstones": []}
+        for changes in [
+            {"schema_version": True}, {"schema_version": 1.0}, {"revision": -1},
+            {"updated_at": []}, {"unexpected": True}, {"custom": []},
+            {"custom": {"manual": {"description": "missing title"}}},
+            {"custom": {"wikipedia-en": {"title": "Collision"}}},
+            {"overrides": {"unknown": {"title": "Would be dropped"}}},
+            {"overrides": {"wikivoyage": {"sha256": "bad"}}, "tombstones": ["wikivoyage"]},
+            {"tombstones": ["unknown"]}, {"tombstones": [[]]},
+            {"tombstones": ["wikivoyage", "wikivoyage"]},
+        ]:
+            with self.subTest(changes=changes):
+                before = json.dumps(valid | changes).encode()
+                self.path.write_bytes(before)
+                with self.assertRaises(catalog_store.CatalogError):
+                    self.store.get()
+                self.assertEqual(self.path.read_bytes(), before)
 
     def test_rejects_invalid_ids_fields_urls_and_unknown_operations(self):
         for sid, fields, operation in [
@@ -106,15 +248,27 @@ class CatalogStoreTests(unittest.TestCase):
         self.path.parent.mkdir(parents=True)
         malformed_states = [
             "not-json",
-            json.dumps({"schema_version": True, "revision": 0, "custom": {}, "overrides": {}, "tombstones": []}),
-            json.dumps({"schema_version": 1, "revision": 0, "custom": {"custom": {"description": "missing title"}}, "overrides": {}, "tombstones": []}),
-            json.dumps({"schema_version": 1, "revision": 0, "custom": {}, "overrides": {}, "tombstones": ["not-a-builtin"]}),
+            json.dumps({"schema_version": True, "revision": 0, "sources": []}),
+            json.dumps({"schema_version": 2, "revision": 0, "sources": [{"source_id": "../bad"}]}),
+            '{"schema_version":2,"revision":1,"revision":0,"updated_at":null,"sources":[]}',
         ]
+        valid = {"source_id": "test", "profile": {"title": "Test"}, "configuration": {"format": "zim"}}
+        malformed_states.extend(json.dumps({"schema_version": 2, "revision": 0, "updated_at": None,
+                                            "sources": sources}) for sources in [
+            [valid, valid], [valid | {"profile": {}}], [valid | {"profile": {"title": "\ud800"}}],
+            [valid | {"configuration": {}}], [valid | {"configuration": {"format": []}}],
+            [valid | {"configuration": {"format": "zim", "source_url": "file:///tmp/test.zim"}}],
+            [valid | {"profile": {"title": "Test", "bytes": 123}}],
+            [valid | {"artifact": {"sha256": "a" * 64}}],
+        ])
         for malformed in malformed_states:
             with self.subTest(state=malformed):
                 self.path.write_text(malformed)
                 with self.assertRaises(catalog_store.CatalogError):
                     self.store.get()
+                self.assertEqual(self.path.read_text(), malformed)
+                with self.assertRaises(catalog_store.CatalogError):
+                    self.store.mutate("add", "other", {"title": "Other"}, 0)
                 self.assertEqual(self.path.read_text(), malformed)
 
     def test_write_failure_preserves_prior_catalog(self):

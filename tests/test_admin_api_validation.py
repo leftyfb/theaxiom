@@ -6,16 +6,24 @@ to ensure these tests never start a real acquisition.
 """
 import json
 import subprocess
+import tempfile
 import threading
 import urllib.error
 import urllib.request
 import unittest
+from pathlib import Path
 from unittest import mock
 
+from theaxiom import admin_api, catalog_store
 from theaxiom.admin_api import AdminAPIHandler, ThreadingHTTPServer
 
 
 class AdminAPIValidationTests(unittest.TestCase):
+    def setUp(self):
+        directory = self.enterContext(tempfile.TemporaryDirectory())
+        self.enterContext(mock.patch.object(admin_api, "SOURCE_CATALOG",
+                                           catalog_store.CatalogStore(Path(directory) / "sources.json")))
+
     @classmethod
     def setUpClass(cls):
         cls.server = ThreadingHTTPServer(("127.0.0.1", 0), AdminAPIHandler)

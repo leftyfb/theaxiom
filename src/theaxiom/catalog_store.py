@@ -1,22 +1,27 @@
 """Versioned persistent source catalog; candidate URLs are data, never fetched."""
 from __future__ import annotations
 
-import copy
 import fcntl
 import json
 import os
 import re
 import tempfile
 import threading
+from collections.abc import Set
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit
 
 from . import source_catalog
 
-SCHEMA_VERSION = 1
-EDITABLE = ("title", "description", "source_url", "publisher", "edition", "language",
-            "expected_size_bytes", "sha256", "provenance", "license")
+SCHEMA_VERSION = 2
+PROFILE_FIELDS = {"title", "description", "publisher", "edition", "language"}
+CANDIDATE_FIELDS = {"source_url", "expected_size_bytes", "sha256", "provenance", "license"}
+CONFIG_FIELDS = CANDIDATE_FIELDS | {"format"}
+V1_FIELDS = PROFILE_FIELDS | CANDIDATE_FIELDS
+EDITABLE = PROFILE_FIELDS | CONFIG_FIELDS
+HEADER_FIELDS = {"schema_version", "revision", "updated_at"}
 ID_RE = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z")
 MAX_CATALOG_BYTES = 256 * 1024
 MAX_ENTRIES = 100
@@ -40,58 +45,151 @@ class CatalogStore:
     def _file_lock(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         fd = os.open(self.lock_path, os.O_CREAT | os.O_RDWR, 0o600)
-        fcntl.flock(fd, fcntl.LOCK_EX)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+        except BaseException:
+            os.close(fd)
+            raise
         return fd
 
-    def _read(self):
-        if not self.path.exists():
-            return {"schema_version": SCHEMA_VERSION, "revision": 0, "updated_at": None,
-                    "custom": {}, "overrides": {}, "tombstones": []}
+    def _read(self, *, initialize=False) -> dict[str, Any]:
+        # Both locks are held. A mutation persists seeding or conversion only
+        # if the revision check and the requested change also succeed.
         try:
-            raw = self.path.read_bytes()
+            with self.path.open("rb") as stream:
+                raw = stream.read(MAX_CATALOG_BYTES + 1)
+        except FileNotFoundError:
+            if self.path.is_symlink():
+                raise CatalogError("catalog cannot be read safely")
+            state = {"schema_version": SCHEMA_VERSION, "revision": 0, "updated_at": None,
+                     "sources": [self._seed_record(entry) for entry in source_catalog.builtin_sources()]}
+        except OSError as exc:
+            raise CatalogError("catalog cannot be read safely") from exc
+        else:
             if len(raw) > MAX_CATALOG_BYTES:
                 raise CatalogError("catalog exceeds size limit")
-            value = json.loads(raw)
-            if (not isinstance(value, dict) or type(value.get("schema_version")) is not int
-                    or value["schema_version"] != SCHEMA_VERSION
-                    or type(value.get("revision")) is not int or value["revision"] < 0
-                    or not isinstance(value.get("custom"), dict)
-                    or not isinstance(value.get("overrides"), dict)
-                    or not isinstance(value.get("tombstones"), list)):
+            try:
+                state = json.loads(raw, object_pairs_hook=self._unique_object)
+            except CatalogError:
+                raise
+            except (ValueError, RecursionError) as exc:
+                raise CatalogError("catalog cannot be read safely") from exc
+            self._validate_header(state)
+            if state["schema_version"] == SCHEMA_VERSION:
+                self._validate_collection(state)
+                if not any("seeded" in record for record in state["sources"] if isinstance(record, dict)):
+                    self._validate_v2(state)
+                    return state
+                state = self._convert_draft_v2(state)
+            elif state["schema_version"] == 1:
+                entries = {entry["source_id"]: entry for entry in source_catalog.builtin_sources()}
+                self._validate_v1(state, entries)
+                state = self._convert_v1(state, entries)
+            else:
                 raise CatalogError("invalid catalog schema")
-            for group in (value["custom"], value["overrides"]):
-                for sid, fields in group.items():
-                    self._validate_id(sid)
-                    if not isinstance(fields, dict) or set(fields) - set(EDITABLE):
-                        raise CatalogError("invalid catalog fields")
-                    for key, val in fields.items():
-                        self._validate_field(key, val)
-            builtins = {x["source_id"] for x in source_catalog.builtin_sources()}
-            for sid, fields in value["custom"].items():
-                if sid in builtins or "title" not in fields:
-                    raise CatalogError("invalid custom source entry")
-            if any(sid not in builtins for sid in value["overrides"]):
+
+        payload = self._validated_payload(state)
+        if initialize:
+            self._atomic_write(payload)
+        return state
+
+    @staticmethod
+    def _unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise CatalogError("duplicate catalog key")
+            result[key] = value
+        return result
+
+    @staticmethod
+    def _validate_header(state):
+        if (not isinstance(state, dict) or type(state.get("schema_version")) is not int
+                or type(state.get("revision")) is not int or state["revision"] < 0):
+            raise CatalogError("invalid catalog schema")
+        timestamp = state.get("updated_at")
+        if timestamp is not None:
+            try:
+                if not isinstance(timestamp, str) or datetime.fromisoformat(timestamp).utcoffset() is None:
+                    raise ValueError
+                timestamp.encode("utf-8")
+            except ValueError as exc:
+                raise CatalogError("invalid catalog timestamp") from exc
+
+    def _validate_v1(self, state, entries):
+        legacy_fields = {"custom", "overrides", "tombstones"}
+        if not legacy_fields <= state.keys() or state.keys() - (HEADER_FIELDS | legacy_fields):
+            raise CatalogError("invalid catalog schema")
+        custom, overrides, tombstones = state["custom"], state["overrides"], state["tombstones"]
+        if not isinstance(custom, dict) or not isinstance(overrides, dict) or not isinstance(tombstones, list):
+            raise CatalogError("invalid catalog schema")
+        if len(custom) + len(overrides) > MAX_ENTRIES:
+            raise CatalogError("catalog entry limit exceeded")
+        for sid, fields in custom.items():
+            self._validate_id(sid)
+            self._validate_fields(fields, V1_FIELDS, required={"title"})
+            if sid in entries:
+                raise CatalogError("invalid custom source entry")
+        for sid, fields in overrides.items():
+            self._validate_id(sid)
+            self._validate_fields(fields, V1_FIELDS)
+            if sid not in entries:
                 raise CatalogError("invalid built-in source override")
-            if (len(value["tombstones"]) != len(set(value["tombstones"]))
-                    or any(sid not in builtins for sid in value["tombstones"])):
+        deleted = set()
+        for sid in tombstones:
+            self._validate_id(sid)
+            if sid not in entries or sid in deleted:
                 raise CatalogError("invalid source tombstones")
-            if len(value["custom"]) + len(value["overrides"]) > MAX_ENTRIES:
-                raise CatalogError("catalog entry limit exceeded")
-            return value
-        except (OSError, UnicodeError, json.JSONDecodeError, TypeError) as exc:
-            raise CatalogError("catalog cannot be read safely") from exc
+            deleted.add(sid)
+
+    @staticmethod
+    def _validate_collection(state):
+        if state.keys() != HEADER_FIELDS | {"sources"} or not isinstance(state["sources"], list):
+            raise CatalogError("invalid catalog schema")
+        if len(state["sources"]) > MAX_ENTRIES:
+            raise CatalogError("catalog entry limit exceeded")
+
+    def _validate_v2(self, state):
+        self._validate_collection(state)
+        ids = set()
+        for record in state["sources"]:
+            if not isinstance(record, dict) or record.keys() != {"source_id", "profile", "configuration"}:
+                raise CatalogError("invalid catalog source")
+            sid = record["source_id"]
+            self._validate_id(sid)
+            if sid in ids:
+                raise CatalogError("duplicate source ID")
+            ids.add(sid)
+            self._validate_fields(record["profile"], PROFILE_FIELDS, required={"title"})
+            self._validate_fields(record["configuration"], CONFIG_FIELDS, required={"format"})
+
+    def _validated_payload(self, state):
+        self._validate_v2(state)
+        payload = json.dumps(state, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+        if len(payload) > MAX_CATALOG_BYTES:
+            raise CatalogError("catalog exceeds size limit")
+        return payload
 
     @staticmethod
     def _validate_id(sid):
         if not isinstance(sid, str) or not ID_RE.fullmatch(sid):
             raise CatalogError("invalid source ID")
 
+    def _validate_fields(self, fields, allowed, *, required: Set[str] = frozenset()):
+        if not isinstance(fields, dict) or fields.keys() - allowed or not required <= fields.keys():
+            raise CatalogError("invalid source fields")
+        for key, value in fields.items():
+            self._validate_field(key, value)
+
     @staticmethod
     def _validate_field(key, value):
-        if not isinstance(value, str) or len(value) > MAX_FIELD or any(ord(c) < 32 for c in value):
+        if (not isinstance(value, str) or len(value) > MAX_FIELD
+                or any(ord(c) < 32 or 0xD800 <= ord(c) <= 0xDFFF for c in value)):
             raise CatalogError("invalid source field")
         if key == "title" and not value.strip():
             raise CatalogError("title is required")
+        if key == "format" and not ID_RE.fullmatch(value):
+            raise CatalogError("invalid source format")
         if key == "expected_size_bytes" and value and not re.fullmatch(r"[1-9][0-9]{0,19}", value):
             raise CatalogError("expected size must be a positive decimal byte count")
         if key == "sha256" and value and not re.fullmatch(r"[a-fA-F0-9]{64}", value):
@@ -99,7 +197,8 @@ class CatalogStore:
         if key == "source_url" and value:
             try:
                 parsed = urlsplit(value)
-                if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username is not None or parsed.password is not None or parsed.path.startswith("//"):
+                if (parsed.scheme not in {"http", "https"} or not parsed.hostname
+                        or parsed.username is not None or parsed.password is not None or parsed.path.startswith("//")):
                     raise ValueError
                 if any(part in {".", ".."} for part in parsed.path.split("/")):
                     raise ValueError
@@ -107,32 +206,98 @@ class CatalogStore:
             except ValueError as exc:
                 raise CatalogError("source URL must be a safe HTTP(S) URL") from exc
 
-    def _snapshot(self):
-        state = self._read()
-        builtins = {x["source_id"]: x for x in source_catalog.builtin_sources()}
+    @staticmethod
+    def _snapshot(state):
+        # Temporary compatibility projection for the existing admin cards.
+        # Neither card type nor pinned artifact metadata affects catalog CRUD.
+        planned = {entry["source_id"]: entry for entry in source_catalog.PLANNED_SOURCES}
+        artifact = source_catalog.WIKIPEDIA_SOURCE
         result = []
-        for sid, entry in builtins.items():
-            if sid in state["tombstones"]:
-                continue
-            merged = copy.deepcopy(entry)
-            override = state["overrides"].get(sid, {})
-            for key, value in override.items():
-                if key in {"source_url", "sha256", "expected_size_bytes", "license"}:
-                    merged["candidate_" + key] = value
-                else:
-                    merged[key] = value
-            merged.update(source_id=sid, builtin=True, candidate_only=bool(override))
-            result.append(merged)
-        for sid, fields in state["custom"].items():
-            if sid not in builtins:
-                result.append(dict(fields, source_id=sid, builtin=False, candidate_only=True))
+        for record in state["sources"]:
+            sid, config = record["source_id"], record["configuration"]
+            has_artifact = sid == artifact["source_id"]
+            builtin = has_artifact or sid in planned
+            entry: dict[str, Any] = dict(record["profile"], source_id=sid, format=config["format"],
+                                         builtin=builtin, candidate_only=not has_artifact)
+            for key in CANDIDATE_FIELDS & config.keys():
+                entry["candidate_" + key] = config[key]
+                if not has_artifact:
+                    entry[key] = config[key]  # Legacy display aliases, not artifact metadata.
+            if has_artifact:
+                entry.update({k: v for k, v in artifact.items() if k not in PROFILE_FIELDS})
+                entry["availability"] = "supported"
+            elif sid in planned:
+                entry.update({k: planned[sid][k] for k in ("kind", "issue", "availability")})
+            result.append(entry)
         return {"revision": state["revision"], "updated_at": state["updated_at"], "sources": result}
+
+    @staticmethod
+    def _apply_fields(record, fields):
+        for key, value in fields.items():
+            record["profile" if key in PROFILE_FIELDS else "configuration"][key] = value
+
+    def _record(self, sid, fields):
+        record = {"source_id": sid, "profile": {}, "configuration": {"format": "unspecified"}}
+        self._apply_fields(record, fields)
+        return record
+
+    def _seed_record(self, entry):
+        fields = {key: entry[key] for key in V1_FIELDS & entry.keys()}
+        if entry["kind"] != "planned":
+            fields["format"] = entry["kind"]
+        if "bytes" in entry:
+            fields["expected_size_bytes"] = str(entry["bytes"])
+        return self._record(entry["source_id"], fields)
+
+    def _convert_v1(self, value, entries):
+        custom, overrides, tombstones = value["custom"], value["overrides"], set(value["tombstones"])
+        records = []
+        for sid, entry in entries.items():
+            if sid in tombstones:
+                continue
+            record = self._seed_record(entry)
+            self._apply_fields(record, overrides.get(sid, {}))
+            records.append(record)
+        records.extend(self._record(sid, custom[sid]) for sid in sorted(custom))
+        return {"schema_version": SCHEMA_VERSION, "revision": value["revision"],
+                "updated_at": value.get("updated_at"), "sources": records}
+
+    def _convert_draft_v2(self, state):
+        # The unfinished implementation wrote this shape during development.
+        # Recognize only its exact shape; reject unexpected data instead of
+        # silently dropping it. The old marker has no role after importing.
+        entries = {entry["source_id"]: entry for entry in source_catalog.builtin_sources()}
+        records = []
+        for record in state["sources"]:
+            if (not isinstance(record, dict)
+                    or record.keys() != {"source_id", "profile", "configuration", "candidate", "seeded"}
+                    or type(record["seeded"]) is not bool or record["configuration"] != {}):
+                raise CatalogError("invalid draft catalog source")
+            sid, profile, candidate = record["source_id"], record["profile"], record["candidate"]
+            self._validate_id(sid)
+            if not isinstance(profile, dict):
+                raise CatalogError("invalid draft catalog profile")
+            seed = entries.get(sid) if record["seeded"] else None
+            if record["seeded"] and seed is None:
+                raise CatalogError("unknown draft seed")
+            static = {k: v for k, v in (seed or {}).items() if k not in V1_FIELDS | {"source_id"}}
+            if (profile.keys() - V1_FIELDS != static.keys()
+                    or any(type(profile[k]) is not type(v) or profile[k] != v for k, v in static.items())):
+                raise CatalogError("invalid draft catalog metadata")
+            fields = {k: v for k, v in profile.items() if k in V1_FIELDS}
+            self._validate_fields(fields, V1_FIELDS, required={"title"})
+            self._validate_fields(candidate, CANDIDATE_FIELDS)
+            if seed is not None:
+                defaults = self._seed_record(seed)["configuration"]
+                fields = defaults | fields
+            records.append(self._record(sid, fields | candidate))
+        return dict(state, sources=records)
 
     def get(self):
         with LOCK:
             fd = self._file_lock()
             try:
-                return self._snapshot()
+                return self._snapshot(self._read(initialize=True))
             finally:
                 os.close(fd)
 
@@ -142,51 +307,41 @@ class CatalogStore:
             raise CatalogError("revision precondition required")
         if busy:
             raise CatalogError("source has active or unresolved acquisition")
-        if not isinstance(fields, dict) or set(fields) - set(EDITABLE):
-            raise CatalogError("invalid editable fields")
-        for key, value in fields.items():
-            self._validate_field(key, value)
+        if operation not in ("add", "edit", "remove"):
+            raise CatalogError("unknown operation")
+        self._validate_fields(fields, EDITABLE, required={"title"} if operation == "add" else frozenset())
+        if operation == "remove" and fields:
+            raise CatalogError("remove does not accept source fields")
         with LOCK:
             fd = self._file_lock()
             try:
                 state = self._read()
                 if state["revision"] != revision:
                     raise RevisionConflict("catalog revision changed")
-                builtins = {x["source_id"]: x for x in source_catalog.builtin_sources()}
+                records = {record["source_id"]: record for record in state["sources"]}
                 if operation == "add":
-                    if source_id in builtins or source_id in state["custom"] or source_id in state["tombstones"]:
+                    if source_id in records:
                         raise CatalogError("source ID already exists")
-                    if "title" not in fields:
-                        raise CatalogError("title is required")
-                    state["custom"][source_id] = fields
-                elif operation == "edit":
-                    target = "overrides" if source_id in builtins else "custom"
-                    if source_id not in builtins and source_id not in state["custom"]:
-                        raise CatalogError("source not found")
-                    state[target].setdefault(source_id, {}).update(fields)
-                elif operation == "remove":
-                    if source_id in builtins:
-                        state["overrides"].pop(source_id, None)
-                        state["tombstones"] = sorted(set(state["tombstones"]) | {source_id})
-                    elif state["custom"].pop(source_id, None) is None:
-                        raise CatalogError("source not found")
+                    state["sources"].append(self._record(source_id, fields))
                 else:
-                    raise CatalogError("unknown operation")
+                    if source_id not in records:
+                        raise CatalogError("source not found")
+                    if operation == "edit":
+                        self._apply_fields(records[source_id], fields)
+                    else:
+                        state["sources"].remove(records[source_id])
                 state["revision"] += 1
                 state["updated_at"] = datetime.now(timezone.utc).isoformat()
-                payload = json.dumps(state, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
-                if len(payload) > MAX_CATALOG_BYTES or len(state["custom"]) + len(state["overrides"]) > MAX_ENTRIES:
-                    raise CatalogError("catalog limit exceeded")
-                self._atomic_write(payload)
-                return self._snapshot()
+                self._atomic_write(self._validated_payload(state))
+                return self._snapshot(state)
             finally:
                 os.close(fd)
 
     def _atomic_write(self, payload):
         fd, name = tempfile.mkstemp(prefix="." + self.path.name + ".", dir=self.path.parent)
         try:
-            os.fchmod(fd, 0o600)
             with os.fdopen(fd, "wb") as stream:
+                os.fchmod(stream.fileno(), 0o600)
                 stream.write(payload)
                 stream.flush()
                 os.fsync(stream.fileno())
@@ -199,7 +354,7 @@ class CatalogStore:
                     os.close(dfd)
             except OSError:
                 pass
-        except Exception:
+        except BaseException:
             try:
                 os.unlink(name)
             except OSError:

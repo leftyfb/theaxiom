@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from theaxiom import admin_api
+from theaxiom import admin_api, catalog_store
 from theaxiom.admin_security import PasswordStore, ServerConfig, load_config
 
 
@@ -83,6 +83,8 @@ class HTTPAuthTests(unittest.TestCase):
         self.host = f"127.0.0.1:{self.port}"
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
+        self.enterContext(patch.object(admin_api, "SOURCE_CATALOG",
+                                       catalog_store.CatalogStore(Path(directory.name) / "sources.json")))
         self.credential_path = Path(directory.name) / "credential"
         PasswordStore.initialize(self.credential_path, "fixture-password-only")
         self.server.axiom_config = ServerConfig("127.0.0.1", self.port, frozenset({self.host}),
