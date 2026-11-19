@@ -269,8 +269,9 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                                   for key in publication.ROUTES})
         elif self.path.rstrip("/") == "/health":
             self._send_json(200, health_response())
-        elif self.path.rstrip("/") == "/admin":
-            self._send_admin_page()
+        elif self.path.rstrip("/") in {"/admin", "/admin/sources", "/admin/settings"}:
+            page = "settings" if self.path.rstrip("/") == "/admin/settings" else "sources"
+            self._send_admin_page(page)
         elif self.path.rstrip("/") == "/api/freshness":
             self._send_json(200, freshness_response())
         elif self.path.rstrip("/") == "/api/acquisitions":
@@ -300,7 +301,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         monitor = getattr(self.server, "acquisition_monitor", None)
         return monitor.snapshot() if monitor else {"acquisitions": [], "stale": True}
 
-    def _send_admin_page(self) -> None:
+    def _send_admin_page(self, page: str = "sources") -> None:
         """Render the standalone admin page using trusted source metadata."""
         environment = Environment(
             loader=FileSystemLoader(ADMIN_TEMPLATE_DIR),
@@ -308,6 +309,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         )
         template = environment.get_template("admin-page.html.j2")
         body = template.render(
+            admin_page=page,
             offline_library_content_manifest=[],
             offline_library_kiwix_zim_enabled=True,
             offline_library_kiwix_zim=WIKIPEDIA_SOURCE,
