@@ -4,13 +4,16 @@ import json
 import os
 import tempfile
 import threading
+import re
+import xml.etree.ElementTree as ET
+from urllib.parse import urlsplit, quote
 from pathlib import Path
 
 from . import storage_settings
 
 LOCK = threading.RLock()
 # Trusted deployment configuration, not administrator-supplied URLs.
-ROUTES = {"wikipedia-en": {"path": "/wikipedia/", "port": 8081,
+ROUTES = {"wikipedia-en": {"path": "/wikipedia/", "port": 8081, "entry_path": "/read/wikipedia-en",
     "name": "Wikipedia", "category": "Encyclopedia",
     "description": "Explore millions of articles, illustrations and reference material without an internet connection.",
     "symbol": "W", "language": "English"}}
@@ -67,6 +70,44 @@ def reachable(route):
         return response.status == 200
     except (OSError, http.client.HTTPException):
         return False
+    finally:
+        connection.close()
+
+
+def reader_location(route):
+    """Discover the single local book's content link from Kiwix OPDS.
+
+    Only accept a local, prefix-scoped book link. Never follow a remote URL
+    or return catalog-supplied executable markup.
+    """
+    connection = http.client.HTTPConnection("127.0.0.1", route["port"], timeout=2)
+    try:
+        connection.request("GET", route["path"] + "catalog/v2/entries?count=2")
+        response = connection.getresponse()
+        if response.status != 200:
+            return None
+        data = response.read(262145)
+        if len(data) > 262144 or b"<!DOCTYPE" in data.upper() or b"<!ENTITY" in data.upper():
+            return None
+        root = ET.fromstring(data)
+        entries = root.findall("{http://www.w3.org/2005/Atom}entry")
+        if len(entries) != 1:
+            return None
+        prefix = route["path"] + "content/"
+        names = set()
+        for link in entries[0].findall("{http://www.w3.org/2005/Atom}link"):
+            href = link.get("href", "")
+            u = urlsplit(href)
+            if u.scheme or u.netloc or u.query or u.fragment or not u.path.startswith(prefix):
+                continue
+            name = u.path[len(prefix):].rstrip("/")
+            if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,200}", name):
+                names.add(name)
+        if len(names) != 1:
+            return None
+        return route["path"] + "viewer#" + quote(names.pop(), safe="") + "/"
+    except (OSError, http.client.HTTPException, ET.ParseError, ValueError):
+        return None
     finally:
         connection.close()
 

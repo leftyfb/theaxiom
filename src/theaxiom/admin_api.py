@@ -175,7 +175,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         if len(hosts) != 1 or hosts[0].lower() not in config.allowed_hosts:
             self._send_json(400, {"error": "invalid host"})
             return False
-        if not post and self.path in {"/", "/index.html", "/health", "/health/", "/internal/publication/wikipedia-en"}:
+        if not post and self.path in {"/", "/index.html", "/health", "/health/", "/internal/publication/wikipedia-en", "/read/wikipedia-en"}:
             return True
         auth = self.headers.get_all("Authorization", [])
         local_hosts = {f"{config.host}:{config.port}", f"localhost:{config.port}"}
@@ -247,6 +247,19 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        elif self.path == "/read/wikipedia-en":
+            source_id = "wikipedia-en"
+            if not publication.allowed(self._snapshot(), source_id):
+                self._send_json(403, {"error": "collection unavailable"})
+                return
+            location = publication.reader_location(publication.ROUTES[source_id])
+            if location is None:
+                self._send_json(503, {"error": "reader entry unavailable"})
+                return
+            self.send_response(302)
+            self.send_header("Location", location)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
         elif self.path == "/internal/publication/wikipedia-en":
             self.send_response(204 if publication.allowed(self._snapshot(), "wikipedia-en") else 403)
             self.send_header("Content-Length", "0")
