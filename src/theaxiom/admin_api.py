@@ -56,9 +56,33 @@ def resolve_source(source_id: str) -> dict[str, Any] | None:
     return TRUSTED_SOURCES.get(source_id)
 
 
+def _release_revision() -> str | None:
+    """Return the immutable source revision loaded by this process, if known."""
+    try:
+        root = Path(__file__).resolve().parents[2]
+        result = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--verify", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    revision = result.stdout.strip()
+    return revision if re.fullmatch(r"[0-9a-f]{40}", revision) else None
+
+
+RELEASE_REVISION = _release_revision()
+
+
 def health_response() -> dict[str, Any]:
-    """Return the fixed liveness payload."""
-    return {"status": "ok", "service": "offline-library-admin-api"}
+    """Return liveness and immutable source revision loaded by this process."""
+    return {
+        "status": "ok",
+        "service": "offline-library-admin-api",
+        "revision": RELEASE_REVISION,
+    }
 
 
 def freshness_response() -> dict[str, Any]:
