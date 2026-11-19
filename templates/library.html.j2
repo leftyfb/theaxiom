@@ -5,12 +5,32 @@
 *{box-sizing:border-box}body{margin:0;background:#edf3ef;color:#18362d;font:16px/1.55 system-ui,sans-serif}
 header{background:#fff;border-bottom:1px solid #d5e2db;padding:18px max(24px,calc((100% - 1100px)/2));display:flex;justify-content:space-between;align-items:center;gap:20px}header strong{font-size:1.25rem}a{color:#176b4d}a:focus-visible{outline:3px solid #c38d32;outline-offset:4px}
 main{max-width:1148px;padding:48px 24px;margin:auto}.eyebrow{letter-spacing:.13em;text-transform:uppercase;font-size:.74rem;font-weight:700;color:#536e61}h1{font-size:clamp(2rem,5vw,3.3rem);line-height:1.12;margin:10px 0 14px}.intro{font-size:1.1rem;color:#536e61;max-width:620px}.collection{margin-top:45px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),350px));gap:24px}.card{display:flex;flex-direction:column;background:white;border:1px solid #cfdfd6;border-radius:16px;text-decoration:none;color:inherit;overflow:hidden;box-shadow:0 4px 14px #18362d0b}.card:hover{border-color:#176b4d;box-shadow:0 5px 20px #18362d18}.art{height:166px;background:#dbe9e0;display:grid;place-items:center;position:relative;overflow:hidden}.art svg{width:100%;height:100%}.body{padding:22px;flex:1;display:flex;flex-direction:column}.body h3{margin:7px 0;font-size:1.45rem}.body p{color:#536e61;margin:0 0 20px}.action{margin-top:auto;color:#176b4d;font-weight:700;border-top:1px solid #dce7df;padding-top:14px}.empty{padding:24px;background:white;border:1px solid #cfdfd6;border-radius:12px}footer{margin-top:48px;color:#536e61;font-size:.85rem}
+
+/* Compact list presentation on narrow screens; retain the desktop grid. */
+.start-card{margin:24px 0;display:flex;flex-direction:row;align-items:center;gap:16px;padding:16px 20px}
+.start-icon{flex:0 0 48px;height:48px;display:grid;place-items:center;background:#dbe9e0;border-radius:10px;font-size:26px;font-weight:700}
+.start-card h2{margin:0;font-size:1.15rem;color:#176b4d}.start-card p{margin:4px 0 0;color:#536e61}
+.start-card .chevron{margin-left:auto;font-size:1.5rem;color:#176b4d}
+.help{max-width:720px;background:white;border:1px solid #cfdfd6;border-radius:12px;padding:24px;overflow-wrap:anywhere}
+@media(max-width:767px){
+header{padding:12px 16px;gap:12px;flex-wrap:wrap}header a{display:inline-flex;align-items:center;min-height:44px}
+main{padding:20px 16px}h1{font-size:1.9rem}.intro{font-size:1rem;margin:8px 0 16px}
+.collection{margin-top:22px}.grid{grid-template-columns:minmax(0,1fr);gap:10px}
+.card:not(.start-card){flex-direction:row;align-items:center;padding:12px;gap:12px;border-radius:10px}
+.art{width:56px;height:56px;flex:0 0 56px;border-radius:8px}.art svg{display:none}
+.art::after{content:attr(data-symbol);font-size:28px;font-weight:700;color:#18362d}
+.body{padding:0;min-width:0;overflow-wrap:anywhere}.body .eyebrow{font-size:.68rem;letter-spacing:.06em}
+.body h3{font-size:1.1rem;line-height:1.25;margin:3px 0;color:#176b4d}.body p{font-size:.9rem;line-height:1.4;margin:0}
+.action{border:0;padding:0;margin:5px 0 0;font-size:.78rem}.start-card{padding:12px;gap:12px;margin:16px 0}.start-card p{font-size:.9rem}.help{padding:16px}footer{margin-top:24px}
+}
 </style></head><body><header><strong>The Axiom</strong><a href="/admin">Administration</a></header>
 <main><div class="eyebrow">Local knowledge · Offline access</div><h1>Your offline reference library</h1><p class="intro">Discover useful collections, reference articles and resources, available right here on your local network.</p>
+<a class="card start-card" href="/#getting-started"><span class="start-icon" aria-hidden="true">i</span><div><h2>Getting Started</h2><p>Learn how to use your offline library.</p></div><span class="chevron" aria-hidden="true">›</span></a>
 <section class="collection" aria-labelledby="collection-title"><h2 id="collection-title">Explore the library</h2>
 {% if sources %}<div class="grid">{% for source in sources %}
-<a class="card" href="{{ source.entry_path }}"><div class="art" aria-hidden="true">
+<a class="card" href="{{ source.entry_path }}"><div class="art" data-symbol="{{ source.symbol }}" aria-hidden="true">
 <svg viewBox="0 0 350 166" xmlns="http://www.w3.org/2000/svg"><defs><pattern id="grid{{ loop.index }}" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M24 0H0V24" fill="none" stroke="#a9c3b1" stroke-opacity=".4"/></pattern></defs><rect width="350" height="166" fill="url(#grid{{ loop.index }})"/><circle cx="175" cy="83" r="61" fill="#f8fbf8" stroke="#739c84" stroke-width="2"/><ellipse cx="175" cy="83" rx="27" ry="61" fill="none" stroke="#b4cbbb"/><path d="M114 83h122M124 52h102M124 114h102" stroke="#b4cbbb" fill="none"/><text x="175" y="108" text-anchor="middle" font-size="75" font-family="Georgia,serif" fill="#18362d">{{ source.symbol }}</text></svg>
 </div><div class="body"><span class="eyebrow">{{ source.category }} · {{ source.language }}</span><h3>{{ source.name }}</h3><p>{{ source.description }}</p><span class="action">Explore collection →</span></div></a>
 {% endfor %}</div>{% else %}<div class="empty">No collections are currently available. Published collections will appear here when their readers are ready.</div>{% endif %}</section>
+<section class="collection help" id="getting-started" aria-labelledby="help-title" tabindex="-1"><h2 id="help-title">Getting Started</h2><p>This library stores reference material on your local network so you can read it without an internet connection.</p><h3>Explore collections</h3><p>Choose a collection above to open its reader. Use its library navigation to return here. Search within a collection when its reader supports search.</p><h3>What if the library is empty?</h3><p>Collections appear when their content has been downloaded, verified and made available by the library administrator. Reading installed collections does not require internet access; acquiring new content generally does.</p><p><a href="#collection-title">Return to collections</a></p></section>
 <footer>The Axiom · Offline reference library</footer></main></body></html>
