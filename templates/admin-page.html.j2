@@ -142,6 +142,11 @@
           <button class="button" type="button" data-action="redownload-zim" disabled>Re-download</button>
           <button class="button" type="button" data-action="update-zim" disabled>Update</button>
         </div>
+        <div class="source-actions" aria-label="Publication controls">
+          <button class="button" type="button" id="publication-toggle" disabled>Publish</button>
+          <a class="button" id="publication-browse" href="/wikipedia/" hidden>Browse</a>
+          <span id="publication-status" role="status">Checking publication…</span>
+        </div>
         <details>
           <summary>Source details</summary>
           <dl class="storage-status source-details">
@@ -182,7 +187,7 @@
       const cards = Array.from(document.querySelectorAll('.source-card[data-source-id]'));
       if (!cards.length) return;
       const labels = {downloading: 'Downloading', verifying: 'Verifying checksum',
-        publishing: 'Publishing / verifying final file', completed: 'Verified and published',
+        publishing: 'Promoting / verifying final file', completed: 'Archive verified',
         retrying: 'Waiting to retry', failed: 'Failed', interrupted: 'Interrupted',
         not_started: 'Not started', unavailable: 'Service not installed', unknown: 'Status unknown'};
       const gib = bytes => (bytes / 1073741824).toFixed(2) + ' GiB';
@@ -253,6 +258,55 @@
       refresh();
     })();
   </script>
+  {% if offline_library_kiwix_zim_enabled %}
+  <script id="publication-script">
+    (() => {
+      const button = document.getElementById('publication-toggle');
+      const browse = document.getElementById('publication-browse');
+      const label = document.getElementById('publication-status');
+      let state, busy = false;
+      async function refresh() {
+        if (busy) return;
+        try {
+          const response = await fetch('/api/publication', {cache:'no-store'});
+          if (!response.ok) throw new Error();
+          const next = (await response.json())['wikipedia-en'];
+          if (busy) return;
+          state = next;
+          button.textContent = state.enabled ? 'Unpublish' : 'Publish';
+          button.disabled = !state.enabled && !state.serving;
+          browse.hidden = !state.published;
+          label.textContent = state.published ? 'Published · available in library' :
+            state.enabled ? 'Enabled · reader unavailable' :
+            state.serving ? 'Unpublished · ready to publish' : 'Unpublished · reader not ready';
+        } catch (_) {
+          button.disabled = true;
+          browse.hidden = true;
+          label.textContent = 'Publication status unavailable';
+        }
+      }
+      button.addEventListener('click', async () => {
+        if (busy || !state) return;
+        busy = true;
+        button.disabled = true;
+        try {
+          const response = await fetch('/api/publication', {method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({source_id:'wikipedia-en', enabled:!state.enabled})});
+          if (!response.ok) throw new Error((await response.json()).error || 'Publication failed');
+        } catch (error) {
+          label.textContent = error.message;
+          window.alert(error.message);
+        } finally {
+          busy = false;
+          await refresh();
+        }
+      });
+      refresh();
+      window.setInterval(refresh, 3000);
+    })();
+  </script>
+  {% endif %}
   <script id="storage-settings-script">
     (() => {
       const byId = (id) => document.getElementById(id);

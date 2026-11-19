@@ -27,6 +27,7 @@ storage = importlib.import_module(f"{__package__}.storage" if __package__ else "
 
 security = importlib.import_module(f"{__package__}.admin_security" if __package__ else "theaxiom.admin_security")
 monitoring = importlib.import_module(f"{__package__}.acquisition_monitor" if __package__ else "theaxiom.acquisition_monitor")
+publication = importlib.import_module(f"{__package__}.publication" if __package__ else "theaxiom.publication")
 BIND_HOST = "127.0.0.1"
 BIND_PORT = 8080
 ADMIN_TEMPLATE_DIR = Path(__file__).resolve().parents[2] / "templates"
@@ -174,7 +175,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         if len(hosts) != 1 or hosts[0].lower() not in config.allowed_hosts:
             self._send_json(400, {"error": "invalid host"})
             return False
-        if not post and self.path in {"/", "/health", "/health/"}:
+        if not post and self.path in {"/", "/index.html", "/health", "/health/", "/internal/publication/wikipedia-en"}:
             return True
         auth = self.headers.get_all("Authorization", [])
         local_hosts = {f"{config.host}:{config.port}", f"localhost:{config.port}"}
@@ -234,13 +235,25 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802 - http.server convention
         if not self._guard():
             return
-        if self.path == "/":
-            body = (ADMIN_TEMPLATE_DIR.parent / "deploy/www/index.html").read_bytes()
+        if self.path in {"/", "/index.html"}:
+            sources = []
+            for source_id, route in publication.ROUTES.items():
+                if publication.status(self._snapshot(), source_id)["published"]:
+                    sources.append(route)
+            environment = Environment(loader=FileSystemLoader(ADMIN_TEMPLATE_DIR), autoescape=True)
+            body = environment.get_template("library.html.j2").render(sources=sources).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        elif self.path == "/internal/publication/wikipedia-en":
+            self.send_response(204 if publication.allowed(self._snapshot(), "wikipedia-en") else 403)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+        elif self.path == "/api/publication":
+            self._send_json(200, {key: publication.status(self._snapshot(), key)
+                                  for key in publication.ROUTES})
         elif self.path.rstrip("/") == "/health":
             self._send_json(200, health_response())
         elif self.path.rstrip("/") == "/admin":
@@ -269,6 +282,10 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 self._send_json(200, response)
         else:
             self._send_json(404, {"error": "not found"})
+
+    def _snapshot(self):
+        monitor = getattr(self.server, "acquisition_monitor", None)
+        return monitor.snapshot() if monitor else {"acquisitions": [], "stale": True}
 
     def _send_admin_page(self) -> None:
         """Render the standalone admin page using trusted source metadata."""
@@ -319,6 +336,27 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 self._send_json(403, {"error": "current password is incorrect"})
                 return
             self._send_json(200, {"changed": True})
+        elif self.path == "/api/publication":
+            if not self.headers.get("Origin"):
+                self._send_json(403, {"error": "same-origin request required"})
+                return
+            data = self._read_body()
+            source_id, enabled = data.get("source_id"), data.get("enabled")
+            if (set(data) != {"source_id", "enabled"} or not isinstance(source_id, str)
+                    or source_id not in publication.ROUTES or type(enabled) is not bool):
+                self._send_json(400, {"error": "invalid publication request"})
+                return
+            with publication.LOCK:
+                state = publication.status(self._snapshot(), source_id, probe=enabled)
+                if enabled and not state["serving"]:
+                    self._send_json(409, {"error": "verified content and a reachable reader are required"})
+                    return
+                try:
+                    publication.save(source_id, enabled)
+                except (OSError, ValueError):
+                    self._send_json(503, {"error": "could not save publication state"})
+                    return
+            self._send_json(200, {"enabled": enabled})
         elif self.path.rstrip("/") == "/api/storage-settings":
             data = self._read_body()
             try:
