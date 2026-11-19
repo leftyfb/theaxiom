@@ -55,10 +55,14 @@ def test_page_specific_scripts_and_navigation():
 
 def test_planned_card_has_no_action_buttons():
     page = render(offline_library_kiwix_zim_enabled=False,
-                  offline_library_content_manifest=[{"title": "Fixture", "kind": "planned"}])
+                  offline_library_content_manifest=[{"title": "Fixture", "kind": "planned", "description": "Emergency reference"}])
     parser = Parser()
     parser.feed(page)
-    assert "Coming soon" in page
+    assert "Not downloaded" in page
+    assert "Emergency reference" in page
+    assert "Download not supported yet." in page
+    assert "Coming soon" not in page
+    assert "Planned collection" not in page
     assert not any(tag == "button" for tag, attrs in parser.tags)
     assert all("open" not in attrs for tag, attrs in parser.tags if tag == "details")
 
