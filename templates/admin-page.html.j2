@@ -43,6 +43,17 @@
     .source-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .75rem; }
     .button:disabled { opacity: .55; cursor: not-allowed; }
     .source-card progress { width: 100%; accent-color: var(--green); height: .9rem; }
+    .source-card { padding: 0; margin: .65rem 0; }
+    .source-card > summary { padding: .8rem 1rem; list-style: none; }
+    .source-card > summary::-webkit-details-marker { display: none; }
+    .source-card > summary::after { content: '▾'; color: var(--green); margin-left: auto; }
+    .source-card[open] > summary::after { content: '▴'; }
+    .source-expanded { padding: .8rem 1rem 1rem; border-top: 1px solid var(--line); }
+    .source-card > summary .source-subtitle { font-weight: 400; font-size: .9rem; }
+    .source-card > summary h3 { font-size: 1.05rem; }
+    .source-card > summary .source-symbol { flex-shrink: 0; }
+    .source-card > summary .badge { flex-shrink: 0; }
+    .compact-publication { font-size: .8rem; color: var(--muted); }
     .source-card details { margin-top: 1rem; border-top: 1px solid var(--line); padding-top: .6rem; }
     .source-card summary { cursor: pointer; font-weight: 650; min-height: 44px; padding: .55rem 0; color: var(--green); }
     .source-card summary:focus-visible { outline: 3px solid #f1b84b; }
@@ -127,15 +138,17 @@
     <div id="source-cards">
     {% if offline_library_kiwix_zim_enabled %}
       {% set source = offline_library_kiwix_zim %}
-      <article class="source-card" data-source-id="wikipedia-en" aria-labelledby="wikipedia-title">
-        <header class="source-header">
+      <details class="source-card" data-source-id="wikipedia-en" aria-labelledby="wikipedia-title">
+        <summary class="source-header">
           <span class="source-symbol" aria-hidden="true">W</span>
           <div>
             <h3 id="wikipedia-title">{{ source.title }}</h3>
             <p class="source-subtitle">Kiwix ZIM · English · {{ (source.bytes / 1073741824)|round(2) }} GiB</p>
+            <span class="compact-publication" id="publication-summary">Checking publication…</span>
           </div>
           <span class="badge" data-field="status" role="status">Waiting for status…</span>
-        </header>
+        </summary>
+        <div class="source-expanded">
         <div class="source-live">
           <p data-field="metrics" hidden></p>
           <progress data-field="transfer" max="100" value="0" aria-label="Archive download progress" hidden></progress>
@@ -154,8 +167,8 @@
           <a class="button" id="publication-browse" href="/read/wikipedia-en" hidden>Browse</a>
           <span id="publication-status" role="status">Checking publication…</span>
         </div>
-        <details>
-          <summary>Source details</summary>
+        <section aria-label="Source details">
+          <h4>Source details</h4>
           <dl class="storage-status source-details">
             <dt>Archive filename</dt><dd>{{ source.filename }}</dd>
             <dt>Catalog date</dt><dd>{{ source.catalog_date or '—' }}</dd>
@@ -167,22 +180,27 @@
             <dt>Verification</dt><dd data-field="verified">Not confirmed</dd>
             <dt>Last sample</dt><dd data-field="sample">—</dd>
           </dl>
-        </details>
-      </article>
+        </section>
+        </div>
+      </details>
     {% endif %}
     {% for source in offline_library_content_manifest %}
-      <article class="source-card">
-        <header class="source-header">
-          <div><h3>{{ source.title }}</h3><p class="source-subtitle">{{ source.kind }}</p></div>
-          <span class="badge">Status unavailable</span>
-        </header>
-        <div class="source-actions">
-          <button class="button" type="button" disabled>Download</button>
-          <button class="button" type="button" disabled>Re-download</button>
-          <button class="button" type="button" disabled>Update</button>
+      <details class="source-card">
+        <summary class="source-header">
+          <div><h3>{{ source.title }}</h3><p class="source-subtitle">{{ 'Planned collection' if source.kind == 'planned' else source.kind }}</p></div>
+          <span class="badge">{{ 'Coming soon' if source.kind == 'planned' else 'Status unavailable' }}</span>
+        </summary>
+        <div class="source-expanded">
+          {% if source.kind == 'planned' %}<p class="source-note">Acquisition and reader support are not yet implemented.</p>{% else %}
+          <div class="source-actions">
+            <button class="button" type="button" disabled>Download</button>
+            <button class="button" type="button" disabled>Re-download</button>
+            <button class="button" type="button" disabled>Update</button>
+          </div>
+          {% endif %}
+          <h4>Source details</h4><dl class="storage-status"><dt>Retrieved (catalog)</dt><dd>{{ source.retrieved or '—' }}</dd></dl>
         </div>
-        <details><summary>Source details</summary><dl class="storage-status"><dt>Retrieved (catalog)</dt><dd>{{ source.retrieved or '—' }}</dd></dl></details>
-      </article>
+      </details>
     {% endfor %}
     {% if not offline_library_content_manifest and not offline_library_kiwix_zim_enabled %}
       <p class="empty">No managed sources configured.</p>
@@ -288,10 +306,12 @@
           label.textContent = state.published ? 'Published · available in library' :
             state.enabled ? 'Enabled · reader unavailable' :
             state.serving ? 'Unpublished · ready to publish' : 'Unpublished · reader not ready';
+          summary.textContent = label.textContent;
         } catch (_) {
           button.disabled = true;
           browse.hidden = true;
           label.textContent = 'Publication status unavailable';
+          summary.textContent = label.textContent;
         }
       }
       button.addEventListener('click', async () => {
