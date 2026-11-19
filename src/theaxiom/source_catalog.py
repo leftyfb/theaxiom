@@ -81,6 +81,7 @@ PLANNED_SOURCES = [
     {
         "source_id": "red-cross",
         "title": "American Red Cross / authoritative first aid reference",
+        "description": "first aid and emergency response guidance",
         "kind": "planned",
         "issue": 24,
         "availability": "planned"
@@ -184,6 +185,7 @@ PLANNED_SOURCES = [
     {
         "source_id": "linux-docs",
         "title": "Linux and open-source technical documentation",
+        "description": "Linux administration and open-source software manuals",
         "kind": "planned",
         "issue": 37,
         "availability": "planned"
@@ -215,6 +217,7 @@ PLANNED_SOURCES = [
     {
         "source_id": "amateur-radio",
         "title": "Amateur radio and emergency communications reference",
+        "description": "radio operation and emergency communications guidance",
         "kind": "planned",
         "issue": 41,
         "availability": "planned"
