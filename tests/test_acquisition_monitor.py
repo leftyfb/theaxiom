@@ -34,3 +34,26 @@ class MonitorTests(unittest.TestCase):
     @patch.object(m, "command", return_value="")
     def test_missing_journal_evidence(self, _):
         self.assertFalse(m.success_evidence({"InvocationID": "a"*32}, WIKIPEDIA_SOURCE, None, "/unused"))
+
+
+class ChecksumProgressTests(unittest.TestCase):
+    def test_live_descriptor_position_and_identity(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            archive = root / "archive.zim.part"
+            archive.write_bytes(b"x" * 100)
+            proc = root / "123"
+            (proc / "fd").mkdir(parents=True)
+            (proc / "fdinfo").mkdir()
+            (proc / "comm").write_text("sha256sum\n")
+            (proc / "fd" / "3").symlink_to(archive)
+            (proc / "fdinfo" / "3").write_text("pos:\t81\n")
+            with patch.object(m, "process_ids", return_value={"123"}):
+                candidates = [(archive, archive.stat(), 1, 2)]
+                self.assertEqual(m.checksum_progress({}, candidates, 100, root),
+                                 {"checksum_bytes": 81, "checksum_pass": 1, "checksum_passes": 2})
+                self.assertEqual(m.checksum_progress({}, candidates, 99, root), {})
+                (proc / "fdinfo" / "3").unlink()
+                self.assertEqual(m.checksum_progress({}, candidates, 100, root), {})

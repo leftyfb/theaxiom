@@ -206,8 +206,26 @@
         put('metrics', valid ? (stale ? 'Last observed download: ' : 'Download: ') +
           progress.value.toFixed(2) + '% · ' + gib(job.downloaded_bytes) + ' / ' + gib(job.expected_bytes) : '');
         const checking = !stale && (job?.state === 'verifying' || job?.state === 'publishing');
-        field('verification').hidden = !checking;
-        put('verification-label', checking ? 'Checksum / publishing in progress — percentage unavailable.' : '');
+        const verify = field('verification');
+        verify.hidden = !checking;
+        const measured = checking && job.state === 'verifying' &&
+          Number.isFinite(job.checksum_bytes) && job.checksum_bytes >= 0 &&
+          Number.isFinite(job.expected_bytes) && job.expected_bytes > 0 &&
+          job.checksum_bytes <= job.expected_bytes;
+        const pass = measured && Number.isInteger(job.checksum_pass) &&
+          Number.isInteger(job.checksum_passes) && job.checksum_pass > 0 &&
+          job.checksum_pass <= job.checksum_passes ?
+          ' pass ' + job.checksum_pass + ' of ' + job.checksum_passes : '';
+        if (measured) {
+          verify.max = 100;
+          verify.value = 100 * job.checksum_bytes / job.expected_bytes;
+        } else {
+          verify.removeAttribute('value');
+        }
+        put('verification-label', checking ? (measured ?
+          'Checksum' + pass + ' verification in progress — ' + verify.value.toFixed(1) +
+          '% read (estimated; digest not yet confirmed).' :
+          'Checksum / publishing in progress — percentage unavailable.') : '');
         const rate = !stale && job?.state === 'downloading' && job.speed_bytes_per_second > 0 ?
           (job.speed_bytes_per_second / 1048576).toFixed(2) + ' MiB/s' +
           (Number.isFinite(job.eta_seconds) ? ' · ' + Math.ceil(job.eta_seconds / 60) + ' min remaining (transfer only)' : '') : '';

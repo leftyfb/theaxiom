@@ -16,7 +16,7 @@ const samples = SAMPLES;
 const fields = {};
 const card = {dataset:{sourceId:'wikipedia-en'}, querySelector(selector) {
   const key = selector.split('"')[1];
-  return fields[key] ??= {hidden:false, value:0, textContent:'', className:''};
+  return fields[key] ??= {hidden:false, value:0, textContent:'', className:'', removeAttribute(name){delete this[name];}};
 }};
 const details = {open:true};
 const requests = [];
@@ -76,3 +76,15 @@ def test_unrelated_job_not_displayed():
     state = run_ui([sample])["states"][0]
     assert state["status"]["textContent"] == "Waiting for status"
     assert state["transfer"]["hidden"]
+
+def test_checksum_measured_pass_and_fallback():
+    first = job("verifying", checksum_bytes=81, checksum_pass=1, checksum_passes=2)
+    second = job("verifying", checksum_bytes=12, checksum_pass=2, checksum_passes=2)
+    states = run_ui([first, second, job("verifying"), dict(second, stale=True)])["states"]
+    assert states[0]["verification"]["value"] == 81
+    assert "pass 1 of 2" in states[0]["verification-label"]["textContent"]
+    assert "81.0%" in states[0]["verification-label"]["textContent"]
+    assert states[1]["verification"]["value"] == 12
+    assert "pass 2 of 2" in states[1]["verification-label"]["textContent"]
+    assert "value" not in states[2]["verification"]
+    assert states[3]["verification"]["hidden"]

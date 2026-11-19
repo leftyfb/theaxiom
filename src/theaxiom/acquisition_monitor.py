@@ -28,7 +28,7 @@ def unit_state():
     ).splitlines() if "=" in line)
 
 
-def processes(unit):
+def process_ids(unit):
     group = unit.get("ControlGroup", "")
     if not group.startswith("/") or ".." in Path(group).parts:
         return set()
@@ -36,14 +36,65 @@ def processes(unit):
         pids = (Path("/sys/fs/cgroup") / group.lstrip("/") / "cgroup.procs").read_text().split()
     except OSError:
         return set()
+    return {pid for pid in pids if pid.isdecimal()}
+
+
+def processes(unit):
     names = set()
-    for pid in pids:
+    for pid in process_ids(unit):
         if pid.isdecimal():
             try:
                 names.add((Path("/proc") / pid / "comm").read_text().strip())
             except OSError:
                 pass
     return names
+
+
+def checksum_progress(unit, candidates, expected_bytes, proc_root=Path("/proc")):
+    """Estimate bytes read from a live hash descriptor, never read ZIM data.
+
+    Candidates are sampled regular-file metadata from the known acquisition
+    paths. Match device/inode and size, not just the descriptor's pathname.
+    A process may exit or change descriptor during sampling: fail unknown.
+    """
+    matches = []
+    for pid in process_ids(unit):
+        proc = proc_root / pid
+        try:
+            if (proc / "comm").read_text().strip() != "sha256sum":
+                continue
+            for fd in (proc / "fd").iterdir():
+                if not fd.name.isdecimal():
+                    continue
+                try:
+                    before = fd.stat()
+                    target = os.readlink(fd)
+                    # The script opens paths via /proc/self/fd; the kernel
+                    # resolves those to the actual filesystem pathname.
+                    for path, info, pass_number, passes in candidates:
+                        if (info is None or target != str(path) or
+                            not stat.S_ISREG(before.st_mode) or
+                            (before.st_dev, before.st_ino, before.st_size) !=
+                            (info.st_dev, info.st_ino, expected_bytes)):
+                            continue
+                        lines = (proc / "fdinfo" / fd.name).read_text().splitlines()
+                        position = int(next(line.split()[1] for line in lines
+                                            if line.startswith("pos:")))
+                        after = fd.stat()
+                        if ((after.st_dev, after.st_ino, after.st_size) !=
+                            (before.st_dev, before.st_ino, before.st_size) or
+                            os.readlink(fd) != target or
+                            (proc / "comm").read_text().strip() != "sha256sum" or
+                            not 0 <= position <= expected_bytes):
+                            continue
+                        matches.append(dict(checksum_bytes=position,
+                                            checksum_pass=pass_number,
+                                            checksum_passes=passes))
+                except (OSError, ValueError, StopIteration, IndexError):
+                    continue
+        except OSError:
+            continue
+    return matches[0] if len(matches) == 1 else {}
 
 
 def metadata(root, relative, mount, mounts):
@@ -143,7 +194,16 @@ def collect(entry):
         if active:
             names = processes(unit)
             if "sha256sum" in names:
-                return dict(result, state="verifying")
+                # Normal transfer path is two passes. A restarted service
+                # can verify a staged or existing final file instead; don't
+                # claim a two-pass sequence for an isolated final-file check.
+                candidates = [
+                    (root / "staging/incomplete" / (name + ".part"), partial, 1, 2),
+                    (root / "staging" / name, staged, 1, 2),
+                    (final_path, final, 2 if staged else None, 2 if staged else None),
+                ]
+                progress = checksum_progress(unit, candidates, total)
+                return dict(result, state="verifying", **progress)
             if "curl" in names and not staged and not final:
                 return dict(result, state="downloading")
             if staged or final:
@@ -215,5 +275,6 @@ class Monitor:
             stale = time.monotonic() - self.sample_time > STALE_AFTER
         if stale:
             data.update(state="unknown", verified=False, speed_bytes_per_second=None,
-                        eta_seconds=None, detail="Last sample is stale; storage or service may be unavailable")
+                        eta_seconds=None, checksum_bytes=None, checksum_pass=None, checksum_passes=None,
+                        detail="Last sample is stale; storage or service may be unavailable")
         return {"acquisitions": [data], "stale": stale}
