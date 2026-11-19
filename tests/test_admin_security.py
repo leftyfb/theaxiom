@@ -84,7 +84,7 @@ class HTTPAuthTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertNotIn("WWW-Authenticate", headers)
         self.assertIn(b"Your offline reference library", body)
-        for path in ("/admin", "/admin/", "/api/storage-settings",
+        for path in ("/admin", "/admin/", "/admin/sources", "/admin/settings", "/admin/sources/", "/admin/settings/", "/api/storage-settings",
                      "/api/storage-status", "/api/acquisitions", "/api/freshness", "/api/jobs/" + "a"*32):
             with self.subTest(path=path):
                 status, headers, _ = self.request(path)
@@ -100,6 +100,20 @@ class HTTPAuthTests(unittest.TestCase):
         status, headers, _ = self.request("/", auth=self.auth)
         self.assertEqual(status, 200)
         self.assertNotIn("Location", headers)
+
+    def test_admin_pages_are_separate(self):
+        for path in ("/admin", "/admin/sources", "/admin/sources/"):
+            code, _, body = self.request(path, auth=self.auth)
+            self.assertEqual(code, 200)
+            self.assertIn(b'id="source-cards"', body)
+            self.assertNotIn(b'id="storage-form"', body)
+        for path in ("/admin/settings", "/admin/settings/"):
+            code, _, body = self.request(path, auth=self.auth)
+            self.assertEqual(code, 200)
+            self.assertIn(b'id="storage-form"', body)
+            self.assertIn(b'id="password-form"', body)
+            self.assertNotIn(b'id="acquisition-monitor-script"', body)
+            self.assertNotIn(b'id="source-cards"', body)
 
     def test_cross_origin_and_simple_posts_rejected(self):
         for headers, expected in [
