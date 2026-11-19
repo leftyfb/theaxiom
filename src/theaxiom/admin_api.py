@@ -98,7 +98,7 @@ def freshness_response() -> dict[str, Any]:
 # override both values explicitly without depending on this source repository.
 DATA_HOME = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share"))
 CONFIG_HOME = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-SOURCE_CATALOG_PATH = Path(os.environ.get("THEAXIOM_SOURCE_CATALOG", CONFIG_HOME / "theaxiom/sources.json"))
+SOURCE_CATALOG_PATH = Path(os.environ.get("THEAXIOM_SOURCE_CATALOG", Path(storage_settings.SETTINGS_PATH or CONFIG_HOME / "theaxiom/storage.json").with_name("sources.json")))
 SOURCE_CATALOG = catalog_store.CatalogStore(SOURCE_CATALOG_PATH)
 ACQUISITION_STAGING_DIR = Path(
     os.environ.get("THEAXIOM_STAGING_DIR", DATA_HOME / "theaxiom/staging")
@@ -350,12 +350,21 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             autoescape=select_autoescape(["html", "htm", "xml"]),
         )
         template = environment.get_template("admin-page.html.j2")
-        catalog_sources = SOURCE_CATALOG.get()["sources"] if page == "sources" else []
+        try:
+            catalog_snapshot = SOURCE_CATALOG.get() if page == "sources" else {"revision": None, "sources": []}
+        except (catalog_store.CatalogError, OSError):
+            self._send_json(503, {"error": "source catalog unavailable; stored data was not replaced"})
+            return
+        catalog_sources = catalog_snapshot["sources"]
+        effective_builtins = [item for item in catalog_sources if item["builtin"]]
+        effective_wikipedia = next((item for item in effective_builtins if item["source_id"] == "wikipedia-en"), WIKIPEDIA_SOURCE)
         body = template.render(
             admin_page=page,
-            offline_library_content_manifest=source_catalog.planned_sources() if page == "sources" else [],
+            offline_library_content_manifest=[item for item in effective_builtins if item["source_id"] != "wikipedia-en"],
             offline_library_kiwix_zim_enabled=True,
-            offline_library_kiwix_zim=WIKIPEDIA_SOURCE,
+            offline_library_kiwix_zim=effective_wikipedia,
+            catalog_revision=catalog_snapshot["revision"],
+            catalog_builtin_sources=effective_builtins,
             catalog_custom_sources=[item for item in catalog_sources if not item["builtin"]],
             source_management_enabled=page == "sources",
             password_change_enabled=bool(getattr(getattr(self.server, "axiom_config", None), "store", None)),
@@ -406,11 +415,23 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 return
             sid = data.get("source_id")
             busy = False
+            if data.get("operation") == "remove" and sid == "wikipedia-en":
+                try:
+                    if publication.load().get(sid, False):
+                        self._send_json(409, {"error": "published source cannot be removed"})
+                        return
+                except (OSError, ValueError):
+                    self._send_json(409, {"error": "publication state unavailable; source removal refused"})
+                    return
             monitor = getattr(self.server, "acquisition_monitor", None)
-            if monitor:
+            if not monitor:
+                busy = True
+            else:
                 try:
                     snap = monitor.snapshot()
-                    busy = any(j.get("source_id") == sid and (snap.get("stale", True) or j.get("active") or j.get("state") not in {"completed", "not_started", "unavailable"}) for j in snap.get("acquisitions", []))
+                    if not isinstance(snap, dict) or snap.get("stale") is not False or not isinstance(snap.get("acquisitions"), list):
+                        busy = True
+                    busy = busy or any(isinstance(j, dict) and j.get("source_id") == sid and (j.get("active") or j.get("state") not in {"completed", "not_started", "unavailable"}) for j in snap.get("acquisitions", []))
                 except Exception:
                     busy = True
             with _active_downloads_lock:

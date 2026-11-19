@@ -47,11 +47,14 @@ class CatalogStoreTests(unittest.TestCase):
     def test_builtin_metadata_override_is_persistent_and_keeps_stable_id(self):
         initial = self.store.get()
         original = next(s for s in initial["sources"] if s["source_id"] == "wikipedia-en")
-        edited = self.store.mutate("edit", "wikipedia-en", {"title": "Reviewed title"}, initial["revision"])
+        edited = self.store.mutate("edit", "wikipedia-en", {"title": "Reviewed title", "source_url": "https://example.org/candidate.zim", "sha256": "a" * 64, "license": "Candidate license"}, initial["revision"])
         current = next(s for s in edited["sources"] if s["source_id"] == "wikipedia-en")
         self.assertEqual(current["title"], "Reviewed title")
         self.assertEqual(current["source_id"], original["source_id"])
         self.assertEqual(current["source_url"], original["source_url"])
+        self.assertEqual(current["candidate_source_url"], "https://example.org/candidate.zim")
+        self.assertEqual(current["candidate_sha256"], "a" * 64)
+        self.assertEqual(current["candidate_license"], "Candidate license")
         restarted = catalog_store.CatalogStore(self.path).get()
         self.assertEqual(next(s for s in restarted["sources"] if s["source_id"] == "wikipedia-en")["title"], "Reviewed title")
 

@@ -159,7 +159,7 @@
     <div id="source-cards">
     {% if offline_library_kiwix_zim_enabled %}
       {% set source = offline_library_kiwix_zim %}
-      <details class="source-card" data-source-id="wikipedia-en" aria-labelledby="wikipedia-title">
+      <details class="source-card" data-source-id="wikipedia-en" data-catalog-id="wikipedia-en" data-catalog-builtin="true" data-catalog-title="{{ source.title }}" data-catalog-description="{{ source.description|default('') }}" data-catalog-publisher="{{ source.publisher }}" data-catalog-language="{{ source.language }}" aria-labelledby="wikipedia-title">
         <summary class="source-header">
           <span class="source-symbol" aria-hidden="true">W</span>
           <div>
@@ -188,6 +188,7 @@
           <a class="button" id="publication-browse" href="/read/wikipedia-en" hidden>Browse</a>
           <span id="publication-status" role="status">Checking publication…</span>
         </div>
+        <div class="source-actions"><button class="button" type="button" data-catalog-edit="wikipedia-en">Edit display metadata</button></div>
         <section aria-label="Source details">
           <h4>Source details</h4>
           <dl class="storage-status source-details">
@@ -206,13 +207,13 @@
       </details>
     {% endif %}
     {% for source in offline_library_content_manifest %}
-      <details class="source-card">
+      <details class="source-card" data-catalog-id="{{ source.source_id }}" data-catalog-builtin="true" data-catalog-title="{{ source.title }}" data-catalog-description="{{ source.description }}" data-catalog-publisher="{{ source.publisher|default('') }}" data-catalog-language="{{ source.language|default('') }}">
         <summary class="source-header">
           <div><h3>{{ source.title }}</h3><p class="source-subtitle">{{ source.description or ('Offline reference collection' if source.kind == 'planned' else source.kind) }}</p></div>
           <span class="badge">{{ 'Not downloaded' if source.kind == 'planned' else 'Status unavailable' }}</span>
         </summary>
         <div class="source-expanded">
-          {% if source.kind == 'planned' %}<p class="source-note">Download not supported yet.</p>{% else %}
+          {% if source.kind == 'planned' %}<p class="source-note">Download not supported yet.</p><div class="source-actions"><button class="button" type="button" data-catalog-edit="{{ source.source_id }}">Edit</button><button class="button" type="button" data-catalog-remove="{{ source.source_id }}">Remove</button></div>{% else %}
           <div class="source-actions">
             <button class="button" type="button" data-acquisition-action="download" disabled>Download</button>
             <button class="button" type="button" disabled>Re-download</button>
@@ -239,18 +240,19 @@
   <script id="source-catalog-script">
     (() => {
       const feedback = document.getElementById('catalog-feedback');
-      let revision = null;
+      let revision = {{ catalog_revision|default('null') }};
       async function load() {
         const response = await fetch('/api/sources', {cache:'no-store'});
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'Catalog unavailable');
-        revision = data.revision;
+        if (revision === null) revision = data.revision;
       }
       const dialog = document.getElementById('source-dialog');
       const form = document.getElementById('source-form');
       const input = name => form.elements.namedItem(name);
       const clearForm = () => {
         form.reset();
+        for (const name of ['source_url', 'expected_size_bytes', 'sha256', 'license']) input(name).disabled = false;
         input('source_id').disabled = false;
         document.getElementById('source-dialog-title').textContent = 'Add source metadata';
         form.dataset.operation = 'add';
@@ -265,6 +267,10 @@
             input(name).value = card.dataset['catalog' + name.split('_').map(x => x[0].toUpperCase() + x.slice(1)).join('')] || '';
           }
           document.getElementById('source-dialog-title').textContent = 'Edit source metadata';
+          if (card.dataset.catalogBuiltin === 'true') {
+            for (const name of ['source_url', 'expected_size_bytes', 'sha256', 'license']) input(name).disabled = true;
+            document.getElementById('source-dialog-title').textContent = 'Edit built-in display metadata';
+          }
         }
         dialog.showModal();
       }
@@ -281,7 +287,7 @@
       form.addEventListener('submit', async event => {
         event.preventDefault();
         const source_id = input('source_id').value;
-        const fields = Object.fromEntries(['title', 'description', 'source_url', 'publisher', 'edition', 'language', 'expected_size_bytes', 'sha256', 'provenance', 'license'].map(name => [name, input(name).value]));
+        const fields = Object.fromEntries(['title', 'description', 'source_url', 'publisher', 'edition', 'language', 'expected_size_bytes', 'sha256', 'provenance', 'license'].filter(name => !input(name).disabled).map(name => [name, input(name).value]));
         try { await change(form.dataset.operation, source_id, fields); }
         catch (error) { feedback.textContent = error.message; }
       });

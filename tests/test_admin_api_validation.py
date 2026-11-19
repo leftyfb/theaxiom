@@ -19,6 +19,9 @@ class AdminAPIValidationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.server = ThreadingHTTPServer(("127.0.0.1", 0), AdminAPIHandler)
+        monitor = mock.Mock()
+        monitor.snapshot.return_value = {"stale": False, "acquisitions": []}
+        setattr(cls.server, "acquisition_monitor", monitor)
         cls.server.daemon_threads = True
         cls.port = cls.server.server_address[1]
         cls.thread = threading.Thread(
@@ -205,7 +208,63 @@ class AdminAPIValidationTests(unittest.TestCase):
             f"http://127.0.0.1:{self.port}/api/acquisitions", timeout=5
         ) as response:
             self.assertEqual(response.status, 200)
-            self.assertEqual(json.loads(response.read()), {"acquisitions": [], "stale": True})
+            self.assertEqual(json.loads(response.read()), {"acquisitions": [], "stale": False})
+
+    def test_builtin_planned_sources_render_edit_and_remove_controls(self):
+        from tempfile import TemporaryDirectory
+        from pathlib import Path
+        from theaxiom import admin_api, catalog_store
+        with TemporaryDirectory() as directory, mock.patch.object(
+            admin_api, "SOURCE_CATALOG", catalog_store.CatalogStore(Path(directory) / "sources.json")
+        ):
+            with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/admin") as response:
+                body = response.read().decode()
+            self.assertIn('data-catalog-edit="internet-archive"', body)
+            self.assertIn('data-catalog-remove="internet-archive"', body)
+            self.assertIn('data-catalog-edit="wikipedia-en"', body)
+            self.assertNotIn('data-catalog-remove="wikipedia-en"', body)
+
+    def test_corrupt_catalog_admin_page_returns_503_without_replacement(self):
+        from tempfile import TemporaryDirectory
+        from pathlib import Path
+        from theaxiom import admin_api, catalog_store
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "sources.json"
+            path.write_text("not-json")
+            with mock.patch.object(admin_api, "SOURCE_CATALOG", catalog_store.CatalogStore(path)):
+                request = urllib.request.Request(f"http://127.0.0.1:{self.port}/admin")
+                with self.assertRaises(urllib.error.HTTPError) as caught:
+                    urllib.request.urlopen(request)
+                self.assertEqual(caught.exception.code, 503)
+            self.assertEqual(path.read_text(), "not-json")
+
+    def test_stale_monitor_refuses_builtin_mutation(self):
+        from tempfile import TemporaryDirectory
+        from pathlib import Path
+        from theaxiom import admin_api, catalog_store
+        monitor = getattr(self.server, "acquisition_monitor")
+        with TemporaryDirectory() as directory, mock.patch.object(
+            admin_api, "SOURCE_CATALOG", catalog_store.CatalogStore(Path(directory) / "sources.json")
+        ):
+            before = admin_api.SOURCE_CATALOG.get()
+            source = next(item for item in before["sources"] if item["source_id"] == "internet-archive")
+            monitor.snapshot.return_value = {"stale": True, "acquisitions": []}
+            status, _ = self.post_source({"operation": "edit", "source_id": source["source_id"], "revision": before["revision"], "fields": {"title": "Changed"}})
+            self.assertNotEqual(status, 200)
+            self.assertEqual(next(item for item in admin_api.SOURCE_CATALOG.get()["sources"] if item["source_id"] == source["source_id"])["title"], source["title"])
+        monitor.snapshot.return_value = {"stale": False, "acquisitions": []}
+
+    def test_published_wikipedia_removal_is_refused(self):
+        from tempfile import TemporaryDirectory
+        from pathlib import Path
+        from theaxiom import admin_api, catalog_store
+        with TemporaryDirectory() as directory, mock.patch.object(
+            admin_api, "SOURCE_CATALOG", catalog_store.CatalogStore(Path(directory) / "sources.json")
+        ), mock.patch.object(admin_api.publication, "load", return_value={"wikipedia-en": True}):
+            before = admin_api.SOURCE_CATALOG.get()
+            status, _ = self.post_source({"operation": "remove", "source_id": "wikipedia-en", "revision": before["revision"], "fields": {}})
+            self.assertEqual(status, 409)
+            self.assertIn("wikipedia-en", [item["source_id"] for item in admin_api.SOURCE_CATALOG.get()["sources"]])
 
     def test_unknown_source_id(self):
         status, _ = self.post_action("nonexistent-source", "download")

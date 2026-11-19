@@ -115,8 +115,13 @@ class CatalogStore:
             if sid in state["tombstones"]:
                 continue
             merged = copy.deepcopy(entry)
-            merged.update(state["overrides"].get(sid, {}))
-            merged.update(source_id=sid, builtin=True, candidate_only=bool(state["overrides"].get(sid, {}).get("source_url")))
+            override = state["overrides"].get(sid, {})
+            for key, value in override.items():
+                if key in {"source_url", "sha256", "expected_size_bytes", "license"}:
+                    merged["candidate_" + key] = value
+                else:
+                    merged[key] = value
+            merged.update(source_id=sid, builtin=True, candidate_only=bool(override))
             result.append(merged)
         for sid, fields in state["custom"].items():
             if sid not in builtins:
