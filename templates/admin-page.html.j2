@@ -249,14 +249,14 @@
     <button class="button" type="button" id="source-select-mode" aria-pressed="false">Select</button>
     <button class="button" type="button" id="source-guide-open">Content source guide</button>
     <p id="catalog-feedback" role="status" aria-live="polite">Candidate source metadata is not trusted or fetched.</p>
-    <details class="group-panel" id="group-panel">
+    <details class="group-panel" id="group-panel" hidden>
       <summary>Organize sources · Categories, collections &amp; tags</summary>
       <p class="source-note">Select source cards to assign groupings. <a href="/admin/groupings">Manage categories, tags and collections separately.</a></p>
       {% set groups = (catalog|default({})).groups|default([]) %}
-      <div class="editor-grid">
+      <div class="editor-grid" id="bulk-group-fields" hidden>
         <div><label for="group-kind">Grouping type</label><select id="group-kind"><option value="categories">Categories</option><option value="collections">Collections</option><option value="tags">Tags</option></select></div>
-        <div><label for="group-existing">Existing group</label><select id="group-existing"><option value="">Choose a group</option>{% for group in groups|sort(attribute="name") %}<option data-kind="{{ group.kind }}" value="{{ group.group_id }}">{{ group.name }}</option>{% endfor %}</select></div>
-        <div class="editor-wide"><label for="group-name">New group name / rename</label><input id="group-name" maxlength="100" autocomplete="off"></div>
+        <div><label for="group-existing">Choose one or more groupings</label><select id="group-existing" multiple size="6">{% for group in groups|sort(attribute="name") %}<option data-kind="{{ group.kind }}" value="{{ group.group_id }}">{{ group.name }}</option>{% endfor %}</select></div>
+        <div class="editor-wide"><label for="group-name">New tag name</label><input id="group-name" maxlength="100" autocomplete="off"></div>
       </div>
       <div class="source-actions">
         <button class="button" type="button" id="group-defaults" hidden>Add predefined categories</button>
@@ -273,8 +273,9 @@
         <button class="button" type="button" id="bulk-publish">Publish selected</button>
         <button class="button" type="button" id="bulk-unpublish">Unpublish selected</button>
         <button class="button" type="button" id="bulk-remove">Remove selected sources</button>
-        <button class="button" type="button" id="group-assign">Add selected to group</button>
-        <button class="button" type="button" id="group-unassign">Remove selected from group</button>
+        <button class="button" type="button" id="group-assign">Add groupings</button>
+        <button class="button" type="button" id="group-unassign">Remove groupings</button>
+        <button class="button" type="button" id="group-replace">Replace groupings</button>
         <button class="button" type="button" id="group-create-assign">Create tag &amp; assign</button>
       </div>
       <p id="group-count" class="source-note" aria-live="polite">0 selected</p>
@@ -495,6 +496,7 @@
           if (!selecting) item.checked = false;
         });
         document.getElementById('bulk-selection').hidden = !selecting;
+        document.getElementById('group-panel').hidden = !selecting;
         if (selecting) document.getElementById('group-panel').open = true;
         groupControls();
       }
@@ -506,19 +508,20 @@
       function groupControls() {
         const kind = groupKind.value, ids = selectedIds();
         document.getElementById('bulk-actions').hidden = !ids.length;
+        document.getElementById('bulk-group-fields').hidden = !ids.length;
         for (const id of ['bulk-publish','bulk-unpublish','bulk-remove']) document.getElementById(id).disabled = bulkBusy || !ids.length;
         for (const option of groupExisting.options) {
           option.hidden = !!option.dataset.kind && option.dataset.kind !== kind;
           option.disabled = option.hidden;
         }
-        if (groupExisting.selectedOptions[0]?.disabled) groupExisting.value = '';
+        for (const option of groupExisting.options) if (option.disabled) option.selected = false;
         document.getElementById('group-count').textContent = ids.length + ' selected (' + groupChecks.filter(item => item.checked && item.closest('.source-card').hidden).length + ' hidden by filters)';
         document.getElementById('group-defaults').hidden = true;
         document.getElementById('group-create-assign').hidden = kind !== 'tags';
         for (const action of ['rename','delete','assign','unassign']) {
-          document.getElementById('group-' + action).disabled = !groupExisting.value ||
-            (['assign','unassign'].includes(action) && !ids.length);
+          document.getElementById('group-' + action).disabled = bulkBusy || !groupExisting.selectedOptions.length || !ids.length;
         }
+        document.getElementById('group-replace').disabled = bulkBusy || !ids.length;
         document.getElementById('group-create-assign').disabled = !ids.length;
       }
       groupChecks.forEach(item => {
@@ -550,6 +553,7 @@
         return result;
       }
       async function groupChange(operation) {
+        if (bulkBusy) return;
         const kind = groupKind.value, ids = selectedIds(), name = groupName.value.trim();
         let payload = {operation, kind, group_id:groupExisting.value};
         if (operation === 'create' || operation === 'create-assign') {
@@ -561,7 +565,14 @@
           payload.name = name;
         } else if (operation === 'delete') {
           if (!window.confirm('Delete this group? Sources and installed files will be retained.')) return;
+        } else if (operation.startsWith('bulk-')) {
+          const group_ids = Array.from(groupExisting.selectedOptions, option => option.value);
+          if (operation === 'bulk-replace' && !window.confirm('Replace all ' + kind + ' memberships for ' + ids.length + ' selected sources with ' + group_ids.length + ' chosen groupings? Other grouping types are preserved.')) return;
+          payload = {operation,kind,group_id:'bulk',group_ids,source_ids:ids};
         } else payload.source_ids = ids;
+        bulkBusy = true;
+        selectMode.disabled = true;
+        groupChecks.forEach(item => item.disabled = true);
         groupButtons.forEach(button => { button.disabled = true; });
         try {
           const result = await groupPost(payload, revision);
@@ -574,11 +585,11 @@
           }
           reloadSources();
         } catch (error) { groupFeedback.textContent = error.message; }
-        finally { groupButtons.forEach(button => { button.disabled = false; }); groupControls(); }
+        finally { bulkBusy = false; selectMode.disabled = false; groupChecks.forEach(item => item.disabled = false); groupButtons.forEach(button => { button.disabled = false; }); groupControls(); }
       }
       for (const [id, operation] of Object.entries({
         defaults:'initialize-categories',create:'create',rename:'rename',delete:'delete',
-        assign:'add-members',unassign:'remove-members','create-assign':'create-assign'
+        assign:'bulk-add',unassign:'bulk-remove',replace:'bulk-replace','create-assign':'create-assign'
       })) document.getElementById('group-' + id).addEventListener('click', () => groupChange(operation));
       document.addEventListener("axiom-source-filters-changed", groupControls);
       selectionMode();

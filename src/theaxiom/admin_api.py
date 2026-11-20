@@ -686,7 +686,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 return
             data = self._read_body()
             required = {"operation", "kind", "group_id", "revision"}
-            if not required <= data.keys() or data.keys() - (required | {"name", "source_ids"}):
+            if not required <= data.keys() or data.keys() - (required | {"name", "source_ids", "group_ids"}):
                 self._send_json(400, {"error": "invalid group mutation"})
                 return
             try:

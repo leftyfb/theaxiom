@@ -408,19 +408,29 @@ class CatalogStore:
             if len(set(members)) != len(members) or not set(members) <= source_ids:
                 raise CatalogError("duplicate or unknown source membership")
 
-    def mutate_group(self, operation, kind, group_id, revision, *, name=None, source_ids=None):
+    def mutate_group(self, operation, kind, group_id, revision, *, name=None, source_ids=None, group_ids=None):
         if not isinstance(kind, str) or kind not in GROUP_KINDS:
             raise CatalogError("invalid group kind")
         self._validate_id(group_id)
         if type(revision) is not int or revision < 0:
             raise CatalogError("revision precondition required")
-        if operation not in ("create", "rename", "delete", "add-members", "remove-members", "initialize-categories", "merge-defaults"):
+        bulk = operation in ("bulk-add", "bulk-remove", "bulk-replace")
+        if bulk:
+            if group_id != "bulk" or name is not None or not isinstance(group_ids, list) or len(group_ids) > MAX_GROUPS:
+                raise CatalogError("invalid bulk grouping request")
+            for gid in group_ids:
+                self._validate_id(gid)
+            if len(set(group_ids)) != len(group_ids) or (not group_ids and operation != "bulk-replace"):
+                raise CatalogError("invalid bulk grouping IDs")
+        elif group_ids is not None:
+            raise CatalogError("unexpected grouping IDs")
+        if operation not in ("bulk-add", "bulk-remove", "bulk-replace", "create", "rename", "delete", "add-members", "remove-members", "initialize-categories", "merge-defaults"):
             raise CatalogError("unknown group operation")
         if operation in ("create", "rename"):
             self._validate_field("title", name)
             if len(name) > MAX_GROUP_NAME or name != name.strip() or source_ids is not None:
                 raise CatalogError("invalid group name or fields")
-        elif operation in ("add-members", "remove-members"):
+        elif bulk or operation in ("add-members", "remove-members"):
             if name is not None or not isinstance(source_ids, list) or not 0 < len(source_ids) <= MAX_ENTRIES:
                 raise CatalogError("invalid membership request")
             for sid in source_ids:
@@ -440,7 +450,22 @@ class CatalogStore:
                 groups = state.setdefault("groups", [])
                 known = {record["source_id"] for record in state["sources"]}
                 group = next((g for g in groups if (g["kind"], g["group_id"]) == (kind, group_id)), None)
-                if operation == "merge-defaults":
+                if bulk:
+                    selected = set(source_ids)
+                    targets = set(group_ids)
+                    available = {g["group_id"] for g in groups if g["kind"] == kind}
+                    if not selected <= known or not targets <= available:
+                        raise CatalogError("unknown source or grouping ID")
+                    for item in groups:
+                        if item["kind"] != kind:
+                            continue
+                        members = set(item["source_ids"])
+                        if item["group_id"] in targets and operation in ("bulk-add", "bulk-replace"):
+                            members.update(selected)
+                        elif operation == "bulk-replace" or (operation == "bulk-remove" and item["group_id"] in targets):
+                            members.difference_update(selected)
+                        item["source_ids"] = sorted(members)
+                elif operation == "merge-defaults":
                     keys = {(g["kind"], g["group_id"]) for g in groups}
                     names = {(g["kind"], g["name"].casefold()) for g in groups}
                     for default in self._default_groups():

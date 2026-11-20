@@ -178,3 +178,11 @@ def test_standalone_groupings_page():
         assert marker in page
     assert 'Winter' in page and 'source assignments?' in page
     assert 'source-catalog-script' not in page
+
+
+def test_bulk_group_multi_select_and_replace_controls():
+    page = render([profile()])
+    assert 'id="group-existing" multiple' in page
+    assert 'id="group-replace"' in page
+    assert 'id="bulk-group-fields" hidden' in page
+    assert "Other grouping types are preserved." in page

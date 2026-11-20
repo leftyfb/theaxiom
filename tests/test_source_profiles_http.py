@@ -350,3 +350,25 @@ def test_admin_filter_status_distinguishes_installed_and_unpublished(app):
     assert source(catalog, "candidate-filter")["download_filter"] == "not-downloaded"
     snapshot["stale"] = True
     assert source(request("/api/sources"))["download_filter"] == "unknown"
+
+
+def test_bulk_group_assignment_preserves_unrelated_memberships(app):
+    request, _ = app
+    state = request("/api/sources")
+    state = mutate(request, state, "add", {"title": "Second"}, sid="second")
+    def apply(operation, kind, ids, sources, status=200):
+        return request("/api/groups", dict(operation=operation, kind=kind, group_id="bulk",
+                       group_ids=ids, source_ids=sources, revision=state["revision"]), status=status)
+    state = apply("bulk-add", "categories", ["communications", "energy-power"], [SID, "second"])
+    state = apply("bulk-add", "tags", ["winter"], [SID])
+    state = apply("bulk-remove", "categories", ["communications"], [SID])
+    state = apply("bulk-replace", "categories", ["general-reference"], [SID])
+    groups = {(g["kind"], g["group_id"]): g["source_ids"] for g in state["groups"]}
+    assert groups["categories", "communications"] == ["second"]
+    assert groups["categories", "energy-power"] == ["second"]
+    assert groups["categories", "general-reference"] == [SID]
+    assert groups["tags", "winter"] == [SID]
+    apply("bulk-replace", "categories", ["missing"], [SID], status=400)
+    assert request("/api/sources")["revision"] == state["revision"]
+    state = apply("bulk-replace", "categories", [], [SID])
+    assert all(SID not in g["source_ids"] for g in state["groups"] if g["kind"] == "categories")
