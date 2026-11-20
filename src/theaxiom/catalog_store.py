@@ -29,6 +29,21 @@ MAX_FIELD = 512
 GROUP_KINDS = frozenset({'categories', 'collections', 'tags'})
 MAX_GROUPS = 100
 MAX_GROUP_NAME = 100
+DEFAULT_CATEGORIES = (
+    ("emergency-preparedness", "Emergency Preparedness"),
+    ("survival-bushcraft", "Survival & Bushcraft"),
+    ("health-medicine", "Health & Medicine"),
+    ("food-agriculture", "Food & Agriculture"),
+    ("water-sanitation", "Water & Sanitation"),
+    ("science-education", "Science & Education"),
+    ("technology-computing", "Technology & Computing"),
+    ("engineering-repair", "Engineering & Repair"),
+    ("energy-power", "Energy & Power"),
+    ("communications", "Communications"),
+    ("maps-navigation", "Maps & Navigation"),
+    ("history-culture", "History & Culture"),
+    ("general-reference", "General Reference"),
+)
 LOCK = threading.RLock()
 
 
@@ -355,7 +370,7 @@ class CatalogStore:
         self._validate_id(group_id)
         if type(revision) is not int or revision < 0:
             raise CatalogError("revision precondition required")
-        if operation not in ("create", "rename", "delete", "add-members", "remove-members"):
+        if operation not in ("create", "rename", "delete", "add-members", "remove-members", "initialize-categories"):
             raise CatalogError("unknown group operation")
         if operation in ("create", "rename"):
             self._validate_field("title", name)
@@ -369,7 +384,9 @@ class CatalogStore:
             if len(set(source_ids)) != len(source_ids):
                 raise CatalogError("duplicate source IDs")
         elif name is not None or source_ids is not None:
-            raise CatalogError("delete does not accept group fields")
+            raise CatalogError("operation does not accept group fields")
+        if operation == "initialize-categories" and (kind != "categories" or group_id != "defaults"):
+            raise CatalogError("invalid default category request")
         with LOCK:
             fd = self._file_lock()
             try:
@@ -379,7 +396,12 @@ class CatalogStore:
                 groups = state.setdefault("groups", [])
                 known = {record["source_id"] for record in state["sources"]}
                 group = next((g for g in groups if (g["kind"], g["group_id"]) == (kind, group_id)), None)
-                if operation == "create":
+                if operation == "initialize-categories":
+                    if any(g["kind"] == "categories" for g in groups):
+                        raise CatalogError("categories already exist; manage them individually")
+                    groups.extend(dict(kind="categories", group_id=gid, name=label, source_ids=[])
+                                  for gid, label in DEFAULT_CATEGORIES)
+                elif operation == "create":
                     if group is not None:
                         raise CatalogError("group ID already exists")
                     groups.append(dict(kind=kind, group_id=group_id, name=name, source_ids=[]))

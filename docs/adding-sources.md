@@ -44,3 +44,8 @@ The same guide is available offline from Administration → Sources → Content 
 ## 6. Edit or remove
 
   Edit display details without changing the stable ID. Unpublish before changing the artifact identity. Removing a published profile automatically unpublishes it and does not delete installed files. If removal fails after unpublishing, the source stays unpublished; reload and retry removal. Changing the URL, size or checksum does not transfer verification to a different artifact. Active or unresolved acquisitions may block editing.
+
+
+## 7. Organize sources
+
+Open Organize sources on Administration → Sources. Add predefined categories once, or manage your own categories deliberately. Create collections for curated sets and tags for flexible keywords. Select one or more source cards, choose a grouping type and group, and add or remove the selected memberships. A source can belong to many groups without duplicating content. Deleting a group never removes source profiles or installed files. Use Create tag & assign to create and assign a new tag in the same interaction.

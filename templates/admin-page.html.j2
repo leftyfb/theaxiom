@@ -63,6 +63,11 @@
     .source-details { overflow-wrap: anywhere; }
     .admin-nav { display:flex; flex-wrap:wrap; gap:.5rem; margin-bottom:1.5rem; }
     .admin-nav a[aria-current="page"] { background:var(--dark); color:white; }
+    .group-panel { background:var(--paper); border:1px solid var(--line); border-radius:.8rem; padding:1rem; margin:1rem 0; }
+    .group-panel summary { cursor:pointer; font-weight:700; color:var(--green); }
+    .group-membership { font-size:.8rem; color:var(--muted); overflow-wrap:anywhere; }
+    .group-select { display:flex; align-items:center; gap:.35rem; font-size:.8rem; color:var(--muted); }
+    .group-select input { width:1.2rem; height:1.2rem; accent-color:var(--green); }
     #source-dialog, #source-guide { width: min(42rem, calc(100% - 2rem)); max-height: calc(100% - 2rem); overflow: auto; border: 1px solid var(--line); border-radius: .85rem; padding: clamp(1rem, 4vw, 1.75rem); color: var(--dark); background: var(--paper); }
     #source-dialog::backdrop, #source-guide::backdrop { background: rgba(18,60,50,.55); }
     #source-dialog h3 { margin: 0; font-size: 1.4rem; }
@@ -156,6 +161,31 @@
     <button class="button" type="button" id="source-add">Add Source</button>
     <button class="button" type="button" id="source-guide-open">Content source guide</button>
     <p id="catalog-feedback" role="status" aria-live="polite">Candidate source metadata is not trusted or fetched.</p>
+    <details class="group-panel" id="group-panel">
+      <summary>Organize sources · Categories, collections &amp; tags</summary>
+      <p class="source-note">Categories classify subjects, collections curate resources, and tags describe anything you choose. Select source cards below to assign a group to one or several sources.</p>
+      {% set groups = (catalog|default({})).groups|default([]) %}
+      <div class="editor-grid">
+        <div><label for="group-kind">Grouping type</label><select id="group-kind"><option value="categories">Categories</option><option value="collections">Collections</option><option value="tags">Tags</option></select></div>
+        <div><label for="group-existing">Existing group</label><select id="group-existing"><option value="">Choose a group</option>{% for group in groups|sort(attribute="name") %}<option data-kind="{{ group.kind }}" value="{{ group.group_id }}">{{ group.name }}</option>{% endfor %}</select></div>
+        <div class="editor-wide"><label for="group-name">New group name / rename</label><input id="group-name" maxlength="100" autocomplete="off"></div>
+      </div>
+      <div class="source-actions">
+        <button class="button" type="button" id="group-defaults">Add predefined categories</button>
+        <button class="button" type="button" id="group-create">Create group</button>
+        <button class="button" type="button" id="group-rename">Rename</button>
+        <button class="button" type="button" id="group-delete">Delete group</button>
+      </div>
+      <div class="source-actions">
+        <button class="button" type="button" id="group-select-all">Select all sources</button>
+        <button class="button" type="button" id="group-clear">Clear selection</button>
+        <button class="button" type="button" id="group-assign">Add selected to group</button>
+        <button class="button" type="button" id="group-unassign">Remove selected from group</button>
+        <button class="button" type="button" id="group-create-assign">Create tag &amp; assign</button>
+      </div>
+      <p id="group-count" class="source-note" aria-live="polite">0 selected</p>
+      <p id="group-feedback" role="status" aria-live="polite"></p>
+    </details>
     <dialog id="source-dialog" aria-labelledby="source-dialog-title">
       <form id="source-form">
         <h3 id="source-dialog-title">Add source metadata</h3>
@@ -214,9 +244,11 @@
       {% set publication_label = 'Publication status unavailable' if pub.error else 'Published · available in library' if pub.published else 'Enabled · reader unavailable' if pub.enabled else 'Unpublished · ready to publish' if pub.serving else 'Unpublished · ' + pub.publication_reason if pub.publication_reason else 'Unpublished · reader not ready' %}
       <details class="source-card" data-source-id="{{ source.source_id }}"{% for name in editable_fields %} data-catalog-{{ name|replace('_', '-') }}="{{ source.profile.get(name, source.configuration.get(name, '')) }}"{% endfor %}>
         <summary class="source-header">
+          <label class="group-select"><input type="checkbox" data-group-select value="{{ source.source_id }}" aria-label="Select {{ source.profile.title }} for grouping">Select</label>
           <div>
             <h3>{{ source.profile.title }}</h3>
             <p class="source-subtitle">{{ source.configuration.format }}{% if source.profile.description %} · {{ source.profile.description }}{% endif %}</p>
+            {% for kind in ["categories", "collections", "tags"] %}{% set memberships = [] %}{% for group in groups if group.kind == kind and source.source_id in group.source_ids %}{% set _ = memberships.append(group.name) %}{% endfor %}{% if memberships %}<p class="group-membership">{{ kind|capitalize }}: {{ memberships|sort|join(", ") }}</p>{% endif %}{% endfor %}
             {% if pub %}<span class="compact-publication" data-field="publication-summary">{{ publication_label }}</span>{% endif %}
           </div>
           <span class="badge" data-field="status" role="status">{% if source.adapter == 'pdf' %}{% if source.installed_verified and source.artifact %}{{ source.artifact.bytes | filesizeformat(true) }}{% else %}PDF not installed or invalid{% endif %}{% elif source.installed_verified and source.artifact %}{{ source.artifact.bytes | filesizeformat(true) }}{% elif not source.artifact and not source.mutation_blocked %}Not downloaded{% elif catalog.acquisition_stale %}Status unavailable{% elif not source.artifact %}Acquisition unresolved{% else %}Waiting for status…{% endif %}</span>
@@ -299,6 +331,8 @@
           document.querySelectorAll('.source-card').forEach(card => {
             card.open = saved.open.includes(card.dataset.sourceId);
           });
+          document.querySelectorAll("[data-group-select]").forEach(item => { item.checked = (saved.selected || []).includes(item.value); });
+          document.getElementById("group-panel").open = !!saved.groupsOpen;
           requestAnimationFrame(() => window.scrollTo(0, saved.scroll));
         }
       } catch (_) { /* Storage may be disabled. */ }
@@ -306,11 +340,98 @@
         try {
           sessionStorage.setItem(stateKey, JSON.stringify({
             open: Array.from(document.querySelectorAll('.source-card[open]'), card => card.dataset.sourceId),
-            scroll: window.scrollY
+            scroll: window.scrollY,
+            selected: Array.from(document.querySelectorAll("[data-group-select]:checked"), item => item.value),
+            groupsOpen: document.getElementById("group-panel").open
           }));
         } catch (_) { /* Reload remains available without session storage. */ }
         window.location.reload();
       }
+
+      const groupKind = document.getElementById('group-kind');
+      const groupExisting = document.getElementById('group-existing');
+      const groupName = document.getElementById('group-name');
+      const groupFeedback = document.getElementById('group-feedback');
+      const groupChecks = Array.from(document.querySelectorAll('[data-group-select]'));
+      const groupButtons = Array.from(document.querySelectorAll('#group-panel button'));
+      const selectedIds = () => groupChecks.filter(item => item.checked).map(item => item.value);
+      function groupControls() {
+        const kind = groupKind.value, ids = selectedIds();
+        for (const option of groupExisting.options) {
+          option.hidden = !!option.dataset.kind && option.dataset.kind !== kind;
+          option.disabled = option.hidden;
+        }
+        if (groupExisting.selectedOptions[0]?.disabled) groupExisting.value = '';
+        document.getElementById('group-count').textContent = ids.length + ' selected';
+        document.getElementById('group-defaults').hidden = kind !== 'categories' ||
+          Array.from(groupExisting.options).some(option => option.dataset.kind === 'categories');
+        document.getElementById('group-create-assign').hidden = kind !== 'tags';
+        for (const action of ['rename','delete','assign','unassign']) {
+          document.getElementById('group-' + action).disabled = !groupExisting.value ||
+            (['assign','unassign'].includes(action) && !ids.length);
+        }
+        document.getElementById('group-create-assign').disabled = !ids.length;
+      }
+      groupChecks.forEach(item => {
+        item.addEventListener('click', event => event.stopPropagation());
+        item.addEventListener('change', groupControls);
+      });
+      groupKind.addEventListener('change', () => { groupExisting.value = ''; groupControls(); });
+      groupExisting.addEventListener('change', groupControls);
+      document.getElementById('group-select-all').addEventListener('click', () => {
+        groupChecks.forEach(item => { item.checked = !item.closest('.source-card').hidden; });
+        groupControls();
+      });
+      document.getElementById('group-clear').addEventListener('click', () => {
+        groupChecks.forEach(item => { item.checked = false; });
+        groupControls();
+      });
+      function groupId() {
+        const base = groupName.value.normalize('NFKD').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0,50).replace(/-$/,'') || 'group';
+        const used = new Set(Array.from(groupExisting.options).filter(o => o.dataset.kind === groupKind.value).map(o => o.value));
+        let id = base;
+        for (let n = 2; used.has(id); n++) id = base + '-' + n;
+        return id;
+      }
+      async function groupPost(payload, currentRevision) {
+        const response = await fetch('/api/groups', {method:'POST', headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({...payload, revision:currentRevision})});
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Group change failed');
+        return result;
+      }
+      async function groupChange(operation) {
+        const kind = groupKind.value, ids = selectedIds(), name = groupName.value.trim();
+        let payload = {operation, kind, group_id:groupExisting.value};
+        if (operation === 'create' || operation === 'create-assign') {
+          if (!name) { groupFeedback.textContent = 'Enter a group name.'; return; }
+          payload = {operation:'create', kind, group_id:groupId(), name};
+        } else if (operation === 'initialize-categories') payload = {operation, kind:'categories', group_id:'defaults'};
+        else if (operation === 'rename') {
+          if (!name) { groupFeedback.textContent = 'Enter a new name.'; return; }
+          payload.name = name;
+        } else if (operation === 'delete') {
+          if (!window.confirm('Delete this group? Sources and installed files will be retained.')) return;
+        } else payload.source_ids = ids;
+        groupButtons.forEach(button => { button.disabled = true; });
+        try {
+          const result = await groupPost(payload, revision);
+          if (operation === 'create-assign') {
+            try {
+              await groupPost({operation:'add-members',kind,group_id:payload.group_id,source_ids:ids}, result.revision);
+            } catch (error) {
+              window.alert('Tag created, but assignment failed. Reload and select the tag to retry: ' + error.message);
+            }
+          }
+          reloadSources();
+        } catch (error) { groupFeedback.textContent = error.message; }
+        finally { groupButtons.forEach(button => { button.disabled = false; }); groupControls(); }
+      }
+      for (const [id, operation] of Object.entries({
+        defaults:'initialize-categories',create:'create',rename:'rename',delete:'delete',
+        assign:'add-members',unassign:'remove-members','create-assign':'create-assign'
+      })) document.getElementById('group-' + id).addEventListener('click', () => groupChange(operation));
+      groupControls();
       const dialog = document.getElementById('source-dialog');
       const form = document.getElementById('source-form');
       const guide = document.getElementById('source-guide');

@@ -283,6 +283,16 @@ class CatalogStoreTests(unittest.TestCase):
         state = self.store.mutate("remove", "manual", {}, state["revision"])
         self.assertTrue(all("manual" not in g["source_ids"] for g in state["groups"]))
 
+    def test_default_categories_are_explicit_and_never_reseed_deleted_group(self):
+        initial = self.store.get()
+        state = self.store.mutate_group("initialize-categories", "categories", "defaults", initial["revision"])
+        self.assertEqual(len(state["groups"]), len(catalog_store.DEFAULT_CATEGORIES))
+        self.assertEqual(state["sources"], initial["sources"])
+        state = self.store.mutate_group("delete", "categories", "communications", state["revision"])
+        with self.assertRaises(catalog_store.CatalogError):
+            self.store.mutate_group("initialize-categories", "categories", "defaults", state["revision"])
+        self.assertEqual(self.store.get(), state)
+
     def test_invalid_group_mutations_do_not_change_catalog(self):
         state = self.store.mutate_group("create", "tags", "one", self.store.get()["revision"], name="One")
         before = self.path.read_bytes()

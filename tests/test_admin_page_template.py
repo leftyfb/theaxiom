@@ -127,3 +127,10 @@ def test_offline_source_guide_is_discoverable_and_honest():
     assert 'arbitrary remote downloads are not yet enabled' in page
     assert 'Removing a published profile automatically unpublishes it and does not delete installed files' in page
     assert 'id="source-guide"' not in render(admin_page="settings")
+
+
+def test_group_management_controls_are_available():
+    page = render([profile("field-guide", "Field guide", "Reference")])
+    for marker in ('id="group-panel"', 'id="group-defaults"', 'id="group-create-assign"',
+                   'id="group-assign"', 'id="group-unassign"', 'data-group-select value="field-guide"'):
+        assert marker in page
