@@ -92,7 +92,8 @@ def test_catalog_management_form_exposes_metadata_and_confirmation_controls():
     assert 'data-catalog-remove="field-guide"' in page
     assert "It will be unpublished automatically. Installed files will not be deleted." in page
     assert "window.prompt" not in page
-    assert "Candidate source metadata is not trusted or fetched." in page
+    assert "Candidate source metadata is not trusted or fetched." not in page
+    assert 'id="catalog-feedback" role="status" aria-live="polite"></p>' in page
 
 
 def test_admin_branding_and_favicon():
@@ -191,7 +192,7 @@ def test_bulk_group_multi_select_and_replace_controls():
 def test_compact_source_layout_and_checkbox_editor():
     page = render([profile()])
     assert '<section class="source-filters" id="source-filters-panel" aria-label="Filter and sort sources" hidden>' in page
-    assert page.index('id="source-filter-search"') < page.index('id="source-select-mode"') < page.index('id="group-panel"') < page.index('id="source-selection-bar"') < page.index('id="source-filters-panel"') < page.index('id="source-cards"')
+    assert page.index('id="source-filter-search"') < page.index('id="group-panel"') < page.index('id="source-selection-bar"') < page.index('id="source-select-mode"') < page.index('id="source-filter-toggle"') < page.index('id="source-filters-panel"') < page.index('id="source-cards"')
     assert '<details id="source-editor-groups" hidden>' in page
     assert 'No categories available.' in page
     assert 'Add starter categories and tags' in page

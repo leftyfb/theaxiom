@@ -66,6 +66,7 @@
     .source-filters { background:var(--paper); border:1px solid var(--line); border-radius:.8rem; padding:1rem; margin:1rem 0; }
     .source-filters > summary, .group-panel > summary, #source-editor-groups > summary, .membership-section > summary, #source-advanced > summary { display:list-item; list-style-position:inside; }
     .source-filters summary { cursor:pointer; font-weight:700; color:var(--green); }
+    #catalog-feedback:empty { margin:0; padding:0; }
     .source-selection-bar { display:flex; align-items:center; gap:.75rem; padding:.35rem .8rem; margin:.35rem 0; color:var(--muted); flex-wrap:wrap; }
     .source-selection-bar label { display:flex; align-items:center; gap:.45rem; cursor:pointer; font-size:.9rem; }
     .source-selection-bar input { width:1.2rem; height:1.2rem; margin:0; accent-color:var(--green); }
@@ -269,7 +270,7 @@
       <button class="button" type="button" id="source-guide-open">Content source guide</button>
       <input id="source-filter-search" type="search" aria-label="Search source names" placeholder="Search sources…" maxlength="512">
     </div>
-    <p id="catalog-feedback" role="status" aria-live="polite">Candidate source metadata is not trusted or fetched.</p>
+    <p id="catalog-feedback" role="status" aria-live="polite"></p>
     {% set groups = (catalog|default({})).groups|default([]) %}
     <dialog id="source-dialog" aria-labelledby="source-dialog-title">
       <form id="source-form">
@@ -343,7 +344,6 @@
 </section>
       <form method="dialog"><button class="button">Close guide</button></form>
     </dialog>
-    <div class="source-list-toolbar"><button class="button" type="button" id="source-select-mode" aria-pressed="false">Select</button><span id="source-list-count" class="source-note" role="status"></span></div>
     <section class="group-panel" id="bulk-selection" hidden>
       <strong>Selected source actions</strong>
       <div class="source-actions" id="bulk-actions" hidden>
@@ -377,6 +377,7 @@
       {% if not groups %}<p class="source-note">No groupings available yet. <a href="/admin/groupings">Add starter categories and tags</a>.</p>{% endif %}
     </details>
     <div class="source-selection-bar" id="source-selection-bar">
+      <button class="button" type="button" id="source-select-mode" aria-pressed="false">Select</button>
       <label id="select-all-label" hidden><input type="checkbox" id="group-select-all" aria-label="Select all visible sources">Select all</label>
       <span id="group-count" class="source-note" aria-live="polite" hidden>0 selected</span>
       <span id="source-filter-count" class="source-note" role="status"></span>
