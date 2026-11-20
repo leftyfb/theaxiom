@@ -78,6 +78,10 @@ def status(sid):
         if job and job["state"] in ACTIVE:
             try:
                 with worker_lock():
+                    try:
+                        job["downloaded_bytes"] = staged_size(sid)
+                    except (OSError, ValueError):
+                        job["downloaded_bytes"] = 0
                     job.update(state="paused", active=False, detail="Backend restarted; resume explicitly.")
                     save(job)
             except BlockingIOError:
