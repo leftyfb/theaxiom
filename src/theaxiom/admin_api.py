@@ -733,6 +733,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         additions = self.headers.get_all("X-PDF-Add", [])
         adding = additions == ["1"]
         metadata = self.headers.get_all("X-PDF-Metadata", [])
+        auto_title = self.headers.get_all("X-PDF-Auto-Title", [])
         if not self.headers.get("Origin"):
             self._send_json(403, {"error": "same-origin request required"})
             return
@@ -740,7 +741,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 or len(revisions) != 1 or not re.fullmatch(r"[0-9]{1,20}", revisions[0])
                 or length <= 0 or self.headers.get("Content-Encoding")
                 or (additions and not adding) or (adding and len(metadata) != 1)
-                or (not adding and metadata)):
+                or (not adding and metadata)
+                or (auto_title and (not adding or auto_title != ["1"]))):
             self._send_json(400, {"error": "invalid PDF upload metadata"})
             return
         sid, revision = ids[0], int(revisions[0])
@@ -787,6 +789,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     raise ValueError("Upload size does not match the catalog pin")
                 observed = pdf_source.install_stream(sid, BytesIO(data), expected_size=length,
                                                      expected_sha256=digest)
+                if adding and auto_title:
+                    fields["title"] = pdf_source.simple_document_title(data) or fields["title"]
                 note = "Uploaded by administrator; SHA-256 calculated locally, not independently publisher-verified."
                 provenance = config.get("provenance", "").strip()
                 if provenance:

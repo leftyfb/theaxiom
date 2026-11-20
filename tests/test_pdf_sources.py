@@ -409,3 +409,36 @@ def test_admin_pdf_header_shows_installed_size(pdf_app, disk):
     assert "Archive verified" not in page
     assert "PDF pin verified" in page
     assert 'data-field="status"' in page
+
+
+@pytest.mark.parametrize("marker,expected", [
+    (b"Emergency Field Guide", "Emergency Field Guide"),
+    (b"  A   useful title  ", "A useful title"),
+    (b"Untitled", None),
+    (b"", None),
+    (b"Title with \\(escape\\)", None),
+    (b"Not ASCII \xff", None),
+])
+def test_simple_pdf_info_title(marker, expected):
+    assert pdf_source.simple_document_title(document(marker)) == expected
+
+
+def test_simple_pdf_title_requires_xref():
+    data = document(b"Trusted title")
+    assert pdf_source.simple_document_title(data.replace(b"/Info 4 0 R", b"/Info 3 0 R")) is None
+    assert pdf_source.simple_document_title(data.replace(b"xref\n", b"xxxx\n", 1)) is None
+    assert pdf_source.simple_document_title(b"/Title (Misleading)") is None
+
+
+@pytest.mark.parametrize("automatic,expected", [(True, "Embedded title"), (False, "Manual title")])
+def test_new_pdf_prefers_simple_metadata_only_when_requested(pdf_app, disk, automatic, expected):
+    import json
+    from urllib.parse import quote
+    request, _ = pdf_app
+    catalog = request("/api/sources")
+    headers = {"X-Source-ID": SID, "X-Catalog-Revision": str(catalog["revision"]),
+               "X-PDF-Add": "1", "X-PDF-Metadata": quote(json.dumps({"title": "Manual title"}))}
+    if automatic:
+        headers["X-PDF-Auto-Title"] = "1"
+    request("/api/pdf-upload", document(b"Embedded title"), upload_headers=headers)
+    assert source(request("/api/sources"), SID)["profile"]["title"] == expected

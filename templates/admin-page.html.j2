@@ -327,11 +327,16 @@
       const idDisplay = document.getElementById('catalog-id-display');
       let manualFormat = false;
       const uploadFile = document.getElementById("source-upload-file");
+      let automaticTitle = false;
+      input("title").addEventListener("input", () => { automaticTitle = false; });
       uploadFile.addEventListener("change", () => {
         const file = uploadFile.files[0];
         if (!file) return;
         const title = file.name.replace(/\.pdf$/i, "").replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
-        input("title").value = title.slice(0, 512) || "Untitled PDF";
+        if (!input("title").value.trim() || automaticTitle) {
+          input("title").value = title.slice(0, 512) || "Untitled PDF";
+          automaticTitle = true;
+        }
         format.value = "pdf";
         manualFormat = true;
       });
@@ -353,6 +358,7 @@
       }
       function openForm(operation, card = null) {
         form.reset();
+        automaticTitle = false;
         document.getElementById('source-upload-row').hidden = !!card;
         uploadFile.disabled = !!card;
         formFeedback.textContent = '';
@@ -402,9 +408,11 @@
           if (form.dataset.operation === 'add' && file) {
             if (!file.size || file.size > 16 * 1024 * 1024) throw new Error('Choose a PDF up to 16 MiB');
             const metadata = Object.fromEntries(Object.entries(fields).filter(([k]) => ['title','description','publisher','edition','language','source_url','license'].includes(k)));
-            const response = await fetch('/api/pdf-upload', {method:'POST', headers:{'Content-Type':'application/pdf',
-              'X-Source-ID':source_id, 'X-Catalog-Revision':String(revision), 'X-PDF-Add':'1',
-              'X-PDF-Metadata':encodeURIComponent(JSON.stringify(metadata))}, body:file});
+            const headers = {'Content-Type':'application/pdf', 'X-Source-ID':source_id,
+              'X-Catalog-Revision':String(revision), 'X-PDF-Add':'1',
+              'X-PDF-Metadata':encodeURIComponent(JSON.stringify(metadata))};
+            if (automaticTitle) headers['X-PDF-Auto-Title'] = '1';
+            const response = await fetch('/api/pdf-upload', {method:'POST', headers, body:file});
             const result = await response.json().catch(() => ({}));
             if (!response.ok || !result.installed_verified) throw new Error(result.error || 'PDF upload failed (HTTP ' + response.status + ')');
             reloadSources();

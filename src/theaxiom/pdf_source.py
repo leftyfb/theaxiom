@@ -166,6 +166,81 @@ def _verify(stream, artifact, destination=None):
     stream.seek(0)
 
 
+
+def simple_document_title(data):
+    """Best-effort classic PDF Info title; never interpret page or stream data.
+
+    Only a single bounded classic xref table and an uncompressed, simple
+    Info dictionary are supported here. More complex metadata is deliberately
+    left to a future full PDF parser. Missing/unsupported titles are normal.
+    """
+    if not isinstance(data, bytes) or not 0 < len(data) <= MAX_BYTES:
+        return None
+    footer = re.search(rb"(?:^|[\r\n])startxref\s+([0-9]{1,10})\s+%%EOF[\x00\t\n\f\r ]*\Z", data[-4096:])
+    if not footer:
+        return None
+    offset = int(footer[1])
+    if not 9 <= offset < len(data) or len(data) - offset > 256 * 1024:
+        return None
+    table, sep, trailer = data[offset:].partition(b"trailer")
+    if not sep or not table.startswith((b"xref\n", b"xref\r")):
+        return None
+    match = re.match(rb"\s*<<([^<>]{1,4096})>>", trailer)
+    if not match or re.search(rb"/(?:Prev|XRefStm|Encrypt)\b", match[1]):
+        return None
+    refs = re.findall(rb"/Info\s+([0-9]{1,10})\s+([0-9]{1,5})\s+R\b", match[1])
+    if len(refs) != 1:
+        return None
+    wanted, generation = map(int, refs[0])
+    if not wanted:
+        return None
+    lines = table.splitlines()
+    i, entries = 1, []
+    while i < len(lines):
+        header = re.fullmatch(rb"\s*([0-9]{1,10})\s+([0-9]{1,10})\s*", lines[i])
+        if not header:
+            return None
+        first, count = map(int, header.groups())
+        i += 1
+        if count > len(lines) - i:
+            return None
+        if first <= wanted < first + count:
+            entry = re.fullmatch(rb"([0-9]{10})\s+([0-9]{5})\s+n\s*", lines[i + wanted - first])
+            if not entry or int(entry[2]) != generation:
+                return None
+            entries.append(int(entry[1]))
+        i += count
+    if len(entries) != 1 or not 9 <= entries[0] < offset:
+        return None
+    start = entries[0]
+    obj = data[start:min(offset, start + 8192)]
+    pattern = (str(wanted).encode() + rb"\s+" + str(generation).encode()
+               + rb"\s+obj\s*<<([^<>]{1,4096})>>\s*endobj\b")
+    info = re.match(pattern, obj)
+    if not info:
+        return None
+    # Conservative subset: plain printable ASCII titles, not escaped or
+    # nested strings; ignore ambiguous dictionaries or unsupported encodings.
+    # Parse complete name/string pairs so /Title inside a string is not a key.
+    pair = re.compile(rb"\s*/([A-Za-z][A-Za-z0-9]*)\s*\(([^()\\\r\n]{0,1024})\)")
+    body, pos, values = info[1], 0, []
+    while pos < len(body):
+        if not body[pos:].strip():
+            break
+        field = pair.match(body, pos)
+        if not field:
+            return None
+        if field[1] == b"Title":
+            values.append(field[2])
+        pos = field.end()
+    if len(values) != 1 or not re.fullmatch(rb"[ -~]{1,512}", values[0]):
+        return None
+    title = " ".join(values[0].decode("ascii").split())
+    if not title or title.casefold() in {"untitled", "untitled document", "document", "pdf", "unknown", "none"}:
+        return None
+    return title
+
+
 def import_local(source_id, artifact):
     """Copy a fixed inbox filename to a private staging file and atomically promote."""
     with (_directory("staging", writing=True) as (staging, smount, _),
