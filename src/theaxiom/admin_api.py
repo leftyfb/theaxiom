@@ -39,6 +39,7 @@ pdf_transport = importlib.import_module(f"{__package__}.pdf_transport" if __pack
 zim_jobs = importlib.import_module(f"{__package__}.zim_jobs" if __package__ else "theaxiom.zim_jobs")
 zim_source = importlib.import_module(f"{__package__}.zim_source" if __package__ else "theaxiom.zim_source")
 zim_catalog = importlib.import_module(f"{__package__}.zim_catalog" if __package__ else "theaxiom.zim_catalog")
+zim_refresh = importlib.import_module(f"{__package__}.zim_refresh" if __package__ else "theaxiom.zim_refresh")
 library_search = importlib.import_module(f"{__package__}.search" if __package__ else "theaxiom.search")
 BIND_HOST = "127.0.0.1"
 BIND_PORT = 8080
@@ -987,6 +988,10 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 except (OSError, ValueError):
                     self._send_json(503, {"error": "could not save publication state"})
                     return
+            if is_zim:
+                # Never restart a reader from HTTP. Generate the new private
+                # manifest and wait for independently monitored Kiwix OPDS.
+                zim_refresh.schedule(lambda: SOURCE_CATALOG.get()["sources"])
             self._send_json(200, {"enabled": enabled})
         elif self.path.rstrip("/") == "/api/storage-settings":
             data = self._read_body()

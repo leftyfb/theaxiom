@@ -12,6 +12,7 @@ def test_optional_generic_kiwix_unit_requires_reader_acknowledgement():
     assert "ExecStartPre=/opt/theaxiom/app/.venv/bin/python -m theaxiom.zim_catalog" in unit
     assert "ExecStartPost=/opt/theaxiom/app/.venv/bin/python -m theaxiom.zim_reader_probe" in unit
     assert "--address=127.0.0.1 --port=8082" in unit
+    assert "--monitorLibrary --library" in unit
     assert "--library /var/lib/theaxiom/kiwix-library.xml" in unit
     assert "chmod" not in unit.lower() and "chown" not in unit.lower()
 
