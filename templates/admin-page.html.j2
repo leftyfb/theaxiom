@@ -512,7 +512,6 @@
             <dt>Artifact size (bytes)</dt><dd>{{ source.artifact.bytes }}</dd>
             <dt>Artifact SHA-256</dt><dd>{{ source.artifact.sha256 }}</dd>
             {% endif %}
-            <dt>Installed verification</dt><dd data-field="verified">{{ (source.adapter|upper ~ ' pin verified') if document and source.installed_verified else 'Confirmed by acquisition service' if pub and pub.verified else 'Not confirmed' }}</dd>
             {% if not document and source.adapter %}<dt>Last sample</dt><dd data-field="sample">—</dd>{% endif %}
           </dl>
         </details>
@@ -1236,7 +1235,6 @@
           (Number.isFinite(job.eta_seconds) ? ' · ' + Math.ceil(job.eta_seconds / 60) + ' min remaining (transfer only)' : '') : '';
         put('rate', rate);
         put('detail', verified ? '' : job?.detail || '');
-        put('verified', verified ? 'Confirmed by acquisition service' : 'Not confirmed');
         put('sample', Number.isFinite(job?.sampled_at) ? new Date(job.sampled_at * 1000).toLocaleString() : '—');
       }
       function controls(card, source) {
@@ -1312,7 +1310,6 @@
             } else if (['pdf','epub'].includes(source?.adapter)) {
               card.querySelector('[data-field="status"]').textContent = source.installed_verified ? size(source.artifact?.bytes) : (source.artifact ? 'Not installed or invalid' : 'Not downloaded');
               card.querySelector('[data-field="status"]').className = 'badge' + (source.installed_verified ? ' enabled' : '');
-              card.querySelector('[data-field="verified"]').textContent = source.installed_verified ? source.adapter.toUpperCase() + ' pin verified' : 'Not confirmed';
             } else if (source?.zim_download) {
               if (source.acquisition) render(card, source.acquisition, false);
               else card.querySelector('[data-field="status"]').textContent = 'Not downloaded';

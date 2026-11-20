@@ -426,3 +426,37 @@ def test_generic_zim_publication_intent_waits_for_verified_reader(app, monkeypat
     result = request("/api/publication", dict(source_id=sid, enabled=False,
                          revision=updated["revision"]))
     assert result["enabled"] is False
+
+
+
+@pytest.mark.parametrize("format_name", ["pdf", "epub", "zim"])
+def test_source_card_hides_internal_verification_without_breaking_refresh(app, format_name):
+    """Presentation-only removal; backend verification and refresh remain intact."""
+    request, _ = app
+    catalog = request("/api/sources")
+    candidate = next((entry for entry in catalog["sources"]
+                      if entry["configuration"].get("format") == format_name), None)
+    if candidate is None:
+        fields = {"title": "Test " + format_name.upper(), "format": format_name}
+        catalog = mutate(request, catalog, "add", fields, sid="test-" + format_name)
+        candidate = source(catalog, "test-" + format_name)
+    html = card(request("/admin/sources"), candidate["source_id"])
+    assert html is not None
+    assert "Installed verification" not in html
+    assert 'data-field="verified"' not in html
+    assert "pin verified" not in html
+    assert "Artifact SHA-256" in html or "Technical details" in html
+    # GET /api/sources still supplies verification state used by publication gates.
+    persisted = source(request("/api/sources"), candidate["source_id"])
+    assert "installed_verified" in persisted
+
+
+def test_admin_source_refresh_never_updates_removed_verification_field(app):
+    request, _ = app
+    page = request("/admin/sources")
+    assert "Installed verification" not in page
+    assert 'data-field="verified"' not in page
+    assert "pin verified" not in page
+    assert "put('verified'" not in page
+    assert "querySelector('[data-field=\\\"verified\\\"]')" not in page
+    assert "data-field=\"status\"" in page
