@@ -88,3 +88,84 @@ def test_world_writable_library_directory_does_not_block_zim_install(disk):
         with pytest.raises(ValueError, match="unsafe"):
             with pdf_source._file(directory, mount, artifact["filename"], artifact["bytes"]):
                 pass
+
+
+def test_actual_resumption_appends_only_requested_range_and_verifies_whole_archive(disk, monkeypatch):
+    from contextlib import contextmanager
+    from unittest.mock import patch
+
+    data = fixture_bytes()
+    half = 72
+    call_offsets = []
+
+    class Stream(BytesIO):
+        def __init__(self, chunk, total):
+            super().__init__(chunk)
+            self.total_size = total
+            self.etag = '"original"'
+            self.last_modified = None
+            self.length = len(chunk)
+
+    @contextmanager
+    def remote(url, *, offset=0, validator=None, **kwargs):
+        call_offsets.append((offset, validator))
+        assert validator == ('"original"' if offset else None)
+        yield Stream(data[offset:], len(data))
+
+    progress = []
+    with patch.object(zim_source.pdf_transport, "open_pdf", remote):
+        def pause_after_chunk(n, total, metadata):
+            progress.append(n)
+            if n >= half:
+                raise zim_source.TransferStopped()
+
+        # First request writes its initial block before a deliberate interruption.
+        original_chunk = zim_source.CHUNK
+        monkeypatch.setattr(zim_source, "CHUNK", half)
+        with pytest.raises(zim_source.TransferStopped):
+            zim_source.download_resumable("ready", CONFIG, progress=pause_after_chunk)
+        assert (disk / "staging/zim/.download-ready.partial").read_bytes() == data[:half]
+        artifact = zim_source.download_resumable("ready", CONFIG, offset=half,
+                   validator='"original"')
+    assert call_offsets == [(0, None), (half, '"original"')]
+    assert artifact["sha256"] == hashlib.sha256(data).hexdigest()
+    assert (disk / "library/zim" / artifact["filename"]).read_bytes() == data
+    assert not (disk / "staging/zim/.download-ready.partial").exists()
+
+
+def test_resumption_validator_change_retains_partial(disk):
+    from contextlib import contextmanager
+    from unittest.mock import patch
+
+    data = fixture_bytes()
+    stage = disk / "staging/zim"
+    stage.mkdir(exist_ok=True)
+    part = stage / ".download-ready.partial"
+    part.write_bytes(data[:40])
+    part.chmod(0o600)
+
+    class Stream(BytesIO):
+        total_size = len(data)
+        etag = '"changed"'
+        last_modified = None
+
+    @contextmanager
+    def remote(url, **kwargs):
+        yield Stream(data[40:])
+
+    with patch.object(zim_source.pdf_transport, "open_pdf", remote):
+        with pytest.raises(ValueError, match="validator changed"):
+            zim_source.download_resumable("ready", CONFIG, offset=40, validator='"old"')
+    assert part.read_bytes() == data[:40]
+    assert not list((disk / "library/zim").iterdir())
+
+
+def test_resume_refuses_inconsistent_saved_offset(disk):
+    stage = disk / "staging/zim"
+    stage.mkdir(exist_ok=True)
+    part = stage / ".download-ready.partial"
+    part.write_bytes(fixture_bytes()[:32])
+    part.chmod(0o600)
+    with pytest.raises(ValueError, match="offset disagrees"):
+        zim_source.download_resumable("ready", CONFIG, offset=40, validator='"old"')
+    assert part.stat().st_size == 32
