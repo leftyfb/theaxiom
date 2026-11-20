@@ -16,7 +16,7 @@ COOKIE_NAME = "theaxiom_session"
 IDLE_SECONDS = 30 * 60
 ABSOLUTE_SECONDS = 8 * 60 * 60
 MAX_SESSIONS = 64
-TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_-]{40,128}\\Z")
+TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_-]{40,128}\Z")
 
 
 @dataclass
