@@ -1,10 +1,4 @@
-"""Durable, bounded ZIM acquisition records independent of browser requests.
-
-A single application worker serializes writes. A file lock prevents duplicate
-workers across processes. Backend termination interrupts a transfer; persisted
-state is reported as interrupted, never silently retried. A separate systemd
-worker and resumable staging are future lifecycle work.
-"""
+"""Durable ZIM jobs with serial acquisition, explicit controls, and restart recovery."""
 from contextlib import contextmanager
 import fcntl
 import json
@@ -16,7 +10,7 @@ import time
 
 from . import catalog_store, storage_settings, zim_source, pdf_source
 
-ACTIVE = {"queued", "downloading", "verifying", "pausing", "cancelling"}
+ACTIVE = {"queued", "downloading", "verifying", "pausing", "cancelling", "publishing"}
 CONTROLS = {}
 LOCK = threading.RLock()
 
@@ -186,6 +180,8 @@ def control(sid, config, action):
         job = status(sid)
         if not matches(job, config):
             raise ValueError("No matching ZIM job")
+        if job["state"] == "publishing":
+            raise ValueError("Verified ZIM publication is already finalizing")
         if job["state"] in ACTIVE:
             pair = CONTROLS.get(sid)
             if not pair:
@@ -236,8 +232,13 @@ def _run(job, guard, signal, offset, validator):
     try:
         job.update(state="downloading", sampled_at=time.time())
         save(job)
+        def promoting():
+            job.update(state="publishing", sampled_at=time.time())
+            save(job)
+
         artifact = zim_source.download_resumable(sid, job["configuration"], offset=offset,
-                     validator=validator, progress=progress, stopped=signal.is_set)
+                     validator=validator, progress=progress, stopped=signal.is_set,
+                     promote_lock=LOCK, promoting=promoting)
         job.update(state="completed", active=False, verified=True, artifact=artifact,
                    downloaded_bytes=artifact["bytes"], expected_bytes=artifact["bytes"], sampled_at=time.time())
     except zim_source.TransferStopped:
