@@ -1,16 +1,17 @@
-"""Bounded, direct HTTPS PDF transport. No proxies or implicit redirects."""
+"""Bounded, direct HTTPS PDF transport. No proxies; every redirect is independently validated."""
 from contextlib import contextmanager
 import http.client
 import ipaddress
 import socket
 import ssl
 import time
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urljoin
 
 from . import pdf_source
 
 TIMEOUT = 10
 TOTAL_SECONDS = 25
+MAX_REDIRECTS = 3
 
 
 def _public_addresses(host):
@@ -79,44 +80,62 @@ class _BoundedBody:
 
 @contextmanager
 def open_pdf(url):
-    if not isinstance(url, str) or not pdf_source.valid_source_url(url):
-        raise ValueError("PDF download requires a direct plain HTTPS document URL")
-    parts = urlsplit(url)
     deadline = time.monotonic() + TOTAL_SECONDS
-    addresses = _public_addresses(parts.hostname)
-    _remaining(deadline)
-    # Connect to a previously validated numeric address, not a second DNS lookup.
-    connection = _PinnedHTTPS(parts.hostname, addresses[0], deadline)
-    try:
-        connection.request("GET", parts.path, headers={
-            "Accept": "application/pdf, application/octet-stream",
-            "Accept-Encoding": "identity", "Connection": "close",
-            "User-Agent": "The-Axiom PDF acquisition",
-        })
-        response = connection.getresponse()
+    visited = set()
+    for hop in range(MAX_REDIRECTS + 1):
+        if not isinstance(url, str) or not pdf_source.valid_source_url(url):
+            raise ValueError("PDF download requires a direct plain HTTPS document URL")
+        canonical = urlsplit(url)
+        key = (canonical.hostname, canonical.path)
+        if key in visited:
+            raise ValueError("PDF redirect loop")
+        visited.add(key)
+        _remaining(deadline)
+        addresses = _public_addresses(canonical.hostname)
+        _remaining(deadline)
+        # Each hop has its own DNS validation, numeric socket pin and TLS identity.
+        connection = _PinnedHTTPS(canonical.hostname, addresses[0], deadline)
         try:
-            _remaining(deadline)
-            if response.status != 200:
-                raise ValueError(f"PDF server returned HTTP {response.status}; redirects are not followed")
-            encoding = response.getheader("Content-Encoding")
-            if encoding and encoding.strip().lower() != "identity":
-                raise ValueError("Encoded PDF responses are unsupported")
-            lengths = response.headers.get_all("Content-Length", [])
-            transfers = response.headers.get_all("Transfer-Encoding", [])
-            if transfers and (lengths or transfers != ["chunked"]):
-                raise ValueError("Ambiguous PDF response framing")
-            length = None
-            if lengths:
-                if len(lengths) != 1 or not lengths[0].isascii() or not lengths[0].isdigit() or len(lengths[0]) > 10:
-                    raise ValueError("Invalid PDF response size")
-                length = int(lengths[0])
-                if not 0 < length <= pdf_source.MAX_BYTES:
-                    raise ValueError("PDF response size exceeds limits")
-            yield _BoundedBody(response, deadline, length)
+            connection.request("GET", canonical.path, headers={
+                "Accept": "application/pdf, application/octet-stream",
+                "Accept-Encoding": "identity", "Connection": "close",
+                "User-Agent": "The-Axiom PDF acquisition",
+            })
+            response = connection.getresponse()
+            try:
+                _remaining(deadline)
+                if response.status in (301, 302, 303, 307, 308):
+                    locations = response.headers.get_all("Location", [])
+                    if hop == MAX_REDIRECTS:
+                        raise ValueError("PDF redirect limit exceeded")
+                    if (len(locations) != 1 or not locations[0] or len(locations[0]) > 2048
+                            or any(ord(c) <= 32 or ord(c) >= 127 for c in locations[0])
+                            or "\\" in locations[0]):
+                        raise ValueError("Invalid PDF redirect location")
+                    url = urljoin(url, locations[0])
+                    continue
+                if response.status != 200:
+                    raise ValueError(f"PDF server returned HTTP {response.status}")
+                encoding = response.getheader("Content-Encoding")
+                if encoding and encoding.strip().lower() != "identity":
+                    raise ValueError("Encoded PDF responses are unsupported")
+                lengths = response.headers.get_all("Content-Length", [])
+                transfers = response.headers.get_all("Transfer-Encoding", [])
+                if transfers and (lengths or transfers != ["chunked"]):
+                    raise ValueError("Ambiguous PDF response framing")
+                length = None
+                if lengths:
+                    if len(lengths) != 1 or not lengths[0].isascii() or not lengths[0].isdigit() or len(lengths[0]) > 10:
+                        raise ValueError("Invalid PDF response size")
+                    length = int(lengths[0])
+                    if not 0 < length <= pdf_source.MAX_BYTES:
+                        raise ValueError("PDF response size exceeds limits")
+                yield _BoundedBody(response, deadline, length)
+                return
+            finally:
+                response.close()
         finally:
-            response.close()
-    finally:
-        connection.close()
+            connection.close()
 
 
 def download(source_id, url, *, expected_size=None, expected_sha256=None):

@@ -101,3 +101,71 @@ def test_direct_response_and_truncated_body(monkeypatch):
         assert body.read(10) == b"abc"
         with pytest.raises(ValueError, match="incomplete"):
             body.read(10)
+
+
+def test_redirects_revalidate_each_host_and_close_responses(monkeypatch):
+    resolved = []
+    requests = []
+    responses = [
+        Response(302, [("Location", "https://cdn.publisher.org/next.pdf")], b""),
+        Response(307, [("Location", "/final.pdf")], b""),
+        Response(200, [("Content-Length", "3")], b"abc"),
+    ]
+    def dns(host, *args, **kwargs):
+        resolved.append(host)
+        return addresses("8.8.8.8" if host == "publisher.org" else "1.1.1.1")
+    monkeypatch.setattr(socket, "getaddrinfo", dns)
+    class Connection:
+        def __init__(self, host, address, deadline):
+            self.host = host
+            assert address[-1][0] == ("8.8.8.8" if host == "publisher.org" else "1.1.1.1")
+        def request(self, method, path, headers):
+            requests.append((self.host, path))
+        def getresponse(self):
+            return responses[len(requests)-1]
+        def close(self):
+            pass
+    monkeypatch.setattr(pdf_transport, "_PinnedHTTPS", Connection)
+    with pdf_transport.open_pdf("https://publisher.org/guide.pdf") as body:
+        assert body.read(10) == b"abc"
+        assert responses[0].body.closed and responses[1].body.closed
+    assert resolved == ["publisher.org", "cdn.publisher.org", "cdn.publisher.org"]
+    assert requests == [("publisher.org", "/guide.pdf"), ("cdn.publisher.org", "/next.pdf"),
+                        ("cdn.publisher.org", "/final.pdf")]
+    assert all(response.body.closed for response in responses)
+
+
+@pytest.mark.parametrize("location", ["https://internal.publisher.org/private.pdf",
+                                     "https://publisher.org/guide.pdf",
+                                     "http://publisher.org/other.pdf",
+                                     "https://publisher.org/other.pdf?token=secret"])
+def test_redirect_rejects_unsafe_or_repeated_target(monkeypatch, location):
+    mock_response(monkeypatch, 302, [("Location", location)])
+    resolved = []
+    def dns(host, *args, **kwargs):
+        resolved.append(host)
+        return addresses("127.0.0.1" if host.startswith("internal.") else "8.8.8.8")
+    monkeypatch.setattr(socket, "getaddrinfo", dns)
+    with pytest.raises(ValueError):
+        with pdf_transport.open_pdf("https://publisher.org/guide.pdf"):
+            pytest.fail("Unsafe redirect must not yield a body")
+    assert resolved == (["publisher.org", "internal.publisher.org"] if location.startswith("https://internal.") else ["publisher.org"])
+
+
+def test_redirect_limit(monkeypatch):
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *args, **kwargs: addresses("8.8.8.8"))
+    paths = []
+    class Connection:
+        def __init__(self, *args):
+            pass
+        def request(self, method, path, headers):
+            paths.append(path)
+        def getresponse(self):
+            return Response(302, [("Location", f"/hop{len(paths)}.pdf")], b"")
+        def close(self):
+            pass
+    monkeypatch.setattr(pdf_transport, "_PinnedHTTPS", Connection)
+    with pytest.raises(ValueError, match="redirect limit"):
+        with pdf_transport.open_pdf("https://publisher.org/guide.pdf"):
+            pass
+    assert len(paths) == pdf_transport.MAX_REDIRECTS + 1
