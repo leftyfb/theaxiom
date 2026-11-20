@@ -171,7 +171,7 @@ def open_pdf(url, *, format_name="pdf", limit=None, total_seconds=None, offset=0
                     if not match:
                         raise ValueError("Missing or malformed ZIM Content-Range")
                     first, last, total_size = map(int, match.groups())
-                    if first != offset or last < first or total_size > limit or total_size <= last:
+                    if first != offset or last < first or total_size > limit or total_size != last + 1:
                         raise ValueError("ZIM Content-Range does not match saved offset")
                     if length is not None and length != last - first + 1:
                         raise ValueError("ZIM Content-Range length mismatch")
