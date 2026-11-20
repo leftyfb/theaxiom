@@ -163,10 +163,10 @@ def test_source_editor_group_membership_controls():
     groups = [{"kind": "tags", "group_id": "winter", "name": "Winter", "source_ids": ["fixture"]}]
     page = render([profile()], catalog=dict(sources=[profile()], revision=1, groups=groups))
     for kind in ("categories", "tags", "collections"):
-        assert f'data-editor-group="{kind}" multiple' in page
+        assert f'data-editor-group="{kind}"' in page
     assert 'id="editor-new-tag"' in page
-    assert '<option value="winter">Winter</option>' in page
-    assert "wasMember === option.selected" in page
+    assert 'value="winter" data-editor-member>Winter' in page
+    assert "wasMember === option.checked" in page
     assert "grouping changes may be incomplete" in page
 
 
@@ -186,3 +186,12 @@ def test_bulk_group_multi_select_and_replace_controls():
     assert 'id="group-replace"' in page
     assert 'id="bulk-group-fields" hidden' in page
     assert "Other grouping types are preserved." in page
+
+
+def test_compact_source_layout_and_checkbox_editor():
+    page = render([profile()])
+    assert '<details class="source-filters" id="source-filters-panel">' in page
+    assert page.index('id="source-filters-panel"') < page.index('id="source-select-mode"') < page.index('id="group-panel"') < page.index('id="source-cards"')
+    assert '<details id="source-editor-groups" hidden>' in page
+    assert 'No categories available.' in page
+    assert 'Add starter categories and tags' in page

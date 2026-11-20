@@ -64,6 +64,8 @@
     .admin-nav { display:flex; flex-wrap:wrap; gap:.5rem; margin-bottom:1.5rem; }
     .admin-nav a[aria-current="page"] { background:var(--dark); color:white; }
     .source-filters { background:var(--paper); border:1px solid var(--line); border-radius:.8rem; padding:1rem; margin:1rem 0; }
+    .source-filters summary { cursor:pointer; font-weight:700; color:var(--green); }
+    .source-list-toolbar { display:flex; align-items:center; gap:.75rem; flex-wrap:wrap; margin:.75rem 0; }
     .source-filters .editor-grid { grid-template-columns:repeat(auto-fit,minmax(145px,1fr)); margin:.5rem 0; }
     .source-card[hidden] { display:none !important; }
     .group-panel { background:var(--paper); border:1px solid var(--line); border-radius:.8rem; padding:1rem; margin:1rem 0; }
@@ -83,6 +85,14 @@
     .editor-grid textarea { min-height: 5rem; resize: vertical; }
     .editor-grid small { display: block; margin-top: .3rem; color: var(--muted); }
     #source-dialog :focus-visible { outline: 3px solid #f1b84b; outline-offset: 2px; }
+    #source-editor-groups { border:0; margin:1rem 0; padding:0; min-width:0; }
+    #source-editor-groups > summary { cursor:pointer; font-weight:700; color:var(--green); padding:.6rem 0; border-top:1px solid var(--line); }
+    .membership-section { border:1px solid var(--line); border-radius:.5rem; padding:.65rem; margin:.5rem 0; }
+    .membership-section summary { cursor:pointer; font-weight:650; color:var(--green); }
+    .membership-options { display:grid; grid-template-columns:repeat(auto-fit,minmax(145px,1fr)); gap:.35rem; max-height:12rem; overflow:auto; margin-top:.5rem; }
+    .membership-option { display:flex; align-items:center; gap:.45rem; padding:.3rem; overflow-wrap:anywhere; }
+    .membership-option input { flex:none; width:1.1rem; height:1.1rem; accent-color:var(--green); }
+    #editor-new-tag { width:100%; min-height:44px; padding:.6rem; font:inherit; border:1px solid #aac5b7; border-radius:.4rem; }
     #source-advanced { border-top: 1px solid var(--line); padding-top: .8rem; }
     #source-advanced summary { cursor: pointer; color: var(--green); font-weight: 650; padding: .5rem 0; }
     .editor-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: .5rem; margin-top: 1rem; }
@@ -246,42 +256,9 @@
     <h2 id="sources">Content sources</h2>
     <p class="source-note">Acquisition controls are disabled until safe download and recovery support is ready.</p>
     <button class="button" type="button" id="source-add">Add Source</button>
-    <button class="button" type="button" id="source-select-mode" aria-pressed="false">Select</button>
     <button class="button" type="button" id="source-guide-open">Content source guide</button>
     <p id="catalog-feedback" role="status" aria-live="polite">Candidate source metadata is not trusted or fetched.</p>
-    <details class="group-panel" id="group-panel" hidden>
-      <summary>Organize sources · Categories, collections &amp; tags</summary>
-      <p class="source-note">Select source cards to assign groupings. <a href="/admin/groupings">Manage categories, tags and collections separately.</a></p>
-      {% set groups = (catalog|default({})).groups|default([]) %}
-      <div class="editor-grid" id="bulk-group-fields" hidden>
-        <div><label for="group-kind">Grouping type</label><select id="group-kind"><option value="categories">Categories</option><option value="collections">Collections</option><option value="tags">Tags</option></select></div>
-        <div><label for="group-existing">Choose one or more groupings</label><select id="group-existing" multiple size="6">{% for group in groups|sort(attribute="name") %}<option data-kind="{{ group.kind }}" value="{{ group.group_id }}">{{ group.name }}</option>{% endfor %}</select></div>
-        <div class="editor-wide"><label for="group-name">New tag name</label><input id="group-name" maxlength="100" autocomplete="off"></div>
-      </div>
-      <div class="source-actions">
-        <button class="button" type="button" id="group-defaults" hidden>Add predefined categories</button>
-        <button class="button" type="button" id="group-create" hidden>Create group</button>
-        <button class="button" type="button" id="group-rename" hidden>Rename</button>
-        <button class="button" type="button" id="group-delete" hidden>Delete group</button>
-      </div>
-      <div id="bulk-selection" hidden>
-      <div class="source-actions">
-        <button class="button" type="button" id="group-select-all">Select visible sources</button>
-        <button class="button" type="button" id="group-clear">Clear selection</button>
-      </div>
-      <div class="source-actions" id="bulk-actions" hidden>
-        <button class="button" type="button" id="bulk-publish">Publish selected</button>
-        <button class="button" type="button" id="bulk-unpublish">Unpublish selected</button>
-        <button class="button" type="button" id="bulk-remove">Remove selected sources</button>
-        <button class="button" type="button" id="group-assign">Add groupings</button>
-        <button class="button" type="button" id="group-unassign">Remove groupings</button>
-        <button class="button" type="button" id="group-replace">Replace groupings</button>
-        <button class="button" type="button" id="group-create-assign">Create tag &amp; assign</button>
-      </div>
-      <p id="group-count" class="source-note" aria-live="polite">0 selected</p>
-      </div>
-      <p id="group-feedback" role="status" aria-live="polite"></p>
-    </details>
+    {% set groups = (catalog|default({})).groups|default([]) %}
     <dialog id="source-dialog" aria-labelledby="source-dialog-title">
       <form id="source-form">
         <h3 id="source-dialog-title">Add source metadata</h3>
@@ -296,22 +273,26 @@
           <div><label for="catalog-format">Content format</label><select id="catalog-format" name="format"><option value="unspecified">Auto / not yet specified</option><option value="zim">Kiwix / ZIM</option><option value="pdf">PDF</option></select></div>
           <div class="editor-wide"><label for="catalog-description">Description (optional)</label><textarea id="catalog-description" name="description" maxlength="512"></textarea></div>
         </div>
-        <fieldset id="source-editor-groups" hidden>
-          <legend>Groupings</legend>
-          <p class="source-note">Choose memberships for this source. Other sources are not affected.</p>
+        <details id="source-editor-groups" hidden>
+          <summary>Groupings <span id="editor-group-count" class="source-note"></span></summary>
+          <p class="source-note">Choose memberships for this source. <a href="/admin/groupings">Manage grouping options</a>.</p>
           {% for kind in ['categories','tags','collections'] %}
-          <div class="editor-wide">
-            <label for="editor-{{ kind }}">{{ kind|capitalize }}</label>
-            <select id="editor-{{ kind }}" data-editor-group="{{ kind }}" multiple size="5">
+          <details class="membership-section" data-editor-group="{{ kind }}">
+            <summary>{{ kind|capitalize }} <span data-membership-count></span></summary>
+            <div class="membership-options">
             {% for group in groups|selectattr("kind","equalto",kind)|sort(attribute="name") %}
-              <option value="{{ group.group_id }}">{{ group.name }}</option>
+              <label class="membership-option"><input type="checkbox" value="{{ group.group_id }}" data-editor-member>{{ group.name }}</label>
+            {% else %}
+              <p class="source-note">No {{ kind }} available. <a href="/admin/groupings">Manage groupings</a>.</p>
             {% endfor %}
-            </select>
-          </div>
+            </div>
+            {% if kind == 'tags' %}
+            <label for="editor-new-tag">Create and assign a new tag (optional)</label>
+            <input id="editor-new-tag" maxlength="100" autocomplete="off">
+            {% endif %}
+          </details>
           {% endfor %}
-          <label for="editor-new-tag">Create and assign a new tag (optional)</label>
-          <input id="editor-new-tag" maxlength="100" autocomplete="off">
-        </fieldset>
+        </details>
         <details id="source-advanced">
           <summary>Advanced Details</summary>
           <p class="source-note">Optional publisher-supplied metadata. These values alone do not establish verification or enable acquisition.</p>
@@ -350,7 +331,7 @@
 </section>
       <form method="dialog"><button class="button">Close guide</button></form>
     </dialog>
-    <section class="source-filters" aria-label="Filter and sort sources">
+    <details class="source-filters" id="source-filters-panel"><summary>Search, filter &amp; sort sources</summary>
       <div class="editor-grid">
         <div class="editor-wide"><label for="source-filter-search">Search source names</label><input id="source-filter-search" type="search" placeholder="Search sources…" maxlength="512"></div>
         <div><label for="source-filter-publication">Publication</label><select id="source-filter-publication"><option value="">All</option><option value="published">Published</option><option value="unpublished">Unpublished</option><option value="unknown">Unknown</option></select></div>
@@ -363,7 +344,41 @@
       </div>
       <div class="source-actions"><button class="button" type="button" id="source-filter-reset">Clear filters</button><button class="button" type="button" id="source-filter-reorder">Refresh order</button></div>
       <p id="source-filter-count" class="source-note" role="status"></p>
-    </section>
+    </details>
+    <div class="source-list-toolbar"><button class="button" type="button" id="source-select-mode" aria-pressed="false">Select</button><span id="source-list-count" class="source-note" role="status"></span></div>
+    <details class="group-panel" id="group-panel" hidden>
+      <summary>Organize sources · Categories, collections &amp; tags</summary>
+      <p class="source-note">Select source cards to assign groupings. <a href="/admin/groupings">Manage categories, tags and collections separately.</a></p>
+      <div class="editor-grid" id="bulk-group-fields" hidden>
+        <div><label for="group-kind">Grouping type</label><select id="group-kind"><option value="categories">Categories</option><option value="collections">Collections</option><option value="tags">Tags</option></select></div>
+        <div><label for="group-existing">Choose groupings (Ctrl/Command to select multiple)</label><select id="group-existing" multiple size="6">{% for group in groups|sort(attribute="name") %}<option data-kind="{{ group.kind }}" value="{{ group.group_id }}">{{ group.name }}</option>{% endfor %}</select></div>
+        <div class="editor-wide"><label for="group-name">New tag name</label><input id="group-name" maxlength="100" autocomplete="off"></div>
+      </div>
+      <div class="source-actions">
+        <button class="button" type="button" id="group-defaults" hidden>Add predefined categories</button>
+        <button class="button" type="button" id="group-create" hidden>Create group</button>
+        <button class="button" type="button" id="group-rename" hidden>Rename</button>
+        <button class="button" type="button" id="group-delete" hidden>Delete group</button>
+      </div>
+      <div id="bulk-selection" hidden>
+      <div class="source-actions">
+        <button class="button" type="button" id="group-select-all">Select visible sources</button>
+        <button class="button" type="button" id="group-clear">Clear selection</button>
+      </div>
+      <div class="source-actions" id="bulk-actions" hidden>
+        <button class="button" type="button" id="bulk-publish">Publish selected</button>
+        <button class="button" type="button" id="bulk-unpublish">Unpublish selected</button>
+        <button class="button" type="button" id="bulk-remove">Remove selected sources</button>
+        <button class="button" type="button" id="group-assign">Add groupings</button>
+        <button class="button" type="button" id="group-unassign">Remove groupings</button>
+        <button class="button" type="button" id="group-replace">Replace groupings</button>
+        <button class="button" type="button" id="group-create-assign">Create tag &amp; assign</button>
+      </div>
+      <p id="group-count" class="source-note" aria-live="polite">0 selected</p>
+      </div>
+      <p id="group-feedback" role="status" aria-live="polite"></p>
+      {% if not groups %}<p class="source-note">No groupings available yet. <a href="/admin/groupings">Add starter categories and tags</a>.</p>{% endif %}
+    </details>
     <p id="source-filter-empty" class="empty" hidden>No sources match the selected filters.</p>
     <div id="source-cards">
     {% for source in (catalog|default({})).sources|default([]) %}
@@ -518,6 +533,7 @@
         document.getElementById('group-count').textContent = ids.length + ' selected (' + groupChecks.filter(item => item.checked && item.closest('.source-card').hidden).length + ' hidden by filters)';
         document.getElementById('group-defaults').hidden = true;
         document.getElementById('group-create-assign').hidden = kind !== 'tags';
+        groupName.closest('.editor-wide').hidden = kind !== 'tags';
         for (const action of ['rename','delete','assign','unassign']) {
           document.getElementById('group-' + action).disabled = bulkBusy || !groupExisting.selectedOptions.length || !ids.length;
         }
@@ -664,6 +680,16 @@
       const idDisplay = document.getElementById('catalog-id-display');
       const editorGroups = {{ groups|tojson }};
       const editorGroupControls = Array.from(form.querySelectorAll('[data-editor-group]'));
+      function updateMembershipCounts() {
+        let total = 0;
+        for (const control of editorGroupControls) {
+          const count = control.querySelectorAll('[data-editor-member]:checked').length;
+          total += count;
+          control.querySelector('[data-membership-count]').textContent = '(' + count + ' selected)';
+        }
+        document.getElementById('editor-group-count').textContent = '(' + total + ' selected)';
+      }
+      editorGroupControls.forEach(control => control.addEventListener('change', updateMembershipCounts));
       let manualFormat = false;
       const uploadFile = document.getElementById("source-upload-file");
       let automaticTitle = false;
@@ -709,12 +735,15 @@
         document.getElementById('source-dialog-title').textContent = card ? 'Edit source profile' : 'Add source profile';
         form.dataset.operation = operation;
         document.getElementById('source-editor-groups').hidden = !card;
+        document.getElementById('source-editor-groups').open = false;
         for (const control of editorGroupControls) {
-          for (const option of control.options) {
-            option.selected = !!card && editorGroups.some(g => g.kind === control.dataset.editorGroup &&
+          control.open = false;
+          for (const option of control.querySelectorAll('[data-editor-member]')) {
+            option.checked = !!card && editorGroups.some(g => g.kind === control.dataset.editorGroup &&
               g.group_id === option.value && g.source_ids.includes(card.dataset.sourceId));
           }
         }
+        updateMembershipCounts();
         if (card) {
           input('source_id').value = card.dataset.sourceId;
           for (const field of fieldsToEdit) {
@@ -733,11 +762,11 @@
       async function updateEditorGroups(source_id, currentRevision) {
         for (const control of editorGroupControls) {
           const kind = control.dataset.editorGroup;
-          for (const option of control.options) {
+          for (const option of control.querySelectorAll('[data-editor-member]')) {
             const group = editorGroups.find(g => g.kind === kind && g.group_id === option.value);
             const wasMember = group.source_ids.includes(source_id);
-            if (wasMember === option.selected) continue;
-            const result = await groupPost({operation:option.selected ? 'add-members' : 'remove-members',
+            if (wasMember === option.checked) continue;
+            const result = await groupPost({operation:option.checked ? 'add-members' : 'remove-members',
               kind, group_id:option.value, source_ids:[source_id]}, currentRevision);
             currentRevision = result.revision;
           }
