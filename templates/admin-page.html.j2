@@ -66,6 +66,14 @@
     .source-filters { background:var(--paper); border:1px solid var(--line); border-radius:.8rem; padding:1rem; margin:1rem 0; }
     .source-filters > summary, .group-panel > summary, #source-editor-groups > summary, .membership-section > summary, #source-advanced > summary { display:list-item; list-style-position:inside; }
     .source-filters summary { cursor:pointer; font-weight:700; color:var(--green); }
+    .source-selection-bar { display:flex; align-items:center; gap:.75rem; padding:.35rem .8rem; margin:.35rem 0; color:var(--muted); flex-wrap:wrap; }
+    .source-selection-bar label { display:flex; align-items:center; gap:.45rem; cursor:pointer; font-size:.9rem; }
+    .source-selection-bar input { width:1.2rem; height:1.2rem; margin:0; accent-color:var(--green); }
+    .source-filter-toggle { margin-left:auto; display:inline-flex; align-items:center; justify-content:center; gap:.35rem; min-height:44px; }
+    .source-filter-toggle[aria-expanded="true"] { background:var(--dark); color:white; }
+    .source-filter-toggle svg { width:1.2rem; height:1.2rem; flex:none; }
+    .source-search-row { display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; }
+    .source-search-row input { margin-left:auto; width:min(100%,20rem); min-height:44px; padding:.55rem .7rem; font:inherit; border:1px solid #aac5b7; border-radius:.4rem; background:white; color:var(--dark); }
     .source-list-toolbar { display:flex; align-items:center; gap:.75rem; flex-wrap:wrap; margin:.75rem 0; }
     .source-filters .editor-grid { grid-template-columns:repeat(auto-fit,minmax(145px,1fr)); margin:.5rem 0; }
     .source-card[hidden] { display:none !important; }
@@ -256,8 +264,11 @@
     <h1>Manage offline sources</h1>
     <h2 id="sources">Content sources</h2>
     <p class="source-note">Acquisition controls are disabled until safe download and recovery support is ready.</p>
-    <button class="button" type="button" id="source-add">Add Source</button>
-    <button class="button" type="button" id="source-guide-open">Content source guide</button>
+    <div class="source-search-row">
+      <button class="button" type="button" id="source-add">Add Source</button>
+      <button class="button" type="button" id="source-guide-open">Content source guide</button>
+      <input id="source-filter-search" type="search" aria-label="Search source names" placeholder="Search sources…" maxlength="512">
+    </div>
     <p id="catalog-feedback" role="status" aria-live="polite">Candidate source metadata is not trusted or fetched.</p>
     {% set groups = (catalog|default({})).groups|default([]) %}
     <dialog id="source-dialog" aria-labelledby="source-dialog-title">
@@ -332,27 +343,9 @@
 </section>
       <form method="dialog"><button class="button">Close guide</button></form>
     </dialog>
-    <details class="source-filters" id="source-filters-panel"><summary>Search, filter &amp; sort sources</summary>
-      <div class="editor-grid">
-        <div class="editor-wide"><label for="source-filter-search">Search source names</label><input id="source-filter-search" type="search" placeholder="Search sources…" maxlength="512"></div>
-        <div><label for="source-filter-publication">Publication</label><select id="source-filter-publication"><option value="">All</option><option value="published">Published</option><option value="unpublished">Unpublished</option><option value="unknown">Unknown</option></select></div>
-        <div><label for="source-filter-download">Download</label><select id="source-filter-download"><option value="">All</option><option value="downloaded">Downloaded</option><option value="not-downloaded">Not downloaded</option><option value="unknown">Unknown / unverified</option></select></div>
-        <div><label for="source-filter-format">Format</label><select id="source-filter-format"><option value="">All formats</option>{% for source_format in (catalog|default({})).sources|default([])|map(attribute="configuration.format")|unique|sort %}<option value="{{ source_format }}">{{ source_format|upper }}</option>{% endfor %}</select></div>
-        {% for kind,label in [("categories","Category"),("collections","Collection"),("tags","Tag")] %}
-        <div><label for="source-filter-{{ kind }}">{{ label }}</label><select id="source-filter-{{ kind }}"><option value="">All</option>{% for group in groups|selectattr("kind","equalto",kind)|sort(attribute="name") %}<option value="{{ group.group_id }}">{{ group.name }}</option>{% endfor %}</select></div>
-        {% endfor %}
-        <div><label for="source-filter-sort">Sort by</label><select id="source-filter-sort"><option value="status">Published, downloaded, then rest</option><option value="alpha">Name A–Z</option></select></div>
-      </div>
-      <div class="source-actions"><button class="button" type="button" id="source-filter-reset">Clear filters</button><button class="button" type="button" id="source-filter-reorder">Refresh order</button></div>
-      <p id="source-filter-count" class="source-note" role="status"></p>
-    </details>
     <div class="source-list-toolbar"><button class="button" type="button" id="source-select-mode" aria-pressed="false">Select</button><span id="source-list-count" class="source-note" role="status"></span></div>
     <section class="group-panel" id="bulk-selection" hidden>
-      <div class="source-list-toolbar"><strong>Selected sources</strong><span id="group-count" class="source-note" aria-live="polite">0 selected</span></div>
-      <div class="source-actions">
-        <button class="button" type="button" id="group-select-all">Select visible sources</button>
-        <button class="button" type="button" id="group-clear">Clear selection</button>
-      </div>
+      <strong>Selected source actions</strong>
       <div class="source-actions" id="bulk-actions" hidden>
         <button class="button" type="button" id="bulk-publish">Publish</button>
         <button class="button" type="button" id="bulk-unpublish">Unpublish</button>
@@ -383,6 +376,24 @@
       <p id="group-feedback" role="status" aria-live="polite"></p>
       {% if not groups %}<p class="source-note">No groupings available yet. <a href="/admin/groupings">Add starter categories and tags</a>.</p>{% endif %}
     </details>
+    <div class="source-selection-bar" id="source-selection-bar">
+      <label id="select-all-label" hidden><input type="checkbox" id="group-select-all" aria-label="Select all visible sources">Select all</label>
+      <span id="group-count" class="source-note" aria-live="polite" hidden>0 selected</span>
+      <span id="source-filter-count" class="source-note" role="status"></span>
+      <button class="button source-filter-toggle" type="button" id="source-filter-toggle" aria-label="Filter and sort sources" title="Filter and sort sources" aria-controls="source-filters-panel" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg><span id="source-filter-active" hidden></span></button>
+    </div>
+    <section class="source-filters" id="source-filters-panel" aria-label="Filter and sort sources" hidden>
+      <div class="editor-grid">
+        <div><label for="source-filter-publication">Publication</label><select id="source-filter-publication"><option value="">All</option><option value="published">Published</option><option value="unpublished">Unpublished</option><option value="unknown">Unknown</option></select></div>
+        <div><label for="source-filter-download">Download</label><select id="source-filter-download"><option value="">All</option><option value="downloaded">Downloaded</option><option value="not-downloaded">Not downloaded</option><option value="unknown">Unknown / unverified</option></select></div>
+        <div><label for="source-filter-format">Format</label><select id="source-filter-format"><option value="">All formats</option>{% for source_format in (catalog|default({})).sources|default([])|map(attribute="configuration.format")|unique|sort %}<option value="{{ source_format }}">{{ source_format|upper }}</option>{% endfor %}</select></div>
+        {% for kind,label in [("categories","Category"),("collections","Collection"),("tags","Tag")] %}
+        <div><label for="source-filter-{{ kind }}">{{ label }}</label><select id="source-filter-{{ kind }}"><option value="">All</option>{% for group in groups|selectattr("kind","equalto",kind)|sort(attribute="name") %}<option value="{{ group.group_id }}">{{ group.name }}</option>{% endfor %}</select></div>
+        {% endfor %}
+        <div><label for="source-filter-sort">Sort by</label><select id="source-filter-sort"><option value="status">Published, downloaded, then rest</option><option value="alpha">Name A–Z</option></select></div>
+      </div>
+      <div class="source-actions"><button class="button" type="button" id="source-filter-reset">Clear filters</button><button class="button" type="button" id="source-filter-reorder">Refresh order</button></div>
+    </section>
     <p id="source-filter-empty" class="empty" hidden>No sources match the selected filters.</p>
     <div id="source-cards">
     {% for source in (catalog|default({})).sources|default([]) %}
@@ -504,6 +515,8 @@
       const groupChecks = Array.from(document.querySelectorAll('[data-group-select]'));
       const groupButtons = Array.from(document.querySelectorAll('#group-panel button, #bulk-selection button'));
       const selectMode = document.getElementById('source-select-mode');
+      const selectAll = document.getElementById('group-select-all');
+      const visibleChecks = () => groupChecks.filter(item => !item.closest('.source-card').hidden);
       let selecting = selectMode.getAttribute('aria-pressed') === 'true';
       let bulkBusy = false;
       const selectedIds = () => selecting ? groupChecks.filter(item => item.checked).map(item => item.value) : [];
@@ -514,7 +527,8 @@
           item.closest('.group-select').hidden = !selecting;
           if (!selecting) item.checked = false;
         });
-        document.getElementById('bulk-selection').hidden = !selecting;
+        document.getElementById('select-all-label').hidden = !selecting;
+        document.getElementById('group-count').hidden = !selecting;
         document.getElementById('group-panel').open = false;
         groupControls();
       }
@@ -525,6 +539,13 @@
       });
       function groupControls() {
         const kind = groupKind.value, ids = selectedIds();
+        const visible = visibleChecks();
+        const checkedVisible = visible.filter(item => item.checked).length;
+        const hiddenSelected = ids.length - checkedVisible;
+        selectAll.checked = visible.length > 0 && checkedVisible === visible.length;
+        selectAll.indeterminate = !selectAll.checked && ids.length > 0;
+        selectAll.disabled = bulkBusy || (!visible.length && !ids.length);
+        document.getElementById('bulk-selection').hidden = !ids.length;
         document.getElementById('bulk-actions').hidden = !ids.length;
         document.getElementById('bulk-group-actions').hidden = !ids.length;
         document.getElementById('group-panel').hidden = !ids.length;
@@ -535,7 +556,7 @@
           option.disabled = option.hidden;
         }
         for (const option of groupExisting.options) if (option.disabled) option.selected = false;
-        document.getElementById('group-count').textContent = ids.length + ' selected (' + groupChecks.filter(item => item.checked && item.closest('.source-card').hidden).length + ' hidden by filters)';
+        document.getElementById('group-count').textContent = ids.length + ' selected' + (hiddenSelected ? ' (' + hiddenSelected + ' hidden by filters)' : '');
         document.getElementById('group-defaults').hidden = true;
         document.getElementById('group-create-assign').hidden = kind !== 'tags';
         groupName.closest('.editor-wide').hidden = kind !== 'tags';
@@ -551,12 +572,13 @@
       });
       groupKind.addEventListener('change', () => { groupExisting.value = ''; groupControls(); });
       groupExisting.addEventListener('change', groupControls);
-      document.getElementById('group-select-all').addEventListener('click', () => {
-        groupChecks.forEach(item => { if (!item.closest('.source-card').hidden) item.checked = true; });
-        groupControls();
-      });
-      document.getElementById('group-clear').addEventListener('click', () => {
-        groupChecks.forEach(item => { item.checked = false; });
+      selectAll.addEventListener('change', () => {
+        if (bulkBusy) { groupControls(); return; }
+        if (selectAll.checked && visibleChecks().length) {
+          visibleChecks().forEach(item => { item.checked = true; });
+        } else {
+          groupChecks.forEach(item => { item.checked = false; });
+        }
         groupControls();
       });
       function groupId() {
@@ -592,6 +614,7 @@
           payload = {operation,kind,group_id:'bulk',group_ids,source_ids:ids};
         } else payload.source_ids = ids;
         bulkBusy = true;
+        selectAll.disabled = true;
         selectMode.disabled = true;
         groupChecks.forEach(item => item.disabled = true);
         groupButtons.forEach(button => { button.disabled = true; });
@@ -622,6 +645,7 @@
         const suffix = action === 'remove' ? ' Catalog entries will be removed and unpublished; installed files will not be deleted.' : action === 'publish' ? ' Only eligible sources with existing rights approval can be published.' : ' Installed files will be retained.';
         if (!window.confirm(verb + ' ' + ids.length + ' selected sources?' + suffix)) return;
         bulkBusy = true;
+        selectAll.disabled = true;
         selectMode.disabled = true;
         groupChecks.forEach(item => item.disabled = true);
         groupButtons.forEach(button => button.disabled = true);
@@ -913,6 +937,12 @@
       const groups = {{ ((catalog|default({})).groups|default([]))|tojson }};
       const values = () => Object.fromEntries(fields.map(key => [key,nodes[key].value]));
       const defaults = {sort:'status'};
+      const filterToggle = document.getElementById('source-filter-toggle');
+      const filterPanel = document.getElementById('source-filters-panel');
+      filterToggle.addEventListener('click', () => {
+        filterPanel.hidden = !filterPanel.hidden;
+        filterToggle.setAttribute('aria-expanded', String(!filterPanel.hidden));
+      });
       function rank(card) {
         return card.dataset.filterPublication === 'published' ? 0 : card.dataset.filterDownload === 'downloaded' ? 1 : 2;
       }
@@ -938,6 +968,10 @@
         }
         const count = document.getElementById('source-filter-count');
         count.textContent = visible + ' of ' + cards.length + ' sources';
+        const active = fields.filter(key => key !== 'search' && v[key] !== (defaults[key] || '')).length;
+        const indicator = document.getElementById('source-filter-active');
+        indicator.hidden = !active;
+        indicator.textContent = String(active);
         document.getElementById('source-filter-empty').hidden = visible !== 0 || cards.length === 0;
         document.dispatchEvent(new Event('axiom-source-filters-changed'));
       }

@@ -190,8 +190,8 @@ def test_bulk_group_multi_select_and_replace_controls():
 
 def test_compact_source_layout_and_checkbox_editor():
     page = render([profile()])
-    assert '<details class="source-filters" id="source-filters-panel">' in page
-    assert page.index('id="source-filters-panel"') < page.index('id="source-select-mode"') < page.index('id="group-panel"') < page.index('id="source-cards"')
+    assert '<section class="source-filters" id="source-filters-panel" aria-label="Filter and sort sources" hidden>' in page
+    assert page.index('id="source-filter-search"') < page.index('id="source-select-mode"') < page.index('id="group-panel"') < page.index('id="source-selection-bar"') < page.index('id="source-filters-panel"') < page.index('id="source-cards"')
     assert '<details id="source-editor-groups" hidden>' in page
     assert 'No categories available.' in page
     assert 'Add starter categories and tags' in page
@@ -206,3 +206,13 @@ def test_bulk_lifecycle_controls_separate_from_grouping_panel():
     assert selection < page.index('id="bulk-remove"') < organize
     assert organize < page.index('id="group-assign"') < page.index('id="source-cards"')
     assert 'id="bulk-group-actions" hidden' in page
+
+
+def test_minimal_source_list_toolbar():
+    page = render([profile()])
+    assert 'type="checkbox" id="group-select-all"' in page
+    assert 'id="group-clear"' not in page
+    assert 'id="source-filter-toggle"' in page
+    assert 'aria-controls="source-filters-panel" aria-expanded="false"' in page
+    assert 'selectAll.indeterminate' in page
+    assert 'id="source-filter-search" type="search"' in page
