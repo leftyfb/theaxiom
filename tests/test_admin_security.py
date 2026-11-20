@@ -182,8 +182,9 @@ class HTTPAuthTests(unittest.TestCase):
         self.assertIn("HttpOnly", headers["Set-Cookie"])
         self.assertIn("SameSite=Strict", headers["Set-Cookie"])
         cookie = headers["Set-Cookie"].split(";", 1)[0]
-        status, _, html = self.request("/admin", headers={"Cookie": cookie})
+        status, page_headers, html = self.request("/admin", headers={"Cookie": cookie})
         self.assertEqual(status, 200)
+        self.assertIn("no-store", page_headers["Cache-Control"])
         csrf = re.search(rb'<meta name="theaxiom-csrf" content="([A-Za-z0-9_-]+)"', html)
         self.assertIsNotNone(csrf)
         token = csrf.group(1).decode()
