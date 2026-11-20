@@ -55,7 +55,15 @@
     .source-card > summary .compact-publication { display:block; }
     .source-card > summary .badge { max-width:11rem; text-align:right; }
     .source-card > summary .summary-progress { display:block; max-width:12rem; height:.45rem; margin-top:.25rem; }
-    @media(max-width:550px) { .source-card > summary { flex-wrap:wrap; gap:.4rem; } .source-card > summary .badge { margin-left:auto; max-width:100%; } .source-card > summary .source-symbol { width:2rem; } }
+    @media(max-width:550px) {
+      .source-card > summary { flex-wrap:wrap; gap:.4rem; align-items:center; }
+      .source-card > summary .source-symbol { width:2rem; }
+      /* Reserve a full first row for the icon and title, even during transfers. */
+      .source-card > summary > div { flex:1 1 calc(100% - 2.5rem); min-width:0; }
+      .source-card > summary .badge { margin-left:2.4rem; max-width:calc(100% - 4rem); }
+      .source-card > summary .summary-progress { flex:1 1 100%; max-width:none; margin:.2rem 0 0 2.4rem; }
+      .source-card > summary::after { margin-left:auto; }
+    }
     .source-card > summary::-webkit-details-marker { display: none; }
     .source-card > summary::after { content: '▾'; color: var(--green); margin-left: .25rem; }
     .source-card[open] > summary::after { content: '▴'; }

@@ -322,3 +322,13 @@ def test_zim_download_feedback_is_local_and_does_not_reload():
     assert "Starting download" in handler
     assert "localFeedback.textContent = error.message" in handler
     assert "reloadSources()" not in handler
+
+
+def test_mobile_download_progress_does_not_crush_title():
+    page = render([profile("ready", title="FEMA / Ready.gov", format="zim",
+                           source_url="https://download.kiwix.org/zim/zimit/ready.gov_en_all_2026-10.zim")])
+    assert 'data-field="summary-progress"' in page
+    # The progress bar must consume its own row rather than shrinking the title.
+    assert ".source-card > summary > div { flex:1 1 calc(100% - 2.5rem); min-width:0; }" in page
+    assert ".source-card > summary .summary-progress { flex:1 1 100%; max-width:none;" in page
+    assert ".source-card > summary .badge { margin-left:2.4rem;" in page
