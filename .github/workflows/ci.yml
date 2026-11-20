@@ -29,6 +29,8 @@ jobs:
         run: python scripts/test_kiwix_live.py
       - name: Validate actual nginx site grammar in an isolated CI configuration
         run: python scripts/test_nginx_syntax.py
+      - name: Verify real Nginx publication gate in isolated CI
+        run: python scripts/test_nginx_auth.py
       - name: Upload test summary
         if: always()
         uses: actions/upload-artifact@v4
