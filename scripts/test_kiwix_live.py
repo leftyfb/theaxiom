@@ -22,7 +22,7 @@ from theaxiom import zim_catalog, zim_reader_probe
 def serve(port, manifest):
     return subprocess.Popen(
         ["kiwix-serve", "--address=127.0.0.1", f"--port={port}",
-         "--urlRootLocation=/zim/", "--library", str(manifest)],
+         "--urlRootLocation=/zim/", "--monitorLibrary", "--library", str(manifest)],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
     )
 
@@ -91,6 +91,48 @@ def main():
             finally:
                 connection.close()
             print(f"PASS real ZIM OPDS and viewer: {expected}")
+            # The live service must pick up a second book without a restart,
+            # then remove the first when publication changes.
+            next_source = base / "sample-second.zim"
+            subprocess.run(
+                ["zimwriterfs", "--welcome=index.html", "--illustration=logo.png",
+                 "--language=eng", "--name=axiom-second", "--title=Second Fixture",
+                 "--description=Another isolated Kiwix smoke fixture",
+                 "--creator=Axiom", "--publisher=Axiom",
+                 str(pages), str(next_source)],
+                check=True, timeout=60,
+            )
+            second_digest = hashlib.sha256(next_source.read_bytes()).hexdigest()
+            second_archive = base / ("second." + second_digest + ".zim")
+            shutil.move(next_source, second_archive)
+            second = {"id": "second", "path": str(second_archive),
+                      "title": "Second Test", "language": "eng"}
+            with patch.object(zim_catalog, "verified_books", return_value=[book, second]):
+                updated = zim_catalog.render_xml([])
+            newer = base / "library-next.xml"
+            newer.write_bytes(updated)
+            newer.replace(manifest)
+            second_name = zim_catalog.content_name(second)
+            deadline = time.monotonic() + 20
+            while time.monotonic() < deadline:
+                if zim_reader_probe.listed_book_ids(port=port) == {expected, second_name}:
+                    break
+                time.sleep(0.5)
+            else:
+                raise RuntimeError("Kiwix failed to automatically load the newly published second book")
+            with patch.object(zim_catalog, "verified_books", return_value=[second]):
+                updated = zim_catalog.render_xml([])
+            newer.write_bytes(updated)
+            newer.replace(manifest)
+            deadline = time.monotonic() + 20
+            while time.monotonic() < deadline:
+                if zim_reader_probe.listed_book_ids(port=port) == {second_name}:
+                    break
+                time.sleep(0.5)
+            else:
+                raise RuntimeError("Kiwix failed to automatically remove the unpublished first book")
+            print("PASS real Kiwix dynamic two-book publish and unpublish reload")
+
         finally:
             process.terminate()
             try:
