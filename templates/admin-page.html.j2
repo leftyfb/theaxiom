@@ -70,6 +70,7 @@
     .group-panel summary { cursor:pointer; font-weight:700; color:var(--green); }
     .group-membership { font-size:.8rem; color:var(--muted); overflow-wrap:anywhere; }
     .group-select { display:flex; align-items:center; gap:.35rem; font-size:.8rem; color:var(--muted); }
+    .group-select[hidden], [hidden] { display:none !important; }
     .group-select input { width:1.2rem; height:1.2rem; accent-color:var(--green); }
     #source-dialog, #source-guide { width: min(42rem, calc(100% - 2rem)); max-height: calc(100% - 2rem); overflow: auto; border: 1px solid var(--line); border-radius: .85rem; padding: clamp(1rem, 4vw, 1.75rem); color: var(--dark); background: var(--paper); }
     #source-dialog::backdrop, #source-guide::backdrop { background: rgba(18,60,50,.55); }
@@ -162,6 +163,7 @@
     <h2 id="sources">Content sources</h2>
     <p class="source-note">Acquisition controls are disabled until safe download and recovery support is ready.</p>
     <button class="button" type="button" id="source-add">Add Source</button>
+    <button class="button" type="button" id="source-select-mode" aria-pressed="false">Select</button>
     <button class="button" type="button" id="source-guide-open">Content source guide</button>
     <p id="catalog-feedback" role="status" aria-live="polite">Candidate source metadata is not trusted or fetched.</p>
     <details class="group-panel" id="group-panel">
@@ -179,14 +181,21 @@
         <button class="button" type="button" id="group-rename">Rename</button>
         <button class="button" type="button" id="group-delete">Delete group</button>
       </div>
+      <div id="bulk-selection" hidden>
       <div class="source-actions">
         <button class="button" type="button" id="group-select-all">Select visible sources</button>
         <button class="button" type="button" id="group-clear">Clear selection</button>
+      </div>
+      <div class="source-actions" id="bulk-actions" hidden>
+        <button class="button" type="button" id="bulk-publish">Publish selected</button>
+        <button class="button" type="button" id="bulk-unpublish">Unpublish selected</button>
+        <button class="button" type="button" id="bulk-remove">Remove selected sources</button>
         <button class="button" type="button" id="group-assign">Add selected to group</button>
         <button class="button" type="button" id="group-unassign">Remove selected from group</button>
         <button class="button" type="button" id="group-create-assign">Create tag &amp; assign</button>
       </div>
       <p id="group-count" class="source-note" aria-live="polite">0 selected</p>
+      </div>
       <p id="group-feedback" role="status" aria-live="polite"></p>
     </details>
     <dialog id="source-dialog" aria-labelledby="source-dialog-title">
@@ -262,7 +271,7 @@
       {% set publication_label = 'Publication status unavailable' if pub.error else 'Published · available in library' if pub.published else 'Enabled · reader unavailable' if pub.enabled else 'Unpublished · ready to publish' if pub.serving else 'Unpublished · ' + pub.publication_reason if pub.publication_reason else 'Unpublished · reader not ready' %}
       <details class="source-card" data-source-id="{{ source.source_id }}" data-filter-title="{{ source.profile.title }}" data-filter-format="{{ source.configuration.format }}" data-filter-publication="{{ source.publication_filter|default('unknown') }}" data-filter-download="{{ source.download_filter|default('unknown') }}"{% for name in editable_fields %} data-catalog-{{ name|replace('_', '-') }}="{{ source.profile.get(name, source.configuration.get(name, '')) }}"{% endfor %}>
         <summary class="source-header">
-          <label class="group-select"><input type="checkbox" data-group-select value="{{ source.source_id }}" aria-label="Select {{ source.profile.title }} for grouping">Select</label>
+          <label class="group-select" hidden><input type="checkbox" data-group-select value="{{ source.source_id }}" aria-label="Select {{ source.profile.title }} for grouping">Select</label>
           <div>
             <h3>{{ source.profile.title }}</h3>
             <p class="source-subtitle">{{ source.configuration.format }}{% if source.profile.description %} · {{ source.profile.description }}{% endif %}</p>
@@ -351,6 +360,7 @@
           });
           document.querySelectorAll("[data-group-select]").forEach(item => { item.checked = (saved.selected || []).includes(item.value); });
           document.getElementById("group-panel").open = !!saved.groupsOpen;
+          document.getElementById("source-select-mode").setAttribute("aria-pressed", String(!!saved.selecting));
           requestAnimationFrame(() => window.scrollTo(0, saved.scroll));
         }
       } catch (_) { /* Storage may be disabled. */ }
@@ -361,6 +371,7 @@
             scroll: window.scrollY,
             selected: Array.from(document.querySelectorAll("[data-group-select]:checked"), item => item.value),
             groupsOpen: document.getElementById("group-panel").open,
+            selecting: document.getElementById("source-select-mode").getAttribute("aria-pressed") === "true",
             filters: window.axiomSourceFilters?.values()
           }));
         } catch (_) { /* Reload remains available without session storage. */ }
@@ -373,9 +384,30 @@
       const groupFeedback = document.getElementById('group-feedback');
       const groupChecks = Array.from(document.querySelectorAll('[data-group-select]'));
       const groupButtons = Array.from(document.querySelectorAll('#group-panel button'));
-      const selectedIds = () => groupChecks.filter(item => item.checked).map(item => item.value);
+      const selectMode = document.getElementById('source-select-mode');
+      let selecting = selectMode.getAttribute('aria-pressed') === 'true';
+      let bulkBusy = false;
+      const selectedIds = () => selecting ? groupChecks.filter(item => item.checked).map(item => item.value) : [];
+      function selectionMode() {
+        selectMode.textContent = selecting ? 'Cancel selection' : 'Select';
+        selectMode.setAttribute('aria-pressed', String(selecting));
+        groupChecks.forEach(item => {
+          item.closest('.group-select').hidden = !selecting;
+          if (!selecting) item.checked = false;
+        });
+        document.getElementById('bulk-selection').hidden = !selecting;
+        if (selecting) document.getElementById('group-panel').open = true;
+        groupControls();
+      }
+      selectMode.addEventListener('click', () => {
+        if (bulkBusy) return;
+        selecting = !selecting;
+        selectionMode();
+      });
       function groupControls() {
         const kind = groupKind.value, ids = selectedIds();
+        document.getElementById('bulk-actions').hidden = !ids.length;
+        for (const id of ['bulk-publish','bulk-unpublish','bulk-remove']) document.getElementById(id).disabled = bulkBusy || !ids.length;
         for (const option of groupExisting.options) {
           option.hidden = !!option.dataset.kind && option.dataset.kind !== kind;
           option.disabled = option.hidden;
@@ -451,7 +483,62 @@
         assign:'add-members',unassign:'remove-members','create-assign':'create-assign'
       })) document.getElementById('group-' + id).addEventListener('click', () => groupChange(operation));
       document.addEventListener("axiom-source-filters-changed", groupControls);
-      groupControls();
+      selectionMode();
+      async function bulkLifecycle(action) {
+        if (bulkBusy) return;
+        const ids = selectedIds();
+        if (!ids.length) return;
+        const verb = action === 'remove' ? 'Remove' : action === 'publish' ? 'Publish' : 'Unpublish';
+        const suffix = action === 'remove' ? ' Catalog entries will be removed and unpublished; installed files will not be deleted.' : action === 'publish' ? ' Only eligible sources with existing rights approval can be published.' : ' Installed files will be retained.';
+        if (!window.confirm(verb + ' ' + ids.length + ' selected sources?' + suffix)) return;
+        bulkBusy = true;
+        selectMode.disabled = true;
+        groupChecks.forEach(item => item.disabled = true);
+        groupButtons.forEach(button => button.disabled = true);
+        let currentRevision = revision;
+        const results = [];
+        try {
+          for (const source_id of ids) {
+            const card = groupChecks.find(item => item.value === source_id).closest('.source-card');
+            const title = card.dataset.filterTitle || source_id;
+            try {
+              const removing = action === 'remove';
+              const payload = removing ? {operation:'remove', source_id, fields:{}, revision:currentRevision}
+                : {source_id, enabled:action === 'publish', revision:currentRevision};
+              const response = await fetch(removing ? '/api/sources' : '/api/publication', {
+                method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+              const result = await response.json();
+              if (!response.ok) {
+                results.push(title + ': ' + (result.error || 'HTTP ' + response.status));
+                if (response.status === 409 && /revision changed/i.test(result.error || '')) {
+                  results.push('Stopped: catalog changed; reload before acting on remaining sources.');
+                  break;
+                }
+                continue;
+              }
+              if (removing) {
+                if (!Number.isInteger(result.revision)) throw new Error('Missing updated catalog revision');
+                currentRevision = result.revision;
+              }
+              results.push(title + ': success');
+            } catch (error) {
+              results.push(title + ': outcome uncertain — ' + error.message);
+              results.push('Stopped; reload to verify remaining sources.');
+              break;
+            }
+          }
+          window.alert(results.join('\n'));
+          reloadSources();
+        } finally {
+          bulkBusy = false;
+          selectMode.disabled = false;
+          groupChecks.forEach(item => item.disabled = false);
+          groupButtons.forEach(button => button.disabled = false);
+          groupControls();
+        }
+      }
+      for (const action of ['publish','unpublish','remove'])
+        document.getElementById('bulk-' + action).addEventListener('click', () => bulkLifecycle(action));
       const dialog = document.getElementById('source-dialog');
       const form = document.getElementById('source-form');
       const guide = document.getElementById('source-guide');

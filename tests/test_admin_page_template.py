@@ -145,3 +145,15 @@ def test_source_filter_toolbar():
                    'value="published"', 'value="unpublished"', 'value="downloaded"',
                    'value="not-downloaded"', 'id="source-filter-empty"'):
         assert marker in page
+
+
+def test_selection_mode_and_bulk_lifecycle_controls():
+    page = render([profile("field-guide", "Field guide")])
+    for marker in ('id="source-select-mode" aria-pressed="false"',
+                   'class="group-select" hidden', 'id="bulk-selection" hidden',
+                   'id="bulk-actions" hidden', 'id="bulk-publish"',
+                   'id="bulk-unpublish"', 'id="bulk-remove"'):
+        assert marker in page
+    assert "Only eligible sources with existing rights approval" in page
+    assert "currentRevision = result.revision" in page
+    assert "outcome uncertain" in page
