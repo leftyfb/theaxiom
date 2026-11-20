@@ -162,8 +162,8 @@ def open_pdf(url, *, format_name="pdf", limit=None, total_seconds=None, offset=0
                 modified = response.headers.get_all("Last-Modified", [])
                 if len(etags) > 1 or len(modified) > 1:
                     raise ValueError("Ambiguous publisher validator")
-                etag = etags[0] if etags and re.fullmatch(r'"[\\x21\\x23-\\x7e]{1,200}"', etags[0]) else None
-                last_modified = modified[0] if modified and re.fullmatch(r"[\\x20-\\x7e]{1,200}", modified[0]) else None
+                etag = etags[0] if etags and re.fullmatch(r'"[\x21\x23-\x7e]{1,200}"', etags[0]) else None
+                last_modified = modified[0] if modified and re.fullmatch(r"[\x20-\x7e]{1,200}", modified[0]) else None
                 total_size = length
                 if offset:
                     ranges = response.headers.get_all("Content-Range", [])
