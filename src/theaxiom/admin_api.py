@@ -34,6 +34,7 @@ monitoring = importlib.import_module(f"{__package__}.acquisition_monitor" if __p
 publication = importlib.import_module(f"{__package__}.publication" if __package__ else "theaxiom.publication")
 pdf_source = importlib.import_module(f"{__package__}.pdf_source" if __package__ else "theaxiom.pdf_source")
 epub_source = importlib.import_module(f"{__package__}.epub_source" if __package__ else "theaxiom.epub_source")
+pdf_language = importlib.import_module(f"{__package__}.pdf_language" if __package__ else "theaxiom.pdf_language")
 pdf_transport = importlib.import_module(f"{__package__}.pdf_transport" if __package__ else "theaxiom.pdf_transport")
 library_search = importlib.import_module(f"{__package__}.search" if __package__ else "theaxiom.search")
 BIND_HOST = "127.0.0.1"
@@ -926,6 +927,10 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     raise ValueError("source has no PDF import adapter")
                 artifact = pdf_source.pin(sid, record["configuration"])
                 pdf_source.import_local(sid, artifact)
+                if not record["profile"].get("language"):
+                    language = pdf_language.installed_language(artifact)
+                    if language:
+                        SOURCE_CATALOG.mutate("edit", sid, {"language": language}, data["revision"])
             except catalog_store.CatalogError:
                 self._send_json(503, {"error": "source catalog unavailable"})
                 return
@@ -1016,6 +1021,10 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                                                          expected_sha256=digest)
                     if adding and auto_title:
                         fields["title"] = pdf_source.simple_document_title(data) or fields["title"]
+                    if not (fields if adding else record["profile"]).get("language"):
+                        language = pdf_language.detect(data)
+                        if language:
+                            fields["language"] = language
                 note = "Uploaded by administrator; SHA-256 calculated locally, not independently publisher-verified."
                 provenance = config.get("provenance", "").strip()
                 if provenance:
@@ -1092,6 +1101,10 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 else:
                     observed = pdf_transport.download(sid, url, expected_size=int(size) if size else None,
                                                       expected_sha256=digest)
+                    if not record["profile"].get("language"):
+                        language = pdf_language.installed_language(observed)
+                        if language:
+                            extracted["language"] = language
                 provenance = config.get("provenance", "").strip()
                 if not provenance:
                     provenance = "Downloaded via configured HTTPS URL; SHA-256 calculated locally, not independently publisher-verified."
