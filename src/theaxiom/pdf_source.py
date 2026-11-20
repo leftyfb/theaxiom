@@ -290,6 +290,7 @@ def status(record, artifact):
         rights = bool(record["configuration"].get("license", "").strip())
         return dict(result, enabled=enabled, verified=available, serving=available and rights,
                     published=enabled and available and rights,
-                    publication_reason="Review usage rights before publishing" if available and not rights else "")
+                    publication_reason="Review usage rights before publishing" if available and not rights else "",
+                    requires_rights_acknowledgement=available and not rights)
     except (OSError, ValueError):
         return dict(result, error="publication state unavailable")

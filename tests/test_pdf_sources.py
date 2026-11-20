@@ -366,3 +366,30 @@ def test_add_pdf_in_one_upload(pdf_app, disk):
     upload(document(), 409, {"X-Catalog-Revision": str(updated["revision"])})
     assert request("/api/sources")["revision"] == updated["revision"]
     assert 'id="source-upload-file"' in request("/admin/sources")
+
+
+def test_pdf_publish_with_explicit_rights_acknowledgement(pdf_app, disk):
+    from urllib.parse import quote
+    import json
+    request, _ = pdf_app
+    catalog = request("/api/sources")
+    headers = {"X-Source-ID": SID, "X-Catalog-Revision": str(catalog["revision"]),
+               "X-PDF-Add": "1", "X-PDF-Metadata": quote(json.dumps({"title": "My PDF"}))}
+    request("/api/pdf-upload", document(), upload_headers=headers)
+    catalog = request("/api/sources")
+    record = source(catalog, SID)
+    assert record["installed_verified"]
+    assert record["publication"]["requires_rights_acknowledgement"]
+    assert not record["publication"]["published"]
+    pub = dict(source_id=SID, enabled=True, revision=catalog["revision"])
+    request("/api/publication", pub, status=409)
+    request("/api/publication", dict(pub, acknowledge_rights=False), status=409)
+    request("/api/publication", dict(pub, acknowledge_rights="true"), status=400)
+    request("/api/publication", dict(pub, acknowledge_rights=True))
+    updated = request("/api/sources")
+    record = source(updated, SID)
+    assert record["publication"]["published"]
+    assert "Administrator confirmed permission" in record["configuration"]["license"]
+    assert request(READER + "/document.pdf", raw=True)[0] == document()
+    request("/api/publication", dict(pub, enabled=False, revision=updated["revision"]))
+    assert not source(request("/api/sources"), SID)["publication"]["published"]

@@ -31,7 +31,7 @@ The same guide is available offline from Administration → Sources → Content 
   **ZIM:** The existing verified Wikipedia archive is supported. New ZIM profiles currently require a matching trusted acquisition manifest; arbitrary remote downloads are not yet enabled.
 
 
-  **PDF:** Use Download from URL for a configured HTTPS PDF link (up to three independently validated HTTPS redirects; query strings and private addresses remain unsupported), or Upload PDF to choose a file from your computer. Both support up to 16 MiB, compute missing size and SHA-256, and record provenance. A URL is optional for uploads. Review rights and enter a rights note before publishing. Local or explicitly configured NFS storage is supported; the expected mount target and export must match.
+  **PDF:** Use Download from URL for a configured HTTPS PDF link (up to three independently validated HTTPS redirects; query strings and private addresses remain unsupported), or Upload PDF to choose a file from your computer. Both support up to 16 MiB, compute missing size and SHA-256, and record provenance. A URL is optional for uploads. When publishing a PDF without a documented license, confirm you have permission to make it available to library users. This acknowledgement is not independent verification of publisher rights. Local or explicitly configured NFS storage is supported; the expected mount target and export must match.
 
 
   

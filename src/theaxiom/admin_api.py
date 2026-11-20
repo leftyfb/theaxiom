@@ -614,7 +614,9 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 return
             data = self._read_body()
             source_id, enabled = data.get("source_id"), data.get("enabled")
-            if (set(data) != {"source_id", "enabled", "revision"} or not isinstance(source_id, str)
+            if (set(data) not in ({"source_id", "enabled", "revision"}, {"source_id", "enabled", "revision", "acknowledge_rights"})
+                    or ("acknowledge_rights" in data and (type(data["acknowledge_rights"]) is not bool or not enabled))
+                    or not isinstance(source_id, str)
                     or not catalog_store.ID_RE.fullmatch(source_id) or type(enabled) is not bool
                     or not self._valid_revision(data["revision"])):
                 self._send_json(400, {"error": "invalid publication request"})
@@ -633,14 +635,28 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 if source_id not in publication.ROUTES and not is_pdf:
                     self._send_json(400, {"error": "source has no publication adapter"})
                     return
+                if "acknowledge_rights" in data and not is_pdf:
+                    self._send_json(400, {"error": "rights acknowledgement is for PDFs only"})
+                    return
                 if enabled and record is not None and is_pdf:
                     artifact = select_lifecycle(source_id, record["configuration"])["artifact"]
-                    if not record["configuration"].get("license", "").strip():
-                        self._send_json(409, {"error": "Review usage rights before publishing"})
-                        return
                     if not pdf_source.ready(artifact, verify=True):
                         self._send_json(409, {"error": "matching verified PDF content is required"})
                         return
+                    if not record["configuration"].get("license", "").strip():
+                        if data.get("acknowledge_rights") is not True:
+                            self._send_json(409, {"error": "Confirm you have permission to make this PDF available to library users"})
+                            return
+                        try:
+                            SOURCE_CATALOG.mutate("edit", source_id, {
+                                "license": "Administrator confirmed permission to make this PDF available in this library; no publisher license independently verified."
+                            }, data["revision"])
+                        except catalog_store.RevisionConflict:
+                            self._send_json(409, {"error": "catalog revision changed"})
+                            return
+                        except (catalog_store.CatalogError, OSError):
+                            self._send_json(503, {"error": "Could not record publication acknowledgement"})
+                            return
                 elif enabled:
                     snapshot = self._snapshot()
                     life = self._lifecycles(catalog).get(source_id)
