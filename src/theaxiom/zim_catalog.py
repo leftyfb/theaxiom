@@ -47,6 +47,8 @@ def verified_books(records, enabled=None):
             sid = record["source_id"]
             config = record["configuration"]
             job = zim_jobs.status(sid)
+            if not job or job.get("verified") is not True or job.get("active") is not False:
+                continue
             artifact = zim_jobs.installed(job, config)
             if not artifact:
                 continue

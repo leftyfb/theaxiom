@@ -89,3 +89,11 @@ def test_manifest_write_is_repeatable_and_not_auto_activated(disk):
     second = zim_catalog.write_manifest([], {})
     assert second == first and second.read_bytes() == before
     assert publication.load() == {}
+
+
+def test_completed_but_unverified_job_never_enters_manifest(disk):
+    artifact = zim_source.install_stream("ready", CONFIG, BytesIO(fixture_bytes()))
+    zim_jobs.save({"source_id": "ready", "state": "completed", "active": False,
+                   "verified": False, "configuration": zim_jobs.identity(CONFIG),
+                   "artifact": artifact})
+    assert zim_catalog.verified_books([record("ready")], {"ready": True}) == []
