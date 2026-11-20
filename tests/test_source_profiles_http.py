@@ -195,7 +195,12 @@ def test_candidate_lifecycle_http_and_dom(app, format_name, complete, adapter, r
     candidate = source(catalog, "candidate")
     assert candidate["adapter"] == adapter
     assert candidate["configuration_valid"] is bool(adapter and complete)
-    assert candidate["artifact"] is candidate["publication"] is None
+    assert candidate["artifact"] is None
+    if adapter == "kiwix":
+        assert candidate["publication"]["verified"] is False
+        assert candidate["publication"]["published"] is False
+    else:
+        assert candidate["publication"] is None
     assert not candidate["installed_verified"] and not candidate["actions"]
     assert reason in refuse_action(request, catalog, 409, sid="candidate")
     assert "accepts no acquisition metadata" in refuse_action(request, catalog, 400, sid="candidate",
@@ -211,8 +216,12 @@ def test_candidate_lifecycle_http_and_dom(app, format_name, complete, adapter, r
         assert reason in details
     parser = Parser()
     parser.feed(rendered)
-    assert not any("data-action" in attrs or attrs.get("data-field") == "publication-toggle"
-                   for _, attrs in parser.tags)
+    assert not any("data-action" in attrs for _, attrs in parser.tags)
+    toggles = [attrs for _, attrs in parser.tags if attrs.get("data-field") == "publication-toggle"]
+    if adapter == "kiwix":
+        assert len(toggles) == 1 and "disabled" in toggles[0]
+    else:
+        assert toggles == []
 
 
 def test_empty_catalog_and_same_candidate_card_after_manual_readd(app):
