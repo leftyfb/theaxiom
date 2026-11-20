@@ -241,7 +241,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": "invalid host"})
             return False
         public_paths = {"/", "/index.html", "/health", "/health/", "/internal/publication/wikipedia-en", "/read/wikipedia-en"}
-        if not post and (self.path in public_paths or self.path.split("?", 1)[0] == "/search"
+        if not post and (self.path in public_paths or self.path.split("?", 1)[0] in {"/", "/index.html", "/search"}
                          or pdf_source.ROUTE.fullmatch(self.path)):
             return True
         auth = self.headers.get_all("Authorization", [])
@@ -308,43 +308,46 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         if pdf_route:
             self._serve_pdf(*pdf_route.groups())
             return
-        if self.path in {"/", "/index.html"}:
-            sources = []
-            snapshot = self._publication_snapshot()
-            for source_id, route in publication.ROUTES.items():
-                if publication.status(snapshot, source_id)["published"]:
-                    sources.append(route)
-            for record, state in self._pdf_publications():
-                if state["published"]:
-                    profile = record["profile"]
-                    sources.append(dict(entry_path=state["entry_path"], symbol="P", category="PDF",
-                                        name=profile["title"], description=profile.get("description", ""),
-                                        language=profile.get("language") or "Unspecified language"))
-            environment = Environment(loader=FileSystemLoader(ADMIN_TEMPLATE_DIR), autoescape=True)
-            body = environment.get_template("library.html.j2").render(sources=sources).encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-        elif self.path.split("?", 1)[0] == "/search":
-            query, groups, error, code = "", [], "", 200
+        if self.path.split("?", 1)[0] in {"/", "/index.html", "/search"}:
+            search_page = self.path.split("?", 1)[0] == "/search"
+            sources, groups, results, selected = [], [], [], {}
+            query, error, code = "", "", 200
             try:
                 if len(self.path) > 4096:
-                    raise ValueError("Search request too long")
+                    raise ValueError("Request too long")
                 params = parse_qs(urlsplit(self.path).query, keep_blank_values=True,
-                                  max_num_fields=2, errors="strict")
-                if set(params) - {"q"} or len(params.get("q", [""])) != 1:
-                    raise ValueError("Invalid search request")
+                                  max_num_fields=4, errors="strict")
+                allowed = {"category", "collection", "tag", "q"}
+                if set(params) - allowed or any(len(values) != 1 for values in params.values()):
+                    raise ValueError("Invalid filters")
                 query = library_search.validate_query(params.get("q", [""])[0])
-                groups = library_search.search(query, self._publication_snapshot)
+                selected = {kind: params[kind][0] for kind in ("category", "collection", "tag")
+                            if params.get(kind, [""])[0]}
+                if any(not catalog_store.ID_RE.fullmatch(gid) for gid in selected.values()):
+                    raise ValueError("Invalid filter ID")
+                sources, groups = self._public_library()
+                eligible = {source["source_id"] for source in sources}
+                for kind, gid in selected.items():
+                    plural = "categories" if kind == "category" else kind + "s"
+                    group = next((g for g in groups if g["kind"] == plural and g["group_id"] == gid), None)
+                    eligible.intersection_update(group["source_ids"] if group else [])
+                sources = [source for source in sources if source["source_id"] in eligible]
+                if search_page and query:
+                    results = library_search.search(query, self._publication_snapshot, source_ids=eligible)
+                    for source in sources:
+                        if source["category"] == "PDF" and query.casefold() in (
+                                source["name"] + " " + source["description"]).casefold():
+                            results.append(dict(source_id=source["source_id"], name=source["name"],
+                                                status="ok", capability="PDF title and description",
+                                                results=[dict(title=source["name"], href=source["entry_path"], snippet="")]))
             except (ValueError, UnicodeError):
-                error, code = "Invalid search query.", 400
+                error, code = "Invalid search or filter request.", 400
             except RuntimeError:
                 error, code = "Search is busy. Try again.", 503
             environment = Environment(loader=FileSystemLoader(ADMIN_TEMPLATE_DIR), autoescape=True)
-            body = environment.get_template("search.html.j2").render(
-                query=query, groups=groups, error=error).encode("utf-8")
+            body = environment.get_template("search.html.j2" if search_page else "library.html.j2").render(
+                sources=sources, groups=results, filter_groups=groups, selected=selected,
+                query=query, error=error).encode("utf-8")
             self.send_response(code)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -411,6 +414,36 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
     def _pdf_record(record):
         return (record["source_id"] not in publication.ROUTES
                 and record["configuration"].get("format") == "pdf")
+
+    def _public_library(self):
+        """Return only published sources and groups containing those sources."""
+        with publication.LOCK:
+            try:
+                catalog = SOURCE_CATALOG.get()
+            except (catalog_store.CatalogError, OSError):
+                return [], []
+            records = {record["source_id"]: record for record in catalog["sources"]}
+            snapshot = self._publication_snapshot()
+            sources = []
+            for sid, route in publication.ROUTES.items():
+                if sid in records and publication.status(snapshot, sid)["published"]:
+                    profile = records[sid]["profile"]
+                    sources.append(dict(route, source_id=sid, name=profile["title"]))
+            for record, state in self._pdf_publications():
+                if state["published"]:
+                    profile = record["profile"]
+                    sources.append(dict(source_id=record["source_id"], entry_path=state["entry_path"],
+                                        symbol="P", category="PDF", name=profile["title"],
+                                        description=profile.get("description", ""),
+                                        language=profile.get("language") or "Unspecified language"))
+            ids = {source["source_id"] for source in sources}
+            groups = [dict(group, source_ids=[sid for sid in group["source_ids"] if sid in ids])
+                      for group in catalog.get("groups", [])]
+            groups = sorted((group for group in groups if group["source_ids"]),
+                            key=lambda group: (group["name"].casefold(), group["group_id"]))
+            for source in sources:
+                source["memberships"] = [group["name"] for group in groups if source["source_id"] in group["source_ids"]]
+            return sources, groups
 
     def _pdf_publications(self):
         try:

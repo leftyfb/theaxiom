@@ -49,3 +49,6 @@ The same guide is available offline from Administration → Sources → Content 
 ## 7. Organize sources
 
 Open Organize sources on Administration → Sources. Add predefined categories once, or manage your own categories deliberately. Create collections for curated sets and tags for flexible keywords. Select one or more source cards, choose a grouping type and group, and add or remove the selected memberships. A source can belong to many groups without duplicating content. Deleting a group never removes source profiles or installed files. Use Create tag & assign to create and assign a new tag in the same interaction.
+
+
+Public library visitors can filter published sources by category, collection and tag, including combinations. Search respects selected groups; PDFs currently match title and description only, not full document text. Groups without published sources are not shown.

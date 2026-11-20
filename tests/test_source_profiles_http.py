@@ -306,3 +306,31 @@ def test_group_api_bulk_membership_and_revision(app):
     assert saved["groups"][0]["source_ids"] == [SID]
     assert request("/api/sources")["groups"] == saved["groups"]
     request("/api/groups", dict(add, source_ids=["missing"], revision=saved["revision"]), status=400)
+
+
+def test_public_group_filters_hide_unpublished_members(app):
+    request, _ = app
+    publication.save(SID, True)
+    catalog = request("/api/sources")
+    catalog = mutate(request, catalog, "add", {"title": "Private fixture"}, sid="private-fixture")
+    for kind, gid, members in [
+        ("categories", "reference", [SID]),
+        ("collections", "private", ["private-fixture"]),
+        ("tags", "mixed", [SID, "private-fixture"]),
+    ]:
+        created = request("/api/groups", dict(operation="create", kind=kind, group_id=gid,
+                                               name=gid.title(), revision=catalog["revision"]))
+        catalog = request("/api/groups", dict(operation="add-members", kind=kind, group_id=gid,
+                                               source_ids=members, revision=created["revision"]))
+    page = request("/?category=reference&tag=mixed")
+    assert 'href="/read/wikipedia-en"' in page
+    assert 'Private fixture' not in page and 'value="private"' not in page
+    assert 'value="reference" selected' in page
+    assert 'href="/read/wikipedia-en"' not in request("/?collection=private")
+    assert "No published sources match" in request("/?category=missing")
+    request("/?category=reference&category=other", status=400)
+    request("/?tag=../bad", status=400)
+    assert "Wikipedia" in request("/search?q=water&tag=mixed")
+    assert "Wikipedia" not in request("/search?q=water&tag=missing")
+    publish(request, False)
+    assert 'value="reference"' not in request("/")

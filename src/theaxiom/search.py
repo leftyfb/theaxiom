@@ -49,7 +49,7 @@ def valid_link(href: str, route: dict) -> bool:
         return False
 
 
-def search(query: str, snapshot: Callable[[], dict]) -> list[dict]:
+def search(query: str, snapshot: Callable[[], dict], *, source_ids=None) -> list[dict]:
     query = validate_query(query)
     if not query:
         return []
@@ -58,6 +58,8 @@ def search(query: str, snapshot: Callable[[], dict]) -> list[dict]:
     try:
         groups = []
         for source_id, route in publication.ROUTES.items():
+            if source_ids is not None and source_id not in source_ids:
+                continue
             if not publication.allowed(snapshot(), source_id):
                 continue
             adapter = ADAPTERS.get(source_id)
