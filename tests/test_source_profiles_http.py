@@ -67,8 +67,17 @@ def mutate(request, catalog, operation, fields=None, sid=SID, status=200):
                                         fields=fields or {}, revision=catalog["revision"]), status=status)
 
 
-def publish(request, enabled, status=200):
-    return request("/api/publication", dict(source_id=SID, enabled=enabled), status=status)
+def publish(request, enabled, status=200, revision=None):
+    if revision is None:
+        revision = request("/api/sources")["revision"]
+    return request("/api/publication", dict(source_id=SID, enabled=enabled, revision=revision), status=status)
+
+
+def refuse_action(request, catalog, status, sid=SID, action="download", **extra):
+    result = request("/api/action", dict(source_id=sid, action=action, revision=catalog["revision"],
+                                         **extra), status=status)
+    assert result["accepted"] is False
+    return result["error"]
 
 
 def card(page, sid=SID):
@@ -112,10 +121,22 @@ def test_published_profile_edit_unpublish_remove_and_equivalent_readd(app, tmp_p
     assert "disabled" not in control(before, "data-field", "publication-toggle")
     removed = mutate(request, edited, "remove")
     assert card(request("/admin/sources")) is None
+    assert "revision changed" in refuse_action(request, edited, 409)
+    assert "no configured profile" in refuse_action(request, removed, 400)
+    publish(request, True, status=409)
     fields = source(edited)["profile"] | source(edited)["configuration"]
     added = mutate(request, removed, "add", fields)
     assert card(request("/admin/sources")) == before
-    assert source(added)["publication"]["serving"] and not source(added)["publication"]["enabled"]
+    restored = source(added)
+    for key in ("adapter", "configuration_valid", "artifact", "installed_verified", "actions"):
+        assert restored[key] == original[key]
+    assert restored["installed_verified"] and restored["publication"]["serving"]
+    assert not restored["publication"]["enabled"]
+    for action in restored["actions"]:
+        assert not restored["actions"][action]
+        assert "disabled" in control(card(request("/admin/sources")), "data-action", action)
+        assert "acquisition disabled" in refuse_action(request, added, 503, action=action)
+    publish(request, True, status=409, revision=removed["revision"])
     publish(request, True)
     assert request("/read/wikipedia-en", status=302) == "/wikipedia/viewer#fixture/"
     assert archive.read_bytes() == b"installed fixture bytes"
@@ -129,6 +150,8 @@ def test_conflicting_profile_does_not_inherit_trusted_state(app, conflict):
     edited = mutate(request, catalog, "edit", conflict)
     wiki = source(edited)
     assert all(wiki[key] is None for key in ("artifact", "acquisition", "publication"))
+    assert not wiki["installed_verified"]
+    assert refuse_action(request, edited, 409) == wiki["acquisition_reason"]
     assert wiki["configuration"] == source(catalog)["configuration"] | conflict
     changed = card(request("/admin/sources"))
     assert "Candidate SHA-256" in changed and "Pinned archive" not in changed
@@ -147,6 +170,39 @@ def test_monitor_identity_mismatch_does_not_supply_verification(app):
     assert wiki["artifact"]["sha256"] == PIN["sha256"]
     assert wiki["acquisition"] is None and not wiki["publication"]["verified"]
     publish(request, True, status=409)
+    assert "unresolved" in refuse_action(request, request("/api/sources"), 409)
+
+
+@pytest.mark.parametrize("format_name,complete,adapter,reason", [
+    ("zim", True, "kiwix", "No trusted acquisition manifest"),
+    ("zim", False, "kiwix", "ZIM candidate configuration requires"),
+    ("pdf", True, None, "No lifecycle adapter supports this format"),
+])
+def test_candidate_lifecycle_http_and_dom(app, format_name, complete, adapter, reason):
+    request, _ = app
+    catalog = request("/api/sources")
+    # Even exact Wikipedia pin values under another ID confer no trust.
+    fields = {"title": "Candidate", "format": format_name}
+    if complete:
+        fields.update(source_url=PIN["source_url"], expected_size_bytes=str(PIN["bytes"]), sha256=PIN["sha256"])
+    catalog = mutate(request, catalog, "add", fields, sid="candidate")
+    candidate = source(catalog, "candidate")
+    assert candidate["adapter"] == adapter
+    assert candidate["configuration_valid"] is bool(adapter and complete)
+    assert candidate["artifact"] is candidate["publication"] is None
+    assert not candidate["installed_verified"] and not candidate["actions"]
+    assert reason in refuse_action(request, catalog, 409, sid="candidate")
+    assert "accepts no acquisition metadata" in refuse_action(request, catalog, 400, sid="candidate",
+                                                             sha256=PIN["sha256"])
+    rendered = card(request("/admin/sources"), "candidate")
+    assert rendered is not None
+    summary, details = rendered.split("</summary>", 1)
+    assert 'role="status">Not downloaded</span>' in summary
+    assert reason not in summary and reason in details
+    parser = Parser()
+    parser.feed(rendered)
+    assert not any("data-action" in attrs or attrs.get("data-field") == "publication-toggle"
+                   for _, attrs in parser.tags)
 
 
 def test_empty_catalog_and_same_candidate_card_after_manual_readd(app):
@@ -181,3 +237,16 @@ def test_active_and_unresolved_states_block_seed_and_manual_changes(app, state, 
             assert "disabled" in control(rendered, f"data-catalog-{action}", sid)
             mutate(request, catalog, action, {"title": "Changed"} if action == "edit" else {},
                    sid=sid, status=400)
+    assert "active or unresolved" in refuse_action(request, catalog, 409)
+    publish(request, True, status=409)
+
+
+def test_acquisition_requires_current_revision_and_fresh_monitor(app):
+    request, snapshot = app
+    catalog = request("/api/sources")
+    for revision in (None, True, "0", -1):
+        body = request("/api/action", dict(source_id=SID, action="update", revision=revision), status=400)
+        assert "requires a catalog revision" in body["error"]
+    snapshot["stale"] = True
+    assert "unresolved" in refuse_action(request, catalog, 409)
+    assert not source(request("/api/sources"))["installed_verified"]

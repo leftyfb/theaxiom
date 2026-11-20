@@ -1,20 +1,22 @@
 from html.parser import HTMLParser
 from pathlib import Path
 from jinja2 import Environment
-from theaxiom.admin_api import WIKIPEDIA_SOURCE
+from theaxiom.admin_api import ACTION_LABELS, WIKIPEDIA_SOURCE, select_lifecycle
 from theaxiom.catalog_store import EDITABLE
 
 TEMPLATE = Path(__file__).parents[1] / "templates/admin-page.html.j2"
 
 
-def profile(source_id="fixture", title="Fixture", description="", artifact=None, **configuration):
+def profile(source_id="fixture", title="Fixture", description="", **configuration):
+    configuration = {"format": "pdf", **configuration}
     return dict(source_id=source_id, profile=dict(title=title, description=description),
-                configuration={"format": "pdf", **configuration}, artifact=artifact,
-                publication=None, mutation_blocked=False)
+                configuration=configuration, **select_lifecycle(source_id, configuration),
+                publication=None, installed_verified=False, mutation_blocked=False)
 
 
 def render(sources=(), **overrides):
-    values = dict(catalog=dict(sources=sources, revision=0), editable_fields=sorted(EDITABLE))
+    values = dict(catalog=dict(sources=sources, revision=0), editable_fields=sorted(EDITABLE),
+                  action_labels=ACTION_LABELS)
     values.update(overrides)
     return Environment(autoescape=True).from_string(TEMPLATE.read_text()).render(**values)
 
@@ -30,7 +32,9 @@ class Parser(HTMLParser):
 
 def test_source_card_and_disabled_actions():
     parser = Parser()
-    parser.feed(render([profile("wikipedia-en", artifact=WIKIPEDIA_SOURCE, format="zim")]))
+    pin = WIKIPEDIA_SOURCE
+    parser.feed(render([profile("wikipedia-en", format="zim", source_url=pin["source_url"],
+                                expected_size_bytes=str(pin["bytes"]), sha256=pin["sha256"])]))
     assert sum(tag == "details" and attrs.get("data-source-id") == "wikipedia-en"
                for tag, attrs in parser.tags) == 1
     actions = [attrs for tag, attrs in parser.tags if tag == "button" and "data-action" in attrs]
@@ -43,7 +47,7 @@ def test_source_card_and_disabled_actions():
 
 def test_configured_and_empty_cards():
     page = render([profile()])
-    assert "Fixture" in page and "Candidate only" in page
+    assert "Fixture" in page and "Not downloaded" in page
     assert "No managed sources configured." in render()
 
 
@@ -62,9 +66,9 @@ def test_candidate_card_has_no_acquisition_buttons():
     page = render([profile(description="Emergency reference")])
     parser = Parser()
     parser.feed(page)
-    assert "Candidate only" in page
+    assert "Not downloaded</span>" in page
     assert "Emergency reference" in page
-    assert "Download not supported for this configuration." in page
+    assert "No lifecycle adapter supports this format." in page
     assert "Coming soon" not in page
     assert "Planned collection" not in page
     assert not any(tag == "button" and attrs.get("data-action") for tag, attrs in parser.tags)

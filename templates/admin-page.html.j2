@@ -169,7 +169,7 @@
             <p class="source-subtitle">{{ source.configuration.format }}{% if source.profile.description %} · {{ source.profile.description }}{% endif %}</p>
             {% if pub %}<span class="compact-publication" data-field="publication-summary">{{ publication_label }}</span>{% endif %}
           </div>
-          <span class="badge" data-field="status" role="status">{% if not source.artifact %}Candidate only · no matching artifact{% elif pub and pub.verified %}Archive verified{% elif catalog.acquisition_stale %}Status unavailable{% else %}Waiting for status…{% endif %}</span>
+          <span class="badge" data-field="status" role="status">{% if source.installed_verified %}Archive verified{% elif not source.artifact and not source.mutation_blocked %}Not downloaded{% elif catalog.acquisition_stale %}Status unavailable{% elif not source.artifact %}Acquisition unresolved{% else %}Waiting for status…{% endif %}</span>
         </summary>
         <div class="source-expanded">
         <div class="source-live">
@@ -180,13 +180,13 @@
           <p class="source-note" data-field="rate" hidden></p>
           <p data-field="detail" class="source-note" hidden></p>
         </div>
-        {% if source.artifact %}
+        {% if source.actions %}
         <div class="source-actions" aria-label="Acquisition controls">
-          <button class="button" type="button" data-action="download" disabled>Download</button>
-          <button class="button" type="button" data-action="redownload" disabled>Re-download</button>
-          <button class="button" type="button" data-action="update" disabled>Update</button>
+          {% for action in source.actions %}
+          <button class="button" type="button" data-action="{{ action }}" disabled>{{ action_labels[action] }}</button>
+          {% endfor %}
         </div>
-        {% else %}<p class="source-note">Download not supported for this configuration.</p>{% endif %}
+        {% endif %}
         {% if pub %}
         <div class="source-actions" aria-label="Publication controls">
           <button class="button" type="button" data-field="publication-toggle" data-enabled="{{ 'true' if pub.enabled else 'false' }}"{% if not pub.enabled and (not pub.serving or source.mutation_blocked) %} disabled{% endif %}>{{ 'Unpublish' if pub.enabled else 'Publish' }}</button>
@@ -201,6 +201,7 @@
         </div>
         <section aria-label="Source details">
           <h4>Source details</h4>
+          <p class="source-note" data-field="acquisition-reason">{{ source.acquisition_reason }}</p>
           <dl class="storage-status source-details">
             {% for name in ('publisher', 'edition', 'language') %}
             <dt>{{ name|capitalize }}</dt><dd>{{ source.profile.get(name) or '—' }}</dd>
@@ -282,7 +283,7 @@
         button.disabled = true;
         try {
           const response = await fetch('/api/publication', {method:'POST', headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({source_id:button.closest('.source-card').dataset.sourceId, enabled:button.dataset.enabled !== 'true'})});
+            body:JSON.stringify({source_id:button.closest('.source-card').dataset.sourceId, enabled:button.dataset.enabled !== 'true', revision})});
           if (!response.ok) throw new Error((await response.json()).error || 'Publication failed');
           window.location.reload();
         } catch (error) {
@@ -384,11 +385,14 @@
           cards.forEach(card => {
             const source = sources.get(card.dataset.sourceId);
             if (source?.artifact) render(card, source.acquisition, data.acquisition_stale !== false);
+            else card.querySelector('[data-field="status"]').textContent = data.acquisition_stale ? 'Status unavailable' :
+              source?.mutation_blocked !== false ? 'Acquisition unresolved' : 'Not downloaded';
             controls(card, source);
           });
         } catch (_) {
           cards.forEach(card => {
             if (card.querySelector('[data-action="download"]')) render(card, null, true, true);
+            else card.querySelector('[data-field="status"]').textContent = 'Status unavailable';
             controls(card, null);
           });
         } finally {

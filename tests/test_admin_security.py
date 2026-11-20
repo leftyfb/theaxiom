@@ -198,10 +198,13 @@ class HTTPAuthTests(unittest.TestCase):
         self.assertNotIn(new, self.credential_path.read_text())
 
     def test_authenticated_acquisition_remains_disabled(self):
-        with patch.object(admin_api.subprocess, "Popen") as launch:
+        with patch.object(admin_api.subprocess, "Popen") as launch, patch.object(
+            self.server, "acquisition_monitor", create=True,
+        ) as monitor:
+            monitor.snapshot.return_value = {"stale": False, "acquisitions": []}
             code, _, _ = self.request("/api/action", "POST", self.auth,
                 {"Content-Type":"application/json","Origin":"http://"+self.host},
-                '{"source_id":"wikipedia-en","action":"download"}')
+                '{"source_id":"wikipedia-en","action":"download","revision":0}')
             self.assertEqual(code, 503)
             launch.assert_not_called()
 

@@ -186,14 +186,19 @@ class AdminAPIValidationTests(unittest.TestCase):
             json.dumps({
                 "source_id": source_id,
                 "action": action,
+                "revision": 0,
             }).encode("utf-8")
         )
 
     def test_valid_action_is_disabled_without_subprocess(self):
-        for action in ("download", "redownload", "update"):
-            status, body = self.post_action("wikipedia-en", action)
-            self.assertEqual(status, 503)
-            self.assertIn("acquisition disabled", body["error"])
+        with mock.patch.object(admin_api, "probe_source") as probe:
+            for action in ("download", "redownload", "update"):
+                status, body = self.post_action("wikipedia-en", action)
+                self.assertEqual(status, 503)
+                assert isinstance(body, dict)
+                self.assertFalse(body["accepted"])
+                self.assertIn("acquisition disabled", body["error"])
+            probe.assert_not_called()
 
     def test_unknown_action(self):
         status, _ = self.post_action("wikipedia-en", "delete")

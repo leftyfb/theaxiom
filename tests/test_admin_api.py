@@ -1,24 +1,8 @@
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-from theaxiom import admin_api
 from theaxiom.freshness_probe import probe_source
 
-
-class ActionResponseTests(unittest.TestCase):
-    @patch.object(admin_api, "probe_source")
-    @patch.object(admin_api.subprocess, "Popen")
-    def test_all_acquisitions_fail_closed_before_probe_or_launch(self, popen, probe):
-        for action in ("download", "redownload", "update"):
-            response = admin_api.action_response("wikipedia-en", action)
-            self.assertFalse(response["accepted"])
-            self.assertIn("acquisition disabled", response["error"])
-        popen.assert_not_called()
-        probe.assert_not_called()
-
-    def test_unknown_source_rejected(self):
-        self.assertEqual(admin_api.action_response("invalid", "download"),
-                         {"accepted": False, "error": "unknown source_id"})
 
 
 class FreshnessProbeTests(unittest.TestCase):

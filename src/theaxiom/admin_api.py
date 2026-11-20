@@ -35,8 +35,8 @@ BIND_HOST = "127.0.0.1"
 BIND_PORT = 8080
 ADMIN_TEMPLATE_DIR = Path(__file__).resolve().parents[2] / "templates"
 
-VALID_ACTIONS = frozenset({"download", "redownload", "update"})
-VALID_SOURCE_IDS = frozenset({"wikipedia-en"})
+ACTION_LABELS = {"download": "Download", "redownload": "Re-download", "update": "Update"}
+ACQUISITION_DISABLED = "acquisition disabled pending storage safety integration"
 
 # Trusted acquisition metadata is shipped separately from planned catalog entries.
 source_catalog = importlib.import_module(f"{__package__}.source_catalog" if __package__ else "theaxiom.source_catalog")
@@ -75,18 +75,37 @@ def _release_revision() -> str | None:
 
 
 ARTIFACT_FIELDS = {"format", "source_url", "expected_size_bytes", "sha256"}
+FORMAT_ADAPTERS = {"zim": "kiwix"}
 
 
-def matching_artifact(source_id, configuration):
-    """Candidate values may select the existing adapter, never define its artifact."""
-    entry = resolve_source(source_id)
-    if (entry and configuration.get("format") == entry["kind"]
-            and configuration.get("source_url") == entry["source_url"]
-            and configuration.get("expected_size_bytes") == str(entry["bytes"])
-            and isinstance(configuration.get("sha256"), str)
-            and configuration["sha256"].lower() == entry["sha256"]):
-        return {key: entry[key] for key in ("filename", "source_url", "bytes", "sha256")}
-    return None
+def select_lifecycle(source_id, configuration):
+    """Select by format first; candidate configuration never creates trust."""
+    format_name = configuration.get("format")
+    adapter = FORMAT_ADAPTERS.get(format_name) if isinstance(format_name, str) else None
+    # CatalogStore validates field syntax; the adapter also requires these
+    # fields to be present before a candidate can select an acquisition pin.
+    valid = bool(adapter and all(isinstance(configuration.get(key), str) and configuration[key]
+                                 for key in ARTIFACT_FIELDS))
+    artifact = None
+    if not adapter:
+        reason = "No lifecycle adapter supports this format."
+    elif not valid:
+        reason = "ZIM candidate configuration requires a URL, expected size and SHA-256."
+    else:
+        entry = resolve_source(source_id)
+        if entry is None:
+            reason = "No trusted acquisition manifest is configured for this source."
+        elif (configuration["format"] != entry["kind"]
+              or configuration["source_url"] != entry["source_url"]
+              or configuration["expected_size_bytes"] != str(entry["bytes"])
+              or configuration["sha256"].lower() != entry["sha256"]):
+            reason = "Candidate configuration does not match the trusted acquisition manifest."
+        else:
+            artifact = {key: entry[key] for key in ("filename", "source_url", "bytes", "sha256")}
+            reason = ACQUISITION_DISABLED
+    return {"adapter": adapter, "configuration_valid": valid, "artifact": artifact,
+            "acquisition_reason": reason,
+            "actions": {action: False for action in ACTION_LABELS} if artifact else {}}
 
 
 RELEASE_REVISION = _release_revision()
@@ -182,15 +201,6 @@ def build_acquisition_args(source_id: str) -> list[str] | None:
         str(entry["bytes"]),
         entry["sha256"],
     ]
-
-
-def action_response(source_id: str, action: str) -> dict[str, Any]:
-    """Fail closed until verified storage and safe acquisition are integrated."""
-    if resolve_source(source_id) is None:
-        return {"accepted": False, "error": "unknown source_id"}
-    if action not in VALID_ACTIONS:
-        return {"accepted": False, "error": "unknown action"}
-    return {"accepted": False, "error": "acquisition disabled pending storage safety integration"}
 
 
 class AdminAPIHandler(BaseHTTPRequestHandler):
@@ -393,19 +403,21 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         return dict(snapshot, acquisitions=jobs)
 
     @staticmethod
-    def _artifacts(catalog):
-        return {record["source_id"]: matching_artifact(record["source_id"], record["configuration"])
+    def _lifecycles(catalog):
+        return {record["source_id"]: select_lifecycle(record["source_id"], record["configuration"])
                 for record in catalog["sources"]}
 
     def _publication_snapshot(self):
         try:
-            return self._matched_snapshot(self._snapshot(), self._artifacts(SOURCE_CATALOG.get()))
+            lifecycles = self._lifecycles(SOURCE_CATALOG.get())
+            return self._matched_snapshot(self._snapshot(), {sid: life["artifact"] for sid, life in lifecycles.items()})
         except (catalog_store.CatalogError, OSError):
             return {"acquisitions": [], "stale": True}
 
     def _source_profiles(self, catalog):
         snapshot = self._snapshot()
-        artifacts = self._artifacts(catalog)
+        lifecycles = self._lifecycles(catalog)
+        artifacts = {sid: life["artifact"] for sid, life in lifecycles.items()}
         matched = self._matched_snapshot(snapshot, artifacts)
         jobs = {job["source_id"]: job for job in matched["acquisitions"]}
         sources = []
@@ -418,7 +430,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 state["entry_path"] = publication.ROUTES[sid]["entry_path"]
                 if not artifacts[sid] and not state["enabled"] and not state.get("error"):
                     state = None
-            sources.append(dict(record, artifact=artifacts[sid], acquisition=jobs.get(sid),
+            sources.append(dict(record, **lifecycles[sid], acquisition=jobs.get(sid),
+                                installed_verified=publication.verified(matched, sid),
                                 publication=state, mutation_blocked=busy))
         return dict(catalog, sources=sources, acquisition_stale=snapshot["stale"])
 
@@ -438,6 +451,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             admin_page=page,
             catalog=self._source_profiles(catalog_snapshot) if page == "sources" else None,
             editable_fields=sorted(catalog_store.EDITABLE),
+            action_labels=ACTION_LABELS,
             password_change_enabled=bool(getattr(getattr(self.server, "axiom_config", None), "store", None)),
         ).encode("utf-8")
         self.send_response(200)
@@ -508,18 +522,25 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 return
             data = self._read_body()
             source_id, enabled = data.get("source_id"), data.get("enabled")
-            if (set(data) != {"source_id", "enabled"} or not isinstance(source_id, str)
-                    or source_id not in publication.ROUTES or type(enabled) is not bool):
+            if (set(data) != {"source_id", "enabled", "revision"} or not isinstance(source_id, str)
+                    or source_id not in publication.ROUTES or type(enabled) is not bool
+                    or not self._valid_revision(data["revision"])):
                 self._send_json(400, {"error": "invalid publication request"})
                 return
             with publication.LOCK:
+                try:
+                    catalog = SOURCE_CATALOG.get()
+                except (catalog_store.CatalogError, OSError):
+                    self._send_json(503, {"error": "source catalog unavailable"})
+                    return
+                if data["revision"] != catalog["revision"]:
+                    self._send_json(409, {"error": "catalog revision changed"})
+                    return
                 if enabled:
                     snapshot = self._snapshot()
-                    try:
-                        matched = self._matched_snapshot(snapshot, self._artifacts(SOURCE_CATALOG.get()))
-                    except (catalog_store.CatalogError, OSError):
-                        self._send_json(503, {"error": "source catalog unavailable"})
-                        return
+                    life = self._lifecycles(catalog).get(source_id)
+                    artifact = life["artifact"] if life else None
+                    matched = self._matched_snapshot(snapshot, {source_id: artifact})
                     if source_busy(snapshot, source_id) or not publication.status(matched, source_id)["serving"]:
                         self._send_json(409, {"error": "matching source configuration, verified content and a reachable reader are required"})
                         return
@@ -538,22 +559,45 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 return
             self._send_json(200, settings)
         elif self.path.rstrip("/") == "/api/action":
-            data = self._read_body()
-            source_id = str(data.get("source_id", "")).strip()
-            action = str(data.get("action", "")).strip()
-            if not source_id or not action:
-                self._send_json(400, {"error": "source_id and action are required"})
-                return
-            if source_id not in VALID_SOURCE_IDS:
-                self._send_json(400, {"error": "unknown source_id"})
-                return
-            if action not in VALID_ACTIONS:
-                self._send_json(400, {"error": "unknown action"})
-                return
-            response = action_response(source_id, action)
-            self._send_json(200 if response["accepted"] else 503, response)
+            self._refuse_acquisition(self._read_body())
         else:
             self._send_json(404, {"error": "not found"})
+
+    @staticmethod
+    def _valid_revision(revision):
+        return type(revision) is int and revision >= 0
+
+    def _refuse_acquisition(self, data):
+        def refuse(status, error):
+            self._send_json(status, {"accepted": False, "error": error})
+
+        sid, action = data.get("source_id"), data.get("action")
+        if not isinstance(sid, str) or not catalog_store.ID_RE.fullmatch(sid):
+            return refuse(400, "invalid source_id")
+        if not isinstance(action, str) or action not in ACTION_LABELS:
+            return refuse(400, "unknown action")
+        if set(data) != {"source_id", "action", "revision"} or not self._valid_revision(data["revision"]):
+            return refuse(400, "action requires a catalog revision and accepts no acquisition metadata")
+        with publication.LOCK:
+            try:
+                catalog = SOURCE_CATALOG.get()
+            except (catalog_store.CatalogError, OSError):
+                return refuse(503, "source catalog unavailable")
+            if data["revision"] != catalog["revision"]:
+                return refuse(409, "catalog revision changed")
+            record = next((record for record in catalog["sources"] if record["source_id"] == sid), None)
+            if record is None:
+                return refuse(400, "unknown source_id: no configured profile")
+            life = select_lifecycle(sid, record["configuration"])
+            if not life["artifact"]:
+                return refuse(409, life["acquisition_reason"])
+            snapshot = self._snapshot()
+            matching = self._matched_snapshot(snapshot, {sid: life["artifact"]})
+            if (source_busy(snapshot, sid) or (any(job["source_id"] == sid for job in snapshot["acquisitions"])
+                                               and not matching["acquisitions"])):
+                return refuse(409, "source has active or unresolved acquisition")
+            # No admin-triggered acquisition is implemented, even for a trusted pin.
+            return refuse(503, life["acquisition_reason"])
 
     @staticmethod
     def _guard_published_mutation(operation, sid, fields, revision):
@@ -572,7 +616,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             if catalog["revision"] != revision:
                 raise catalog_store.RevisionConflict("catalog revision changed")
             record = next((item for item in catalog["sources"] if item["source_id"] == sid), None)
-            if record and not matching_artifact(sid, record["configuration"] | fields):
+            if record and not select_lifecycle(sid, record["configuration"] | fields)["artifact"]:
                 raise catalog_store.RevisionConflict("unpublish source before changing artifact configuration")
 
     def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
