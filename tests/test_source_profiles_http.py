@@ -180,8 +180,8 @@ def test_monitor_identity_mismatch_does_not_supply_verification(app):
 
 
 @pytest.mark.parametrize("format_name,complete,adapter,reason", [
-    ("zim", True, "kiwix", "No trusted acquisition manifest"),
-    ("zim", False, "kiwix", "ZIM candidate configuration requires"),
+    ("zim", True, "kiwix", "Use the ZIM Download action"),
+    ("zim", False, "kiwix", "ZIM download requires a direct plain HTTPS URL"),
     ("other", True, None, "No lifecycle adapter supports this format"),
 ])
 def test_candidate_lifecycle_http_and_dom(app, format_name, complete, adapter, reason):
@@ -204,7 +204,11 @@ def test_candidate_lifecycle_http_and_dom(app, format_name, complete, adapter, r
     assert rendered is not None
     summary, details = rendered.split("</summary>", 1)
     assert ('role="status">Not yet supported</span>' if not adapter else 'role="status">Not downloaded</span>') in summary
-    assert reason not in summary and reason in details
+    assert reason not in summary
+    if complete and adapter == "kiwix":
+        assert 'data-zim-download' in details
+    else:
+        assert reason in details
     parser = Parser()
     parser.feed(rendered)
     assert not any("data-action" in attrs or attrs.get("data-field") == "publication-toggle"

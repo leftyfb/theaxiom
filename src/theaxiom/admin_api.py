@@ -36,6 +36,8 @@ pdf_source = importlib.import_module(f"{__package__}.pdf_source" if __package__ 
 epub_source = importlib.import_module(f"{__package__}.epub_source" if __package__ else "theaxiom.epub_source")
 pdf_language = importlib.import_module(f"{__package__}.pdf_language" if __package__ else "theaxiom.pdf_language")
 pdf_transport = importlib.import_module(f"{__package__}.pdf_transport" if __package__ else "theaxiom.pdf_transport")
+zim_jobs = importlib.import_module(f"{__package__}.zim_jobs" if __package__ else "theaxiom.zim_jobs")
+zim_source = importlib.import_module(f"{__package__}.zim_source" if __package__ else "theaxiom.zim_source")
 library_search = importlib.import_module(f"{__package__}.search" if __package__ else "theaxiom.search")
 BIND_HOST = "127.0.0.1"
 BIND_PORT = 8080
@@ -110,6 +112,14 @@ def select_lifecycle(source_id, configuration):
         return dict(adapter=adapter, configuration_valid=artifact is not None, artifact=artifact,
                     pdf_download=pdf_source.valid_source_url(configuration.get("source_url", "")),
                     acquisition_reason=reason, actions={})
+    if adapter == "kiwix" and source_id not in publication.ROUTES:
+        try:
+            zim_source.candidate(configuration)
+        except ValueError as exc:
+            return dict(adapter=adapter, configuration_valid=False, artifact=None,
+                        acquisition_reason=str(exc), actions={}, zim_download=False)
+        return dict(adapter=adapter, configuration_valid=True, artifact=None,
+                    acquisition_reason="", actions={}, zim_download=True)
     # CatalogStore validates field syntax; the adapter also requires these
     # fields to be present before a candidate can select an acquisition pin.
     valid = bool(adapter and all(isinstance(configuration.get(key), str) and configuration[key]
@@ -665,6 +675,24 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             verified = (bool(state and state["verified"]) if self._pdf_record(record) or self._epub_record(record)
                         else publication.verified(matched, sid))
             job = jobs.get(sid)
+            if lifecycles[sid].get("zim_download"):
+                try:
+                    local_job = zim_jobs.status(sid)
+                    if zim_jobs.matches(local_job, record["configuration"]):
+                        job = local_job
+                        busy = bool(local_job.get("active"))
+                        artifact = zim_jobs.installed(local_job, record["configuration"])
+                        if artifact:
+                            lifecycles[sid]["artifact"] = artifact
+                            verified = True
+                        elif local_job["state"] == "completed":
+                            job = dict(local_job, state="unavailable", verified=False, detail="Installed archive unavailable")
+                    elif local_job and local_job.get("active"):
+                        busy = True
+                    else:
+                        busy = False
+                except (ValueError, OSError):
+                    busy = True
             publication_filter = ("unknown" if state and state.get("error") else
                                   "published" if state and state["published"] else "unpublished")
             download_filter = "unknown"
@@ -678,6 +706,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                         # A missing file, corrupt file or unavailable mount cannot all
                         # be distinguished by the existing verification result.
                         download_filter = "unknown"
+                elif lifecycles[sid].get("zim_download") and not busy:
+                    download_filter = "not-downloaded"
                 elif not snapshot["stale"] and not busy and (not artifacts[sid]
                         or (job and job.get("state") == "not_started")):
                     download_filter = "not-downloaded"
@@ -784,6 +814,10 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                         existing is None and isinstance(sid, str) and sid not in publication.ROUTES
                         and isinstance(fields, dict) and fields.get("format") in {"pdf", "epub"})
                     busy = not is_pdf and source_busy(self._snapshot(), sid)
+                    if isinstance(sid, str) and sid not in publication.ROUTES:
+                        local_job = zim_jobs.status(sid)
+                        if local_job and local_job.get("active"):
+                            busy = True
                     unpublished = False
                     if operation == "remove":
                         # Validate all preconditions before changing publication.
@@ -895,7 +929,9 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             self._send_json(200, settings)
         elif self.path.rstrip("/") == "/api/action":
             data = self._read_body()
-            if data.get("action") == "import":
+            if data.get("action") == "zim-download":
+                self._start_zim(data)
+            elif data.get("action") == "import":
                 self._import_pdf(data)
             elif data.get("action") in {"pdf-download", "epub-download", "epub-add-download"}:
                 self._download_pdf(data)
@@ -1140,6 +1176,37 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 return
         self._send_json(200, {"accepted": True, "installed_verified": True, "revision": updated["revision"]})
 
+    def _start_zim(self, data):
+        sid = data.get("source_id")
+        if (set(data) != {"source_id", "action", "revision"} or not isinstance(sid, str)
+                or not catalog_store.ID_RE.fullmatch(sid) or not self._valid_revision(data["revision"])):
+            self._send_json(400, {"error": "ZIM download requires a source ID and current revision only"})
+            return
+        if not self.headers.get("Origin"):
+            self._send_json(403, {"error": "same-origin request required"})
+            return
+        with publication.LOCK:
+            try:
+                catalog = SOURCE_CATALOG.get()
+                if data["revision"] != catalog["revision"]:
+                    raise ValueError("catalog revision changed")
+                record = next((r for r in catalog["sources"] if r["source_id"] == sid), None)
+                if not record or sid in publication.ROUTES or not select_lifecycle(sid, record["configuration"]).get("zim_download"):
+                    raise ValueError("Source has no supported ZIM download URL")
+                if publication.load().get(sid):
+                    raise ValueError("Unpublish before downloading")
+                result = zim_jobs.start(sid, record["configuration"])
+            except BlockingIOError:
+                self._send_json(409, {"error": "Another ZIM acquisition is active"})
+                return
+            except ValueError as exc:
+                self._send_json(409, {"error": str(exc)})
+                return
+            except OSError:
+                self._send_json(503, {"error": "ZIM job or storage unavailable"})
+                return
+        self._send_json(202, result)
+
     def _refuse_acquisition(self, data):
         def refuse(status, error):
             self._send_json(status, {"accepted": False, "error": error})
@@ -1163,7 +1230,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 return refuse(400, "unknown source_id: no configured profile")
             life = select_lifecycle(sid, record["configuration"])
             if not life["artifact"]:
-                return refuse(409, life["acquisition_reason"])
+                return refuse(409, life["acquisition_reason"] or "Use the ZIM Download action")
             snapshot = self._snapshot()
             matching = self._matched_snapshot(snapshot, {sid: life["artifact"]})
             if (source_busy(snapshot, sid) or (any(job["source_id"] == sid for job in snapshot["acquisitions"])
