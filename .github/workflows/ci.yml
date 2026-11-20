@@ -21,6 +21,12 @@ jobs:
         run: |
           set -o pipefail
           python -m pytest -q | tee "$RUNNER_TEMP/axiom-pytest.log"
+      - name: Install isolated Kiwix smoke dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq kiwix-tools zim-tools
+      - name: Run real ZIM serving smoke test
+        run: python scripts/test_kiwix_live.py
       - name: Upload test summary
         if: always()
         uses: actions/upload-artifact@v4
