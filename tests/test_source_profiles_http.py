@@ -334,3 +334,19 @@ def test_public_group_filters_hide_unpublished_members(app):
     assert "Wikipedia" not in request("/search?q=water&tag=missing")
     publish(request, False)
     assert 'value="reference"' not in request("/")
+
+
+def test_admin_filter_status_distinguishes_installed_and_unpublished(app):
+    request, snapshot = app
+    publication.save(SID, True)
+    catalog = request("/api/sources")
+    assert source(catalog)["publication_filter"] == "published"
+    assert source(catalog)["download_filter"] == "downloaded"
+    publish(request, False)
+    catalog = request("/api/sources")
+    assert source(catalog)["publication_filter"] == "unpublished"
+    assert source(catalog)["download_filter"] == "downloaded"
+    catalog = mutate(request, catalog, "add", {"title": "Not downloaded"}, sid="candidate-filter")
+    assert source(catalog, "candidate-filter")["download_filter"] == "not-downloaded"
+    snapshot["stale"] = True
+    assert source(request("/api/sources"))["download_filter"] == "unknown"

@@ -52,3 +52,8 @@ Open Organize sources on Administration → Sources. Add predefined categories o
 
 
 Public library visitors can filter published sources by category, collection and tag, including combinations. Search respects selected groups; PDFs currently match title and description only, not full document text. Groups without published sources are not shown.
+
+
+## 8. Filter administration sources
+
+The Sources page defaults to published first, verified downloaded second, and all other sources last, alphabetical within each group. Combine independent publication and download filters with title, format and grouping filters. Unknown/unverified storage status is distinct from confirmed absence. Refresh order explicitly after live status changes; filter selections persist between reloads. Bulk selection includes visible cards only when using Select visible sources; the selected count identifies hidden selections before assignment.

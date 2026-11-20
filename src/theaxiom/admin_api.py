@@ -547,10 +547,28 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 busy = False
                 pdf_state = pdf_source.status(record, artifacts[sid])
                 state = pdf_state
-            sources.append(dict(record, **lifecycles[sid], acquisition=jobs.get(sid),
-                                installed_verified=(bool(state and state["verified"]) if self._pdf_record(record)
-                                                    else publication.verified(matched, sid)),
-                                publication=state, mutation_blocked=busy))
+            verified = (bool(state and state["verified"]) if self._pdf_record(record)
+                        else publication.verified(matched, sid))
+            job = jobs.get(sid)
+            publication_filter = ("unknown" if state and state.get("error") else
+                                  "published" if state and state["published"] else "unpublished")
+            download_filter = "unknown"
+            if verified:
+                download_filter = "downloaded"
+            elif not (state and state.get("error")):
+                if self._pdf_record(record):
+                    if not artifacts[sid]:
+                        download_filter = "not-downloaded"
+                    else:
+                        # A missing file, corrupt file or unavailable mount cannot all
+                        # be distinguished by the existing verification result.
+                        download_filter = "unknown"
+                elif not snapshot["stale"] and not busy and (not artifacts[sid]
+                        or (job and job.get("state") == "not_started")):
+                    download_filter = "not-downloaded"
+            sources.append(dict(record, **lifecycles[sid], acquisition=job, installed_verified=verified,
+                                publication=state, mutation_blocked=busy,
+                                publication_filter=publication_filter, download_filter=download_filter))
         return dict(catalog, sources=sources, acquisition_stale=snapshot["stale"])
 
     def _send_admin_page(self, page: str = "sources") -> None:

@@ -63,6 +63,9 @@
     .source-details { overflow-wrap: anywhere; }
     .admin-nav { display:flex; flex-wrap:wrap; gap:.5rem; margin-bottom:1.5rem; }
     .admin-nav a[aria-current="page"] { background:var(--dark); color:white; }
+    .source-filters { background:var(--paper); border:1px solid var(--line); border-radius:.8rem; padding:1rem; margin:1rem 0; }
+    .source-filters .editor-grid { grid-template-columns:repeat(auto-fit,minmax(145px,1fr)); margin:.5rem 0; }
+    .source-card[hidden] { display:none !important; }
     .group-panel { background:var(--paper); border:1px solid var(--line); border-radius:.8rem; padding:1rem; margin:1rem 0; }
     .group-panel summary { cursor:pointer; font-weight:700; color:var(--green); }
     .group-membership { font-size:.8rem; color:var(--muted); overflow-wrap:anywhere; }
@@ -177,7 +180,7 @@
         <button class="button" type="button" id="group-delete">Delete group</button>
       </div>
       <div class="source-actions">
-        <button class="button" type="button" id="group-select-all">Select all sources</button>
+        <button class="button" type="button" id="group-select-all">Select visible sources</button>
         <button class="button" type="button" id="group-clear">Clear selection</button>
         <button class="button" type="button" id="group-assign">Add selected to group</button>
         <button class="button" type="button" id="group-unassign">Remove selected from group</button>
@@ -238,11 +241,26 @@
 </section>
       <form method="dialog"><button class="button">Close guide</button></form>
     </dialog>
+    <section class="source-filters" aria-label="Filter and sort sources">
+      <div class="editor-grid">
+        <div class="editor-wide"><label for="source-filter-search">Search source names</label><input id="source-filter-search" type="search" placeholder="Search sources…" maxlength="512"></div>
+        <div><label for="source-filter-publication">Publication</label><select id="source-filter-publication"><option value="">All</option><option value="published">Published</option><option value="unpublished">Unpublished</option><option value="unknown">Unknown</option></select></div>
+        <div><label for="source-filter-download">Download</label><select id="source-filter-download"><option value="">All</option><option value="downloaded">Downloaded</option><option value="not-downloaded">Not downloaded</option><option value="unknown">Unknown / unverified</option></select></div>
+        <div><label for="source-filter-format">Format</label><select id="source-filter-format"><option value="">All formats</option>{% for source_format in (catalog|default({})).sources|default([])|map(attribute="configuration.format")|unique|sort %}<option value="{{ source_format }}">{{ source_format|upper }}</option>{% endfor %}</select></div>
+        {% for kind,label in [("categories","Category"),("collections","Collection"),("tags","Tag")] %}
+        <div><label for="source-filter-{{ kind }}">{{ label }}</label><select id="source-filter-{{ kind }}"><option value="">All</option>{% for group in groups|selectattr("kind","equalto",kind)|sort(attribute="name") %}<option value="{{ group.group_id }}">{{ group.name }}</option>{% endfor %}</select></div>
+        {% endfor %}
+        <div><label for="source-filter-sort">Sort by</label><select id="source-filter-sort"><option value="status">Published, downloaded, then rest</option><option value="alpha">Name A–Z</option></select></div>
+      </div>
+      <div class="source-actions"><button class="button" type="button" id="source-filter-reset">Clear filters</button><button class="button" type="button" id="source-filter-reorder">Refresh order</button></div>
+      <p id="source-filter-count" class="source-note" role="status"></p>
+    </section>
+    <p id="source-filter-empty" class="empty" hidden>No sources match the selected filters.</p>
     <div id="source-cards">
     {% for source in (catalog|default({})).sources|default([]) %}
       {% set pub = source.publication %}
       {% set publication_label = 'Publication status unavailable' if pub.error else 'Published · available in library' if pub.published else 'Enabled · reader unavailable' if pub.enabled else 'Unpublished · ready to publish' if pub.serving else 'Unpublished · ' + pub.publication_reason if pub.publication_reason else 'Unpublished · reader not ready' %}
-      <details class="source-card" data-source-id="{{ source.source_id }}"{% for name in editable_fields %} data-catalog-{{ name|replace('_', '-') }}="{{ source.profile.get(name, source.configuration.get(name, '')) }}"{% endfor %}>
+      <details class="source-card" data-source-id="{{ source.source_id }}" data-filter-title="{{ source.profile.title }}" data-filter-format="{{ source.configuration.format }}" data-filter-publication="{{ source.publication_filter|default('unknown') }}" data-filter-download="{{ source.download_filter|default('unknown') }}"{% for name in editable_fields %} data-catalog-{{ name|replace('_', '-') }}="{{ source.profile.get(name, source.configuration.get(name, '')) }}"{% endfor %}>
         <summary class="source-header">
           <label class="group-select"><input type="checkbox" data-group-select value="{{ source.source_id }}" aria-label="Select {{ source.profile.title }} for grouping">Select</label>
           <div>
@@ -342,7 +360,8 @@
             open: Array.from(document.querySelectorAll('.source-card[open]'), card => card.dataset.sourceId),
             scroll: window.scrollY,
             selected: Array.from(document.querySelectorAll("[data-group-select]:checked"), item => item.value),
-            groupsOpen: document.getElementById("group-panel").open
+            groupsOpen: document.getElementById("group-panel").open,
+            filters: window.axiomSourceFilters?.values()
           }));
         } catch (_) { /* Reload remains available without session storage. */ }
         window.location.reload();
@@ -362,7 +381,7 @@
           option.disabled = option.hidden;
         }
         if (groupExisting.selectedOptions[0]?.disabled) groupExisting.value = '';
-        document.getElementById('group-count').textContent = ids.length + ' selected';
+        document.getElementById('group-count').textContent = ids.length + ' selected (' + groupChecks.filter(item => item.checked && item.closest('.source-card').hidden).length + ' hidden by filters)';
         document.getElementById('group-defaults').hidden = kind !== 'categories' ||
           Array.from(groupExisting.options).some(option => option.dataset.kind === 'categories');
         document.getElementById('group-create-assign').hidden = kind !== 'tags';
@@ -379,7 +398,7 @@
       groupKind.addEventListener('change', () => { groupExisting.value = ''; groupControls(); });
       groupExisting.addEventListener('change', groupControls);
       document.getElementById('group-select-all').addEventListener('click', () => {
-        groupChecks.forEach(item => { item.checked = !item.closest('.source-card').hidden; });
+        groupChecks.forEach(item => { if (!item.closest('.source-card').hidden) item.checked = true; });
         groupControls();
       });
       document.getElementById('group-clear').addEventListener('click', () => {
@@ -431,6 +450,7 @@
         defaults:'initialize-categories',create:'create',rename:'rename',delete:'delete',
         assign:'add-members',unassign:'remove-members','create-assign':'create-assign'
       })) document.getElementById('group-' + id).addEventListener('click', () => groupChange(operation));
+      document.addEventListener("axiom-source-filters-changed", groupControls);
       groupControls();
       const dialog = document.getElementById('source-dialog');
       const form = document.getElementById('source-form');
@@ -609,6 +629,67 @@
       }));
     })();
   </script>
+
+  <script id="source-filter-script">
+    (() => {
+      const fields = ['search','publication','download','format','categories','collections','tags','sort'];
+      const nodes = Object.fromEntries(fields.map(key => [key, document.getElementById('source-filter-' + key)]));
+      const root = document.getElementById('source-cards');
+      const cards = Array.from(root.querySelectorAll('.source-card'));
+      const groups = {{ ((catalog|default({})).groups|default([]))|tojson }};
+      const values = () => Object.fromEntries(fields.map(key => [key,nodes[key].value]));
+      const defaults = {sort:'status'};
+      function rank(card) {
+        return card.dataset.filterPublication === 'published' ? 0 : card.dataset.filterDownload === 'downloaded' ? 1 : 2;
+      }
+      function apply(reorder = false) {
+        const v = values(), query = v.search.trim().toLocaleLowerCase();
+        let visible = 0;
+        for (const card of cards) {
+          const data = card.dataset;
+          const matches = (!query || data.filterTitle.toLocaleLowerCase().includes(query)) &&
+            (!v.publication || data.filterPublication === v.publication) &&
+            (!v.download || data.filterDownload === v.download) &&
+            (!v.format || data.filterFormat === v.format) &&
+            ['categories','collections','tags'].every(kind => !v[kind] ||
+              groups.some(g => g.kind === kind && g.group_id === v[kind] && g.source_ids.includes(data.sourceId)));
+          card.hidden = !matches;
+          if (matches) visible++;
+        }
+        if (reorder) {
+          cards.sort((a,b) => (v.sort === 'alpha' ? 0 : rank(a)-rank(b)) ||
+            a.dataset.filterTitle.localeCompare(b.dataset.filterTitle, undefined, {sensitivity:'base'}) ||
+            a.dataset.sourceId.localeCompare(b.dataset.sourceId));
+          for (const card of cards) root.appendChild(card);
+        }
+        const count = document.getElementById('source-filter-count');
+        count.textContent = visible + ' of ' + cards.length + ' sources';
+        document.getElementById('source-filter-empty').hidden = visible !== 0 || cards.length === 0;
+        document.dispatchEvent(new Event('axiom-source-filters-changed'));
+      }
+      const storageKey = 'theaxiom-source-filters';
+      try {
+        const saved = JSON.parse(sessionStorage.getItem(storageKey) || '{}');
+        for (const key of fields) if (typeof saved[key] === 'string') {
+          nodes[key].value = saved[key];
+          if (key === 'sort' && !nodes[key].value) nodes[key].value = 'status';
+        }
+      } catch (_) { /* Filtering still works without storage. */ }
+      function save() {
+        try { sessionStorage.setItem(storageKey, JSON.stringify(values())); } catch (_) {}
+      }
+      fields.forEach(key => nodes[key].addEventListener(key === 'search' ? 'input' : 'change', () => {
+        save(); apply(key === 'sort');
+      }));
+      document.getElementById('source-filter-reset').addEventListener('click', () => {
+        fields.forEach(key => { nodes[key].value = defaults[key] || ''; });
+        save(); apply(true);
+      });
+      document.getElementById('source-filter-reorder').addEventListener('click', () => apply(true));
+      window.axiomSourceFilters = {values, apply};
+      apply(true);
+    })();
+  </script>
   <script id="acquisition-monitor-script">
     (() => {
       const cards = Array.from(document.querySelectorAll('.source-card[data-source-id]'));
@@ -715,13 +796,19 @@
             else card.querySelector('[data-field="status"]').textContent = data.acquisition_stale ? 'Status unavailable' :
               source?.mutation_blocked !== false ? 'Acquisition unresolved' : 'Not downloaded';
             controls(card, source);
+            card.dataset.filterPublication = source?.publication_filter || "unknown";
+            card.dataset.filterDownload = source?.download_filter || "unknown";
           });
+          window.axiomSourceFilters?.apply(false);
         } catch (_) {
           cards.forEach(card => {
             if (card.querySelector('[data-action="download"]')) render(card, null, true, true);
             else card.querySelector('[data-field="status"]').textContent = 'Status unavailable';
             controls(card, null);
+            card.dataset.filterPublication = "unknown";
+            card.dataset.filterDownload = "unknown";
           });
+          window.axiomSourceFilters?.apply(false);
         } finally {
           window.clearTimeout(timer);
           window.setTimeout(refresh, 2000);

@@ -134,3 +134,14 @@ def test_group_management_controls_are_available():
     for marker in ('id="group-panel"', 'id="group-defaults"', 'id="group-create-assign"',
                    'id="group-assign"', 'id="group-unassign"', 'data-group-select value="field-guide"'):
         assert marker in page
+
+
+def test_source_filter_toolbar():
+    page = render([profile("field-guide", "Field guide", "Reference")])
+    for marker in ('id="source-filter-search"', 'id="source-filter-publication"',
+                   'id="source-filter-download"', 'id="source-filter-format"',
+                   'id="source-filter-categories"', 'id="source-filter-collections"',
+                   'id="source-filter-tags"', 'id="source-filter-sort"',
+                   'value="published"', 'value="unpublished"', 'value="downloaded"',
+                   'value="not-downloaded"', 'id="source-filter-empty"'):
+        assert marker in page
