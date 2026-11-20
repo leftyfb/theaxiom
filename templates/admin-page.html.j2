@@ -557,7 +557,7 @@
           const toggle = card?.querySelector('[data-field="publication-toggle"]');
           if (!toggle || toggle.disabled || toggle.dataset.posting || card.dataset.filterPublication === 'unknown') return false;
           return action === 'publish'
-            ? card.dataset.filterPublication === 'unpublished' && toggle.dataset.enabled === 'false' && toggle.dataset.acknowledgeRights === 'false'
+            ? card.dataset.filterPublication === 'unpublished' && toggle.dataset.enabled === 'false'
             : card.dataset.filterPublication === 'published' && toggle.dataset.enabled === 'true';
         });
       }
@@ -579,7 +579,7 @@
           const eligible = bulkPublicationEligible(action, ids);
           button.disabled = bulkBusy || !eligible;
           button.title = eligible ? '' : action === 'publish'
-            ? 'All selected sources must be unpublished, ready to publish and already rights-approved.'
+            ? 'All selected sources must be unpublished and ready to publish.'
             : 'All selected sources must be published.';
         }
         document.getElementById('bulk-remove').disabled = bulkBusy || !ids.length;
@@ -674,7 +674,9 @@
         const ids = selectedIds();
         if (!ids.length || (action !== 'remove' && !bulkPublicationEligible(action, ids))) return;
         const verb = action === 'remove' ? 'Remove' : action === 'publish' ? 'Publish' : 'Unpublish';
-        const suffix = action === 'remove' ? ' Catalog entries will be removed and unpublished; installed files will not be deleted.' : action === 'publish' ? ' Only eligible sources with existing rights approval can be published.' : ' Installed files will be retained.';
+        const rightsIds = new Set(action === 'publish' ? ids.filter(id => groupChecks.find(item => item.value === id).closest('.source-row').querySelector('[data-field="publication-toggle"]').dataset.acknowledgeRights === 'true') : []);
+        const rightsTitles = groupChecks.filter(item => rightsIds.has(item.value)).map(item => item.closest('.source-row').querySelector('.source-card').dataset.filterTitle || item.value);
+        const suffix = action === 'remove' ? ' Catalog entries will be removed and unpublished; installed files will not be deleted.' : action === 'publish' ? (rightsIds.size ? '\n\nConfirm you have permission to make these documents available to library users:\n' + rightsTitles.join('\n') : '') : ' Installed files will be retained.';
         if (!window.confirm(verb + ' ' + ids.length + ' selected sources?' + suffix)) return;
         bulkBusy = true;
         selectAll.disabled = true;
@@ -691,13 +693,14 @@
               const removing = action === 'remove';
               const payload = removing ? {operation:'remove', source_id, fields:{}, revision:currentRevision}
                 : {source_id, enabled:action === 'publish', revision:currentRevision};
+              if (rightsIds.has(source_id)) payload.acknowledge_rights = true;
               const response = await fetch(removing ? '/api/sources' : '/api/publication', {
                 method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
               const result = await response.json();
               if (!response.ok) {
                 results.push(title + ': ' + (result.error || 'HTTP ' + response.status));
-                if (response.status === 409 && /revision changed/i.test(result.error || '')) {
-                  results.push('Stopped: catalog changed; reload before acting on remaining sources.');
+                if (rightsIds.has(source_id) || (response.status === 409 && /revision changed/i.test(result.error || ''))) {
+                  results.push('Stopped: verify catalog and publication state before acting on remaining sources.');
                   break;
                 }
                 continue;
@@ -705,6 +708,8 @@
               if (removing) {
                 if (!Number.isInteger(result.revision)) throw new Error('Missing updated catalog revision');
                 currentRevision = result.revision;
+              } else if (rightsIds.has(source_id)) {
+                currentRevision += 1;
               }
               results.push(title + ': success');
             } catch (error) {

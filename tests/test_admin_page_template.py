@@ -155,7 +155,7 @@ def test_selection_mode_and_bulk_lifecycle_controls():
                    'id="bulk-actions" hidden', 'id="bulk-publish"',
                    'id="bulk-unpublish"', 'id="bulk-remove"'):
         assert marker in page
-    assert "Only eligible sources with existing rights approval" in page
+    assert "Confirm you have permission to make these documents available to library users" in page
     assert "currentRevision = result.revision" in page
     assert "outcome uncertain" in page
 
@@ -226,7 +226,10 @@ def test_bulk_publication_requires_all_selected_sources_eligible():
     assert 'id="bulk-unpublish" disabled' in page
     assert 'ids.length > 0 && ids.every(id =>' in page
     assert "card.dataset.filterPublication === 'unknown'" in page
-    assert "toggle.dataset.acknowledgeRights === 'false'" in page
+    assert "toggle.dataset.acknowledgeRights === 'false'" not in page
+    assert "if (rightsIds.has(source_id)) payload.acknowledge_rights = true" in page
+    assert "else if (rightsIds.has(source_id))" in page
+    assert "currentRevision += 1" in page
     assert "card.dataset.filterPublication === 'published' && toggle.dataset.enabled === 'true'" in page
     assert "action !== 'remove' && !bulkPublicationEligible(action, ids)" in page
 
