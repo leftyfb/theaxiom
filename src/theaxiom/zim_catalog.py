@@ -83,7 +83,7 @@ def verified_books(records, enabled=None):
 
 def render_xml(records, enabled=None):
     """Generate deterministic XML with standard escaping and no arbitrary paths."""
-    root = ET.Element("library", {"version": "2"})
+    root = ET.Element("library", {"version": "20110515"})
     for book in verified_books(records, enabled):
         ET.SubElement(root, "book", book)
     return ET.tostring(root, encoding="utf-8", xml_declaration=True) + b"\n"
@@ -142,7 +142,26 @@ def active_manifest_matches(records, enabled=None, *, acknowledgement=None):
 
 
 
-CONTENT_ROUTE = re.compile(r"/zim/content/([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:/|$)")
+CONTENT_ROUTE = re.compile(r"/zim/content/([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.[a-f0-9]{64})(?:/|$)")
+
+
+def content_name(book):
+    """Kiwix content IDs derive from the installed ZIM filename, not source ID."""
+    return Path(book["path"]).stem
+
+
+def source_content_name(record):
+    """Return the expected content ID only for a completed, verified archive."""
+    try:
+        job = zim_jobs.status(record["source_id"])
+        if not job or job.get("verified") is not True or job.get("active") is not False:
+            return None
+        artifact = zim_jobs.installed(job, record["configuration"])
+        if not artifact:
+            return None
+        return Path(artifact["filename"]).stem
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
 
 
 def authorize_reader_uri(records, uri):
@@ -165,7 +184,7 @@ def authorize_reader_uri(records, uri):
             match = CONTENT_ROUTE.match(path)
             if not match:
                 return False
-            return match.group(1) in {book["id"] for book in verified_books(records)}
+            return match.group(1) in {content_name(book) for book in verified_books(records)}
         return bool(verified_books(records))
     except (OSError, ValueError, TypeError):
         return False
@@ -192,7 +211,7 @@ def status(record, records):
         verified = artifact is not None
         rights = bool(config.get("license", "").strip())
         ready = (verified and rights and enabled and active_manifest_matches(records)
-                 and publication.reader_location(GENERIC_READER, sid) is not None)
+                 and publication.reader_location(GENERIC_READER, source_content_name(record)) is not None)
         reason = ("Confirm permission to share this archive" if verified and not rights
                   else "Awaiting verified Kiwix reader activation" if enabled and not ready
                   else "")

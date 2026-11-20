@@ -406,7 +406,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 if not state or not state["published"]:
                     self._send_json(403, {"error": "ZIM collection unavailable"})
                     return
-                location = publication.reader_location(zim_catalog.GENERIC_READER, sid)
+                location = publication.reader_location(zim_catalog.GENERIC_READER, zim_catalog.source_content_name(record))
                 if location is None:
                     self._send_json(503, {"error": "ZIM reader entry unavailable"})
                     return

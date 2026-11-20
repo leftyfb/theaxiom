@@ -43,7 +43,7 @@ def listed_book_ids(*, port=8082):
                 if u.scheme or u.netloc or u.query or u.fragment or not u.path.startswith(prefix):
                     continue
                 ident = u.path[len(prefix):].rstrip("/")
-                if catalog_store.ID_RE.fullmatch(ident):
+                if re.fullmatch(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.[a-f0-9]{64}', ident):
                     names.add(ident)
             if len(names) != 1:
                 raise ValueError("Ambiguous Kiwix book identity")
@@ -62,7 +62,7 @@ def acknowledge(records, *, path=None, book_ids=None):
     """Record a loaded generation only when Kiwix proves the exact book set."""
     enabled = publication.load()
     books = zim_catalog.verified_books(records, enabled)
-    expected_ids = {book["id"] for book in books}
+    expected_ids = {zim_catalog.content_name(book) for book in books}
     if not expected_ids:
         raise ValueError("No verified published ZIMs to serve")
     content = zim_catalog.render_xml(records, enabled)
