@@ -347,6 +347,18 @@
       <p id="source-filter-count" class="source-note" role="status"></p>
     </details>
     <div class="source-list-toolbar"><button class="button" type="button" id="source-select-mode" aria-pressed="false">Select</button><span id="source-list-count" class="source-note" role="status"></span></div>
+    <section class="group-panel" id="bulk-selection" hidden>
+      <div class="source-list-toolbar"><strong>Selected sources</strong><span id="group-count" class="source-note" aria-live="polite">0 selected</span></div>
+      <div class="source-actions">
+        <button class="button" type="button" id="group-select-all">Select visible sources</button>
+        <button class="button" type="button" id="group-clear">Clear selection</button>
+      </div>
+      <div class="source-actions" id="bulk-actions" hidden>
+        <button class="button" type="button" id="bulk-publish">Publish</button>
+        <button class="button" type="button" id="bulk-unpublish">Unpublish</button>
+        <button class="button" type="button" id="bulk-remove">Remove sources</button>
+      </div>
+    </section>
     <details class="group-panel" id="group-panel" hidden>
       <summary>Organize sources · Categories, collections &amp; tags</summary>
       <p class="source-note">Select source cards to assign groupings. <a href="/admin/groupings">Manage categories, tags and collections separately.</a></p>
@@ -361,22 +373,13 @@
         <button class="button" type="button" id="group-rename" hidden>Rename</button>
         <button class="button" type="button" id="group-delete" hidden>Delete group</button>
       </div>
-      <div id="bulk-selection" hidden>
-      <div class="source-actions">
-        <button class="button" type="button" id="group-select-all">Select visible sources</button>
-        <button class="button" type="button" id="group-clear">Clear selection</button>
-      </div>
-      <div class="source-actions" id="bulk-actions" hidden>
-        <button class="button" type="button" id="bulk-publish">Publish selected</button>
-        <button class="button" type="button" id="bulk-unpublish">Unpublish selected</button>
-        <button class="button" type="button" id="bulk-remove">Remove selected sources</button>
+      <div class="source-actions" id="bulk-group-actions" hidden>
         <button class="button" type="button" id="group-assign">Add groupings</button>
         <button class="button" type="button" id="group-unassign">Remove groupings</button>
         <button class="button" type="button" id="group-replace">Replace groupings</button>
         <button class="button" type="button" id="group-create-assign">Create tag &amp; assign</button>
       </div>
-      <p id="group-count" class="source-note" aria-live="polite">0 selected</p>
-      </div>
+
       <p id="group-feedback" role="status" aria-live="polite"></p>
       {% if not groups %}<p class="source-note">No groupings available yet. <a href="/admin/groupings">Add starter categories and tags</a>.</p>{% endif %}
     </details>
@@ -499,7 +502,7 @@
       const groupName = document.getElementById('group-name');
       const groupFeedback = document.getElementById('group-feedback');
       const groupChecks = Array.from(document.querySelectorAll('[data-group-select]'));
-      const groupButtons = Array.from(document.querySelectorAll('#group-panel button'));
+      const groupButtons = Array.from(document.querySelectorAll('#group-panel button, #bulk-selection button'));
       const selectMode = document.getElementById('source-select-mode');
       let selecting = selectMode.getAttribute('aria-pressed') === 'true';
       let bulkBusy = false;
@@ -512,8 +515,7 @@
           if (!selecting) item.checked = false;
         });
         document.getElementById('bulk-selection').hidden = !selecting;
-        document.getElementById('group-panel').hidden = !selecting;
-        if (selecting) document.getElementById('group-panel').open = true;
+        document.getElementById('group-panel').open = false;
         groupControls();
       }
       selectMode.addEventListener('click', () => {
@@ -524,6 +526,8 @@
       function groupControls() {
         const kind = groupKind.value, ids = selectedIds();
         document.getElementById('bulk-actions').hidden = !ids.length;
+        document.getElementById('bulk-group-actions').hidden = !ids.length;
+        document.getElementById('group-panel').hidden = !ids.length;
         document.getElementById('bulk-group-fields').hidden = !ids.length;
         for (const id of ['bulk-publish','bulk-unpublish','bulk-remove']) document.getElementById(id).disabled = bulkBusy || !ids.length;
         for (const option of groupExisting.options) {

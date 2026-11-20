@@ -195,3 +195,14 @@ def test_compact_source_layout_and_checkbox_editor():
     assert '<details id="source-editor-groups" hidden>' in page
     assert 'No categories available.' in page
     assert 'Add starter categories and tags' in page
+
+
+def test_bulk_lifecycle_controls_separate_from_grouping_panel():
+    page = render([profile()])
+    selection = page.index('id="bulk-selection"')
+    organize = page.index('id="group-panel"')
+    assert selection < page.index('id="bulk-publish"') < organize
+    assert selection < page.index('id="bulk-unpublish"') < organize
+    assert selection < page.index('id="bulk-remove"') < organize
+    assert organize < page.index('id="group-assign"') < page.index('id="source-cards"')
+    assert 'id="bulk-group-actions" hidden' in page
