@@ -52,7 +52,7 @@ For a local admin UI and API development check, start the backend and open the a
 curl http://127.0.0.1:8080/health
 ```
 
-The backend defaults to `127.0.0.1:8080` and serves the admin UI at `http://127.0.0.1:8080/admin`. Acquisition actions currently fail closed while storage safety integration is under development. This repository does not yet provide a complete installation package or a preloaded content library; local access is not a production deployment.
+The backend defaults to `127.0.0.1:8080` and serves the admin UI at `http://127.0.0.1:8080/admin`. Legacy /api/action acquisitions remain fail-closed. The dedicated ZIM downloader supports download, pause, resume and cancel through revision-gated admin controls; see docs/generic-zim-serving.md for verification and publication safeguards. This repository does not yet provide a complete installation package or a preloaded content library; local access is not a production deployment.
 
 ### Standard Nginx hosting
 
@@ -64,7 +64,7 @@ password is stored as a salted PBKDF2-HMAC-SHA256 hash and can be changed in the
 administration interface without restarting services. HTTP development hosting
 does not encrypt credentials; use a trusted isolated LAN and HTTPS for production.
 The local loopback development server remains available for tests without credentials
-when no Nginx mode is configured. Real acquisitions remain disabled.
+when no Nginx mode is configured. The legacy /api/action acquisition adapter remains disabled; dedicated ZIM and document acquisition/import flows have separate safeguards.
 
 ### Source profiles
 
@@ -83,11 +83,11 @@ Unpublish before removing a published source or changing its artifact identity. 
 ### Import a trusted PDF for offline reading
 
 1. In Sources, add a `pdf` source with a plain HTTPS publisher URL, provenance and redistribution basis, exact byte count (at most 16 MiB), and SHA-256. An administrator must independently review the origin, redistribution rights, and document safety. These fields are attestations; the app does not contact the publisher or establish that a PDF is safe to render.
-2. Use an explicitly configured local storage root or NFS mount with matching `storage_mount` and `storage_source` (no nested mounts). An operator must provision `staging/pdf` and `library/pdf` within it, owned by the application user and not group/world-writable. Place the trusted local file at `staging/pdf/<source-id>.pdf` with the same ownership and permissions. Symlinks, hard links and special files are refused.
+2. Use an explicitly configured local storage root or NFS mount with matching `storage_mount` and `storage_source` (no nested mounts). An operator must provision `staging/pdf` and `library/pdf` within it, owned by the application user and not group/world-writable. Place the trusted local file at `staging/pdf/<source-id>.pdf` with the required file ownership and permissions. Managed directory modes, including 0777, are an operator-controlled policy; files remain subject to owner, mount, symlink and write-safety checks. Symlinks, hard links and special files are refused.
 3. Select **Import local PDF** in that source's card. The app checks the storage reserve, streams and verifies the document framing and pin, and atomically installs the copy under `library/pdf/<source-id>.<sha256>.pdf`. Failure leaves previously installed bytes in place. The original inbox file is not deleted. Older pins are retained, not automatically pruned.
 4. Publish separately from the same card. The library links directly to the integrated offline PDF reader; see [PDF.js installation and reader limits](docs/pdfjs.md). Unpublishing blocks new reader and direct document requests; it cannot revoke previously saved copies. PDF full-text search is not included.
 
-Remote HTTPS acquisition (including redirect policy) and a production FEMA/Ready.gov source are pending. No production metadata is registered from the historical demo fixture.
+PDF HTTPS acquisition and safe ZIM transport now have separate workers and validation rules. FEMA/Ready.gov production acceptance and generic ZIM live serving remain pending explicit deployment approval. No production metadata is registered from the historical demo fixture.
 
 ### Storage configuration (development)
 
@@ -96,6 +96,13 @@ Open `/admin` and select Storage settings. Enter an existing storage root, selec
 GET and POST /api/storage-settings read and save the complete configuration object. The default is unconfigured, with empty storage_root, storage_mount and storage_source, minimum_free_bytes set to zero, and fixed directories ["staging", "library"]. Select an existing absolute non-root storage_root. For mounted storage, specify both its exact mount target and expected source; leave both empty for intentionally local storage. Managed destinations are staging/ and library/zim/ under the root. Configuration is saved atomically under XDG_CONFIG_HOME/theaxiom/storage.json (or THEAXIOM_STORAGE_SETTINGS). Older or corrupt configuration must be explicitly replaced, not automatically activated.
 
 GET /api/storage-status reports advisory readiness, detected mount, capacity and blocking errors. It makes no directories or probe writes. It checks the Linux mount table before inspecting filesystem paths, rejects symlinks and nested mounts, and checks available capacity against the selected source size. Hard NFS mounts can still block filesystem metadata operations. The checks cannot protect a subsequent writer from mount disappearance, replacement, or concurrent changes. Acquisition is therefore disabled, including when readiness passes. Existing staging environment overrides do not authorize acquisition. Persistent jobs, verified-local freshness, safe promotion and recovery remain outstanding.
+
+For generic ZIM serving, published status requires an explicitly verified installed
+archive, any necessary rights acknowledgement, a matching Kiwix manifest and an
+acknowledged running reader. The standalone Kiwix instance on port 8082 is an
+optional deployment component; it is not installed or started by application
+publishing actions. The current Wikipedia reader remains independent on 8081.
+See [generic ZIM acceptance and deployment gate](docs/generic-zim-serving.md).
 
 Node.js is required for the JavaScript tests in the full development suite.
 
