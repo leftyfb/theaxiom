@@ -2,6 +2,7 @@
 from contextlib import contextmanager
 import http.client
 import ipaddress
+import re
 import socket
 import ssl
 import time
@@ -63,8 +64,11 @@ def _remaining(deadline):
 
 
 class _BoundedBody:
-    def __init__(self, response, deadline, length, limit=None):
+    def __init__(self, response, deadline, length, limit=None, *, etag=None, last_modified=None, total_size=None):
         self.response = response
+        self.etag = etag
+        self.last_modified = last_modified
+        self.total_size = total_size
         self.deadline = deadline
         self.length = length
         self.count = 0
@@ -87,9 +91,13 @@ class _BoundedBody:
 
 
 @contextmanager
-def open_pdf(url, *, format_name="pdf", limit=None, total_seconds=None):
+def open_pdf(url, *, format_name="pdf", limit=None, total_seconds=None, offset=0, validator=None):
     if format_name not in {"pdf", "epub", "zim"} or (format_name == "zim" and (limit is None or total_seconds is None)):
         raise ValueError("Unsupported document format")
+    if offset and (format_name != "zim" or type(offset) is not int or not 0 < offset < limit
+                   or not isinstance(validator, str) or not validator
+                   or "\\r" in validator or "\\n" in validator or len(validator) > 256):
+        raise ValueError("Safe ZIM resume requires a validated offset and upstream validator")
     limit = pdf_source.MAX_BYTES if limit is None else limit
     deadline = time.monotonic() + (TOTAL_SECONDS if total_seconds is None else total_seconds)
     visited = set()
@@ -107,11 +115,15 @@ def open_pdf(url, *, format_name="pdf", limit=None, total_seconds=None):
         # Each hop has its own DNS validation, numeric socket pin and TLS identity.
         connection = _PinnedHTTPS(canonical.hostname, addresses[0], deadline)
         try:
-            connection.request("GET", canonical.path, headers={
+            headers = {
                 "Accept": ({"epub": "application/epub+zip", "pdf": "application/pdf", "zim": "application/octet-stream"}[format_name]) + ", application/octet-stream",
                 "Accept-Encoding": "identity", "Connection": "close",
                 "User-Agent": "The-Axiom PDF acquisition",
-            })
+            }
+            if offset:
+                headers["Range"] = f"bytes={offset}-"
+                headers["If-Range"] = validator
+            connection.request("GET", canonical.path, headers=headers)
             response = connection.getresponse()
             try:
                 _remaining(deadline)
@@ -125,7 +137,12 @@ def open_pdf(url, *, format_name="pdf", limit=None, total_seconds=None):
                         raise ValueError("Invalid PDF redirect location")
                     url = urljoin(url, locations[0])
                     continue
-                if response.status != 200:
+                if offset:
+                    if response.status == 200:
+                        raise ValueError("Publisher ignored HTTP Range; partial archive preserved")
+                    if response.status != 206:
+                        raise ValueError(f"ZIM resume rejected by publisher (HTTP {response.status})")
+                elif response.status != 200:
                     raise ValueError(f"PDF server returned HTTP {response.status}")
                 encoding = response.getheader("Content-Encoding")
                 if encoding and encoding.strip().lower() != "identity":
@@ -141,7 +158,27 @@ def open_pdf(url, *, format_name="pdf", limit=None, total_seconds=None):
                     length = int(lengths[0])
                     if not 0 < length <= limit:
                         raise ValueError("PDF response size exceeds limits")
-                yield _BoundedBody(response, deadline, length, limit)
+                etags = response.headers.get_all("ETag", [])
+                modified = response.headers.get_all("Last-Modified", [])
+                if len(etags) > 1 or len(modified) > 1:
+                    raise ValueError("Ambiguous publisher validator")
+                etag = etags[0] if etags and re.fullmatch(r'"[\\x21\\x23-\\x7e]{1,200}"', etags[0]) else None
+                last_modified = modified[0] if modified and re.fullmatch(r"[\\x20-\\x7e]{1,200}", modified[0]) else None
+                total_size = length
+                if offset:
+                    ranges = response.headers.get_all("Content-Range", [])
+                    match = re.fullmatch(r"bytes ([0-9]+)-([0-9]+)/([0-9]+)", ranges[0]) if len(ranges) == 1 else None
+                    if not match:
+                        raise ValueError("Missing or malformed ZIM Content-Range")
+                    first, last, total_size = map(int, match.groups())
+                    if first != offset or last < first or total_size > limit or total_size <= last:
+                        raise ValueError("ZIM Content-Range does not match saved offset")
+                    if length is not None and length != last - first + 1:
+                        raise ValueError("ZIM Content-Range length mismatch")
+                    if validator != etag and validator != last_modified:
+                        raise ValueError("Publisher changed ZIM identity since partial download")
+                yield _BoundedBody(response, deadline, length, limit - offset,
+                                   etag=etag, last_modified=last_modified, total_size=total_size)
                 return
             finally:
                 response.close()
