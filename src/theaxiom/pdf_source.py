@@ -88,8 +88,22 @@ def _directory(branch, *, writing=False):
         raise ValueError("PDF storage must be on the configured mount without nested mounts")
     fd = os.open("/", DIRECTORY)
     try:
-        for part in path.parts[1:]:
-            child = os.open(part, DIRECTORY, dir_fd=fd)
+        for index, part in enumerate(path.parts[1:]):
+            try:
+                child = os.open(part, DIRECTORY, dir_fd=fd)
+            except FileNotFoundError:
+                # Create only the PDF leaf, on the already configured mount.
+                # Never create the mount, storage root or parent directories.
+                if not writing or index != len(path.parts) - 2 or part != "pdf":
+                    raise
+                if (_mount_id(fd) != mount["id"]
+                        or storage._covering(path.parent, storage.read_mounts()) != mount):
+                    raise ValueError("PDF parent directory is not on the configured mount")
+                try:
+                    os.mkdir(part, mode=0o700, dir_fd=fd)
+                except FileExistsError:
+                    pass
+                child = os.open(part, DIRECTORY, dir_fd=fd)
             os.close(fd)
             fd = child
         _check_directory(fd, mount["id"])

@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import json
-import http.client
 import importlib
 import os
 import re
@@ -747,8 +746,14 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             except ValueError as exc:
                 self._send_json(409, {"error": str(exc)})
                 return
-            except (OSError, http.client.HTTPException):
-                self._send_json(503, {"error": "PDF download or storage unavailable"})
+            except FileNotFoundError:
+                self._send_json(503, {"error": "PDF storage parent directory or catalog path is missing"})
+                return
+            except PermissionError:
+                self._send_json(503, {"error": "PDF storage or catalog is not writable by the application"})
+                return
+            except OSError:
+                self._send_json(503, {"error": "PDF storage or catalog I/O failed"})
                 return
         self._send_json(200, {"accepted": True, "installed_verified": True, "revision": updated["revision"]})
 

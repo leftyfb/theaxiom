@@ -259,3 +259,30 @@ def test_pdf_download_metadata_and_explicit_publication(pdf_app, disk, monkeypat
     request("/api/publication", dict(pub, revision=catalog["revision"]))
     request("/api/action", dict(action, revision=catalog["revision"]), status=409)
     assert request(READER + "/document.pdf", raw=True)[0] == data
+
+
+def test_pdf_download_creates_missing_pdf_leaf_directories(pdf_app, disk, monkeypatch):
+    from io import BytesIO
+    request, _ = pdf_app
+    inbox, library = disk
+    inbox.parent.rmdir()
+    library.rmdir()
+    data = document()
+    monkeypatch.setattr(admin_api.pdf_transport, "download",
+                        lambda sid, url, **kwargs: pdf_source.install_stream(sid, BytesIO(data), **kwargs))
+    catalog = mutate(request, request("/api/sources"), "add", fields(data), sid=SID)
+    result = request("/api/action", dict(source_id=SID, action="pdf-download", revision=catalog["revision"]))
+    assert result["installed_verified"]
+    assert inbox.parent.is_dir()
+    assert (library / (SID + "." + hashlib.sha256(data).hexdigest() + ".pdf")).read_bytes() == data
+
+
+def test_pdf_download_storage_permission_error_is_actionable(pdf_app, disk, monkeypatch):
+    request, _ = pdf_app
+    def denied(*args, **kwargs):
+        raise PermissionError("private path must not be returned")
+    monkeypatch.setattr(admin_api.pdf_transport, "download", denied)
+    catalog = mutate(request, request("/api/sources"), "add", fields(document()), sid=SID)
+    result = request("/api/action", dict(source_id=SID, action="pdf-download", revision=catalog["revision"]), status=503)
+    assert "not writable" in result["error"]
+    assert "private path" not in result["error"]

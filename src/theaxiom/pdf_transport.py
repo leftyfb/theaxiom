@@ -14,6 +14,10 @@ TOTAL_SECONDS = 25
 MAX_REDIRECTS = 3
 
 
+class DownloadError(ValueError):
+    """Sanitized remote transport failure, distinct from local storage errors."""
+
+
 def _public_addresses(host):
     results = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM, proto=socket.IPPROTO_TCP)
     addresses = []
@@ -68,7 +72,10 @@ class _BoundedBody:
     def read(self, size):
         _remaining(self.deadline)
         # read1 avoids waiting to fill a large buffer under a slow-drip response.
-        data = self.response.read1(size)
+        try:
+            data = self.response.read1(size)
+        except (OSError, http.client.HTTPException) as exc:
+            raise DownloadError("PDF network response interrupted or timed out") from exc
         _remaining(self.deadline)
         self.count += len(data)
         if self.count > pdf_source.MAX_BYTES:
@@ -139,6 +146,17 @@ def open_pdf(url):
 
 
 def download(source_id, url, *, expected_size=None, expected_sha256=None):
-    with open_pdf(url) as stream:
+    from contextlib import ExitStack
+    with ExitStack() as stack:
+        try:
+            stream = stack.enter_context(open_pdf(url))
+        except socket.gaierror as exc:
+            raise DownloadError("PDF publisher DNS lookup failed") from exc
+        except ssl.SSLError as exc:
+            raise DownloadError("PDF publisher TLS validation or handshake failed") from exc
+        except TimeoutError as exc:
+            raise DownloadError("PDF publisher connection timed out") from exc
+        except (OSError, http.client.HTTPException) as exc:
+            raise DownloadError("PDF publisher network connection or HTTP response failed") from exc
         return pdf_source.install_stream(source_id, stream, expected_size=expected_size,
                                          expected_sha256=expected_sha256)
