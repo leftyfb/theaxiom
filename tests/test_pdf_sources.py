@@ -198,3 +198,34 @@ def test_explicit_nfs_mount_identity_and_local_fallback(disk, monkeypatch):
     with pytest.raises(ValueError, match="missing or replaced"):
         pdf_source.import_local(SID, artifact)
     assert installed.read_bytes() == data
+
+
+def test_stream_install_observes_metadata_and_preserves_previous_bytes(disk):
+    from io import BytesIO
+    inbox, library = disk
+    data = document()
+    artifact = pdf_source.install_stream(SID, BytesIO(data))
+    assert artifact["bytes"] == len(data)
+    assert artifact["sha256"] == hashlib.sha256(data).hexdigest()
+    assert pdf_source.ready(artifact, verify=True)
+    assert (library / artifact["filename"]).read_bytes() == data
+    for incoming, kwargs in [
+        (b"not a PDF", {}),
+        (document(b"Different"), {"expected_sha256": artifact["sha256"]}),
+        (data, {"expected_size": len(data) - 1}),
+        (data, {"expected_size": len(data) + 1}),
+    ]:
+        with pytest.raises(ValueError):
+            pdf_source.install_stream(SID, BytesIO(incoming), **kwargs)
+    assert list(library.iterdir()) == [library / artifact["filename"]]
+    assert not list(inbox.parent.glob(".import-*"))
+
+
+def test_stream_install_respects_capacity_and_maximum(disk, monkeypatch):
+    from io import BytesIO
+    inbox, library = disk
+    monkeypatch.setattr(pdf_source, "MAX_BYTES", 32)
+    with pytest.raises(ValueError, match="limit"):
+        pdf_source.install_stream(SID, BytesIO(document()))
+    assert not list(library.iterdir())
+    assert not list(inbox.parent.glob(".import-*"))

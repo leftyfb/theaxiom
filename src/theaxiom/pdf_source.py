@@ -171,6 +171,66 @@ def import_local(source_id, artifact):
                     pass
 
 
+
+def install_stream(source_id, stream, *, expected_size=None, expected_sha256=None):
+    """Install bounded incoming PDF bytes, returning their observed identity.
+
+    The caller must authorize acquisition and persist provenance separately.
+    A computed digest is not an independent publisher attestation.
+    """
+    if not catalog_store.ID_RE.fullmatch(source_id):
+        raise ValueError("Invalid PDF source ID")
+    if expected_size is not None and (type(expected_size) is not int or not 0 < expected_size <= MAX_BYTES):
+        raise ValueError("Invalid expected PDF size")
+    if expected_sha256 is not None and not re.fullmatch(r"[a-fA-F0-9]{64}", expected_sha256):
+        raise ValueError("Invalid expected PDF SHA-256")
+    with (_directory("staging", writing=True) as (staging, smount, _),
+          _directory("library", writing=True) as (library, lmount, minimum)):
+        if smount != lmount:
+            raise ValueError("PDF staging and library must share one mount")
+        capacity = os.fstatvfs(staging)
+        budget = min(MAX_BYTES, capacity.f_bavail * capacity.f_frsize - minimum)
+        if capacity.f_flag & os.ST_RDONLY or budget < (expected_size or 1):
+            raise ValueError("Insufficient writable PDF storage capacity")
+        temporary = ".import-" + uuid4().hex
+        flags = os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+        fd = os.open(temporary, flags, 0o600, dir_fd=staging)
+        try:
+            with os.fdopen(fd, "w+b") as target:
+                count = 0
+                digest = hashlib.sha256()
+                limit = min(budget, expected_size or MAX_BYTES)
+                while block := stream.read(min(CHUNK, limit - count + 1)):
+                    count += len(block)
+                    if count > limit:
+                        raise ValueError("PDF exceeds expected size or storage limit")
+                    digest.update(block)
+                    target.write(block)
+                observed = digest.hexdigest()
+                if expected_size is not None and count != expected_size:
+                    raise ValueError("PDF size does not match the catalog pin")
+                if expected_sha256 is not None and observed != expected_sha256.lower():
+                    raise ValueError("PDF SHA-256 does not match the catalog pin")
+                artifact = {"filename": f"{source_id}.{observed}.pdf",
+                            "bytes": count, "sha256": observed}
+                target.seek(0)
+                _verify(target, artifact)
+                target.flush()
+                os.fsync(target.fileno())
+            os.replace(temporary, artifact["filename"], src_dir_fd=staging, dst_dir_fd=library)
+            for directory in (library, staging):
+                try:
+                    os.fsync(directory)
+                except OSError:
+                    pass
+            return artifact
+        finally:
+            try:
+                os.unlink(temporary, dir_fd=staging)
+            except FileNotFoundError:
+                pass
+
+
 @contextmanager
 def installed(artifact, *, verify=False):
     with _directory("library") as (directory, mount_id, _):
