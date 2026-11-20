@@ -119,7 +119,7 @@ def test_published_profile_edit_unpublish_remove_and_equivalent_readd(app, tmp_p
     assert source(edited)["artifact"] == original["artifact"]
     assert source(edited)["publication"]["published"]
     wiki = card(request("/admin/sources"))
-    assert "Local &lt;reference&gt;" in wiki and "Candidate license</dt><dd>Operator note" in wiki
+    assert "Local &lt;reference&gt;" in wiki and "License</dt><dd>Operator note" in wiki
     publish(request, False)
     assert request("/read/wikipedia-en", status=403)
     before = card(request("/admin/sources"))
@@ -160,7 +160,7 @@ def test_conflicting_profile_does_not_inherit_trusted_state(app, conflict):
     assert refuse_action(request, edited, 409) == wiki["acquisition_reason"]
     assert wiki["configuration"] == source(catalog)["configuration"] | conflict
     changed = card(request("/admin/sources"))
-    assert "Candidate SHA-256" in changed and "Pinned archive" not in changed
+    assert "Expected SHA-256" in changed and "Artifact SHA-256" not in changed
     assert "publication-toggle" not in changed and "Not confirmed" in changed
     publish(request, True, status=409)
     publication.save(SID, True)  # A stale persisted flag cannot bypass the configuration check.

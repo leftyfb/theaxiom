@@ -9,12 +9,12 @@ class AdminWebUISkeletonTests(unittest.TestCase):
         text = TEMPLATE.read_text()
         for marker in ("<!doctype html>", 'lang="en"', 'meta name="viewport"',
                        "Skip to administration", 'id="main-content"', "Manage offline sources",
-                       'data-source-id="{{ source.source_id }}"', '<details class="source-card"', '<summary class="source-header">', '<section aria-label="Source details">',
+                       'data-source-id="{{ source.source_id }}"', '<details class="source-card"', '<summary class="source-header">', '<details class="source-technical">', '<summary>Technical details</summary>',
                        "No managed sources configured.", 'name="format"', "fetch('/api/sources'",
                        'id="status-staging"', 'id="status-library"'):
             self.assertIn(marker, text)
         for marker in ("data-pdf-upload", "data-pdf-download", "data-pdf-file",
-                       "action:card.dataset.filterFormat === 'epub' ? 'epub-download' : 'pdf-download'", "fetch('/api/pdf-upload'", "sessionStorage.setItem(stateKey"):
+                       "action:card.dataset.filterFormat === 'epub' ? 'epub-download' : 'pdf-download'", "acquisitionFetch('/api/pdf-upload'", "sessionStorage.setItem(stateKey"):
             self.assertTrue(marker in text, f"Missing PDF action marker: {marker}")
         for marker in ("data-dest=", "auth_basic", "proxy_pass",
                        "nginx", "systemd"):

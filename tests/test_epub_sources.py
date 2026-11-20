@@ -140,7 +140,9 @@ def test_epub_http_upload(epub_app, disk):
     assert row["profile"]["publisher"] == "Example Press"
     assert row["download_filter"] == "downloaded"
     request("/api/publication", dict(source_id="fixture-book", enabled=True, revision=updated["revision"]), status=409)
-    assert "Upload EPUB" in request("/admin/sources")
+    page = request("/admin/sources")
+    assert ">Replace EPUB</button>" in page
+    assert ">Upload EPUB</button>" not in page
 
 
 def test_epub_http_add_download(epub_app, disk, monkeypatch):
