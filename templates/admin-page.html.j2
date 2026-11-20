@@ -347,8 +347,8 @@
     <section class="group-panel" id="bulk-selection" hidden>
       <strong>Selected source actions</strong>
       <div class="source-actions" id="bulk-actions" hidden>
-        <button class="button" type="button" id="bulk-publish">Publish</button>
-        <button class="button" type="button" id="bulk-unpublish">Unpublish</button>
+        <button class="button" type="button" id="bulk-publish" disabled>Publish</button>
+        <button class="button" type="button" id="bulk-unpublish" disabled>Unpublish</button>
         <button class="button" type="button" id="bulk-remove">Remove sources</button>
       </div>
     </section>
@@ -538,6 +538,16 @@
         selecting = !selecting;
         selectionMode();
       });
+      function bulkPublicationEligible(action, ids) {
+        return ids.length > 0 && ids.every(id => {
+          const card = groupChecks.find(item => item.value === id)?.closest('.source-card');
+          const toggle = card?.querySelector('[data-field="publication-toggle"]');
+          if (!toggle || toggle.disabled || toggle.dataset.posting || card.dataset.filterPublication === 'unknown') return false;
+          return action === 'publish'
+            ? card.dataset.filterPublication === 'unpublished' && toggle.dataset.enabled === 'false' && toggle.dataset.acknowledgeRights === 'false'
+            : card.dataset.filterPublication === 'published' && toggle.dataset.enabled === 'true';
+        });
+      }
       function groupControls() {
         const kind = groupKind.value, ids = selectedIds();
         const visible = visibleChecks();
@@ -551,7 +561,15 @@
         document.getElementById('bulk-group-actions').hidden = !ids.length;
         document.getElementById('group-panel').hidden = !ids.length;
         document.getElementById('bulk-group-fields').hidden = !ids.length;
-        for (const id of ['bulk-publish','bulk-unpublish','bulk-remove']) document.getElementById(id).disabled = bulkBusy || !ids.length;
+        for (const action of ['publish','unpublish']) {
+          const button = document.getElementById('bulk-' + action);
+          const eligible = bulkPublicationEligible(action, ids);
+          button.disabled = bulkBusy || !eligible;
+          button.title = eligible ? '' : action === 'publish'
+            ? 'All selected sources must be unpublished, ready to publish and already rights-approved.'
+            : 'All selected sources must be published.';
+        }
+        document.getElementById('bulk-remove').disabled = bulkBusy || !ids.length;
         for (const option of groupExisting.options) {
           option.hidden = !!option.dataset.kind && option.dataset.kind !== kind;
           option.disabled = option.hidden;
@@ -641,7 +659,7 @@
       async function bulkLifecycle(action) {
         if (bulkBusy) return;
         const ids = selectedIds();
-        if (!ids.length) return;
+        if (!ids.length || (action !== 'remove' && !bulkPublicationEligible(action, ids))) return;
         const verb = action === 'remove' ? 'Remove' : action === 'publish' ? 'Publish' : 'Unpublish';
         const suffix = action === 'remove' ? ' Catalog entries will be removed and unpublished; installed files will not be deleted.' : action === 'publish' ? ' Only eligible sources with existing rights approval can be published.' : ' Installed files will be retained.';
         if (!window.confirm(verb + ' ' + ids.length + ' selected sources?' + suffix)) return;

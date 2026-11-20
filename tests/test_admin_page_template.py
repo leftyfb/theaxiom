@@ -217,3 +217,14 @@ def test_minimal_source_list_toolbar():
     assert 'aria-controls="source-filters-panel" aria-expanded="false"' in page
     assert 'selectAll.indeterminate' in page
     assert 'id="source-filter-search" type="search"' in page
+
+
+def test_bulk_publication_requires_all_selected_sources_eligible():
+    page = render([profile()])
+    assert 'id="bulk-publish" disabled' in page
+    assert 'id="bulk-unpublish" disabled' in page
+    assert 'ids.length > 0 && ids.every(id =>' in page
+    assert "card.dataset.filterPublication === 'unknown'" in page
+    assert "toggle.dataset.acknowledgeRights === 'false'" in page
+    assert "card.dataset.filterPublication === 'published' && toggle.dataset.enabled === 'true'" in page
+    assert "action !== 'remove' && !bulkPublicationEligible(action, ids)" in page
