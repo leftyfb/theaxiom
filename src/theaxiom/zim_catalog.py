@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import tempfile
+import time
 from urllib.parse import urlsplit
 import xml.etree.ElementTree as ET
 
@@ -94,6 +95,15 @@ def write_manifest(records, enabled=None):
     content = render_xml(records, enabled)
     target = manifest_path()
     target.parent.mkdir(parents=True, exist_ok=True)
+    # Kiwix --monitorLibrary compares integer-second mtimes (strictly >).
+    # Two atomic manifest replacements in the same second may otherwise
+    # NEVER be detected. Keep each replacement strictly newer than the
+    # previous generation, even when updates are close together.
+    try:
+        previous_second = target.stat().st_mtime_ns // 1_000_000_000
+    except FileNotFoundError:
+        previous_second = -1
+    generation_second = max(int(time.time()), previous_second + 1)
     fd, name = tempfile.mkstemp(prefix=".kiwix-library-", dir=target.parent)
     try:
         with os.fdopen(fd, "wb") as stream:
@@ -101,6 +111,8 @@ def write_manifest(records, enabled=None):
             stream.write(content)
             stream.flush()
             os.fsync(stream.fileno())
+        os.utime(name, ns=(generation_second * 1_000_000_000,
+                            generation_second * 1_000_000_000))
         os.replace(name, target)
         dir_fd = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY)
         try:

@@ -109,9 +109,9 @@ def main():
                       "title": "Second Test", "language": "eng"}
             with patch.object(zim_catalog, "verified_books", return_value=[book, second]):
                 updated = zim_catalog.render_xml([])
-            newer = base / "library-next.xml"
-            newer.write_bytes(updated)
-            newer.replace(manifest)
+            with (patch.object(zim_catalog, "verified_books", return_value=[book, second]),
+                  patch.object(zim_catalog, "manifest_path", return_value=manifest)):
+                zim_catalog.write_manifest([])
             second_name = zim_catalog.content_name(second)
             deadline = time.monotonic() + 20
             while time.monotonic() < deadline:
@@ -122,8 +122,9 @@ def main():
                 raise RuntimeError("Kiwix failed to automatically load the newly published second book")
             with patch.object(zim_catalog, "verified_books", return_value=[second]):
                 updated = zim_catalog.render_xml([])
-            newer.write_bytes(updated)
-            newer.replace(manifest)
+            with (patch.object(zim_catalog, "verified_books", return_value=[second]),
+                  patch.object(zim_catalog, "manifest_path", return_value=manifest)):
+                zim_catalog.write_manifest([])
             deadline = time.monotonic() + 20
             while time.monotonic() < deadline:
                 if zim_reader_probe.listed_book_ids(port=port) == {second_name}:

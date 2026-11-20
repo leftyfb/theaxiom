@@ -169,3 +169,17 @@ def test_kiwix_xml_version_and_installed_file_slug(disk):
     books = zim_catalog.verified_books([record("ready")], {"ready": True})
     assert zim_catalog.content_name(books[0]) == "ready." + artifact["sha256"]
     assert ET.fromstring(zim_catalog.render_xml([record("ready")], {"ready": True})).get("version") == "20110515"
+
+
+def test_manifest_mtime_increases_with_fast_atomic_updates(disk, monkeypatch):
+    # Kiwix's watch loop uses integer-second timestamps and strictly >.
+    # Simulate multiple publication changes within the same wall second.
+    monkeypatch.setattr(zim_catalog.time, "time", lambda: 1000.0)
+    path = zim_catalog.write_manifest([], {})
+    first = path.stat().st_mtime_ns
+    path = zim_catalog.write_manifest([], {})
+    second = path.stat().st_mtime_ns
+    path = zim_catalog.write_manifest([], {})
+    third = path.stat().st_mtime_ns
+    assert second >= first + 1_000_000_000
+    assert third >= second + 1_000_000_000
