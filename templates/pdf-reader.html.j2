@@ -1,25 +1,27 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{ record.profile.title }} · The Axiom</title>
-  <style>
-    body { max-width: 48rem; margin: 2rem auto; padding: 0 1rem; font: 1.1rem/1.5 system-ui, sans-serif; }
-    a { color: #176b4d; } dd { overflow-wrap: anywhere; }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ record.profile.title }} · The Axiom</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font:16px system-ui,sans-serif;background:#e8ece9;color:#172a23}header{position:sticky;top:0;z-index:2;background:#fff;padding:10px;border-bottom:1px solid #bbc9c0}nav,.tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap}nav a{font-weight:700;color:#176b4d}h1{font-size:1rem;margin:6px 0}button,input,a{font:inherit}button,input{padding:7px;max-width:100%}#page{width:5em}#find{width:13em}main{display:flex;align-items:flex-start;gap:12px;padding:12px}#thumbs{width:140px;flex:none;max-height:75vh;overflow:auto}#thumbs button{display:block;width:100%;margin-bottom:8px}#thumbs canvas{max-width:100%;height:auto}#document{flex:1;min-width:0;overflow:auto;text-align:center}#paper{display:block;margin:auto;background:white;box-shadow:0 2px 8px #0003}#message{padding:8px}#matches{font-size:.85rem}#print-pages{display:none}@media(max-width:650px){main{padding:4px;gap:4px}#thumbs{width:90px}button,input{font-size:14px}header{padding:6px}}@media print{header,main,#message{display:none!important}#print-pages{display:block}#print-pages canvas{display:block;max-width:100%;height:auto;break-after:page}body{background:white}}
+</style>
 </head>
-<body>
-  <nav><a href="/">← Back to library</a></nav>
-  <main>
-    <h1>{{ record.profile.title }}</h1>
-    <p>{{ record.profile.description }}</p>
-    <p><a href="{{ path }}" target="_blank" rel="noopener">Open offline PDF (new tab)</a></p>
-    <dl>
-      <dt>Source URL</dt><dd>{{ record.configuration.source_url }}</dd>
-      <dt>Provenance</dt><dd>{{ record.configuration.provenance }}</dd>
-      <dt>Redistribution rights</dt><dd>{{ record.configuration.license }}</dd>
-    </dl>
-  </main>
-</body>
-</html>
+<body data-document="{{ path }}">
+<header>
+<nav><a href="/">← Back to library</a><a href="{{ path }}" download>Download PDF</a></nav>
+<h1>{{ record.profile.title }}</h1>
+<div class="tools">
+<button id="toggle" aria-expanded="false">Thumbnails</button>
+<button id="prev" aria-label="Previous page">‹</button><label>Page <input id="page" type="number" min="1" value="1"></label><span id="total"></span><button id="next" aria-label="Next page">›</button>
+<button id="out" aria-label="Zoom out">−</button><button id="fit">Fit width</button><button id="in" aria-label="Zoom in">+</button>
+<label>Find <input id="find" type="search" placeholder="Search document"></label><button id="find-next">Next match</button><span id="matches" role="status"></span>
+<button id="print">Print</button>
+</div></header>
+<div id="message" role="status">Loading offline PDF viewer…</div>
+<main><aside id="thumbs" hidden aria-label="Page thumbnails"></aside><section id="document" aria-label="PDF page"><canvas id="paper"></canvas></section></main>
+<div id="print-pages"></div>
+<noscript>JavaScript is required for this viewer. Use the Download PDF link above.</noscript>
+<script type="module" src="/api/pdf-reader.mjs"></script>
+</body></html>

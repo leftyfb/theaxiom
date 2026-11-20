@@ -38,6 +38,9 @@ library_search = importlib.import_module(f"{__package__}.search" if __package__ 
 BIND_HOST = "127.0.0.1"
 BIND_PORT = 8080
 ADMIN_TEMPLATE_DIR = Path(__file__).resolve().parents[2] / "templates"
+PDFJS_ROOT = Path("/opt/pdfjs/current")
+PDFJS_PREFIX = "/api/pdfjs/"
+PDFJS_ASSET = re.compile(r"/api/pdfjs/(?:build|web|cmaps|standard_fonts|wasm|iccs|image_decoders|locale)/[A-Za-z0-9_./-]+\Z")
 
 ACTION_LABELS = {"download": "Download", "redownload": "Re-download", "update": "Update"}
 ACQUISITION_DISABLED = "acquisition disabled pending storage safety integration"
@@ -240,9 +243,9 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         if len(hosts) != 1 or hosts[0].lower() not in config.allowed_hosts:
             self._send_json(400, {"error": "invalid host"})
             return False
-        public_paths = {"/", "/index.html", "/health", "/health/", "/internal/publication/wikipedia-en", "/read/wikipedia-en"}
+        public_paths = {"/", "/index.html", "/health", "/health/", "/internal/publication/wikipedia-en", "/read/wikipedia-en", "/api/pdf-reader.mjs"}
         if not post and (self.path in public_paths or self.path.split("?", 1)[0] in {"/", "/index.html", "/search"}
-                         or pdf_source.ROUTE.fullmatch(self.path)):
+                         or pdf_source.ROUTE.fullmatch(self.path) or PDFJS_ASSET.fullmatch(self.path)):
             return True
         auth = self.headers.get_all("Authorization", [])
         local_hosts = {f"{config.host}:{config.port}", f"localhost:{config.port}"}
@@ -303,6 +306,17 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802 - http.server convention
         if not self._guard():
+            return
+        if self.path == "/api/pdf-reader.mjs":
+            body = (ADMIN_TEMPLATE_DIR / "pdf-reader.mjs").read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/javascript")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if PDFJS_ASSET.fullmatch(self.path):
+            self._serve_pdfjs_asset()
             return
         pdf_route = pdf_source.ROUTE.fullmatch(self.path)
         if pdf_route:
@@ -455,6 +469,37 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 artifact = select_lifecycle(record["source_id"], record["configuration"])["artifact"]
                 yield record, pdf_source.status(record, artifact)
 
+    def _serve_pdfjs_asset(self):
+        """Serve only trusted installed renderer assets, never arbitrary host files."""
+        relative = self.path[len(PDFJS_PREFIX):]
+        parts = relative.split("/")
+        if any(part in {"", ".", ".."} for part in parts):
+            self._send_json(404, {"error": "asset not found"})
+            return
+        types = {".mjs": "text/javascript", ".js": "text/javascript",
+                 ".css": "text/css", ".wasm": "application/wasm",
+                 ".bcmap": "application/octet-stream", ".pfb": "application/octet-stream",
+                 ".ttf": "font/ttf", ".otf": "font/otf", ".icc": "application/octet-stream",
+                 ".json": "application/json", ".ftl": "text/plain",
+                 ".svg": "image/svg+xml", ".png": "image/png"}
+        try:
+            root = PDFJS_ROOT.resolve(strict=True)
+            path = (root / relative).resolve(strict=True)
+            if not path.is_relative_to(root) or path.suffix not in types or not path.is_file():
+                raise ValueError("not an asset")
+            if path.stat().st_size > 32 * 1024 * 1024:
+                raise ValueError("asset too large")
+            body = path.read_bytes()
+        except (OSError, ValueError):
+            self._send_json(404, {"error": "PDF.js asset unavailable"})
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", types[path.suffix])
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Content-Security-Policy", "default-src 'none'")
+        self.end_headers()
+        self.wfile.write(body)
+
     def _serve_pdf(self, sid, document):
         with ExitStack() as files:
             try:
@@ -477,6 +522,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
+                self.send_header("Content-Security-Policy", "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data: blob:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'")
                 self.end_headers()
                 self.wfile.write(body)
                 return

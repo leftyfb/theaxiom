@@ -1,14 +1,26 @@
-# PDF.js integration (#74)
+# Offline PDF reader (#74)
 
-The official Mozilla legacy generic distribution is pinned to 6.5.438.
-The preparation script verifies the release archive's exact size and SHA-256
-before extraction, refuses unsafe paths and symlinks, and requires the viewer
-and worker entry points and license. The read-only preparation workflow runs
-on changes to the script/workflow and produces a reviewable distribution artifact.
+Install the official Mozilla PDF.js legacy generic distribution 6.5.438 at
+`/opt/pdfjs/6.5.438` and link `/opt/pdfjs/current` to it. Use
+`python3 scripts/vendor_pdfjs.py /opt/pdfjs/6.5.438` as an administrator on a
+connected preparation host, then transfer the verified directory if needed.
+Keep the distribution and license notices root-owned and not writable by the
+application service account. No installation-time changes to content storage
+are needed. No CDN or runtime internet access is used.
 
-This is dependency preparation only. The application does not yet consume
-these assets; no runtime internet requests or new deployment services are
-introduced. Before enabling the viewer, vendor the verified distribution
-and upstream notices into the application checkout, inspect its license and
-browser requirements, enforce publication and external-link/scripting
-restrictions, and test the actual reader on desktop and mobile.
+The application exposes only renderer assets through the existing /api/ proxy.
+It does not expose the upstream generic viewer HTML, arbitrary file URLs,
+PDF annotations/actions, scripting layer, XFA, or document-defined links.
+The application owns the toolbar and renders pages using PDF.js directly.
+The authorized PDF endpoint is unchanged and checked before reader and document
+delivery. A restrictive reader CSP limits resources to the same origin; PDFs
+are loaded into the renderer as bytes, not navigated as active HTML.
+
+Features: page navigation, fit and zoom, lazy thumbnails, text search by
+matching page (not OCR or highlighted hits), print (up to 100 pages, bounded
+resolution), download and keyboard navigation. The download fallback remains
+available when the renderer is unavailable. Already downloaded bytes cannot
+be revoked. Browser/Pi acceptance must verify real rendering, search, printing,
+offline requests and resource use. PDF.js is Apache-2.0; preserve upstream
+license and notices, including bundled fonts. Verify actual host installation
+and browser compatibility before acceptance. Track dependency inventory in #79.

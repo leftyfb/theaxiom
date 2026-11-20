@@ -83,12 +83,14 @@ def test_pdf_lifecycle(pdf_app, disk, tmp_path, monkeypatch):  # noqa: F811
     assert READER not in request("/")
     request("/api/publication", publication)
     monkeypatch.setattr(admin_api, "SOURCE_CATALOG", catalog_store.CatalogStore(tmp_path / "sources.json"))
-    assert ('href="' + READER + '/document.pdf"') in request("/")
-    assert ('href="' + READER + '"') not in request("/")
+    assert ('href="' + READER + '/document.pdf"') not in request("/")
+    assert ('href="' + READER + '"') in request("/")
     assert "Open PDF" in request("/")
     page = request(READER)
     assert 'href="/"' in page and 'A local &lt;guide&gt;' in page
     assert READER + "/document.pdf" in page
+    assert "/api/pdf-reader.mjs" in page
+    assert "Content-Security-Policy" in request(READER, raw=True)[1]
     asset, headers = request(READER + "/document.pdf", raw=True)
     assert asset == data and headers["Content-Type"] == "application/pdf"
     assert headers["Content-Disposition"].startswith("inline;") and headers["Cache-Control"] == "no-store"
@@ -392,7 +394,7 @@ def test_pdf_publish_with_explicit_rights_acknowledgement(pdf_app, disk):
     updated = request("/api/sources")
     record = source(updated, SID)
     assert record["publication"]["published"]
-    assert record["publication"]["entry_path"] == READER + "/document.pdf"
+    assert record["publication"]["entry_path"] == READER
     assert "Administrator confirmed permission" in record["configuration"]["license"]
     assert request(READER + "/document.pdf", raw=True)[0] == document()
     request("/api/publication", dict(pub, enabled=False, revision=updated["revision"]))
