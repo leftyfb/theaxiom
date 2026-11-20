@@ -131,6 +131,27 @@ class HTTPAuthTests(unittest.TestCase):
         self.assertEqual(self.request("/api/action", "POST", body='{"action":"import"}')[0], 401)
         self.assertEqual(self.request("/api/library/pdf/fixture-guide/document.pdf")[0], 403)
 
+    def test_brand_icons_load_without_admin_credentials(self):
+        """Browser favicon requests must not trigger an admin password prompt."""
+        icons = {
+            "/favicon.svg": ("image/svg+xml", b"<svg"),
+            "/favicon.png": ("image/png", b"\\x89PNG\\r\\n\\x1a\\n"),
+            "/favicon.ico": ("image/x-icon", b"\\x00\\x00\\x01\\x00"),
+        }
+        for path, (mime, magic) in icons.items():
+            with self.subTest(path=path):
+                code, headers, body = self.request(path)
+                self.assertEqual(code, 200)
+                self.assertEqual(headers["Content-Type"], mime)
+                self.assertEqual(int(headers["Content-Length"]), len(body))
+                self.assertIn("nosniff", headers["X-Content-Type-Options"])
+                self.assertTrue(body.startswith(magic))
+                self.assertNotIn("WWW-Authenticate", headers)
+                self.assertEqual(self.request(path, headers={"Host": "attacker.invalid"})[0], 400)
+        status, headers, _ = self.request("/admin")
+        self.assertEqual(status, 401)
+        self.assertEqual(headers["WWW-Authenticate"], 'Basic realm="The Axiom", charset="UTF-8"')
+
     def test_invalid_credentials_and_host_rejected(self):
         self.assertEqual(self.request("/admin", auth="Basic bad")[0], 401)
         self.assertEqual(self.request("/admin", auth=self.auth, headers={"Host":"attacker.invalid"})[0], 400)
@@ -236,3 +257,36 @@ class AdminProxyRouteTests(unittest.TestCase):
             for path in (route, route + "/"):
                 with self.subTest(path=path):
                     self.assertIn("location = " + path + " { include /etc/nginx/snippets/theaxiom-backend.conf; }", config)
+
+
+class BrandingAssetTests(unittest.TestCase):
+    def test_all_shipped_html_templates_use_local_brand_identity(self):
+        root = Path(__file__).resolve().parents[1]
+        pages = [
+            "templates/admin-page.html.j2", "templates/library.html.j2",
+            "templates/search.html.j2", "templates/document-page.html.j2",
+            "templates/epub-reader.html.j2", "templates/pdf-reader.html.j2",
+            "deploy/www/index.html",
+        ]
+        for page in pages:
+            with self.subTest(page=page):
+                html = (root / page).read_text()
+                self.assertIn('<meta name="application-name" content="The Axiom">', html)
+                self.assertIn('href="/favicon.svg"', html)
+                self.assertIn('href="/favicon.png"', html)
+                self.assertIn('href="/favicon.ico"', html)
+                self.assertIn("<title>", html)
+                self.assertIn("The Axiom</title>", html)
+
+    def test_nginx_serves_icons_without_auth_or_proxy_dependencies(self):
+        root = Path(__file__).resolve().parents[1]
+        conf = (root / "deploy/nginx/theaxiom.conf").read_text()
+        for icon in ("favicon.svg", "favicon.png", "favicon.ico"):
+            block = conf.split("location = /" + icon + " {", 1)[1].split("}", 1)[0]
+            self.assertIn("try_files $uri =404;", block)
+            self.assertNotIn("auth_request", block)
+            self.assertNotIn("proxy_pass", block)
+        icons = root / "deploy/www"
+        self.assertTrue((icons / "favicon.svg").read_bytes().startswith(b"<svg"))
+        self.assertTrue((icons / "favicon.png").read_bytes().startswith(b"\\x89PNG\\r\\n\\x1a\\n"))
+        self.assertTrue((icons / "favicon.ico").read_bytes().startswith(b"\\x00\\x00\\x01\\x00"))
