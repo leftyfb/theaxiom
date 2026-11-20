@@ -169,3 +169,45 @@ def test_resume_refuses_inconsistent_saved_offset(disk):
     with pytest.raises(ValueError, match="offset disagrees"):
         zim_source.download_resumable("ready", CONFIG, offset=40, validator='"old"')
     assert part.stat().st_size == 32
+
+
+def test_world_writable_staging_does_not_allow_swapped_inode_promotion(disk, monkeypatch):
+    from contextlib import contextmanager
+    from unittest.mock import patch
+
+    data = fixture_bytes()
+    stage = disk / "staging/zim"
+    stage.mkdir(exist_ok=True)
+    stage.chmod(0o777)
+    library = disk / "library/zim"
+    library.mkdir(exist_ok=True)
+    library.chmod(0o777)
+
+    class Stream(BytesIO):
+        length = len(data)
+        total_size = len(data)
+        etag = '"same"'
+        last_modified = None
+
+    @contextmanager
+    def remote(url, **kwargs):
+        yield Stream(data)
+
+    original = zim_source.os.link
+    def swap_before_link(source, dest, *, src_dir_fd, dst_dir_fd, follow_symlinks):
+        zim_source.os.unlink(source, dir_fd=src_dir_fd)
+        fd = zim_source.os.open(source, zim_source.os.O_CREAT | zim_source.os.O_EXCL |
+                                zim_source.os.O_WRONLY, 0o600, dir_fd=src_dir_fd)
+        with zim_source.os.fdopen(fd, "wb") as writer:
+            writer.write(b"malicious substitute")
+        return original(source, dest, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd,
+                        follow_symlinks=follow_symlinks)
+
+    with patch.object(zim_source.pdf_transport, "open_pdf", remote):
+        with patch.object(zim_source.os, "link", swap_before_link):
+            with pytest.raises(ValueError, match="changed during final promotion"):
+                zim_source.download_resumable("ready", CONFIG)
+
+    assert not list(library.iterdir())
+    assert stage.stat().st_mode & 0o777 == 0o777
+    assert library.stat().st_mode & 0o777 == 0o777
