@@ -146,12 +146,26 @@ def test_reader_content_auth_requires_specific_published_book(disk):
                    "artifact": artifact})
     rec = record("ready")
     publication.save("ready", True)
+    name = zim_catalog.content_name({"path": artifact["filename"]})
+    assert name == "ready." + artifact["sha256"]
     with patch.object(zim_catalog, "active_manifest_matches", return_value=True):
-        assert zim_catalog.authorize_reader_uri([rec], "/zim/content/ready/article")
+        assert zim_catalog.authorize_reader_uri([rec], "/zim/content/" + name + "/article")
         assert zim_catalog.authorize_reader_uri([rec], "/zim/viewer")
         assert not zim_catalog.authorize_reader_uri([rec], "/zim/content/other/article")
-        assert not zim_catalog.authorize_reader_uri([rec], "/zim/content/ready%2Fother/article")
+        assert not zim_catalog.authorize_reader_uri([rec], "/zim/content/" + name + "%2Fother/article")
         assert not zim_catalog.authorize_reader_uri([rec], "/zim/content/../ready")
         assert not zim_catalog.authorize_reader_uri([rec], "/admin")
         publication.save("ready", False)
-        assert not zim_catalog.authorize_reader_uri([rec], "/zim/content/ready/article")
+        assert not zim_catalog.authorize_reader_uri([rec], "/zim/content/" + name + "/article")
+
+
+# Kiwix exposes a filename-derived content ID rather than the catalog source ID.
+
+def test_kiwix_xml_version_and_installed_file_slug(disk):
+    artifact = zim_source.install_stream("ready", CONFIG, BytesIO(fixture_bytes()))
+    zim_jobs.save({"source_id": "ready", "state": "completed", "active": False,
+                   "verified": True, "configuration": zim_jobs.identity(CONFIG),
+                   "artifact": artifact})
+    books = zim_catalog.verified_books([record("ready")], {"ready": True})
+    assert zim_catalog.content_name(books[0]) == "ready." + artifact["sha256"]
+    assert ET.fromstring(zim_catalog.render_xml([record("ready")], {"ready": True})).get("version") == "20110515"

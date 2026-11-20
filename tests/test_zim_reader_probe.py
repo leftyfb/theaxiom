@@ -26,11 +26,12 @@ def installed(disk):
 def test_startup_acknowledges_only_exact_published_content(disk, tmp_path):
     rec = installed(disk)
     zim_catalog.write_manifest(rec)
+    book_name = zim_catalog.content_name(zim_catalog.verified_books(rec)[0])
     marker = tmp_path / "manifest.sha256"
     with pytest.raises(ValueError, match="unexpected"):
         zim_reader_probe.acknowledge(rec, path=marker, book_ids={"another"})
     assert not marker.exists()
-    zim_reader_probe.acknowledge(rec, path=marker, book_ids={"ready"})
+    zim_reader_probe.acknowledge(rec, path=marker, book_ids={book_name})
     assert zim_catalog.active_manifest_matches(rec, acknowledgement=marker)
     publication.save("ready", False)
     assert not zim_catalog.active_manifest_matches(rec, acknowledgement=marker)
@@ -57,13 +58,14 @@ def test_opds_book_identity_rejects_ambiguous_duplicates_and_external_links():
             response.status = 200
             response.read.return_value = xml.encode()
             return zim_reader_probe.listed_book_ids()
-    good = '<feed xmlns="http://www.w3.org/2005/Atom"><entry><link href="/zim/content/ready"/></entry></feed>'
-    assert read(good) == {"ready"}
+    slug = "ready." + "a"*64
+    good = '<feed xmlns="http://www.w3.org/2005/Atom"><entry><link href="/zim/content/' + slug + '"/></entry></feed>'
+    assert read(good) == {slug}
     for xml in (
-        '<feed xmlns="http://www.w3.org/2005/Atom"><entry><link href="https://evil.example/zim/content/ready"/></entry></feed>',
-        '<feed xmlns="http://www.w3.org/2005/Atom"><entry><link href="/zim/content/ready"/><link href="/zim/content/other"/></entry></feed>',
-        '<feed xmlns="http://www.w3.org/2005/Atom"><entry><link href="/zim/content/ready"/></entry><entry><link href="/zim/content/ready"/></entry></feed>',
-        '<feed xmlns="http://www.w3.org/2005/Atom"><entry><link href="/zim/content/ready%2funsafe"/></entry></feed>',
+        '<feed xmlns="http://www.w3.org/2005/Atom"><entry><link href="https://evil.example/zim/content/' + slug + '"/></entry></feed>',
+        '<feed xmlns="http://www.w3.org/2005/Atom"><entry><link href="/zim/content/' + slug + '"/><link href="/zim/content/other.' + "b"*64 + '"/></entry></feed>',
+        '<feed xmlns="http://www.w3.org/2005/Atom"><entry><link href="/zim/content/' + slug + '"/></entry><entry><link href="/zim/content/' + slug + '"/></entry></feed>',
+        '<feed xmlns="http://www.w3.org/2005/Atom"><entry><link href="/zim/content/' + slug + '%2funsafe"/></entry></feed>',
     ):
         with pytest.raises(ValueError):
             read(xml)
