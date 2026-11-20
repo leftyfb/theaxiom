@@ -180,3 +180,15 @@ output, package availability and clean-install tests on Ubuntu 24.04/26.04
 amd64/arm64, resolved wheel/deb hashes, external Kiwix provenance, and isolated
 network smoke evidence. Track offline installation/recovery in #53 and
 standard deployment in #10. No new installer or host mutation is authorized.
+
+
+### Operator-selected shared-directory permissions
+
+The Axiom accepts application-owned content leaf directories with mode `0777`,
+as well as restrictive modes. Configured mount identity, directory ownership,
+path/symlink restrictions, free-space reserve and individual installed-file
+ownership/permissions remain enforced. World-writable directories allow other
+local users to rename or remove directory entries, including installed content;
+this can cause disruption even when the file checks reject substituted bytes.
+Use restrictive permissions on untrusted multi-user hosts, but the application
+does not silently change an operator's chosen directory mode.

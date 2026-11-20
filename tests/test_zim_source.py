@@ -69,3 +69,22 @@ def test_optional_pin_validation():
     assert zim_source.candidate(CONFIG | {"expected_size_bytes":"120", "sha256":"A"*64})[1:] == (120, "a"*64)
     with pytest.raises(ValueError):
         zim_source.candidate(CONFIG | {"source_url":"http://example.org/a.zim"})
+
+
+def test_world_writable_library_directory_does_not_block_zim_install(disk):
+    from theaxiom import pdf_source
+
+    library = disk / "library" / "zim"
+    library.mkdir()
+    library.chmod(0o777)
+    data = fixture_bytes()
+    artifact = zim_source.install_stream("ready", CONFIG, BytesIO(data))
+    assert (library / artifact["filename"]).read_bytes() == data
+    assert library.stat().st_mode & 0o777 == 0o777
+
+    # A permissive directory does not weaken ownership/mode checks on files.
+    (library / artifact["filename"]).chmod(0o666)
+    with pdf_source._directory("library", format_name="zim") as (directory, mount, _):
+        with pytest.raises(ValueError, match="unsafe"):
+            with pdf_source._file(directory, mount, artifact["filename"], artifact["bytes"]):
+                pass

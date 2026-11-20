@@ -346,8 +346,8 @@ def test_new_pdf_leaf_corrects_server_inherited_write_permissions(disk, monkeypa
     assert inbox.parent.stat().st_mode & 0o777 == 0o700
     assert library.stat().st_mode & 0o777 == 0o700
     library.chmod(0o777)
-    with pytest.raises(ValueError, match="PDF directories"):
-        pdf_source.install_stream(SID, BytesIO(document()))
+    assert pdf_source.ready(artifact, verify=True)
+    assert pdf_source.install_stream(SID, BytesIO(document())) == artifact
     assert library.stat().st_mode & 0o777 == 0o777
 
 

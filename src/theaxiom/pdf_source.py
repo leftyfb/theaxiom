@@ -66,8 +66,11 @@ def _mount_id(fd):
 
 def _check_directory(fd, mount_id):
     info = os.fstat(fd)
-    if (_mount_id(fd) != mount_id or info.st_uid != os.geteuid() or info.st_mode & 0o022):
-        raise ValueError("PDF directories must be owned by the application user, not group/world writable, and on the configured mount")
+    # Directory modes, including 0777, are an operator-controlled policy.
+    # Never relax ownership, mount identity, symlink or installed-file checks.
+    if (not stat.S_ISDIR(info.st_mode) or _mount_id(fd) != mount_id
+            or info.st_uid != os.geteuid()):
+        raise ValueError("Managed content directories must be owned by the application user and remain on the configured mount")
 
 
 @contextmanager
