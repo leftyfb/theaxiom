@@ -680,7 +680,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     local_job = zim_jobs.status(sid)
                     if zim_jobs.matches(local_job, record["configuration"]):
                         job = local_job
-                        busy = bool(local_job.get("active"))
+                        busy = bool(local_job.get("active")) or (local_job["state"] in {"paused", "failed", "interrupted"}
+                            and zim_jobs.staged_size(sid) > 0)
                         artifact = zim_jobs.installed(local_job, record["configuration"])
                         if artifact:
                             lifecycles[sid]["artifact"] = artifact

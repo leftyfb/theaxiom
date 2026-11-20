@@ -253,8 +253,20 @@ def _run(job, guard, signal, offset, validator):
             job.update(state="paused", active=False, verified=False, downloaded_bytes=staged_size(sid),
                        detail="Download paused; partial retained.", sampled_at=time.time())
     except Exception as exc:
-        detail = str(exc)[:240] if isinstance(exc, ValueError) else "ZIM acquisition failed (network or storage I/O)."
-        job.update(state="failed", active=False, verified=False, detail=detail, sampled_at=time.time())
+        requested = CONTROLS.get(sid, (None, None))[1] if signal.is_set() else None
+        if requested == "cancel":
+            try:
+                zim_source.discard_partial(sid)
+            except FileNotFoundError:
+                pass
+            job.update(state="cancelled", active=False, verified=False, downloaded_bytes=0,
+                       detail="Download cancelled; staged bytes removed.", sampled_at=time.time())
+        elif requested == "pause":
+            job.update(state="paused", active=False, verified=False,
+                       detail="Download paused after network interruption.", sampled_at=time.time())
+        else:
+            detail = str(exc)[:240] if isinstance(exc, ValueError) else "ZIM acquisition failed (network or storage I/O)."
+            job.update(state="failed", active=False, verified=False, detail=detail, sampled_at=time.time())
         try:
             job["downloaded_bytes"] = staged_size(sid)
         except (ValueError, OSError):
