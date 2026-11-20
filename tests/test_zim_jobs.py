@@ -64,7 +64,6 @@ def test_pause_retains_partial_and_cancel_removes_it(disk):
                 output.write(fixture_bytes()[:80])
         progress(80, len(fixture_bytes()), {"etag": '"v1"'})
         entered.set()
-        assert threading.Event().wait(0.01) is None
         while not stopped():
             threading.Event().wait(0.01)
         raise zim_source.TransferStopped()
