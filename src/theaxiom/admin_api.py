@@ -1200,7 +1200,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 if operation in {"zim-pause", "zim-cancel"}:
                     result = zim_jobs.control(sid, record["configuration"], operation.removeprefix("zim-"))
                 else:
-                    result = zim_jobs.start(sid, record["configuration"], resume=operation == "zim-resume")
+                    result = (zim_jobs.start(sid, record["configuration"], resume=True)
+                              if operation == "zim-resume" else zim_jobs.start(sid, record["configuration"]))
             except BlockingIOError:
                 self._send_json(409, {"error": "Another ZIM acquisition is active"})
                 return
