@@ -156,8 +156,9 @@ class HTTPAuthTests(unittest.TestCase):
                 self.assertNotIn("WWW-Authenticate", headers)
                 self.assertEqual(self.request(path, headers={"Host": "attacker.invalid"})[0], 400)
         status, headers, _ = self.request("/admin")
-        self.assertEqual(status, 401)
-        self.assertEqual(headers["WWW-Authenticate"], 'Basic realm="The Axiom", charset="UTF-8"')
+        self.assertEqual(status, 303)
+        self.assertEqual(headers["Location"], "/admin/login")
+        self.assertNotIn("WWW-Authenticate", headers)
 
     def test_branded_browser_login_session_csrf_and_logout(self):
         import re
