@@ -120,8 +120,15 @@ class HTTPAuthTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertNotIn("WWW-Authenticate", headers)
         self.assertIn(b"Your offline reference library", body)
-        for path in ("/admin", "/admin/", "/admin/sources", "/admin/settings", "/admin/sources/", "/admin/settings/", "/admin/groupings", "/admin/groupings/", "/api/storage-settings",
-                     "/api/storage-status", "/api/acquisitions", "/api/freshness", "/api/jobs/" + "a"*32):
+        for path in ("/admin", "/admin/", "/admin/sources", "/admin/settings",
+                     "/admin/sources/", "/admin/settings/", "/admin/groupings", "/admin/groupings/"):
+            with self.subTest(path=path):
+                status, headers, _ = self.request(path)
+                self.assertEqual(status, 303)
+                self.assertEqual(headers["Location"], "/admin/login")
+                self.assertNotIn("WWW-Authenticate", headers)
+        for path in ("/api/storage-settings", "/api/storage-status", "/api/acquisitions",
+                     "/api/freshness", "/api/jobs/" + "a"*32):
             with self.subTest(path=path):
                 status, headers, _ = self.request(path)
                 self.assertEqual(status, 401)
@@ -152,8 +159,75 @@ class HTTPAuthTests(unittest.TestCase):
         self.assertEqual(status, 401)
         self.assertEqual(headers["WWW-Authenticate"], 'Basic realm="The Axiom", charset="UTF-8"')
 
+    def test_branded_browser_login_session_csrf_and_logout(self):
+        import re
+        status, headers, html = self.request("/admin/login")
+        self.assertEqual(status, 200)
+        self.assertIn("no-store", headers["Cache-Control"])
+        self.assertIn(b'<input id="username" name="username"', html)
+        self.assertIn(b'autocomplete="current-password"', html)
+        self.assertIn(b'Administrator sign in', html)
+        login_headers = {"Origin": "http://" + self.host,
+                         "Content-Type": "application/json"}
+        body = json.dumps({"username": "admin", "password": "invalid"})
+        self.assertEqual(self.request("/api/admin/login", "POST", headers=login_headers,
+                                      body=body)[0], 403)
+        self.assertEqual(self.request("/api/admin/login", "POST",
+                                      headers={"Content-Type": "application/json"},
+                                      body=body)[0], 403)
+        body = json.dumps({"username": "admin", "password": "fixture-password-only"})
+        code, headers, _ = self.request("/api/admin/login", "POST", headers=login_headers, body=body)
+        self.assertEqual(code, 204)
+        self.assertIn("HttpOnly", headers["Set-Cookie"])
+        self.assertIn("SameSite=Strict", headers["Set-Cookie"])
+        cookie = headers["Set-Cookie"].split(";", 1)[0]
+        status, _, html = self.request("/admin", headers={"Cookie": cookie})
+        self.assertEqual(status, 200)
+        csrf = re.search(rb'<meta name="theaxiom-csrf" content="([A-Za-z0-9_-]+)"', html)
+        self.assertIsNotNone(csrf)
+        token = csrf.group(1).decode()
+        self.assertEqual(self.request("/api/sources", headers={"Cookie": cookie})[0], 200)
+        self.assertEqual(self.request("/api/admin/logout", "POST",
+            headers={**login_headers, "Cookie": cookie}, body="{}")[0], 403)
+        self.assertEqual(self.request("/api/admin/logout", "POST",
+            headers={**login_headers, "Cookie": cookie, "X-Axiom-CSRF": "invalid"},
+            body="{}")[0], 403)
+        self.assertEqual(self.request("/api/admin/logout", "POST",
+            headers={**login_headers, "Cookie": cookie, "X-Axiom-CSRF": token,
+                     "Sec-Fetch-Site": "cross-site"}, body="{}")[0], 403)
+        code, response_headers, _ = self.request("/api/admin/logout", "POST",
+            headers={**login_headers, "Cookie": cookie, "X-Axiom-CSRF": token},
+            body="{}")
+        self.assertEqual(code, 204)
+        self.assertIn("Max-Age=0", response_headers["Set-Cookie"])
+        self.assertEqual(self.request("/admin", headers={"Cookie": cookie})[0], 303)
+
+    def test_password_rotation_invalidates_browser_session_and_keeps_basic_clients(self):
+        login_headers = {"Origin": "http://" + self.host, "Content-Type": "application/json"}
+        code, headers, _ = self.request("/api/admin/login", "POST",
+            headers=login_headers,
+            body=json.dumps({"username": "admin", "password": "fixture-password-only"}))
+        self.assertEqual(code, 204)
+        cookie = headers["Set-Cookie"].split(";", 1)[0]
+        self.assertEqual(self.request("/api/sources", headers={"Cookie": cookie})[0], 200)
+        payload = json.dumps({"current_password": "fixture-password-only",
+                              "new_password": "newpass888", "confirm_password": "newpass888"})
+        code, _, _ = self.request("/api/admin/password", "POST",
+                                  auth=self.auth, headers=login_headers, body=payload)
+        self.assertEqual(code, 200)
+        self.assertEqual(self.request("/admin", headers={"Cookie": cookie})[0], 303)
+        new_auth = "Basic " + base64.b64encode(b"admin:newpass888").decode()
+        self.assertEqual(self.request("/admin", auth=new_auth)[0], 200)
+
+    def test_browser_api_401_has_no_basic_challenge(self):
+        code, headers, body = self.request("/api/sources",
+            headers={"Sec-Fetch-Mode": "cors"})
+        self.assertEqual(code, 401)
+        self.assertNotIn("WWW-Authenticate", headers)
+        self.assertIn(b"sign in required", body)
+
     def test_invalid_credentials_and_host_rejected(self):
-        self.assertEqual(self.request("/admin", auth="Basic bad")[0], 401)
+        self.assertEqual(self.request("/admin", auth="Basic bad")[0], 303)
         self.assertEqual(self.request("/admin", auth=self.auth, headers={"Host":"attacker.invalid"})[0], 400)
         self.assertEqual(self.request("/admin", auth=self.auth)[0], 200)
         status, headers, _ = self.request("/", auth=self.auth)
@@ -212,7 +286,7 @@ class HTTPAuthTests(unittest.TestCase):
         payload["confirm_password"] = new
         self.assertEqual(self.request("/api/admin/password", "POST", self.auth,
                                      headers, json.dumps(payload))[0], 200)
-        self.assertEqual(self.request("/admin", auth=self.auth)[0], 401)
+        self.assertEqual(self.request("/admin", auth=self.auth)[0], 303)
         new_auth = "Basic " + base64.b64encode(("admin:"+new).encode()).decode()
         self.assertEqual(self.request("/admin", auth=new_auth)[0], 200)
         self.assertTrue(PasswordStore(self.credential_path).verify(new))
