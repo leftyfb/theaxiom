@@ -62,3 +62,44 @@ def test_nested_resources_array_and_tj_operators(compressed):
     operators = b"BT [(" + EN[:20].encode() + b") -10 (" + EN[20:].encode() + b")] TJ ET"
     assert pdf_language.detect(pdf(operators=operators, nested=True, array=True, compressed=compressed)) == "en"
     assert pdf_language.detect(pdf(nested=True, array=True)) is None
+
+
+def test_malformed_numeric_array_cannot_stall_parser():
+    # The old repeated numeric alternation could repartition this digit run
+    # exponentially when the final token was invalid.
+    operators = b"BT [" + b"1" * 100 + b" X] TJ (" + EN.encode() + b") Tj ET"
+    assert pdf_language.detect(pdf(operators=operators)) == "en"
+
+
+def test_detection_timeout_does_not_prevent_upload(pdf_app, disk, monkeypatch):
+    import json
+    import subprocess
+    from urllib.parse import quote
+
+    def timeout(*args, **kwargs):
+        assert kwargs["timeout"] == pdf_language.DETECTION_TIMEOUT
+        raise subprocess.TimeoutExpired(args[0], kwargs["timeout"])
+
+    monkeypatch.setattr(pdf_language.subprocess, "run", timeout)
+    request, _ = pdf_app
+    revision = request("/api/sources")["revision"]
+    headers = {"X-Source-ID": SID, "X-Catalog-Revision": str(revision), "X-PDF-Add": "1",
+               "X-PDF-Metadata": quote(json.dumps({"title": "Guide"}))}
+    assert request("/api/pdf-upload", pdf(EN), upload_headers=headers)["installed_verified"]
+    assert not source(request("/api/sources"), SID)["profile"].get("language")
+
+
+def test_real_worker_deadline(monkeypatch):
+    # A real subprocess must be killed and reaped, not merely a timed-out thread.
+    import sys
+    import time
+    original = pdf_language.subprocess.run
+
+    def slow_worker(args, **kwargs):
+        return original([sys.executable, "-c", "import time; time.sleep(30)"], **kwargs)
+
+    monkeypatch.setattr(pdf_language.subprocess, "run", slow_worker)
+    monkeypatch.setattr(pdf_language, "DETECTION_TIMEOUT", 0.25)
+    start = time.monotonic()
+    assert pdf_language.detect(pdf(EN)) is None
+    assert time.monotonic() - start < 5

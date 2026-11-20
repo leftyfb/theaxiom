@@ -2,15 +2,19 @@
 
 No new parser dependency: only classic xref objects and plain/Flate page
 streams are interpreted. Unsupported constructs return unknown, never block
-acquisition. No OCR, subprocesses, network or executable PDF content.
+acquisition. Parsing runs in a short-lived isolated subprocess. No OCR,
+network or executable PDF content.
 """
 import re
+import subprocess
+import sys
 import zlib
 
 from . import pdf_source
 
 MAX_STREAM = 256 * 1024
 MAX_SAMPLE = 32 * 1024
+DETECTION_TIMEOUT = 2.0
 LANGUAGES = {
     "en": "the and of to in is that for with this from are you your can should not have be as on or",
     "es": "el la los las de del que en por para con una uno es son se al como su sus esta este",
@@ -133,8 +137,21 @@ def _stream_text(body, obj):
         for item in re.finditer(literal + rb"\s*Tj\b|\[([^\[\]]{1,8192})\]\s*TJ\b", block[1]):
             if item[1] is not None:
                 result.append(item[1].decode("latin-1"))
-            elif re.fullmatch(rb"(?:\s*"+literal+rb"|\s*[+-]?(?:\d+(?:\.\d*)?|\.\d+))*\s*", item[2]):
-                result.append(b"".join(re.findall(literal, item[2])).decode("latin-1"))
+            else:
+                # Consume each token exactly once. A repeated alternation
+                # with variable-length numeric tokens can backtrack exponentially.
+                array = item[2]
+                token = re.compile(rb"\s+|" + literal + rb"|[+-]?(?:\d+(?:\.\d*)?|\.\d+)")
+                pos, strings = 0, []
+                while pos < len(array):
+                    part = token.match(array, pos)
+                    if not part:
+                        break
+                    if part[1] is not None:
+                        strings.append(part[1])
+                    pos = part.end()
+                if pos == len(array):
+                    result.append(b"".join(strings).decode("latin-1"))
     return " ".join(result)
 
 
@@ -152,7 +169,7 @@ def _classify(text):
     return code
 
 
-def detect(data):
+def _detect(data):
     """Return a language code or None; favor precision over coverage."""
     try:
         if not isinstance(data, bytes) or not 0 < len(data) <= pdf_source.MAX_BYTES:
@@ -176,8 +193,18 @@ def detect(data):
                 break
             refs = re.findall(rb"/Contents\s+(\d{1,10})\s+(\d{1,5})\s+R\b", page[0])
             arrays = re.findall(rb"/Contents\s*\[([^\[\]]{1,4096})\]", page[0])
-            if not refs and len(arrays) == 1 and re.fullmatch(rb"(?:\s*\d{1,10}\s+\d{1,5}\s+R\s*)+", arrays[0]):
-                refs = re.findall(rb"(\d{1,10})\s+(\d{1,5})\s+R\b", arrays[0])
+            if not refs and len(arrays) == 1:
+                array = arrays[0].strip()
+                ref_token = re.compile(rb"(\d{1,10})\s+(\d{1,5})\s+R(?:\s+|$)")
+                pos, parsed_refs = 0, []
+                while pos < len(array) and len(parsed_refs) < 16:
+                    match = ref_token.match(array, pos)
+                    if not match:
+                        break
+                    parsed_refs.append(match.groups())
+                    pos = match.end()
+                if pos == len(array):
+                    refs = parsed_refs
             if 0 < len(refs) <= 16:
                 sample = " ".join(_stream_text(obj(tuple(map(int, ref))), obj) for ref in refs)
                 if sample:
@@ -197,9 +224,32 @@ def detect(data):
         return None
 
 
+def detect(data):
+    """Best-effort metadata: terminate a stalled parser, never block the API."""
+    if not isinstance(data, bytes) or not 0 < len(data) <= pdf_source.MAX_BYTES:
+        return None
+    try:
+        completed = subprocess.run(
+            [sys.executable, "-m", "theaxiom.pdf_language"],
+            input=data, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            timeout=DETECTION_TIMEOUT, check=True,
+        )
+        value = completed.stdout.strip()
+        if re.fullmatch(rb"[a-z]{2,3}(?:-[a-z0-9]{2,8}){0,3}", value):
+            return value.decode("ascii")
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return None
+
+
 def installed_language(artifact):
     try:
         with pdf_source.installed(artifact, verify=True) as stream:
             return detect(stream.read(pdf_source.MAX_BYTES+1))
     except (OSError, ValueError):
         return None
+
+
+if __name__ == "__main__":
+    data = sys.stdin.buffer.read(pdf_source.MAX_BYTES + 1)
+    print(_detect(data) or "")
