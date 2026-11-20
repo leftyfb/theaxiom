@@ -74,6 +74,10 @@ def main():
     try:
         site = SITE.read_text().replace(
             "listen 192.168.0.4:80;", f"listen 127.0.0.1:{front_port};")
+        # Keep real static icon routing, using checkout content rather than
+        # any deployed host path. This runner must never contact Vancouver.
+        site = site.replace("/opt/theaxiom/app/deploy/www",
+                            str(SITE.parent.parent / "www"))
         site = site.replace("include /etc/nginx/snippets/theaxiom-backend.conf;", "return 404;")
         site = site.replace("proxy_pass http://127.0.0.1:8080/internal/publication/zim;",
                             f"proxy_pass http://127.0.0.1:{gate_port}/internal/publication/zim;")
@@ -101,13 +105,22 @@ def main():
                         time.sleep(0.1)
                 else:
                     raise RuntimeError("isolated nginx failed to listen")
+                for icon, magic in [
+                    ("favicon.svg", b"<svg"),
+                    ("favicon.png", bytes.fromhex("89504e470d0a1a0a")),
+                    ("favicon.ico", bytes.fromhex("00000100")),
+                ]:
+                    status, body = request(front_port, "/" + icon)
+                    assert status == 200 and body.startswith(magic), (
+                        f"unauthenticated Nginx icon {icon} failed: {status}")
+                assert request(front_port, "/no-such-icon.ico")[0] == 404
                 assert request(front_port, "/zim/content/" + NAME + "/index.html") == (200, b"archive reached")
                 calls = len(Archive.requests)
                 denied = request(front_port, "/zim/content/other." + "b" * 64 + "/index.html")
                 assert denied[0] == 403, denied
                 assert len(Archive.requests) == calls, "unpublished archive reached upstream"
                 assert request(front_port, "/zim/viewer") == (200, b"archive reached")
-                print("PASS real Nginx published route, unpublished route denial and reader")
+                print("PASS real Nginx icons, publication gate, unpublished denial and reader")
             finally:
                 process.terminate()
                 try:
