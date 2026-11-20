@@ -67,19 +67,56 @@ def _objects(data):
     return tuple(map(int, root[0])), entries, obj
 
 
-def _stream_text(body):
-    match = re.match(rb"\s*<<([^<>]{1,4096})>>\s*stream\r?\n", body)
+def _dictionary(body):
+    """Return the outer dictionary and its end offset, masking nested values."""
+    start = re.match(rb"\s*<<", body)
+    if not start:
+        return None
+    # Tokenize only a bounded prefix; reject unsupported or incomplete values.
+    tokens = re.compile(rb"%[^\r\n]*|\((?:\\[\s\S]|[^()\\])*\)|<<|>>|<(?!<)[0-9A-Fa-f\s]*>|[^\s<>()%]+|[()]")
+    depth, pos, parts = 1, start.end(), []
+    for token in tokens.finditer(body, pos, min(len(body), pos + 16384)):
+        if body[pos:token.start()].strip():
+            return None
+        value = token[0]
+        pos = token.end()
+        if value == b"<<":
+            depth += 1
+        elif value == b">>":
+            depth -= 1
+            if not depth:
+                return b" ".join(parts), pos
+        elif value in (b"(", b")"):
+            return None
+        elif depth == 1 and not value.startswith(b"%"):
+            parts.append(value)
+    return None
+
+
+def _stream_text(body, obj):
+    parsed = _dictionary(body)
+    if not parsed:
+        return ""
+    dictionary, end = parsed
+    match = re.match(rb"\s*stream\r?\n", body[end:])
     if not match:
         return ""
-    dictionary = match[1]
-    lengths = re.findall(rb"/Length\s+(\d{1,8})\b(?!\s+\d+\s+R)", dictionary)
+    start = end + match.end()
+    lengths = re.findall(rb"/Length\s+(\d{1,8})(?:\s+(\d{1,5})\s+R\b)?(?=\s|$)", dictionary)
     if len(lengths) != 1:
         return ""
-    length = int(lengths[0])
+    number, generation = lengths[0]
+    if generation:
+        indirect = re.match(rb"\s*(\d{1,8})\s+endobj\b", obj((int(number), int(generation))))
+        if not indirect:
+            return ""
+        length = int(indirect[1])
+    else:
+        length = int(number)
     if not 0 < length <= MAX_STREAM:
         return ""
-    raw = body[match.end():match.end()+length]
-    if len(raw) != length or not re.match(rb"\s*endstream\b", body[match.end()+length:]):
+    raw = body[start:start+length]
+    if len(raw) != length or not re.match(rb"\s*endstream\b", body[start+length:]):
         return ""
     if re.search(rb"/Filter\b", dictionary):
         if not re.search(rb"/Filter\s*/FlateDecode\b", dictionary) or b"/DecodeParms" in dictionary:
@@ -88,11 +125,16 @@ def _stream_text(body):
         raw = decoder.decompress(raw, MAX_STREAM+1)
         if len(raw) > MAX_STREAM or not decoder.eof or decoder.unconsumed_tail:
             return ""
-    # Only simple, unescaped literal text operands, inside a text object.
+    # Literal Tj operands and simple TJ arrays. Numeric kerning does not
+    # generally indicate a word break; preserve explicit spaces.
     result = []
+    literal = rb"\(([^()\\\r\n]{1,2048})\)"
     for block in re.finditer(rb"\bBT\b(.*?)\bET\b", raw, re.S):
-        for item in re.finditer(rb"\(([^()\\\r\n]{1,2048})\)\s*Tj\b", block[1]):
-            result.append(item[1].decode("latin-1"))
+        for item in re.finditer(literal + rb"\s*Tj\b|\[([^\[\]]{1,8192})\]\s*TJ\b", block[1]):
+            if item[1] is not None:
+                result.append(item[1].decode("latin-1"))
+            elif re.fullmatch(rb"(?:\s*"+literal+rb"|\s*[+-]?(?:\d+(?:\.\d*)?|\.\d+))*\s*", item[2]):
+                result.append(b"".join(re.findall(literal, item[2])).decode("latin-1"))
     return " ".join(result)
 
 
@@ -116,21 +158,28 @@ def detect(data):
         if not isinstance(data, bytes) or not 0 < len(data) <= pdf_source.MAX_BYTES:
             return None
         root, entries, obj = _objects(data)
-        catalog = re.match(rb"\s*<<([^<>]{1,4096})>>", obj(root))
-        if not catalog or not re.search(rb"/Type\s*/Catalog\b", catalog[1]):
+        catalog = _dictionary(obj(root))
+        if not catalog or not re.search(rb"/Type\s*/Catalog\b", catalog[0]):
             return None
         # Only a simple unambiguous Catalog /Lang literal is recognized.
-        lang = re.findall(rb"/Lang\s*\(([A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,3})\)", catalog[1])
+        lang = re.findall(rb"/Lang\s*\(([A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,3})\)", catalog[0])
         declared = lang[0].decode("ascii").lower() if len(lang) == 1 else None
         samples = []
+        pages_seen = 0
         for key in list(entries)[:8192]:
             body = obj(key)
-            page = re.match(rb"\s*<<([^<>]{1,4096})>>", body)
-            if not page or not re.search(rb"/Type\s*/Page\b", page[1]):
+            page = _dictionary(body)
+            if not page or not re.search(rb"/Type\s*/Page\b", page[0]):
                 continue
-            refs = re.findall(rb"/Contents\s+(\d{1,10})\s+(\d{1,5})\s+R\b", page[1])
-            if len(refs) == 1:
-                sample = _stream_text(obj(tuple(map(int, refs[0]))))
+            pages_seen += 1
+            if pages_seen > 16:
+                break
+            refs = re.findall(rb"/Contents\s+(\d{1,10})\s+(\d{1,5})\s+R\b", page[0])
+            arrays = re.findall(rb"/Contents\s*\[([^\[\]]{1,4096})\]", page[0])
+            if not refs and len(arrays) == 1 and re.fullmatch(rb"(?:\s*\d{1,10}\s+\d{1,5}\s+R\s*)+", arrays[0]):
+                refs = re.findall(rb"(\d{1,10})\s+(\d{1,5})\s+R\b", arrays[0])
+            if 0 < len(refs) <= 16:
+                sample = " ".join(_stream_text(obj(tuple(map(int, ref))), obj) for ref in refs)
                 if sample:
                     samples.append(sample[:MAX_SAMPLE])
             if len(samples) >= 4 or sum(map(len, samples)) >= MAX_SAMPLE:

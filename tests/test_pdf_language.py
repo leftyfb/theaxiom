@@ -6,14 +6,14 @@ from theaxiom import pdf_language
 from test_pdf_sources import pdf_app, disk, SID, source, mutate  # noqa: F401
 
 
-def pdf(text="", lang=None, compressed=False):
-    content = ("BT (" + text + ") Tj ET").encode("latin-1")
+def pdf(text="", lang=None, compressed=False, operators=None, nested=False, array=False):
+    content = operators if operators is not None else ("BT (" + text + ") Tj ET").encode("latin-1")
     if compressed:
         content = zlib.compress(content)
     objects = [
         b"<< /Type /Catalog /Pages 2 0 R" + (b" /Lang (" + lang.encode() + b")" if lang else b"") + b" >>",
         b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200]" + (b" /Resources << /Font << /F1 8 0 R >> >>" if nested else b"") + (b" /Contents [4 0 R] >>" if array else b" /Contents 4 0 R >>"),
         b"<< /Length " + str(len(content)).encode() + (b" /Filter /FlateDecode" if compressed else b"") + b" >>\nstream\n" + content + b"\nendstream",
     ]
     data = b"%PDF-1.4\n"
@@ -55,3 +55,10 @@ def test_upload_preserves_manual_language(pdf_app, disk, override):
                "X-PDF-Metadata": quote(json.dumps({"title": "Guide", "language": override}))}
     assert request("/api/pdf-upload", pdf(EN), upload_headers=headers)["installed_verified"]
     assert source(request("/api/sources"), SID)["profile"]["language"] == (override or "en")
+
+
+@pytest.mark.parametrize("compressed", [False, True])
+def test_nested_resources_array_and_tj_operators(compressed):
+    operators = b"BT [(" + EN[:20].encode() + b") -10 (" + EN[20:].encode() + b")] TJ ET"
+    assert pdf_language.detect(pdf(operators=operators, nested=True, array=True, compressed=compressed)) == "en"
+    assert pdf_language.detect(pdf(nested=True, array=True)) is None
