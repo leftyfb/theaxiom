@@ -87,7 +87,10 @@ def test_pdf_lifecycle(pdf_app, disk, tmp_path, monkeypatch):  # noqa: F811
     assert ('href="' + READER + '"') in request("/")
     assert "Open PDF" in request("/")
     page = request(READER)
-    assert 'href="/"' in page and 'A local &lt;guide&gt;' in page
+    assert 'class="library-return" href="/">← Back to library</a>' in page
+    assert 'A local &lt;guide&gt;' in page
+    assert 'nav a.library-return{background:#18362d;color:#fff' in page
+    assert 'min-height:44px' in page and 'nav a:focus-visible' in page
     assert READER + "/document.pdf" in page
     assert "/api/pdf-reader.mjs" in page
     assert "Content-Security-Policy" in request(READER, raw=True)[1]
