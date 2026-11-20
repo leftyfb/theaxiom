@@ -157,3 +157,14 @@ def test_selection_mode_and_bulk_lifecycle_controls():
     assert "Only eligible sources with existing rights approval" in page
     assert "currentRevision = result.revision" in page
     assert "outcome uncertain" in page
+
+
+def test_source_editor_group_membership_controls():
+    groups = [{"kind": "tags", "group_id": "winter", "name": "Winter", "source_ids": ["fixture"]}]
+    page = render([profile()], catalog=dict(sources=[profile()], revision=1, groups=groups))
+    for kind in ("categories", "tags", "collections"):
+        assert f'data-editor-group="{kind}" multiple' in page
+    assert 'id="editor-new-tag"' in page
+    assert '<option value="winter">Winter</option>' in page
+    assert "wasMember === option.selected" in page
+    assert "grouping changes may be incomplete" in page

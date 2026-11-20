@@ -212,6 +212,22 @@
           <div><label for="catalog-format">Content format</label><select id="catalog-format" name="format"><option value="unspecified">Auto / not yet specified</option><option value="zim">Kiwix / ZIM</option><option value="pdf">PDF</option></select></div>
           <div class="editor-wide"><label for="catalog-description">Description (optional)</label><textarea id="catalog-description" name="description" maxlength="512"></textarea></div>
         </div>
+        <fieldset id="source-editor-groups" hidden>
+          <legend>Groupings</legend>
+          <p class="source-note">Choose memberships for this source. Other sources are not affected.</p>
+          {% for kind in ['categories','tags','collections'] %}
+          <div class="editor-wide">
+            <label for="editor-{{ kind }}">{{ kind|capitalize }}</label>
+            <select id="editor-{{ kind }}" data-editor-group="{{ kind }}" multiple size="5">
+            {% for group in groups|selectattr("kind","equalto",kind)|sort(attribute="name") %}
+              <option value="{{ group.group_id }}">{{ group.name }}</option>
+            {% endfor %}
+            </select>
+          </div>
+          {% endfor %}
+          <label for="editor-new-tag">Create and assign a new tag (optional)</label>
+          <input id="editor-new-tag" maxlength="100" autocomplete="off">
+        </fieldset>
         <details id="source-advanced">
           <summary>Advanced Details</summary>
           <p class="source-note">Optional publisher-supplied metadata. These values alone do not establish verification or enable acquisition.</p>
@@ -553,6 +569,8 @@
       const advanced = document.getElementById('source-advanced');
       const format = input('format');
       const idDisplay = document.getElementById('catalog-id-display');
+      const editorGroups = {{ groups|tojson }};
+      const editorGroupControls = Array.from(form.querySelectorAll('[data-editor-group]'));
       let manualFormat = false;
       const uploadFile = document.getElementById("source-upload-file");
       let automaticTitle = false;
@@ -597,6 +615,13 @@
         idDisplay.textContent = card ? 'Stable ID: ' + card.dataset.sourceId : '';
         document.getElementById('source-dialog-title').textContent = card ? 'Edit source profile' : 'Add source profile';
         form.dataset.operation = operation;
+        document.getElementById('source-editor-groups').hidden = !card;
+        for (const control of editorGroupControls) {
+          for (const option of control.options) {
+            option.selected = !!card && editorGroups.some(g => g.kind === control.dataset.editorGroup &&
+              g.group_id === option.value && g.source_ids.includes(card.dataset.sourceId));
+          }
+        }
         if (card) {
           input('source_id').value = card.dataset.sourceId;
           for (const field of fieldsToEdit) {
@@ -612,12 +637,47 @@
         dialog.showModal();
         input('title').focus();
       }
-      async function change(operation, source_id, fields) {
+      async function updateEditorGroups(source_id, currentRevision) {
+        for (const control of editorGroupControls) {
+          const kind = control.dataset.editorGroup;
+          for (const option of control.options) {
+            const group = editorGroups.find(g => g.kind === kind && g.group_id === option.value);
+            const wasMember = group.source_ids.includes(source_id);
+            if (wasMember === option.selected) continue;
+            const result = await groupPost({operation:option.selected ? 'add-members' : 'remove-members',
+              kind, group_id:option.value, source_ids:[source_id]}, currentRevision);
+            currentRevision = result.revision;
+          }
+        }
+        const name = document.getElementById('editor-new-tag').value.trim();
+        if (name) {
+          const existing = editorGroups.find(g => g.kind === 'tags' && g.name.toLowerCase() === name.toLowerCase());
+          let group_id = existing?.group_id;
+          if (!group_id) {
+            const base = name.normalize('NFKD').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,50).replace(/-$/,'') || 'tag';
+            const used = new Set(editorGroups.filter(g => g.kind === 'tags').map(g => g.group_id));
+            group_id = base;
+            for (let n=2; used.has(group_id); n++) group_id = base + '-' + n;
+            const created = await groupPost({operation:'create',kind:'tags',group_id,name}, currentRevision);
+            currentRevision = created.revision;
+          }
+          await groupPost({operation:'add-members',kind:'tags',group_id,source_ids:[source_id]}, currentRevision);
+        }
+      }
+      async function change(operation, source_id, fields, editGroups = false) {
         if (revision === null) throw new Error('Catalog revision unavailable');
         const response = await fetch('/api/sources', {method:'POST', headers:{'Content-Type':'application/json'},
           body:JSON.stringify({operation, source_id, fields, revision})});
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || 'Catalog update failed');
+        if (editGroups) {
+          try {
+            if (!Number.isInteger(result.revision)) throw new Error('Missing updated revision');
+            await updateEditorGroups(source_id, result.revision);
+          } catch (error) {
+            window.alert('Source profile saved, but grouping changes may be incomplete. Reload and review memberships: ' + error.message);
+          }
+        }
         reloadSources();
       }
       document.getElementById('source-add').addEventListener('click', () => openForm('add'));
@@ -644,7 +704,7 @@
             const result = await response.json().catch(() => ({}));
             if (!response.ok || !result.installed_verified) throw new Error(result.error || 'PDF upload failed (HTTP ' + response.status + ')');
             reloadSources();
-          } else { await change(form.dataset.operation, source_id, fields); }
+          } else { await change(form.dataset.operation, source_id, fields, form.dataset.operation === 'edit'); }
         }
         catch (error) { formFeedback.textContent = error.message; formFeedback.focus(); }
         finally { save.disabled = false; }
