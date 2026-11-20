@@ -169,3 +169,46 @@ def test_redirect_limit(monkeypatch):
         with pdf_transport.open_pdf("https://publisher.org/guide.pdf"):
             pass
     assert len(paths) == pdf_transport.MAX_REDIRECTS + 1
+
+
+@pytest.mark.parametrize("status,headers", [
+    (200, [("Content-Length", "6"), ("ETag", '"v1"')]),
+    (206, [("Content-Range", "bytes 0-2/6"), ("Content-Length", "3"), ("ETag", '"v1"')]),
+    (206, [("Content-Range", "bytes 3-5/7"), ("Content-Length", "3"), ("ETag", '"v1"')]),
+    (206, [("Content-Range", "bytes 3-5/6"), ("Content-Length", "2"), ("ETag", '"v1"')]),
+    (206, [("Content-Range", "bytes 3-5/6"), ("Content-Length", "3"), ("ETag", '"v2"')]),
+    (206, [("Content-Length", "3"), ("ETag", '"v1"')]),
+])
+def test_resume_rejects_ignored_range_mismatched_range_or_changed_etag(monkeypatch, status, headers):
+    mock_response(monkeypatch, status, headers, b"def")
+    with pytest.raises(ValueError):
+        with pdf_transport.open_pdf("https://publisher.org/guide.pdf", format_name="zim",
+                                     offset=3, validator='"v1"', limit=100, total_seconds=30):
+            pytest.fail("Resume must not yield unvalidated bytes")
+
+
+def test_resume_sends_range_and_if_range_and_checks_continuation(monkeypatch):
+    mock_response(monkeypatch, 206,
+                  [("Content-Range", "bytes 3-5/6"), ("Content-Length", "3"), ("ETag", '"v1"')],
+                  b"def")
+    # Capture actual request headers, including If-Range.
+    response = Response(206, [("Content-Range", "bytes 3-5/6"),
+                              ("Content-Length", "3"), ("ETag", '"v1"')], b"def")
+    headers_seen = []
+    class Connection:
+        def __init__(self, *args):
+            pass
+        def request(self, method, path, headers):
+            headers_seen.append(headers)
+        def getresponse(self):
+            return response
+        def close(self):
+            pass
+    monkeypatch.setattr(pdf_transport, "_PinnedHTTPS", Connection)
+    with pdf_transport.open_pdf("https://publisher.org/guide.pdf", format_name="zim",
+                                offset=3, validator='"v1"', limit=100, total_seconds=30) as stream:
+        assert stream.total_size == 6
+        assert stream.read(1024) == b"def"
+        assert stream.read(1024) == b""
+    assert headers_seen[0]["Range"] == "bytes=3-"
+    assert headers_seen[0]["If-Range"] == '"v1"'
