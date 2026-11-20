@@ -3,7 +3,8 @@
 Runs entirely within a GitHub Actions runner, never against Vancouver. No
 downloads beyond Ubuntu packages and no deployment side effects.
 """
-import base64
+import struct
+import zlib
 import hashlib
 import http.client
 from pathlib import Path
@@ -33,13 +34,19 @@ def main():
         pages.mkdir()
         (pages / "index.html").write_text(
             "<!doctype html><title>Offline Ready</title><h1>Ready for offline use</h1>")
-        # 1x1 PNG, used only by zimwriterfs as its required illustration.
-        (pages / "logo.png").write_bytes(base64.b64decode(
-            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9YtV5ZQAAAAASUVORK5CYII="))
+        # zimwriterfs requires a proper 48x48 PNG illustration.
+        def chunk(kind, data):
+            return (struct.pack(">I", len(data)) + kind + data +
+                    struct.pack(">I", zlib.crc32(kind + data) & 0xffffffff))
+        rows = (b"\x00" + b"\x00\x80\x20" * 48) * 48
+        png = (b"\x89PNG\r\n\x1a\n" +
+               chunk(b"IHDR", struct.pack(">IIBBBBB", 48, 48, 8, 2, 0, 0, 0)) +
+               chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
+        (pages / "logo.png").write_bytes(png)
         output = base / "sample.zim"
         subprocess.run(
             ["zimwriterfs", "--welcome=index.html", "--illustration=logo.png",
-             "--language=eng", "--title=Offline Fixture",
+             "--language=eng", "--name=axiom-smoke", "--title=Offline Fixture",
              "--description=Isolated Kiwix smoke fixture", "--creator=Axiom",
              "--publisher=Axiom", str(pages), str(output)],
             check=True, timeout=60,
