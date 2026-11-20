@@ -5,6 +5,7 @@ generated library into a dedicated, publication-gated reader later. Only
 explicitly published, locally verified completed ZIMs may enter the manifest.
 """
 import argparse
+import hashlib
 import os
 from pathlib import Path
 import re
@@ -108,6 +109,34 @@ def write_manifest(records, enabled=None):
     finally:
         Path(name).unlink(missing_ok=True)
     return target
+
+
+
+# Written by the separate Kiwix reader startup handshake after it has verified
+# that its OPDS catalog exactly matches the manifest. Missing runtime evidence
+# disables serving; regenerating XML alone does not activate a reader.
+RUNTIME_ACK = Path("/run/theaxiom-kiwix/manifest.sha256")
+MAX_MANIFEST_BYTES = 256 * 1024
+
+
+def active_manifest_matches(records, enabled=None, *, acknowledgement=None):
+    """Fail closed unless the reader acknowledged the exact current book set.
+
+    This deliberately checks durable publisher intent on every call. An
+    unpublish or a source-configuration change invalidates the old Kiwix
+    instance immediately, even if its server process has not restarted.
+    """
+    try:
+        expected = render_xml(records, enabled)
+        if b"<book " not in expected or len(expected) > MAX_MANIFEST_BYTES:
+            return False
+        stored = manifest_path().read_bytes()
+        if len(stored) > MAX_MANIFEST_BYTES or stored != expected:
+            return False
+        stamp = (acknowledgement or RUNTIME_ACK).read_bytes()
+        return stamp == (hashlib.sha256(expected).hexdigest() + "\n").encode("ascii")
+    except (OSError, ValueError, TypeError):
+        return False
 
 
 def main(argv=None):

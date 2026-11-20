@@ -97,3 +97,22 @@ def test_completed_but_unverified_job_never_enters_manifest(disk):
                    "verified": False, "configuration": zim_jobs.identity(CONFIG),
                    "artifact": artifact})
     assert zim_catalog.verified_books([record("ready")], {"ready": True}) == []
+
+
+def test_runtime_reader_acknowledgement_must_match_current_publication(disk, tmp_path):
+    import hashlib
+    artifact = zim_source.install_stream("ready", CONFIG, BytesIO(fixture_bytes()))
+    zim_jobs.save({"source_id": "ready", "state": "completed", "active": False,
+                   "verified": True, "configuration": zim_jobs.identity(CONFIG),
+                   "artifact": artifact})
+    records = [record("ready")]
+    filename = zim_catalog.write_manifest(records, {"ready": True})
+    checkpoint = tmp_path / "manifest.sha256"
+    assert not zim_catalog.active_manifest_matches(records, {"ready": True}, acknowledgement=checkpoint)
+    checkpoint.write_text(hashlib.sha256(filename.read_bytes()).hexdigest() + "\n")
+    assert zim_catalog.active_manifest_matches(records, {"ready": True}, acknowledgement=checkpoint)
+    assert not zim_catalog.active_manifest_matches(records, {"ready": False}, acknowledgement=checkpoint)
+    assert not zim_catalog.active_manifest_matches([record("ready", title="Changed")],
+                                                    {"ready": True}, acknowledgement=checkpoint)
+    checkpoint.write_text("unverified\n")
+    assert not zim_catalog.active_manifest_matches(records, {"ready": True}, acknowledgement=checkpoint)
