@@ -937,24 +937,36 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 is_epub = record is not None and self._epub_record(record)
                 is_pdf = record is not None and self._pdf_record(record)
                 is_document = is_pdf or is_epub
-                if source_id not in publication.ROUTES and not is_document:
+                is_zim = record is not None and self._zim_record(record)
+                if source_id not in publication.ROUTES and not (is_document or is_zim):
                     self._send_json(400, {"error": "source has no publication adapter"})
                     return
-                if "acknowledge_rights" in data and not is_document:
-                    self._send_json(400, {"error": "rights acknowledgement is for documents only"})
+                if "acknowledge_rights" in data and not (is_document or is_zim):
+                    self._send_json(400, {"error": "rights acknowledgement is for documents and ZIMs only"})
                     return
-                if enabled and record is not None and is_document:
-                    artifact = select_lifecycle(source_id, record["configuration"])["artifact"]
-                    if not (epub_source.ready(artifact) if is_epub else pdf_source.ready(artifact, verify=True)):
-                        self._send_json(409, {"error": "matching verified EPUB content is required" if is_epub else "matching verified PDF content is required"})
-                        return
+                if enabled and record is not None and (is_document or is_zim):
+                    if is_zim:
+                        try:
+                            job = zim_jobs.status(source_id)
+                            artifact = (zim_jobs.installed(job, record["configuration"])
+                                        if job and job.get("verified") is True and job.get("active") is False else None)
+                        except (OSError, ValueError):
+                            artifact = None
+                        if not artifact:
+                            self._send_json(409, {"error": "a completed, verified, matching ZIM archive is required"})
+                            return
+                    else:
+                        artifact = select_lifecycle(source_id, record["configuration"])["artifact"]
+                        if not (epub_source.ready(artifact) if is_epub else pdf_source.ready(artifact, verify=True)):
+                            self._send_json(409, {"error": "matching verified EPUB content is required" if is_epub else "matching verified PDF content is required"})
+                            return
                     if not record["configuration"].get("license", "").strip():
                         if data.get("acknowledge_rights") is not True:
-                            self._send_json(409, {"error": "Confirm you have permission to make this EPUB available to library users" if is_epub else "Confirm you have permission to make this PDF available to library users"})
+                            self._send_json(409, {"error": "Confirm you have permission to make this ZIM available to library users" if is_zim else "Confirm you have permission to make this EPUB available to library users" if is_epub else "Confirm you have permission to make this PDF available to library users"})
                             return
                         try:
                             SOURCE_CATALOG.mutate("edit", source_id, {
-                                "license": "Administrator confirmed permission to make this " + ("EPUB" if is_epub else "PDF") + " available in this library; no publisher license independently verified."
+                                "license": "Administrator confirmed permission to make this " + ("ZIM" if is_zim else "EPUB" if is_epub else "PDF") + " available in this library; no publisher license independently verified."
                             }, data["revision"])
                         except catalog_store.RevisionConflict:
                             self._send_json(409, {"error": "catalog revision changed"})
