@@ -341,3 +341,28 @@ def test_new_pdf_leaf_corrects_server_inherited_write_permissions(disk, monkeypa
     with pytest.raises(ValueError, match="PDF directories"):
         pdf_source.install_stream(SID, BytesIO(document()))
     assert library.stat().st_mode & 0o777 == 0o777
+
+
+def test_add_pdf_in_one_upload(pdf_app, disk):
+    from urllib.parse import quote
+    import json
+    request, _ = pdf_app
+    catalog = request("/api/sources")
+    headers = {"X-Source-ID": SID, "X-Catalog-Revision": str(catalog["revision"]),
+               "X-PDF-Add": "1", "X-PDF-Metadata": quote(json.dumps({"title": "My PDF"}))}
+    def upload(data, status=200, extra=None):
+        return request("/api/pdf-upload", data, status=status, upload_headers=headers | (extra or {}))
+    upload(b"invalid PDF", 409)
+    assert request("/api/sources")["revision"] == catalog["revision"]
+    assert not list(disk[1].iterdir())
+    upload(document(), 400, {"X-PDF-Metadata": quote(json.dumps({"title": "bad", "sha256": "fake"}))})
+    assert upload(document())["installed_verified"]
+    updated = request("/api/sources")
+    assert updated["revision"] == catalog["revision"] + 1
+    record = source(updated, SID)
+    assert record["profile"]["title"] == "My PDF"
+    assert record["installed_verified"]
+    assert record["configuration"]["sha256"] == hashlib.sha256(document()).hexdigest()
+    upload(document(), 409, {"X-Catalog-Revision": str(updated["revision"])})
+    assert request("/api/sources")["revision"] == updated["revision"]
+    assert 'id="source-upload-file"' in request("/admin/sources")

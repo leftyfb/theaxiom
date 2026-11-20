@@ -159,10 +159,11 @@
     <dialog id="source-dialog" aria-labelledby="source-dialog-title">
       <form id="source-form">
         <h3 id="source-dialog-title">Add source metadata</h3>
-        <p class="source-note">Choose content to add to your offline library. Saving a profile does not download or publish it. <a href="#source-help" id="source-guide-link">Content source help</a></p>
+        <p class="source-note">Choose content to add to your offline library. Choose a PDF to install it now, or save a URL-based profile for later acquisition. Publication is separate. <a href="#source-help" id="source-guide-link">Content source help</a></p>
         <input id="catalog-id" name="source_id" type="hidden">
         <p id="catalog-id-display" class="source-note" hidden></p>
         <div class="editor-grid">
+          <div class="editor-wide" id="source-upload-row"><label for="source-upload-file">Upload PDF (optional)</label><input id="source-upload-file" type="file" accept=".pdf,application/pdf"><small>Choose a PDF to populate its name and format automatically.</small></div>
           <div class="editor-wide"><label for="catalog-title">Source name</label><input id="catalog-title" name="title" required maxlength="512"></div>
           <div class="editor-wide"><label for="catalog-url">Source URL</label><input id="catalog-url" name="source_url" type="url" maxlength="512">
             <small>Direct HTTP(S) download URL, if available.</small></div>
@@ -194,7 +195,7 @@
   <h4>1. Find content</h4>
   <p>For Kiwix archives, browse the <a href="https://library.kiwix.org/">Kiwix library</a> or <a href="https://download.kiwix.org/zim/">official ZIM download directory</a>. Choose your language, edition and archive size. Copy the direct .zim download link rather than the catalog or article page. For PDF documents, use the original publisher, for example <a href="https://www.ready.gov/">Ready.gov</a>, and look for a direct HTTPS PDF link. Check permission to store and distribute the material offline.</p>
   <h4>2. Add a source profile</h4>
-  <p>Choose Add Source, enter a recognizable name and optionally a direct artifact URL, confirm or select the format, optionally describe the collection, and Save source. A stable ID is generated automatically and retained when editing. A normal website URL is not a downloadable archive. Unsupported formats can be recorded but cannot be acquired or read.</p>
+  <p>Choose Add Source and select a local PDF to populate its title from its filename and install it in one operation. Alternatively, enter a recognizable name and optionally a direct artifact URL, confirm or select the format, optionally describe the collection, and Save source. A stable ID is generated automatically and retained when editing. A normal website URL is not a downloadable archive. Unsupported formats can be recorded but cannot be acquired or read.</p>
   <h4>3. Review advanced details</h4>
   <p>Publisher, edition and language describe the content. Expected size and SHA-256 are the exact byte count and fingerprint of the intended file. Provenance records where the information came from; license records the permission to use it. Use trustworthy publisher metadata where available. A checksum calculated from a downloaded file can identify those bytes later, but does not independently prove their origin. Saving metadata does not verify it.</p>
   <h4>4. Acquire and verify</h4>
@@ -325,6 +326,15 @@
       const format = input('format');
       const idDisplay = document.getElementById('catalog-id-display');
       let manualFormat = false;
+      const uploadFile = document.getElementById("source-upload-file");
+      uploadFile.addEventListener("change", () => {
+        const file = uploadFile.files[0];
+        if (!file) return;
+        const title = file.name.replace(/\.pdf$/i, "").replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+        input("title").value = title.slice(0, 512) || "Untitled PDF";
+        format.value = "pdf";
+        manualFormat = true;
+      });
       function detectFormat() {
         if (manualFormat) return;
         try {
@@ -343,6 +353,8 @@
       }
       function openForm(operation, card = null) {
         form.reset();
+        document.getElementById('source-upload-row').hidden = !!card;
+        uploadFile.disabled = !!card;
         formFeedback.textContent = '';
         advanced.open = false;
         format.querySelectorAll('[data-legacy-format]').forEach(option => option.remove());
@@ -385,7 +397,19 @@
         const fields = Object.fromEntries(fieldsToEdit.map(field => [field.name, field.value]));
         const save = form.querySelector('[type="submit"]');
         save.disabled = true;
-        try { await change(form.dataset.operation, source_id, fields); }
+        try {
+          const file = uploadFile.files[0];
+          if (form.dataset.operation === 'add' && file) {
+            if (!file.size || file.size > 16 * 1024 * 1024) throw new Error('Choose a PDF up to 16 MiB');
+            const metadata = Object.fromEntries(Object.entries(fields).filter(([k]) => ['title','description','publisher','edition','language','source_url','license'].includes(k)));
+            const response = await fetch('/api/pdf-upload', {method:'POST', headers:{'Content-Type':'application/pdf',
+              'X-Source-ID':source_id, 'X-Catalog-Revision':String(revision), 'X-PDF-Add':'1',
+              'X-PDF-Metadata':encodeURIComponent(JSON.stringify(metadata))}, body:file});
+            const result = await response.json().catch(() => ({}));
+            if (!response.ok || !result.installed_verified) throw new Error(result.error || 'PDF upload failed (HTTP ' + response.status + ')');
+            reloadSources();
+          } else { await change(form.dataset.operation, source_id, fields); }
+        }
         catch (error) { formFeedback.textContent = error.message; formFeedback.focus(); }
         finally { save.disabled = false; }
       });

@@ -11,7 +11,7 @@ import re
 import subprocess
 import threading
 from contextlib import ExitStack
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urlsplit, unquote
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -714,15 +714,34 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         ids = self.headers.get_all("X-Source-ID", [])
         revisions = self.headers.get_all("X-Catalog-Revision", [])
         length = int(self.headers["Content-Length"])
+        additions = self.headers.get_all("X-PDF-Add", [])
+        adding = additions == ["1"]
+        metadata = self.headers.get_all("X-PDF-Metadata", [])
         if not self.headers.get("Origin"):
             self._send_json(403, {"error": "same-origin request required"})
             return
         if (len(ids) != 1 or not catalog_store.ID_RE.fullmatch(ids[0])
                 or len(revisions) != 1 or not re.fullmatch(r"[0-9]{1,20}", revisions[0])
-                or length <= 0 or self.headers.get("Content-Encoding")):
+                or length <= 0 or self.headers.get("Content-Encoding")
+                or (additions and not adding) or (adding and len(metadata) != 1)
+                or (not adding and metadata)):
             self._send_json(400, {"error": "invalid PDF upload metadata"})
             return
         sid, revision = ids[0], int(revisions[0])
+        fields = {}
+        if adding:
+            try:
+                if len(metadata[0]) > 8192:
+                    raise ValueError
+                fields = json.loads(unquote(metadata[0], errors="strict"))
+                SOURCE_CATALOG._validate_fields(fields, catalog_store.PROFILE_FIELDS | {"source_url", "license"},
+                                                required={"title"})
+                fields["format"] = "pdf"
+                if fields.get("source_url") and not pdf_source.valid_source_url(fields["source_url"]):
+                    raise ValueError
+            except (ValueError, UnicodeError):
+                self._send_json(400, {"error": "invalid new PDF source metadata"})
+                return
         # Read at most the verified request length before acquiring the shared lock.
         try:
             data = self.rfile.read(length)
@@ -738,11 +757,14 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 if revision != catalog["revision"]:
                     raise ValueError("catalog revision changed")
                 record = next((item for item in catalog["sources"] if item["source_id"] == sid), None)
-                if record is None or not self._pdf_record(record):
+                if adding:
+                    if record is not None or sid in publication.ROUTES or len(catalog["sources"]) >= catalog_store.MAX_ENTRIES:
+                        raise ValueError("source ID already exists or catalog is full")
+                elif record is None or not self._pdf_record(record):
                     raise ValueError("source has no PDF upload adapter")
                 if publication.load().get(sid, False):
                     raise ValueError("Unpublish source before uploading")
-                config = record["configuration"]
+                config = {} if adding else record["configuration"]
                 size = config.get("expected_size_bytes") or None
                 digest = config.get("sha256") or None
                 if size and int(size) != length:
@@ -755,9 +777,9 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     provenance = provenance[:catalog_store.MAX_FIELD-len(note)-1] + " " + note
                 else:
                     provenance = note
-                updated = SOURCE_CATALOG.mutate("edit", sid, {
-                    "expected_size_bytes": str(observed["bytes"]), "sha256": observed["sha256"],
-                    "provenance": provenance}, revision)
+                fields.update(expected_size_bytes=str(observed["bytes"]), sha256=observed["sha256"],
+                              provenance=provenance)
+                updated = SOURCE_CATALOG.mutate("add" if adding else "edit", sid, fields, revision)
             except catalog_store.RevisionConflict as exc:
                 self._send_json(409, {"error": str(exc)})
                 return

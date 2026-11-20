@@ -16,7 +16,7 @@ The same guide is available offline from Administration → Sources → Content 
   
 ## 2. Add a source profile
 
-  Choose Add Source, enter a recognizable name and optionally a direct artifact URL, confirm or select the format, optionally describe the collection, and Save source. A stable ID is generated automatically and retained when editing. A normal website URL is not a downloadable archive. Unsupported formats can be recorded but cannot be acquired or read.
+  Choose Add Source and select a local PDF to populate the title from its filename and install it in one operation. Alternatively, enter a recognizable name and optionally a direct artifact URL, confirm or select the format, optionally describe the collection, and Save source. A stable ID is generated automatically and retained when editing. A normal website URL is not a downloadable archive. Unsupported formats can be recorded but cannot be acquired or read.
 
 
   
