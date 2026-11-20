@@ -283,7 +283,7 @@ def status(record, artifact):
     from . import publication
     sid = record["source_id"]
     path = ROUTE_PREFIX + sid
-    result = dict(enabled=False, verified=False, serving=False, published=False, path=path, entry_path=path, publication_reason="")
+    result = dict(enabled=False, verified=False, serving=False, published=False, path=path, entry_path=path + "/document.pdf", publication_reason="")
     try:
         enabled = publication.load().get(sid, False)
         available = ready(artifact, verify=True)

@@ -83,7 +83,9 @@ def test_pdf_lifecycle(pdf_app, disk, tmp_path, monkeypatch):  # noqa: F811
     assert READER not in request("/")
     request("/api/publication", publication)
     monkeypatch.setattr(admin_api, "SOURCE_CATALOG", catalog_store.CatalogStore(tmp_path / "sources.json"))
-    assert READER in request("/")
+    assert ('href="' + READER + '/document.pdf"') in request("/")
+    assert ('href="' + READER + '"') not in request("/")
+    assert "Open PDF" in request("/")
     page = request(READER)
     assert 'href="/"' in page and 'A local &lt;guide&gt;' in page
     assert READER + "/document.pdf" in page
@@ -389,7 +391,21 @@ def test_pdf_publish_with_explicit_rights_acknowledgement(pdf_app, disk):
     updated = request("/api/sources")
     record = source(updated, SID)
     assert record["publication"]["published"]
+    assert record["publication"]["entry_path"] == READER + "/document.pdf"
     assert "Administrator confirmed permission" in record["configuration"]["license"]
     assert request(READER + "/document.pdf", raw=True)[0] == document()
     request("/api/publication", dict(pub, enabled=False, revision=updated["revision"]))
     assert not source(request("/api/sources"), SID)["publication"]["published"]
+
+
+def test_admin_pdf_header_shows_installed_size(pdf_app, disk):
+    request, _ = pdf_app
+    data = document()
+    catalog = mutate(request, request("/api/sources"), "add", fields(data), sid=SID)
+    headers = {"X-Source-ID": SID, "X-Catalog-Revision": str(catalog["revision"])}
+    request("/api/pdf-upload", data, upload_headers=headers)
+    page = request("/admin/sources")
+    assert "PDF verified" not in page
+    assert "Archive verified" not in page
+    assert "PDF pin verified" in page
+    assert 'data-field="status"' in page

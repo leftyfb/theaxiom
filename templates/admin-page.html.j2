@@ -219,7 +219,7 @@
             <p class="source-subtitle">{{ source.configuration.format }}{% if source.profile.description %} · {{ source.profile.description }}{% endif %}</p>
             {% if pub %}<span class="compact-publication" data-field="publication-summary">{{ publication_label }}</span>{% endif %}
           </div>
-          <span class="badge" data-field="status" role="status">{% if source.adapter == 'pdf' %}{{ 'PDF verified' if source.installed_verified else 'PDF not installed or invalid' }}{% elif source.installed_verified %}Archive verified{% elif not source.artifact and not source.mutation_blocked %}Not downloaded{% elif catalog.acquisition_stale %}Status unavailable{% elif not source.artifact %}Acquisition unresolved{% else %}Waiting for status…{% endif %}</span>
+          <span class="badge" data-field="status" role="status">{% if source.adapter == 'pdf' %}{% if source.installed_verified and source.artifact %}{{ source.artifact.bytes | filesizeformat(true) }}{% else %}PDF not installed or invalid{% endif %}{% elif source.installed_verified and source.artifact %}{{ source.artifact.bytes | filesizeformat(true) }}{% elif not source.artifact and not source.mutation_blocked %}Not downloaded{% elif catalog.acquisition_stale %}Status unavailable{% elif not source.artifact %}Acquisition unresolved{% else %}Waiting for status…{% endif %}</span>
         </summary>
         <div class="source-expanded">
         <div class="source-live">
@@ -490,6 +490,13 @@
         retrying: 'Waiting to retry', failed: 'Failed', interrupted: 'Interrupted',
         not_started: 'Not downloaded', unavailable: 'Service not installed', unknown: 'Status unknown'};
       const gib = bytes => (bytes / 1073741824).toFixed(2) + ' GiB';
+      function size(bytes) {
+        if (!Number.isFinite(bytes) || bytes < 0) return 'Installed';
+        const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+        let i = 0;
+        while (bytes >= 1024 && i < units.length - 1) { bytes /= 1024; i++; }
+        return bytes.toFixed(i ? 1 : 0) + ' ' + units[i];
+      }
       function render(card, job, stale, unavailable = false) {
         const field = name => card.querySelector('[data-field="' + name + '"]');
         const put = (name, value) => {
@@ -499,7 +506,7 @@
         };
         const verified = !stale && job?.state === 'completed' && job.verified === true && job.active === false;
         const status = unavailable ? 'Status unavailable' : stale ? 'Stale sample — status unknown' :
-          !job ? 'Waiting for status' : verified ? 'Archive verified' : (labels[job.state] || 'Status unknown');
+          !job ? 'Waiting for status' : verified ? size(job.expected_bytes) : (labels[job.state] || 'Status unknown');
         put('status', status);
         field('status').className = 'badge' + (!stale && job?.state === 'completed' && job.verified === true ?
           ' enabled' : !stale && job?.state === 'failed' ? ' disabled' : '');
@@ -573,7 +580,7 @@
           cards.forEach(card => {
             const source = sources.get(card.dataset.sourceId);
             if (source?.adapter === 'pdf') {
-              card.querySelector('[data-field="status"]').textContent = source.installed_verified ? 'PDF verified' : 'PDF not installed or invalid';
+              card.querySelector('[data-field="status"]').textContent = source.installed_verified ? size(source.artifact?.bytes) : 'PDF not installed or invalid';
               card.querySelector('[data-field="verified"]').textContent = source.installed_verified ? 'PDF pin verified' : 'Not confirmed';
             } else if (source?.artifact) render(card, source.acquisition, data.acquisition_stale !== false);
             else card.querySelector('[data-field="status"]').textContent = data.acquisition_stale ? 'Status unavailable' :
