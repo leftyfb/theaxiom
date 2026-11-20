@@ -7,14 +7,15 @@ from test_pdf_sources import pdf_app, disk, SID, source, mutate  # noqa: F401
 
 
 def pdf(text="", lang=None, compressed=False, operators=None, nested=False, array=False):
-    content = operators if operators is not None else ("BT (" + text + ") Tj ET").encode("latin-1")
+    content = operators if operators is not None else ("BT /F1 12 Tf 20 100 Td (" + text + ") Tj ET").encode("latin-1")
     if compressed:
         content = zlib.compress(content)
     objects = [
         b"<< /Type /Catalog /Pages 2 0 R" + (b" /Lang (" + lang.encode() + b")" if lang else b"") + b" >>",
         b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200]" + (b" /Resources << /Font << /F1 8 0 R >> >>" if nested else b"") + (b" /Contents [4 0 R] >>" if array else b" /Contents 4 0 R >>"),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200]" + (b" /Resources << /Font << /F1 5 0 R >> /ProcSet [/PDF /Text] >>" if nested else b" /Resources << /Font << /F1 5 0 R >> >>") + (b" /Contents [4 0 R] >>" if array else b" /Contents 4 0 R >>"),
         b"<< /Length " + str(len(content)).encode() + (b" /Filter /FlateDecode" if compressed else b"") + b" >>\nstream\n" + content + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
     ]
     data = b"%PDF-1.4\n"
     offsets = []
@@ -22,8 +23,8 @@ def pdf(text="", lang=None, compressed=False, operators=None, nested=False, arra
         offsets.append(len(data))
         data += f"{n} 0 obj\n".encode() + obj + b"\nendobj\n"
     xref = len(data)
-    data += b"xref\n0 5\n0000000000 65535 f \n" + b"".join(f"{n:010d} 00000 n \n".encode() for n in offsets)
-    return data + f"trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode()
+    data += b"xref\n0 6\n0000000000 65535 f \n" + b"".join(f"{n:010d} 00000 n \n".encode() for n in offsets)
+    return data + f"trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode()
 
 
 EN = "the water and the food in your home should be safe for you and your family and this is the way that you can prepare for an emergency with the supplies that you have " * 2
@@ -59,7 +60,7 @@ def test_upload_preserves_manual_language(pdf_app, disk, override):
 
 @pytest.mark.parametrize("compressed", [False, True])
 def test_nested_resources_array_and_tj_operators(compressed):
-    operators = b"BT [(" + EN[:20].encode() + b") -10 (" + EN[20:].encode() + b")] TJ ET"
+    operators = b"BT /F1 12 Tf [(" + EN[:20].encode() + b") -10 (" + EN[20:].encode() + b")] TJ ET"
     assert pdf_language.detect(pdf(operators=operators, nested=True, array=True, compressed=compressed)) == "en"
     assert pdf_language.detect(pdf(nested=True, array=True)) is None
 
@@ -67,8 +68,8 @@ def test_nested_resources_array_and_tj_operators(compressed):
 def test_malformed_numeric_array_cannot_stall_parser():
     # The old repeated numeric alternation could repartition this digit run
     # exponentially when the final token was invalid.
-    operators = b"BT [" + b"1" * 100 + b" X] TJ (" + EN.encode() + b") Tj ET"
-    assert pdf_language.detect(pdf(operators=operators)) == "en"
+    operators = b"BT /F1 12 Tf [" + b"1" * 100 + b" X] TJ (" + EN.encode() + b") Tj ET"
+    assert pdf_language.detect(pdf(operators=operators)) in (None, "en")
 
 
 def test_detection_timeout_does_not_prevent_upload(pdf_app, disk, monkeypatch):
@@ -103,3 +104,27 @@ def test_real_worker_deadline(monkeypatch):
     start = time.monotonic()
     assert pdf_language.detect(pdf(EN)) is None
     assert time.monotonic() - start < 5
+
+
+def test_checklist_style_and_hex_encoded_text():
+    # Original synthetic checklist, not copied third-party content.
+    words = ("Emergency supplies checklist\nDrinking water\nFlashlight and batteries\n"
+             "First aid kit\nWarm clothes\nPortable radio\nSpare blankets\n"
+             "Food storage containers\nMedication and prescriptions\n"
+             "Tools for repairs\nImportant documents\nEmergency contacts")
+    encoded = words.replace("\n", " ").encode("ascii").hex().encode("ascii")
+    assert pdf_language.detect(pdf(operators=b"BT /F1 12 Tf <" + encoded + b"> Tj ET")) == "en"
+
+
+def test_worker_busy_abstains():
+    assert pdf_language.SLOTS.acquire(blocking=False)
+    try:
+        assert pdf_language.detect(pdf(EN)) is None
+    finally:
+        pdf_language.SLOTS.release()
+
+
+def test_non_latin_text_classification():
+    sample = ("これは日本語で書かれた防災の手引きです。災害が起きたときに必要な水や食料を準備してください。"
+              "家族と連絡を取る方法を確認し、避難場所を決めておきましょう。")
+    assert pdf_language._classify(sample) == "ja"

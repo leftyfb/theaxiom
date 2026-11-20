@@ -1,9 +1,39 @@
-# PDF language detection
+# PDF language detection (#75)
 
-Acquisition fills a blank language field when a conservative offline detector recognizes a simple PDF Catalog language declaration or sufficiently distinctive text. A manually supplied language is retained. Language codes are stored as metadata and remain editable.
+Language is inferred at acquisition only when the administrator has not supplied it.
+The result is an editable metadata language code, not a security or publication
+decision. Existing records are not automatically changed.
 
-The implementation uses only the Python standard library. It supports classic cross-reference tables, simple Catalog language literals, nested page resource dictionaries, content stream arrays, indirect stream lengths, and bounded plain or Flate-compressed page streams containing literal Tj and simple TJ text operands. Text inference currently covers English, Spanish, French, German, Portuguese and Italian. Insufficient or conflicting evidence yields no inferred language. Unsupported modern cross-reference streams, custom character mappings, scanned pages without text, and complex text operators may remain unknown. This is deliberately not a full PDF parser or universal language classifier.
+The old narrow handwritten PDF parser and six-language word list have been
+replaced by pypdf (BSD-3-Clause; version 7.1.1) and langdetect (Apache-2.0;
+version 1.0.9, bundled 55-language profiles). Both are declared in pyproject.toml.
+See https://pypi.org/project/pypdf/ and https://pypi.org/project/langdetect/.
+The classifier uses a fixed seed, a minimum sample, confidence threshold,
+and multiple page/block samples. A credible Catalog /Lang declaration is used
+unless it conflicts with extracted text. Ambiguous, empty and mixed samples may
+remain unknown. OCR and password-protected documents are not supported.
+Language recognition is probabilistic, particularly on short lists.
 
-A complete parser such as pypdf or an external Poppler tool would broaden extraction but requires dependency and deployment review, including resource isolation for untrusted files. OCR is intentionally excluded: it requires separate language packs, processing budgets and security review. Detection never changes verification requirements or rejects a PDF merely because language is unknown.
+All parsing and inference takes place in an independent worker, with a five
+second wall-clock timeout, four second CPU limit, 384 MiB address-space limit,
+16 MiB input ceiling, 32 KiB sampled text ceiling, and at most eight sampled
+pages. Only one worker is admitted per application process; simultaneous
+requests skip inference instead of waiting. No network access is required
+during normal operation. Worker failure, timeout or missing packages does
+not reject otherwise verified content. No document text is logged.
 
-Language inference runs in a short-lived Python subprocess with a two-second execution timeout. Timeout or worker failure leaves language unknown; the upload is not rejected. The parser consumes numeric text-array tokens sequentially rather than using ambiguous repeated regular expressions. No additional runtime package is needed.
+## Existing deployment prerequisite
+
+The fixed application deployment script does not authorize installing packages.
+Before deploying this revision to an existing server, the operator must install
+the declared versions into its existing application virtual environment and
+verify imports as the service account. Installation requires package access or
+an operator-prepared offline wheelhouse; do not install at runtime.
+
+```sh
+sudo /opt/theaxiom/app/.venv/bin/python -m pip install 'pypdf==7.1.1' 'langdetect==1.0.9'
+sudo -u theaxiom /opt/theaxiom/app/.venv/bin/python -c 'import pypdf, langdetect; print(pypdf.__version__)'
+```
+
+The dependencies are pure-Python, subject to platform/Python-version tests,
+and langdetect requires six. Track package preparation and upgrade policy in #79.

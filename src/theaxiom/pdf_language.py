@@ -1,232 +1,91 @@
-"""Conservative, bounded offline language inference for simple PDFs.
-
-No new parser dependency: only classic xref objects and plain/Flate page
-streams are interpreted. Unsupported constructs return unknown, never block
-acquisition. Parsing runs in a short-lived isolated subprocess. No OCR,
-network or executable PDF content.
-"""
+"""Best-effort offline PDF language inference in a resource-bounded worker."""
+import io
+import logging
 import re
 import subprocess
 import sys
-import zlib
+import threading
 
 from . import pdf_source
 
-MAX_STREAM = 256 * 1024
 MAX_SAMPLE = 32 * 1024
-DETECTION_TIMEOUT = 2.0
-LANGUAGES = {
-    "en": "the and of to in is that for with this from are you your can should not have be as on or",
-    "es": "el la los las de del que en por para con una uno es son se al como su sus esta este",
-    "fr": "le la les des du de et en que pour dans avec une un est sont ce cette vous pas sur au",
-    "de": "der die das den dem des und ist sind mit für von zu im ein eine nicht auf auch sich als",
-    "pt": "o os a as de do da dos das que em para com uma um são não seu sua pelo pela esse esta",
-    "it": "il lo la gli le di del della che e in per con una un sono non questo questa nel delle",
-}
-WORDS = {code: set(words.split()) for code, words in LANGUAGES.items()}
-
-
-def _objects(data):
-    footer = re.search(rb"(?:^|[\r\n])startxref\s+([0-9]{1,10})\s+%%EOF[\x00\t\n\f\r ]*\Z", data[-4096:])
-    if not footer:
-        raise ValueError
-    offset = int(footer[1])
-    if not 9 <= offset < len(data) or len(data)-offset > 256*1024:
-        raise ValueError
-    table, sep, trailer = data[offset:].partition(b"trailer")
-    match = re.match(rb"\s*<<([^<>]{1,4096})>>", trailer)
-    if not sep or not table.startswith((b"xref\n", b"xref\r")) or not match or re.search(rb"/(?:Prev|XRefStm|Encrypt)\b", match[1]):
-        raise ValueError
-    root = re.findall(rb"/Root\s+(\d{1,10})\s+(\d{1,5})\s+R\b", match[1])
-    if len(root) != 1:
-        raise ValueError
-    lines = table.splitlines()
-    entries = {}
-    i = 1
-    while i < len(lines):
-        header = re.fullmatch(rb"\s*(\d{1,10})\s+(\d{1,10})\s*", lines[i])
-        if not header:
-            raise ValueError
-        first, count = map(int, header.groups())
-        i += 1
-        if count > len(lines)-i or len(entries)+count > 8192:
-            raise ValueError
-        for n in range(count):
-            entry = re.fullmatch(rb"(\d{10})\s+(\d{5})\s+([nf])\s*", lines[i+n])
-            if not entry:
-                raise ValueError
-            if entry[3] == b"n":
-                key = (first+n, int(entry[2]))
-                pos = int(entry[1])
-                if key in entries or not 9 <= pos < offset:
-                    raise ValueError
-                entries[key] = pos
-        i += count
-    def obj(key):
-        pos = entries[key]
-        head = re.match(rb"(\d+)\s+(\d+)\s+obj\b", data[pos:pos+64])
-        if not head or tuple(map(int, head.groups())) != key:
-            raise ValueError
-        return data[pos+head.end():min(offset,pos+MAX_STREAM+8192)]
-    return tuple(map(int, root[0])), entries, obj
-
-
-def _dictionary(body):
-    """Return the outer dictionary and its end offset, masking nested values."""
-    start = re.match(rb"\s*<<", body)
-    if not start:
-        return None
-    # Tokenize only a bounded prefix; reject unsupported or incomplete values.
-    tokens = re.compile(rb"%[^\r\n]*|\((?:\\[\s\S]|[^()\\])*\)|<<|>>|<(?!<)[0-9A-Fa-f\s]*>|[^\s<>()%]+|[()]")
-    depth, pos, parts = 1, start.end(), []
-    for token in tokens.finditer(body, pos, min(len(body), pos + 16384)):
-        if body[pos:token.start()].strip():
-            return None
-        value = token[0]
-        pos = token.end()
-        if value == b"<<":
-            depth += 1
-        elif value == b">>":
-            depth -= 1
-            if not depth:
-                return b" ".join(parts), pos
-        elif value in (b"(", b")"):
-            return None
-        elif depth == 1 and not value.startswith(b"%"):
-            parts.append(value)
-    return None
-
-
-def _stream_text(body, obj):
-    parsed = _dictionary(body)
-    if not parsed:
-        return ""
-    dictionary, end = parsed
-    match = re.match(rb"\s*stream\r?\n", body[end:])
-    if not match:
-        return ""
-    start = end + match.end()
-    lengths = re.findall(rb"/Length\s+(\d{1,8})(?:\s+(\d{1,5})\s+R\b)?(?=\s|$)", dictionary)
-    if len(lengths) != 1:
-        return ""
-    number, generation = lengths[0]
-    if generation:
-        indirect = re.match(rb"\s*(\d{1,8})\s+endobj\b", obj((int(number), int(generation))))
-        if not indirect:
-            return ""
-        length = int(indirect[1])
-    else:
-        length = int(number)
-    if not 0 < length <= MAX_STREAM:
-        return ""
-    raw = body[start:start+length]
-    if len(raw) != length or not re.match(rb"\s*endstream\b", body[start+length:]):
-        return ""
-    if re.search(rb"/Filter\b", dictionary):
-        if not re.search(rb"/Filter\s*/FlateDecode\b", dictionary) or b"/DecodeParms" in dictionary:
-            return ""
-        decoder = zlib.decompressobj()
-        raw = decoder.decompress(raw, MAX_STREAM+1)
-        if len(raw) > MAX_STREAM or not decoder.eof or decoder.unconsumed_tail:
-            return ""
-    # Literal Tj operands and simple TJ arrays. Numeric kerning does not
-    # generally indicate a word break; preserve explicit spaces.
-    result = []
-    literal = rb"\(([^()\\\r\n]{1,2048})\)"
-    for block in re.finditer(rb"\bBT\b(.*?)\bET\b", raw, re.S):
-        for item in re.finditer(literal + rb"\s*Tj\b|\[([^\[\]]{1,8192})\]\s*TJ\b", block[1]):
-            if item[1] is not None:
-                result.append(item[1].decode("latin-1"))
-            else:
-                # Consume each token exactly once. A repeated alternation
-                # with variable-length numeric tokens can backtrack exponentially.
-                array = item[2]
-                token = re.compile(rb"\s+|" + literal + rb"|[+-]?(?:\d+(?:\.\d*)?|\.\d+)")
-                pos, strings = 0, []
-                while pos < len(array):
-                    part = token.match(array, pos)
-                    if not part:
-                        break
-                    if part[1] is not None:
-                        strings.append(part[1])
-                    pos = part.end()
-                if pos == len(array):
-                    result.append(b"".join(strings).decode("latin-1"))
-    return " ".join(result)
+MAX_PAGES = 8
+DETECTION_TIMEOUT = 5.0
+MAX_MEMORY = 384 * 1024 * 1024
+LANG = re.compile(r"[a-z]{2,3}(?:-[a-z0-9]{2,8}){0,3}\Z")
+LOG = logging.getLogger(__name__)
+SLOTS = threading.BoundedSemaphore(1)
 
 
 def _classify(text):
-    words = re.findall(r"[^\W\d_]+", text.casefold(), re.UNICODE)
-    if len(words) < 35:
+    from langdetect import DetectorFactory, detect_langs
+    from langdetect.lang_detect_exception import LangDetectException
+
+    # Ignore numeric labels, isolated letters and punctuation; keep scripts
+    # without spaces intact. A short or ambiguous sample is not trustworthy.
+    text = re.sub(r"[\W\d_]+", " ", text, flags=re.UNICODE).strip()
+    if sum(ch.isalpha() for ch in text) < 60:
         return None
-    scores = sorted(((sum(word in terms for word in words), code) for code, terms in WORDS.items()), reverse=True)
-    count, code = scores[0]
-    runner = scores[1][0]
-    if count < max(12, len(words)*0.18) or count < 2*max(1, runner) or count-runner < 8:
+    if len(set(ch.casefold() for ch in text if ch.isalpha())) < 10:
         return None
-    if len(set(words) & WORDS[code]) < 6:
+    DetectorFactory.seed = 0
+    try:
+        results = detect_langs(text[:MAX_SAMPLE])
+    except LangDetectException:
         return None
-    return code
+    if not results or results[0].prob < .90:
+        return None
+    value = results[0].lang.lower()
+    return value if LANG.fullmatch(value) else None
 
 
 def _detect(data):
-    """Return a language code or None; favor precision over coverage."""
-    try:
-        if not isinstance(data, bytes) or not 0 < len(data) <= pdf_source.MAX_BYTES:
-            return None
-        root, entries, obj = _objects(data)
-        catalog = _dictionary(obj(root))
-        if not catalog or not re.search(rb"/Type\s*/Catalog\b", catalog[0]):
-            return None
-        # Only a simple unambiguous Catalog /Lang literal is recognized.
-        lang = re.findall(rb"/Lang\s*\(([A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,3})\)", catalog[0])
-        declared = lang[0].decode("ascii").lower() if len(lang) == 1 else None
-        samples = []
-        pages_seen = 0
-        for key in list(entries)[:8192]:
-            body = obj(key)
-            page = _dictionary(body)
-            if not page or not re.search(rb"/Type\s*/Page\b", page[0]):
-                continue
-            pages_seen += 1
-            if pages_seen > 16:
-                break
-            refs = re.findall(rb"/Contents\s+(\d{1,10})\s+(\d{1,5})\s+R\b", page[0])
-            arrays = re.findall(rb"/Contents\s*\[([^\[\]]{1,4096})\]", page[0])
-            if not refs and len(arrays) == 1:
-                array = arrays[0].strip()
-                ref_token = re.compile(rb"(\d{1,10})\s+(\d{1,5})\s+R(?:\s+|$)")
-                pos, parsed_refs = 0, []
-                while pos < len(array) and len(parsed_refs) < 16:
-                    match = ref_token.match(array, pos)
-                    if not match:
-                        break
-                    parsed_refs.append(match.groups())
-                    pos = match.end()
-                if pos == len(array):
-                    refs = parsed_refs
-            if 0 < len(refs) <= 16:
-                sample = " ".join(_stream_text(obj(tuple(map(int, ref))), obj) for ref in refs)
-                if sample:
-                    samples.append(sample[:MAX_SAMPLE])
-            if len(samples) >= 4 or sum(map(len, samples)) >= MAX_SAMPLE:
-                break
-        guesses = {_classify(sample) for sample in samples} - {None}
-        if len(guesses) > 1:
-            return None
-        guess = _classify(" ".join(samples)[:MAX_SAMPLE])
-        if declared:
-            if guess and declared.split("-")[0] != guess:
-                return None
-            return declared
-        return guess
-    except (ValueError, KeyError, OverflowError, zlib.error):
+    from pypdf import PdfReader
+
+    reader = PdfReader(io.BytesIO(data), strict=False)
+    if reader.is_encrypted:
         return None
+    root = reader.trailer["/Root"]
+    raw = root.get("/Lang")
+    declared = str(raw).strip().lower() if raw is not None else ""
+    declared = declared if LANG.fullmatch(declared) and declared != "und" else None
+    samples = []
+    remaining = MAX_SAMPLE
+    count = len(reader.pages)
+    # Sample across the document, not just its front cover.
+    indices = sorted(set(range(min(count, 4))) |
+                     {count * i // 4 for i in range(1, 4) if count})
+    for index in indices[:MAX_PAGES]:
+        if not remaining:
+            break
+        text = (reader.pages[index].extract_text() or "")[:remaining]
+        if text.strip():
+            samples.append(text)
+            remaining -= len(text)
+    guesses = {_classify(sample) for sample in samples} - {None}
+    # Check substantial blocks independently for mixed-language documents,
+    # including those with multiple languages on a single page.
+    combined = "\n".join(samples)
+    if len(combined) >= 300:
+        mid = len(combined) // 2
+        guesses.update({_classify(combined[:mid]), _classify(combined[mid:])} - {None})
+    if len(guesses) > 1:
+        return None
+    guess = _classify(combined)
+    if declared:
+        if any(code.split("-")[0] != declared.split("-")[0] for code in guesses | ({guess} if guess else set())):
+            return None
+        return declared
+    if guess and (not guesses or guess in guesses):
+        return guess
+    return None
 
 
 def detect(data):
-    """Best-effort metadata: terminate a stalled parser, never block the API."""
+    """Never let optional metadata prevent acquisition or overwhelm the HTTP process."""
     if not isinstance(data, bytes) or not 0 < len(data) <= pdf_source.MAX_BYTES:
+        return None
+    if not SLOTS.acquire(blocking=False):
         return None
     try:
         completed = subprocess.run(
@@ -234,12 +93,13 @@ def detect(data):
             input=data, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             timeout=DETECTION_TIMEOUT, check=True,
         )
-        value = completed.stdout.strip()
-        if re.fullmatch(rb"[a-z]{2,3}(?:-[a-z0-9]{2,8}){0,3}", value):
-            return value.decode("ascii")
-    except (OSError, subprocess.SubprocessError):
-        pass
-    return None
+        value = completed.stdout.strip().decode("ascii")
+        return value if LANG.fullmatch(value) else None
+    except (OSError, subprocess.SubprocessError, UnicodeError):
+        LOG.warning("PDF language inference worker unavailable or exceeded its resource budget")
+        return None
+    finally:
+        SLOTS.release()
 
 
 def installed_language(artifact):
@@ -250,6 +110,21 @@ def installed_language(artifact):
         return None
 
 
-if __name__ == "__main__":
+def _worker():
+    # Set limits before loading parser/model or reading untrusted bytes.
+    import resource
+    resource.setrlimit(resource.RLIMIT_AS, (MAX_MEMORY, MAX_MEMORY))
+    resource.setrlimit(resource.RLIMIT_CPU, (4, 4))
+    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     data = sys.stdin.buffer.read(pdf_source.MAX_BYTES + 1)
-    print(_detect(data) or "")
+    if not 0 < len(data) <= pdf_source.MAX_BYTES:
+        return
+    try:
+        print(_detect(data) or "")
+    except Exception:
+        # A parser error is not evidence of any language.
+        return
+
+
+if __name__ == "__main__":
+    _worker()

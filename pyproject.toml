@@ -11,6 +11,8 @@ requires-python = ">=3.10"
 dependencies = [
   "Jinja2>=3.1",
   "PyYAML>=6.0",
+  "pypdf==7.1.1",
+  "langdetect==1.0.9",
 ]
 
 [project.optional-dependencies]
