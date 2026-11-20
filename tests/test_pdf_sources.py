@@ -492,3 +492,23 @@ assert.equal(pageMatches([{str:"water"}],"fire").length,0);
 assert.equal(wrappedMatch(0,-1,3),2);
 assert.equal(wrappedMatch(2,1,3),0);
 """], check=True)
+
+
+def test_pdf_canvas_and_text_layer_are_isolated():
+    from pathlib import Path
+    root = Path(__file__).parents[1] / "templates"
+    html = (root / "pdf-reader.html.j2").read_text()
+    script = (root / "pdf-reader.mjs").read_text()
+    assert '/web/pdf_viewer.css' not in html
+    assert '#paper{display:block;position:relative;z-index:0' in html
+    assert '#text-layer{position:absolute;inset:0;z-index:1;opacity:0' in html
+    assert '#highlights{position:absolute;inset:0;z-index:2' in html
+    show = script[script.index("async function show("):script.index("async function thumbnails(")]
+    assert 'const canvas = document.createElement("canvas")' in show
+    assert 'await task.promise;' in show
+    assert show.index('await task.promise;') < show.index('$("paper").replaceWith(canvas)') < show.index('new pdfjs.TextLayer')
+    assert 'const canvas = $("paper")' not in show
+    assert 'if (token !== generation) return;' in show
+    assert 'const container = document.createElement("div")' in show
+    assert 'Text highlights unavailable on this page.' in show
+    assert 'new ResizeObserver' in script

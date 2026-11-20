@@ -31,3 +31,5 @@ be revoked. Browser/Pi acceptance must verify real rendering, search, printing,
 offline requests and resource use. PDF.js is Apache-2.0; preserve upstream
 license and notices, including bundled fonts. Verify actual host installation
 and browser compatibility before acceptance. Track dependency inventory in #79.
+
+The embedded reader deliberately avoids the upstream generic viewer stylesheet. Its canvas, invisible measurement text layer and highlight overlay are independently stacked. Each render uses its own canvas and only replaces the visible page after successful rendering; stale/cancelled generations and text-layer failures cannot clear the visible canvas. Mobile browser acceptance remains required.

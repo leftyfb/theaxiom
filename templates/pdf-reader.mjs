@@ -64,43 +64,66 @@ async function draw(target, number, scale, limit = maxPixels) {
 async function show(number) {
   if (!pdf) return;
   page = Math.max(1, Math.min(pdf.numPages, Number(number) || 1));
+  const requestedPage = page;
   $("page").value = page;
   $("prev").disabled = page === 1;
   $("next").disabled = page === pdf.numPages;
   const token = ++generation;
   if (layerTask) { layerTask.cancel(); layerTask = null; }
+  if (renderTask) { renderTask.cancel(); renderTask = null; }
   visibleLayer = null;
-  $("text-layer").replaceChildren(); $("highlights").replaceChildren();
+  $("highlights").replaceChildren();
   updateMatches();
-  if (renderTask) { renderTask.cancel(); try { await renderTask.promise; } catch {} }
+  let source, viewport;
   try {
-    const source = await pdf.getPage(page);
+    source = await pdf.getPage(requestedPage);
     if (token !== generation) return;
     const base = source.getViewport({scale: 1});
     const scale = Math.min(zoom * Math.max(0.1, ($("document").clientWidth - 12) / base.width),
       Math.sqrt(maxPixels / (base.width * base.height)));
-    const viewport = source.getViewport({scale});
-    const canvas = $("paper");
+    viewport = source.getViewport({scale});
+    const canvas = document.createElement("canvas");
+    canvas.id = "paper";
+    canvas.setAttribute("aria-label", "Rendered PDF page");
     canvas.width = Math.max(1, Math.floor(viewport.width));
     canvas.height = Math.max(1, Math.floor(viewport.height));
-    renderTask = source.render({canvas, canvasContext: canvas.getContext("2d"), viewport,
+    const task = source.render({canvas, canvasContext: canvas.getContext("2d"), viewport,
       annotationMode: pdfjs.AnnotationMode.DISABLE});
-    await renderTask.promise;
+    renderTask = task;
+    await task.promise;
     if (token !== generation) return;
+    $("paper").replaceWith(canvas);
+    renderTask = null;
     message("");
+  } catch (error) {
+    if (token === generation && error.name !== "RenderingCancelledException") message("Unable to render this page.");
+    return;
+  }
+
+  // A text-layer failure must never erase or invalidate a rendered page.
+  try {
     const content = await source.getTextContent();
     if (token !== generation) return;
-    const container = $("text-layer");
+    const container = document.createElement("div");
+    container.id = "text-layer";
+    container.className = "textLayer";
+    container.setAttribute("aria-hidden", "true");
     container.style.setProperty("--scale-factor", String(viewport.scale));
     container.style.setProperty("--total-scale-factor", String(viewport.scale));
     container.style.setProperty("--user-unit", "1");
-    layerTask = new pdfjs.TextLayer({textContentSource:content, container, viewport});
-    await layerTask.render();
+    $("text-layer").replaceWith(container);
+    const task = new pdfjs.TextLayer({textContentSource:content, container, viewport});
+    layerTask = task;
+    await task.render();
     if (token !== generation) return;
-    visibleLayer = {items:content.items, divs:layerTask.textDivs};
+    visibleLayer = {items:content.items, divs:task.textDivs};
+    layerTask = null;
     paintMatches();
-  } catch (error) {
-    if (token === generation && error.name !== "RenderingCancelledException") message("Unable to render this page.");
+  } catch {
+    if (token === generation) {
+      layerTask = null;
+      message("Text highlights unavailable on this page.");
+    }
   }
 }
 
@@ -162,7 +185,7 @@ function paintMatches() {
     }
   });
   if (scrollMatch && active) {
-    active.scrollIntoView({block:"center",inline:"center"});
+    active.scrollIntoView({block:"center",inline:"nearest"});
     scrollMatch = false;
   }
 }
@@ -238,7 +261,14 @@ document.addEventListener("keydown", event => {
       page + (["ArrowRight","PageDown"].includes(event.key) ? 1 : -1));
   }
 });
-window.addEventListener("resize", () => show(page));
+let lastDocumentWidth = 0;
+const resizeObserver = new ResizeObserver(() => {
+  const width = $("document").clientWidth;
+  if (width === lastDocumentWidth) return;
+  lastDocumentWidth = width;
+  if (pdf) show(page);
+});
+resizeObserver.observe($("document"));
 try {
   if (pdfjs.version !== "6.5.438") throw Error("Unexpected PDF.js version");
   const url = document.body.dataset.document;
