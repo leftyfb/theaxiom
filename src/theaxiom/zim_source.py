@@ -159,7 +159,7 @@ def discard_partial(source_id):
 
 def download_resumable(source_id, config, *, offset=0, validator=None,
                        progress=lambda current, total, metadata: None,
-                       stopped=lambda: False):
+                       stopped=lambda: False, promote_lock=None, promoting=lambda: None):
     """Persist source-scoped staged bytes and validate any resumed response before appending.
 
     Only the caller may delete a partial, on an explicit cancellation. A failed
@@ -283,14 +283,19 @@ def download_resumable(source_id, config, *, offset=0, validator=None,
                         raise TransferStopped()
                     target.flush()
                     os.fsync(target.fileno())
-                check_mount()
-                if available() < 0:
-                    raise ValueError("ZIM storage reserve would be exceeded")
-                filename = source_id + "." + digest + ".zim"
-                os.link(name, filename, src_dir_fd=staging, dst_dir_fd=library, follow_symlinks=False)
-                os.fsync(library)
-                os.unlink(name, dir_fd=staging)
-                os.fsync(staging)
-                return {"filename": filename, "source_url": url, "bytes": count, "sha256": digest}
+                from contextlib import nullcontext
+                with promote_lock if promote_lock is not None else nullcontext():
+                    if stopped():
+                        raise TransferStopped()
+                    check_mount()
+                    if available() < 0:
+                        raise ValueError("ZIM storage reserve would be exceeded")
+                    promoting()  # establishes a non-cancellable atomic promotion phase
+                    filename = source_id + "." + digest + ".zim"
+                    os.link(name, filename, src_dir_fd=staging, dst_dir_fd=library, follow_symlinks=False)
+                    os.fsync(library)
+                    os.unlink(name, dir_fd=staging)
+                    os.fsync(staging)
+                    return {"filename": filename, "source_url": url, "bytes": count, "sha256": digest}
         finally:
             os.close(fd)
