@@ -929,7 +929,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             self._send_json(200, settings)
         elif self.path.rstrip("/") == "/api/action":
             data = self._read_body()
-            if data.get("action") == "zim-download":
+            if data.get("action") in {"zim-download", "zim-resume", "zim-pause", "zim-cancel"}:
                 self._start_zim(data)
             elif data.get("action") == "import":
                 self._import_pdf(data)
