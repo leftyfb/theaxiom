@@ -131,3 +131,54 @@ def test_cancel_accepted_during_network_failure_is_not_lost(disk):
     assert zim_jobs.status("ready")["state"] == "cancelled"
     assert zim_jobs.staged_size("ready") == 0
     assert not list((disk / "library/zim").iterdir())
+
+
+
+def test_resume_after_backend_restart_uses_original_etag_and_full_verification(disk, monkeypatch):
+    """The persisted job and staged bytes alone must suffice after process exit."""
+    from contextlib import contextmanager
+
+    data = fixture_bytes()
+    offset = 48
+    stage = disk / "staging/zim"
+    stage.mkdir(exist_ok=True)
+    partial = stage / ".download-ready.partial"
+    partial.write_bytes(data[:offset])
+    partial.chmod(0o600)
+    zim_jobs.save(dict(source_id="ready", state="downloading", active=True,
+                       configuration=zim_jobs.identity(CONFIG), downloaded_bytes=offset,
+                       expected_bytes=len(data), etag='"stable"'))
+    recovered = zim_jobs.status("ready")
+    assert recovered["state"] == "paused" and recovered["downloaded_bytes"] == offset
+
+    class Body(BytesIO):
+        total_size = len(data)
+        etag = '"stable"'
+        last_modified = None
+
+    calls = []
+
+    @contextmanager
+    def transport(url, *, offset, validator, **kwargs):
+        calls.append((offset, validator))
+        yield Body(data[offset:])
+
+    monkeypatch.setattr(zim_source.pdf_transport, "open_pdf", transport)
+    zim_jobs.start("ready", CONFIG, resume=True)
+    join_worker()
+    job = zim_jobs.status("ready")
+    assert job["state"] == "completed" and job["verified"]
+    assert calls == [(offset, '"stable"')]
+    assert zim_jobs.installed(job, CONFIG)["bytes"] == len(data)
+    assert not partial.exists()
+
+
+def test_pausing_or_cancelling_completed_zim_never_deletes_installed_archive(disk):
+    data = fixture_bytes()
+    artifact = zim_source.install_stream("ready", CONFIG, BytesIO(data))
+    zim_jobs.save(dict(source_id="ready", state="completed", active=False, verified=True,
+                       configuration=zim_jobs.identity(CONFIG), artifact=artifact))
+    for operation in ("pause", "cancel"):
+        with pytest.raises(ValueError):
+            zim_jobs.control("ready", CONFIG, operation)
+    assert (disk / "library/zim" / artifact["filename"]).read_bytes() == data
