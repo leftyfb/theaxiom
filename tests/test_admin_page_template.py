@@ -228,3 +228,9 @@ def test_bulk_publication_requires_all_selected_sources_eligible():
     assert "toggle.dataset.acknowledgeRights === 'false'" in page
     assert "card.dataset.filterPublication === 'published' && toggle.dataset.enabled === 'true'" in page
     assert "action !== 'remove' && !bulkPublicationEligible(action, ids)" in page
+
+
+def test_sources_page_omits_obsolete_intro():
+    page = render([profile()])
+    assert '<h2 id="sources">Content sources</h2>' not in page
+    assert "Acquisition controls are disabled until safe download and recovery support is ready." not in page

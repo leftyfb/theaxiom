@@ -120,7 +120,7 @@ class HTTPAuthTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertNotIn("WWW-Authenticate", headers)
         self.assertIn(b"Your offline reference library", body)
-        for path in ("/admin", "/admin/", "/admin/sources", "/admin/settings", "/admin/sources/", "/admin/settings/", "/api/storage-settings",
+        for path in ("/admin", "/admin/", "/admin/sources", "/admin/settings", "/admin/sources/", "/admin/settings/", "/admin/groupings", "/admin/groupings/", "/api/storage-settings",
                      "/api/storage-status", "/api/acquisitions", "/api/freshness", "/api/jobs/" + "a"*32):
             with self.subTest(path=path):
                 status, headers, _ = self.request(path)
@@ -227,3 +227,12 @@ class PasswordLengthTests(unittest.TestCase):
             self.assertTrue(store.change("eight123", "newpass8"))
             self.assertTrue(store.verify("newpass8"))
             self.assertFalse(store.verify("eight123"))
+
+
+class AdminProxyRouteTests(unittest.TestCase):
+    def test_all_admin_navigation_routes_reach_authenticated_backend(self):
+        config = (Path(__file__).parents[1] / "deploy/nginx/theaxiom.conf").read_text()
+        for route in ("/admin/sources", "/admin/groupings", "/admin/settings"):
+            for path in (route, route + "/"):
+                with self.subTest(path=path):
+                    self.assertIn("location = " + path + " { include /etc/nginx/snippets/theaxiom-backend.conf; }", config)
