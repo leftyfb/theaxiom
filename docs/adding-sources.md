@@ -31,7 +31,7 @@ The same guide is available offline from Administration → Sources → Content 
   **ZIM:** The existing verified Wikipedia archive is supported. New ZIM profiles currently require a matching trusted acquisition manifest; arbitrary remote downloads are not yet enabled.
 
 
-  **PDF:** Local import currently requires an administrator-reviewed HTTPS publisher URL, provenance, rights note, exact size (maximum 16 MiB) and SHA-256. An operator must stage the file as staging/pdf/<source-id>.pdf in the configured storage root and provision staging/pdf and library/pdf with application ownership and restrictive permissions. Use Import local PDF to verify and install. Remote PDF acquisition is not yet supported. Local or explicitly configured NFS storage is supported; the expected mount target and export must match.
+  **PDF:** Local import currently requires an administrator-reviewed HTTPS publisher URL, provenance, rights note, exact size (maximum 16 MiB) and SHA-256. An operator must stage the file as staging/pdf/<source-id>.pdf in the configured storage root and provision staging/pdf and library/pdf with application ownership and restrictive permissions. Use Import local PDF to verify and install. Download PDF retrieves a direct HTTPS URL (no redirects yet), computes missing size and SHA-256, and records locally calculated provenance. Review rights and enter a rights note before publishing. Browser upload is not yet supported. Local or explicitly configured NFS storage is supported; the expected mount target and export must match.
 
 
   

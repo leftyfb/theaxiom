@@ -229,3 +229,33 @@ def test_stream_install_respects_capacity_and_maximum(disk, monkeypatch):
         pdf_source.install_stream(SID, BytesIO(document()))
     assert not list(library.iterdir())
     assert not list(inbox.parent.glob(".import-*"))
+
+
+def test_pdf_download_metadata_and_explicit_publication(pdf_app, disk, monkeypatch):
+    from io import BytesIO
+    request, _ = pdf_app
+    data = document()
+    def download(sid, url, **kwargs):
+        assert url == "https://publisher.example.org/guide.pdf"
+        return pdf_source.install_stream(sid, BytesIO(data), **kwargs)
+    monkeypatch.setattr(admin_api.pdf_transport, "download", download)
+    catalog = mutate(request, request("/api/sources"), "add",
+                     dict(title="Remote guide", format="pdf", source_url="https://publisher.example.org/guide.pdf"), sid=SID)
+    action = dict(source_id=SID, action="pdf-download", revision=catalog["revision"])
+    assert "data-pdf-download" in request("/admin/sources")
+    request("/api/action", dict(action, url="https://other.org/"), status=400)
+    request("/api/action", action, origin="", status=403)
+    request("/api/action", dict(action, revision=action["revision"]-1), status=409)
+    result = request("/api/action", action)
+    assert result["installed_verified"]
+    catalog = request("/api/sources")
+    config = source(catalog, SID)["configuration"]
+    assert config["sha256"] == hashlib.sha256(data).hexdigest()
+    assert config["expected_size_bytes"] == str(len(data))
+    assert "calculated locally" in config["provenance"]
+    pub = dict(source_id=SID, enabled=True, revision=catalog["revision"])
+    request("/api/publication", pub, status=409)
+    catalog = mutate(request, catalog, "edit", {"license": "Fixture redistribution authorized"}, sid=SID)
+    request("/api/publication", dict(pub, revision=catalog["revision"]))
+    request("/api/action", dict(action, revision=catalog["revision"]), status=409)
+    assert request(READER + "/document.pdf", raw=True)[0] == data

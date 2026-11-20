@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import http.client
 import importlib
 import os
 import re
@@ -32,6 +33,7 @@ security = importlib.import_module(f"{__package__}.admin_security" if __package_
 monitoring = importlib.import_module(f"{__package__}.acquisition_monitor" if __package__ else "theaxiom.acquisition_monitor")
 publication = importlib.import_module(f"{__package__}.publication" if __package__ else "theaxiom.publication")
 pdf_source = importlib.import_module(f"{__package__}.pdf_source" if __package__ else "theaxiom.pdf_source")
+pdf_transport = importlib.import_module(f"{__package__}.pdf_transport" if __package__ else "theaxiom.pdf_transport")
 library_search = importlib.import_module(f"{__package__}.search" if __package__ else "theaxiom.search")
 BIND_HOST = "127.0.0.1"
 BIND_PORT = 8080
@@ -88,10 +90,11 @@ def select_lifecycle(source_id, configuration):
         artifact = None
         try:
             artifact = pdf_source.pin(source_id, configuration)
-            reason = "Import from the local PDF inbox. Remote acquisition is not enabled."
+            reason = "Import from the local PDF inbox or download the configured HTTPS document."
         except ValueError as exc:
             reason = str(exc)
         return dict(adapter=adapter, configuration_valid=artifact is not None, artifact=artifact,
+                    pdf_download=pdf_source.valid_source_url(configuration.get("source_url", "")),
                     acquisition_reason=reason, actions={})
     # CatalogStore validates field syntax; the adapter also requires these
     # fields to be present before a candidate can select an acquisition pin.
@@ -658,6 +661,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             data = self._read_body()
             if data.get("action") == "import":
                 self._import_pdf(data)
+            elif data.get("action") == "pdf-download":
+                self._download_pdf(data)
             else:
                 self._refuse_acquisition(data)
         else:
@@ -696,6 +701,56 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 self._send_json(503, {"error": "PDF inbox or local storage unavailable"})
                 return
         self._send_json(200, {"accepted": True, "installed_verified": True})
+
+    def _download_pdf(self, data):
+        sid = data.get("source_id")
+        if (set(data) != {"source_id", "action", "revision"} or not isinstance(sid, str)
+                or not catalog_store.ID_RE.fullmatch(sid) or not self._valid_revision(data["revision"])):
+            self._send_json(400, {"error": "download requires a source ID and catalog revision only"})
+            return
+        if not self.headers.get("Origin"):
+            self._send_json(403, {"error": "same-origin request required"})
+            return
+        with publication.LOCK:
+            try:
+                catalog = SOURCE_CATALOG.get()
+                if data["revision"] != catalog["revision"]:
+                    raise ValueError("catalog revision changed")
+                record = next((item for item in catalog["sources"] if item["source_id"] == sid), None)
+                if record is None or not self._pdf_record(record):
+                    raise ValueError("source has no PDF download adapter")
+                if publication.load().get(sid, False):
+                    raise ValueError("Unpublish source before downloading")
+                config = record["configuration"]
+                url = config.get("source_url", "")
+                if not pdf_source.valid_source_url(url):
+                    raise ValueError("A direct HTTPS PDF URL is required")
+                size = config.get("expected_size_bytes") or None
+                digest = config.get("sha256") or None
+                observed = pdf_transport.download(sid, url, expected_size=int(size) if size else None,
+                                                  expected_sha256=digest)
+                provenance = config.get("provenance", "").strip()
+                if not provenance:
+                    provenance = "Downloaded via configured HTTPS URL; SHA-256 calculated locally, not independently publisher-verified."
+                elif not digest:
+                    suffix = " SHA-256 calculated locally, not independently publisher-verified."
+                    provenance = provenance[:catalog_store.MAX_FIELD - len(suffix)] + suffix
+                fields = {"expected_size_bytes": str(observed["bytes"]), "sha256": observed["sha256"],
+                          "provenance": provenance}
+                updated = SOURCE_CATALOG.mutate("edit", sid, fields, data["revision"])
+            except catalog_store.RevisionConflict as exc:
+                self._send_json(409, {"error": str(exc)})
+                return
+            except catalog_store.CatalogError:
+                self._send_json(503, {"error": "source catalog unavailable"})
+                return
+            except ValueError as exc:
+                self._send_json(409, {"error": str(exc)})
+                return
+            except (OSError, http.client.HTTPException):
+                self._send_json(503, {"error": "PDF download or storage unavailable"})
+                return
+        self._send_json(200, {"accepted": True, "installed_verified": True, "revision": updated["revision"]})
 
     def _refuse_acquisition(self, data):
         def refuse(status, error):
