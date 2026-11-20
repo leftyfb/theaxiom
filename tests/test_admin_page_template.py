@@ -100,3 +100,18 @@ def test_admin_branding_and_favicon():
     assert 'href="/favicon.svg"' in page
     assert "Administration · The Axiom" in page
     assert "← The Axiom" in page
+
+
+def test_source_editor_simple_defaults_and_advanced_details():
+    page = render()
+    dialog = page.split('<dialog id="source-dialog"', 1)[1].split('</dialog>', 1)[0]
+    basic, advanced = dialog.split('<details id="source-advanced">', 1)
+    for name in ("title", "source_url", "format", "description"):
+        assert f'name="{name}"' in basic
+    for name in ("publisher", "edition", "language", "expected_size_bytes", "sha256", "provenance", "license"):
+        assert f'name="{name}"' not in basic
+        assert f'name="{name}"' in advanced
+    assert 'name="source_id" type="hidden"' in basic
+    assert '<option value="zim">' in basic and '<option value="pdf">' in basic
+    assert "generateId()" in page and "data-legacy-format" in page
+    assert 'href="#source-help"' in basic

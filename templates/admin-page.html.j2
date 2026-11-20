@@ -63,6 +63,24 @@
     .source-details { overflow-wrap: anywhere; }
     .admin-nav { display:flex; flex-wrap:wrap; gap:.5rem; margin-bottom:1.5rem; }
     .admin-nav a[aria-current="page"] { background:var(--dark); color:white; }
+    #source-dialog { width: min(42rem, calc(100% - 2rem)); max-height: calc(100% - 2rem); overflow: auto; border: 1px solid var(--line); border-radius: .85rem; padding: clamp(1rem, 4vw, 1.75rem); color: var(--dark); background: var(--paper); }
+    #source-dialog::backdrop { background: rgba(18,60,50,.55); }
+    #source-dialog h3 { margin: 0; font-size: 1.4rem; }
+    .editor-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 1rem; margin: 1rem 0; }
+    .editor-wide { grid-column: 1 / -1; }
+    .editor-grid > div { min-width: 0; }
+    .editor-grid label { display: block; font-weight: 650; margin-bottom: .35rem; }
+    .editor-grid input, .editor-grid select, .editor-grid textarea { display: block; width: 100%; min-width: 0; min-height: 44px; padding: .65rem; font: inherit; border: 1px solid #aac5b7; border-radius: .4rem; color: var(--dark); background: white; }
+    .editor-grid textarea { min-height: 5rem; resize: vertical; }
+    .editor-grid small { display: block; margin-top: .3rem; color: var(--muted); }
+    #source-dialog :focus-visible { outline: 3px solid #f1b84b; outline-offset: 2px; }
+    #source-advanced { border-top: 1px solid var(--line); padding-top: .8rem; }
+    #source-advanced summary { cursor: pointer; color: var(--green); font-weight: 650; padding: .5rem 0; }
+    .editor-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: .5rem; margin-top: 1rem; }
+    .editor-save { background: var(--green); color: white; }
+    #source-form-feedback { color: #a12820; overflow-wrap: anywhere; }
+    #source-help { border-top: 1px solid var(--line); margin-top: 1rem; padding-top: .75rem; font-size: .9rem; }
+    @media (max-width: 550px) { .editor-grid { grid-template-columns: minmax(0,1fr); } }
   </style>
 </head>
 <body>
@@ -140,22 +158,32 @@
     <dialog id="source-dialog" aria-labelledby="source-dialog-title">
       <form id="source-form">
         <h3 id="source-dialog-title">Add source metadata</h3>
-        <label for="catalog-id">Stable ID</label><input id="catalog-id" name="source_id" required pattern="[a-z0-9]+(?:-[a-z0-9]+)*" maxlength="64">
-        <label for="catalog-title">Title</label><input id="catalog-title" name="title" required maxlength="512">
-        <label for="catalog-description">Description</label><textarea id="catalog-description" name="description" maxlength="512"></textarea>
-        <label for="catalog-format">Format (e.g. zim, pdf, unspecified)</label><input id="catalog-format" name="format" value="unspecified" required pattern="[a-z0-9](?:[a-z0-9\-]{0,61}[a-z0-9])?" maxlength="63">
-        <label for="catalog-url">Candidate URL (not fetched)</label><input id="catalog-url" name="source_url" type="url" maxlength="512">
-        <label for="catalog-publisher">Publisher</label><input id="catalog-publisher" name="publisher" maxlength="512">
-        <label for="catalog-edition">Edition / release</label><input id="catalog-edition" name="edition" maxlength="512">
-        <label for="catalog-language">Language</label><input id="catalog-language" name="language" maxlength="512">
-        <label for="catalog-size">Expected size in bytes (candidate metadata)</label><input id="catalog-size" name="expected_size_bytes" inputmode="numeric" pattern="[1-9][0-9]{0,19}" maxlength="20">
-        <label for="catalog-sha256">Expected SHA-256 (candidate metadata)</label><input id="catalog-sha256" name="sha256" pattern="[a-fA-F0-9]{64}" maxlength="64">
-        <label for="catalog-provenance">Provenance / source of metadata</label><textarea id="catalog-provenance" name="provenance" maxlength="512"></textarea>
-        <label for="catalog-license">License / rights note</label><input id="catalog-license" name="license" maxlength="512">
-        <p class="source-note">This records candidate metadata only. It does not verify rights or enable acquisition.</p>
-        <p id="source-form-feedback" role="status"></p>
-        <button class="button" type="submit">Save source</button>
-        <button class="button" type="button" id="source-cancel">Cancel</button>
+        <p class="source-note">Choose content to add to your offline library. Saving a profile does not download or publish it. <a href="#source-help">Content source help</a></p>
+        <input id="catalog-id" name="source_id" type="hidden">
+        <p id="catalog-id-display" class="source-note" hidden></p>
+        <div class="editor-grid">
+          <div class="editor-wide"><label for="catalog-title">Source name</label><input id="catalog-title" name="title" required maxlength="512"></div>
+          <div class="editor-wide"><label for="catalog-url">Source URL</label><input id="catalog-url" name="source_url" type="url" maxlength="512">
+            <small>Direct HTTP(S) download URL, if available.</small></div>
+          <div><label for="catalog-format">Content format</label><select id="catalog-format" name="format"><option value="unspecified">Auto / not yet specified</option><option value="zim">Kiwix / ZIM</option><option value="pdf">PDF</option></select></div>
+          <div class="editor-wide"><label for="catalog-description">Description (optional)</label><textarea id="catalog-description" name="description" maxlength="512"></textarea></div>
+        </div>
+        <details id="source-advanced">
+          <summary>Advanced Details</summary>
+          <p class="source-note">Optional publisher-supplied metadata. These values alone do not establish verification or enable acquisition.</p>
+          <div class="editor-grid">
+            <div><label for="catalog-publisher">Publisher</label><input id="catalog-publisher" name="publisher" maxlength="512"></div>
+            <div><label for="catalog-edition">Edition / release</label><input id="catalog-edition" name="edition" maxlength="512"></div>
+            <div><label for="catalog-language">Language</label><input id="catalog-language" name="language" maxlength="512"></div>
+            <div><label for="catalog-size">Expected size in bytes (candidate metadata)</label><input id="catalog-size" name="expected_size_bytes" inputmode="numeric" pattern="[1-9][0-9]{0,19}" maxlength="20"></div>
+            <div class="editor-wide"><label for="catalog-sha256">Expected SHA-256 (candidate metadata)</label><input id="catalog-sha256" name="sha256" pattern="[a-fA-F0-9]{64}" maxlength="64"></div>
+            <div class="editor-wide"><label for="catalog-provenance">Provenance / source of metadata</label><textarea id="catalog-provenance" name="provenance" maxlength="512"></textarea></div>
+            <div class="editor-wide"><label for="catalog-license">License / rights note</label><input id="catalog-license" name="license" maxlength="512"></div>
+          </div>
+        </details>
+        <p id="source-form-feedback" role="alert" tabindex="-1"></p>
+        <div class="editor-actions"><button class="button" type="button" id="source-cancel">Cancel</button><button class="button editor-save" type="submit">Save source</button></div>
+        <section id="source-help" class="source-note"><strong>Content source help</strong><p>Use a direct .zim or .pdf URL when available. ZIM archives are available from <a href="https://library.kiwix.org/">Kiwix</a>; PDF documents may be obtained from their original publishers. Saving a profile does not establish download eligibility. Full offline source documentation is forthcoming.</p></section>
       </form>
     </dialog>
     <div id="source-cards">
@@ -244,19 +272,50 @@
       const input = name => form.elements.namedItem(name);
       const formFeedback = document.getElementById('source-form-feedback');
       const fieldsToEdit = Array.from(form.querySelectorAll('[name]:not([name="source_id"])'));
+      const advanced = document.getElementById('source-advanced');
+      const format = input('format');
+      const idDisplay = document.getElementById('catalog-id-display');
+      let manualFormat = false;
+      function detectFormat() {
+        if (manualFormat) return;
+        try {
+          const path = new URL(input('source_url').value).pathname.toLowerCase();
+          format.value = path.endsWith('.zim') ? 'zim' : path.endsWith('.pdf') ? 'pdf' : 'unspecified';
+        } catch (_) { format.value = 'unspecified'; }
+      }
+      input('source_url').addEventListener('input', detectFormat);
+      format.addEventListener('change', () => { manualFormat = true; });
+      function generateId() {
+        const base = input('title').value.normalize('NFKD').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50).replace(/-$/,'') || 'source';
+        const used = new Set(Array.from(document.querySelectorAll('.source-card'), card => card.dataset.sourceId));
+        let id = base;
+        for (let n = 2; used.has(id); n++) id = base + '-' + n;
+        return id;
+      }
       function openForm(operation, card = null) {
         form.reset();
         formFeedback.textContent = '';
-        input('source_id').disabled = !!card;
+        advanced.open = false;
+        format.querySelectorAll('[data-legacy-format]').forEach(option => option.remove());
+        manualFormat = !!card;
+        idDisplay.hidden = !card;
+        idDisplay.textContent = card ? 'Stable ID: ' + card.dataset.sourceId : '';
         document.getElementById('source-dialog-title').textContent = card ? 'Edit source profile' : 'Add source profile';
         form.dataset.operation = operation;
         if (card) {
           input('source_id').value = card.dataset.sourceId;
           for (const field of fieldsToEdit) {
-            field.value = card.getAttribute('data-catalog-' + field.name.replaceAll('_', '-')) || '';
+            const value = card.getAttribute('data-catalog-' + field.name.replaceAll('_', '-')) || '';
+            if (field === format && value && !Array.from(format.options).some(option => option.value === value)) {
+              const option = new Option(value + ' (existing format)', value);
+              option.dataset.legacyFormat = 'true';
+              format.add(option);
+            }
+            field.value = value;
           }
         }
         dialog.showModal();
+        input('title').focus();
       }
       async function change(operation, source_id, fields) {
         if (revision === null) throw new Error('Catalog revision unavailable');
@@ -268,12 +327,18 @@
       }
       document.getElementById('source-add').addEventListener('click', () => openForm('add'));
       document.getElementById('source-cancel').addEventListener('click', () => dialog.close());
+      form.addEventListener('invalid', event => {
+        if (advanced.contains(event.target)) advanced.open = true;
+      }, true);
       form.addEventListener('submit', async event => {
         event.preventDefault();
-        const source_id = input('source_id').value;
+        const source_id = form.dataset.operation === 'add' ? generateId() : input('source_id').value;
         const fields = Object.fromEntries(fieldsToEdit.map(field => [field.name, field.value]));
+        const save = form.querySelector('[type="submit"]');
+        save.disabled = true;
         try { await change(form.dataset.operation, source_id, fields); }
-        catch (error) { formFeedback.textContent = error.message; }
+        catch (error) { formFeedback.textContent = error.message; formFeedback.focus(); }
+        finally { save.disabled = false; }
       });
       document.querySelectorAll('[data-catalog-edit]').forEach(button => button.addEventListener('click', () => {
         openForm('edit', button.closest('.source-card'));
