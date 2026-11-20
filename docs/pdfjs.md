@@ -24,7 +24,7 @@ delivery. A restrictive reader CSP limits resources to the same origin; PDFs
 are loaded into the renderer as bytes, not navigated as active HTML.
 
 Features: page navigation, fit and zoom, lazy thumbnails, text search by
-matching page (not OCR or highlighted hits), print (up to 100 pages, bounded
+individual occurrence with active and other match highlights (not OCR), print (up to 100 pages, bounded
 resolution), download and keyboard navigation. The download fallback remains
 available when the renderer is unavailable. Already downloaded bytes cannot
 be revoked. Browser/Pi acceptance must verify real rendering, search, printing,

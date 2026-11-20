@@ -469,3 +469,26 @@ def test_pdfjs_assets_are_local_and_restricted(pdf_app, tmp_path, monkeypatch):
     request("/api/pdfjs/build/private.txt", status=404)
     request("/api/pdfjs/build/escape.mjs", status=404)
     request("/api/pdfjs/build/../outside.mjs", status=404)
+
+
+def test_pdf_search_occurrences_and_navigation():
+    import shutil
+    import subprocess
+    from pathlib import Path
+    import pytest
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js unavailable")
+    script = (Path(__file__).parents[1] / "templates/pdf-reader.mjs").read_text()
+    helpers = script[script.index("function pageMatches("):script.index("async function draw(")]
+    subprocess.run([node, "-e", helpers + r"""
+const assert = require("node:assert/strict");
+const matches = pageMatches([{str:"Wa"},{str:"ter water"},{str:"water",hasEOL:true},{str:"safe"}],"WATER");
+assert.equal(matches.length,3);
+assert.deepEqual(matches[0],[{i:0,start:0,end:2},{i:1,start:0,end:3}]);
+assert.equal(pageMatches([{str:"water",hasEOL:true},{str:"safe"}],"water safe").length,1);
+assert.equal(pageMatches([{str:"water"}],"").length,0);
+assert.equal(pageMatches([{str:"water"}],"fire").length,0);
+assert.equal(wrappedMatch(0,-1,3),2);
+assert.equal(wrappedMatch(2,1,3),0);
+"""], check=True)

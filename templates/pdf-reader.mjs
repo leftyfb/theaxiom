@@ -7,6 +7,47 @@ const asset = "/api/pdfjs/";
 let pdf, page = 1, zoom = 1, renderTask, generation = 0, printing = false;
 let hits = [], hit = -1, searchGeneration = 0;
 const maxPixels = 6000000;
+let layerTask, visibleLayer, scrollMatch = false, searching = false, searchStatus = "";
+// Search offsets are UTF-16 offsets into the original PDF.js text items.
+function pageMatches(items, query) {
+  let text = "", offsets = [], previous = null;
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if (typeof item.str !== "string") continue;
+    const a = previous?.transform, b = item.transform;
+    const gap = a && b && Math.abs(a[1]) < 0.01 && Math.abs(b[1]) < 0.01 &&
+      (Math.abs(b[5]-a[5]) > Math.max(1, previous.height*0.5) ||
+       b[4]-a[4]-previous.width > Math.max(1, previous.height*0.15));
+    if (previous && (previous.hasEOL || gap)) { text += " "; offsets.push(null); }
+    let j = 0;
+    for (const ch of item.str) {
+      const folded = ch.toLowerCase();
+      text += folded;
+      for (let k = 0; k < folded.length; k++) offsets.push({i, start:j, end:j+ch.length});
+      j += ch.length;
+    }
+    previous = item;
+  }
+  const needle = query.trim().toLowerCase();
+  if (!needle) return [];
+  const hits = [];
+  for (let start = text.indexOf(needle); start !== -1; start = text.indexOf(needle, start+needle.length)) {
+    const segments = [];
+    for (const offset of offsets.slice(start, start+needle.length)) {
+      if (!offset) continue;
+      const last = segments.at(-1);
+      if (last?.i === offset.i) last.end = offset.end;
+      else segments.push({...offset});
+    }
+    if (segments.length) hits.push(segments);
+  }
+  return hits;
+}
+function wrappedMatch(index, delta, count) {
+  return count ? (index + delta + count) % count : -1;
+}
+
+
 
 async function draw(target, number, scale, limit = maxPixels) {
   const source = await pdf.getPage(number);
@@ -27,6 +68,10 @@ async function show(number) {
   $("prev").disabled = page === 1;
   $("next").disabled = page === pdf.numPages;
   const token = ++generation;
+  if (layerTask) { layerTask.cancel(); layerTask = null; }
+  visibleLayer = null;
+  $("text-layer").replaceChildren(); $("highlights").replaceChildren();
+  updateMatches();
   if (renderTask) { renderTask.cancel(); try { await renderTask.promise; } catch {} }
   try {
     const source = await pdf.getPage(page);
@@ -41,7 +86,19 @@ async function show(number) {
     renderTask = source.render({canvas, canvasContext: canvas.getContext("2d"), viewport,
       annotationMode: pdfjs.AnnotationMode.DISABLE});
     await renderTask.promise;
-    if (token === generation) message("");
+    if (token !== generation) return;
+    message("");
+    const content = await source.getTextContent();
+    if (token !== generation) return;
+    const container = $("text-layer");
+    container.style.setProperty("--scale-factor", String(viewport.scale));
+    container.style.setProperty("--total-scale-factor", String(viewport.scale));
+    container.style.setProperty("--user-unit", "1");
+    layerTask = new pdfjs.TextLayer({textContentSource:content, container, viewport});
+    await layerTask.render();
+    if (token !== generation) return;
+    visibleLayer = {items:content.items, divs:layerTask.textDivs};
+    paintMatches();
   } catch (error) {
     if (token === generation && error.name !== "RenderingCancelledException") message("Unable to render this page.");
   }
@@ -68,31 +125,81 @@ async function thumbnails() {
   }
 }
 
+function updateMatches() {
+  $("find-prev").disabled = $("find-next").disabled = searching || !hits.length;
+  const count = hits.filter(h => h.page === page).length;
+  $("matches").textContent = searching ? "Searching…" : hits.length ?
+    (hit+1) + " of " + hits.length + " · " + count + " on this page" : searchStatus;
+}
+function paintMatches() {
+  const overlay = $("highlights");
+  overlay.replaceChildren();
+  if (!visibleLayer) return;
+  const {items, divs} = visibleLayer;
+  const indices = new Map();
+  let index = 0;
+  items.forEach((item,i) => { if (typeof item.str === "string") indices.set(i,index++); });
+  if (index !== divs.length) return;
+  const origin = overlay.getBoundingClientRect();
+  let active;
+  hits.forEach((match,i) => {
+    if (match.page !== page) return;
+    for (const segment of match.segments) {
+      const div = divs[indices.get(segment.i)];
+      if (!div || div.textContent !== items[segment.i].str || !div.firstChild ||
+          div.firstChild.nodeType !== Node.TEXT_NODE) continue;
+      const range = document.createRange();
+      range.setStart(div.firstChild, segment.start); range.setEnd(div.firstChild, segment.end);
+      for (const rect of range.getClientRects()) {
+        if (!rect.width || !rect.height) continue;
+        const mark = document.createElement("span");
+        mark.className = i === hit ? "active-match" : "search-match";
+        Object.assign(mark.style,{left:(rect.left-origin.left)+"px",top:(rect.top-origin.top)+"px",
+          width:rect.width+"px",height:rect.height+"px"});
+        overlay.append(mark);
+        if (i === hit && !active) active = mark;
+      }
+    }
+  });
+  if (scrollMatch && active) {
+    active.scrollIntoView({block:"center",inline:"center"});
+    scrollMatch = false;
+  }
+}
 async function find() {
   if (!pdf) return;
-  const query = $("find").value.trim().toLocaleLowerCase();
+  const query = $("find").value.trim();
   const token = ++searchGeneration;
-  hits = []; hit = -1;
-  if (!query) { $("matches").textContent = ""; return; }
-  $("matches").textContent = "Searching…";
+  hits = []; hit = -1; scrollMatch = false; searchStatus = "";
+  searching = !!query;
+  updateMatches(); paintMatches();
+  if (!query) return;
+  let hasText = false;
+  const results = [];
   try {
     for (let n = 1; n <= pdf.numPages; n++) {
       const source = await pdf.getPage(n);
+      if (token !== searchGeneration) return;
       const content = await source.getTextContent();
       if (token !== searchGeneration) return;
-      const text = content.items.map(item => item.str || "").join(" ").toLocaleLowerCase();
-      if (text.includes(query)) hits.push(n);
+      hasText ||= content.items.some(item => item.str?.trim());
+      for (const segments of pageMatches(content.items,query)) results.push({page:n,segments});
     }
     if (token !== searchGeneration) return;
-    if (hits.length) nextMatch();
-    else $("matches").textContent = "No matching pages";
-  } catch { if (token === searchGeneration) $("matches").textContent = "Search unavailable"; }
+    hits = results; searching = false;
+    if (hits.length) nextMatch(1);
+    else { searchStatus = hasText ? "No matches" : "No searchable text"; updateMatches(); }
+  } catch {
+    if (token === searchGeneration) { searching = false; searchStatus = "Search unavailable"; updateMatches(); }
+  }
 }
-function nextMatch() {
-  if (!hits.length) return;
-  hit = (hit + 1) % hits.length;
-  $("matches").textContent = (hit + 1) + " of " + hits.length + " matching pages";
-  show(hits[hit]);
+function nextMatch(delta = 1) {
+  if (searching || !hits.length) return;
+  hit = wrappedMatch(hit < 0 && delta < 0 ? 0 : hit,delta,hits.length);
+  scrollMatch = true;
+  updateMatches();
+  if (page === hits[hit].page && visibleLayer) paintMatches();
+  else show(hits[hit].page);
 }
 
 async function printDocument() {
@@ -118,9 +225,10 @@ $("in").onclick = () => { zoom = Math.min(4, zoom * 1.25); show(page); };
 $("out").onclick = () => { zoom = Math.max(0.25, zoom / 1.25); show(page); };
 $("fit").onclick = () => { zoom = 1; show(page); };
 $("toggle").onclick = thumbnails;
-$("find").onchange = find;
-$("find").onkeydown = event => { if (event.key === "Enter") find(); };
-$("find-next").onclick = nextMatch;
+$("find").oninput = find;
+$("find").onkeydown = event => { if (event.key === "Enter") { event.preventDefault(); nextMatch(event.shiftKey ? -1 : 1); } };
+$("find-prev").onclick = () => nextMatch(-1);
+$("find-next").onclick = () => nextMatch(1);
 $("print").onclick = printDocument;
 document.addEventListener("keydown", event => {
   if (event.target.matches("input,button,a") || event.altKey || event.ctrlKey || event.metaKey) return;
@@ -130,7 +238,7 @@ document.addEventListener("keydown", event => {
       page + (["ArrowRight","PageDown"].includes(event.key) ? 1 : -1));
   }
 });
-window.addEventListener("resize", () => { if (zoom === 1) show(page); });
+window.addEventListener("resize", () => show(page));
 try {
   if (pdfjs.version !== "6.5.438") throw Error("Unexpected PDF.js version");
   const url = document.body.dataset.document;
