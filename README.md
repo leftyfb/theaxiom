@@ -26,6 +26,8 @@ The Axiom is in early development. Its goals include reliable preparation and lo
 
 This repository is the standalone home for the project. The current migration preserves the application and proof-of-concept tooling while intentionally excluding Ansible, host inventory and Projectwright integration; standard nginx/systemd deployment examples now live in `deploy/`. See `docs/architecture.md` and `docs/backlog.md` for boundaries and next work.
 
+**Deployment remains on hold while Ready.gov downloads on Vancouver.** See the [development-to-deployment acceptance register](docs/deployment-acceptance-register.md) for exact CI evidence, pending live checks, and authorization gates. A green GitHub Actions run does not authorize deployment.
+
 ## Development
 
 The supported development baseline is Ubuntu 24.04 LTS and Ubuntu 26.04 LTS with Python 3.10 or newer:
@@ -61,8 +63,12 @@ administration page and API to the unprivileged loopback-only Python backend.
 See [standard deployment instructions](deploy/README.md) for the Nginx site,
 systemd unit, initial credential setup and instance configuration. The admin
 password is stored as a salted PBKDF2-HMAC-SHA256 hash and can be changed in the
-administration interface without restarting services. HTTP development hosting
-does not encrypt credentials; use a trusted isolated LAN and HTTPS for production.
+administration interface without restarting services. Interactive administration
+uses a branded HTML sign-in and short-lived server-side sessions with same-origin
+CSRF enforcement; explicit Basic Authorization remains available for API clients.
+HTTP development hosting does not encrypt credentials or cookies; use a trusted
+isolated LAN and HTTPS for production. Chrome/1Password save/fill needs live
+browser acceptance before declaring #67 complete.
 The local loopback development server remains available for tests without credentials
 when no Nginx mode is configured. The legacy /api/action acquisition adapter remains disabled; dedicated ZIM and document acquisition/import flows have separate safeguards.
 
