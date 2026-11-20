@@ -104,3 +104,30 @@ def test_cancel_does_not_delete_previously_installed_content(disk):
                        configuration=zim_jobs.identity(CONFIG), downloaded_bytes=40, etag='"v1"'))
     assert zim_jobs.control("ready", CONFIG, "cancel")["accepted"]
     assert (disk / "library/zim" / installed["filename"]).read_bytes() == data
+
+
+def test_cancel_accepted_during_network_failure_is_not_lost(disk):
+    entered, release = threading.Event(), threading.Event()
+
+    def download(sid, config, *, progress, stopped, **kwargs):
+        with zim_source.pdf_source._directory("staging", writing=True, format_name="zim") as (root, _, _):
+            fd = zim_source.os.open(zim_source.partial_name(sid), zim_source.os.O_CREAT | zim_source.os.O_WRONLY,
+                                    0o600, dir_fd=root)
+            with zim_source.os.fdopen(fd, "wb") as output:
+                output.write(fixture_bytes()[:64])
+        progress(64, len(fixture_bytes()), {"etag": '"v1"'})
+        entered.set()
+        assert release.wait(5)
+        raise OSError("connection interrupted during cancellation")
+
+    with patch.object(zim_source, "download_resumable", download):
+        try:
+            zim_jobs.start("ready", CONFIG)
+            assert entered.wait(5)
+            assert zim_jobs.control("ready", CONFIG, "cancel")["accepted"]
+        finally:
+            release.set()
+        join_worker()
+    assert zim_jobs.status("ready")["state"] == "cancelled"
+    assert zim_jobs.staged_size("ready") == 0
+    assert not list((disk / "library/zim").iterdir())
