@@ -18,4 +18,55 @@ jobs:
       - name: Install application and test dependencies
         run: python -m pip install -e '.[dev]'
       - name: Run application tests
-        run: python -m pytest -q
+        run: |
+          set -o pipefail
+          python -m pytest -q | tee "$RUNNER_TEMP/axiom-pytest.log"
+      - name: Upload test summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-output
+          path: ${{ runner.temp }}/axiom-pytest.log
+          if-no-files-found: ignore
+
+  report:
+    needs: tests
+    if: ${{ always() && github.repository == 'leftyfb/theaxiom' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Retrieve test output
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: pytest-output
+          path: ${{ runner.temp }}/ci-report
+      - name: Report CI result to coordination mailbox
+        env:
+          GH_TOKEN: ${{ secrets.AC_REPORT_TOKEN }}
+          TEST_RESULT: ${{ needs.tests.result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$GH_TOKEN" || { echo "::error::AC_REPORT_TOKEN is missing"; exit 1; }
+          repo=leftyfb/agent-coordination
+          title="[CI] The Axiom — ${GITHUB_SHA:0:12} — run ${GITHUB_RUN_ID} attempt ${GITHUB_RUN_ATTEMPT}"
+          report="$(mktemp)"
+          trap 'rm -f "$report"' EXIT
+          {
+            printf 'Repository: %s\nCommit: %s\nBranch: %s\nResult: %s\nRun ID: %s\nAttempt: %s\nWorkflow: %s/%s/actions/runs/%s\n' \
+              "$GITHUB_REPOSITORY" "$GITHUB_SHA" "$GITHUB_REF_NAME" "$TEST_RESULT" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"
+            printf '\nTest output (last 30 lines):\n\n'
+            if [[ -f "$RUNNER_TEMP/ci-report/axiom-pytest.log" ]]; then
+              printf '    '; tail -n 30 "$RUNNER_TEMP/ci-report/axiom-pytest.log" | sed '2,$s/^/    /'
+            else
+              printf 'Test log unavailable; inspect workflow run.\n'
+            fi
+            printf '\nCI report only; not a poller execution request.\n'
+          } > "$report"
+          existing="$(gh api --method GET "repos/$repo/issues" -f state=all -f per_page=100 --paginate --jq '.[] | select(.pull_request == null) | [.number,.title] | @tsv' | awk -F '\t' -v title="$title" '$2 == title {print $1}')"
+          if [[ -n "$existing" ]]; then
+            echo "Report already exists: $existing"
+          else
+            gh issue create --repo "$repo" --title "$title" --body-file "$report" --label ac:review
+          fi
