@@ -9,7 +9,7 @@ import xml.etree.ElementTree as ET
 from urllib.parse import urlsplit, quote
 from pathlib import Path
 
-from . import storage_settings
+from . import catalog_store, storage_settings
 
 LOCK = threading.RLock()
 # Trusted deployment configuration, not administrator-supplied URLs.
@@ -29,18 +29,21 @@ def load():
             data = json.loads(state_path().read_text())
         except FileNotFoundError:
             return {}
-        if not isinstance(data, dict) or any(k not in ROUTES or type(v) is not bool
+        if not isinstance(data, dict) or any(not catalog_store.ID_RE.fullmatch(k) or type(v) is not bool
                                              for k, v in data.items()):
             raise ValueError("invalid publication state")
         return data
 
 
 def save(source_id, enabled):
-    if source_id not in ROUTES or type(enabled) is not bool:
+    if not catalog_store.ID_RE.fullmatch(source_id) or type(enabled) is not bool:
         raise ValueError("invalid publication request")
     with LOCK:
         data = load()
-        data[source_id] = enabled
+        if enabled or source_id in ROUTES:
+            data[source_id] = enabled
+        else:
+            data.pop(source_id, None)
         target = state_path()
         target.parent.mkdir(parents=True, exist_ok=True)
         fd, name = tempfile.mkstemp(prefix=".publication-", dir=target.parent)

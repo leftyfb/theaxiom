@@ -74,9 +74,18 @@ Source configuration is stored separately from content at `${XDG_CONFIG_HOME:-~/
 
 Every profile can set a format (e.g. `zim`, `pdf`, `unspecified`), HTTP(S) candidate URL, expected size, SHA-256, provenance, and license. These fields are not fetched and do not verify content or rights. The API reports `adapter` and `configuration_valid` separately from the trusted `artifact` and `installed_verified`. ZIM selects the Kiwix adapter; a complete ZIM candidate is not necessarily trusted. The existing Wikipedia reader uses its pinned route and artifact only for a matching source ID, format, URL, size, and digest. Installed verification comes independently from the acquisition monitor. Conflicting profiles do not inherit verification or become publishable, even under the same ID.
 
-`POST /api/action` requires `source_id`, `action`, and the current catalog `revision`; it does not accept artifact metadata and never starts a download, re-download or update. The API reports the refusal reason and the UI keeps those actions disabled or absent. `POST /api/publication` requires `source_id`, `enabled`, and the current catalog `revision`; enabling still requires a matching, verified archive and a ready reader.
+`POST /api/action` requires `source_id`, `action`, and the current catalog `revision`; it does not accept artifact metadata and never starts a download, re-download or update. `POST /api/publication` requires `source_id`, `enabled`, and the current catalog `revision`; enabling requires matching verified content and a ready reader.
 
 Unpublish before removing a published source or changing its artifact identity. Removal deletes only the catalog record; it never moves or deletes installed bytes. Re-adding equivalent configuration reconnects matching acquisition status but does not republish automatically. Active or unresolved acquisition blocks catalog mutations regardless of profile origin.
+
+### Import a trusted PDF for offline reading
+
+1. In Sources, add a `pdf` source with a plain HTTPS publisher URL, provenance and redistribution basis, exact byte count (at most 16 MiB), and SHA-256. An administrator must independently review the origin, redistribution rights, and document safety. These fields are attestations; the app does not contact the publisher or establish that a PDF is safe to render.
+2. Use an explicitly configured local storage root (not network-backed, without a configured `storage_mount` or nested mounts). An operator must provision `staging/pdf` and `library/pdf` within it, owned by the application user and not group/world-writable. Place the trusted local file at `staging/pdf/<source-id>.pdf` with the same ownership and permissions. Symlinks, hard links and special files are refused.
+3. Select **Import local PDF** in that source's card. The app checks the storage reserve, streams and verifies the document framing and pin, and atomically installs the copy under `library/pdf/<source-id>.<sha256>.pdf`. Failure leaves previously installed bytes in place. The original inbox file is not deleted. Older pins are retained, not automatically pruned.
+4. Publish separately from the same card. The library links to a reader page with a return link and an inline PDF for the browser's native viewer. Unpublishing blocks new reader and direct document requests; it cannot revoke previously saved copies. PDF full-text search is not included.
+
+Remote HTTPS acquisition (including redirect policy) and a production FEMA/Ready.gov source are pending. No production metadata is registered from the historical demo fixture.
 
 ### Storage configuration (development)
 

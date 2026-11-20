@@ -128,6 +128,8 @@ class HTTPAuthTests(unittest.TestCase):
                 self.assertIn("WWW-Authenticate", headers)
         for path in ("/api/storage-settings", "/api/action", "/api/admin/password"):
             self.assertEqual(self.request(path, "POST", body="{}")[0], 401)
+        self.assertEqual(self.request("/api/action", "POST", body='{"action":"import"}')[0], 401)
+        self.assertEqual(self.request("/api/library/pdf/fixture-guide/document.pdf")[0], 403)
 
     def test_invalid_credentials_and_host_rejected(self):
         self.assertEqual(self.request("/admin", auth="Basic bad")[0], 401)

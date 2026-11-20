@@ -9,6 +9,7 @@ import os
 import re
 import subprocess
 import threading
+from contextlib import ExitStack
 from urllib.parse import parse_qs, urlsplit
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -30,6 +31,7 @@ catalog_store = importlib.import_module(f"{__package__}.catalog_store" if __pack
 security = importlib.import_module(f"{__package__}.admin_security" if __package__ else "theaxiom.admin_security")
 monitoring = importlib.import_module(f"{__package__}.acquisition_monitor" if __package__ else "theaxiom.acquisition_monitor")
 publication = importlib.import_module(f"{__package__}.publication" if __package__ else "theaxiom.publication")
+pdf_source = importlib.import_module(f"{__package__}.pdf_source" if __package__ else "theaxiom.pdf_source")
 library_search = importlib.import_module(f"{__package__}.search" if __package__ else "theaxiom.search")
 BIND_HOST = "127.0.0.1"
 BIND_PORT = 8080
@@ -75,13 +77,22 @@ def _release_revision() -> str | None:
 
 
 ARTIFACT_FIELDS = {"format", "source_url", "expected_size_bytes", "sha256"}
-FORMAT_ADAPTERS = {"zim": "kiwix"}
+FORMAT_ADAPTERS = {"zim": "kiwix", "pdf": "pdf"}
 
 
 def select_lifecycle(source_id, configuration):
     """Select by format first; candidate configuration never creates trust."""
     format_name = configuration.get("format")
     adapter = FORMAT_ADAPTERS.get(format_name) if isinstance(format_name, str) else None
+    if adapter == "pdf" and source_id not in publication.ROUTES:
+        artifact = None
+        try:
+            artifact = pdf_source.pin(source_id, configuration)
+            reason = "Import from the local PDF inbox. Remote acquisition is not enabled."
+        except ValueError as exc:
+            reason = str(exc)
+        return dict(adapter=adapter, configuration_valid=artifact is not None, artifact=artifact,
+                    acquisition_reason=reason, actions={})
     # CatalogStore validates field syntax; the adapter also requires these
     # fields to be present before a candidate can select an acquisition pin.
     valid = bool(adapter and all(isinstance(configuration.get(key), str) and configuration[key]
@@ -226,7 +237,9 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         if len(hosts) != 1 or hosts[0].lower() not in config.allowed_hosts:
             self._send_json(400, {"error": "invalid host"})
             return False
-        if not post and (self.path.split("?", 1)[0] == "/search" or self.path in {"/", "/index.html", "/health", "/health/", "/internal/publication/wikipedia-en", "/read/wikipedia-en"}):
+        public_paths = {"/", "/index.html", "/health", "/health/", "/internal/publication/wikipedia-en", "/read/wikipedia-en"}
+        if not post and (self.path in public_paths or self.path.split("?", 1)[0] == "/search"
+                         or pdf_source.ROUTE.fullmatch(self.path)):
             return True
         auth = self.headers.get_all("Authorization", [])
         local_hosts = {f"{config.host}:{config.port}", f"localhost:{config.port}"}
@@ -286,12 +299,22 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802 - http.server convention
         if not self._guard():
             return
+        pdf_route = pdf_source.ROUTE.fullmatch(self.path)
+        if pdf_route:
+            self._serve_pdf(*pdf_route.groups())
+            return
         if self.path in {"/", "/index.html"}:
             sources = []
             snapshot = self._publication_snapshot()
             for source_id, route in publication.ROUTES.items():
                 if publication.status(snapshot, source_id)["published"]:
                     sources.append(route)
+            for record, state in self._pdf_publications():
+                if state["published"]:
+                    profile = record["profile"]
+                    sources.append(dict(entry_path=state["entry_path"], symbol="P", category="PDF",
+                                        name=profile["title"], description=profile.get("description", ""),
+                                        language=profile.get("language") or "Unspecified language"))
             environment = Environment(loader=FileSystemLoader(ADMIN_TEMPLATE_DIR), autoescape=True)
             body = environment.get_template("library.html.j2").render(sources=sources).encode("utf-8")
             self.send_response(200)
@@ -342,7 +365,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         elif self.path == "/api/publication":
             snapshot = self._publication_snapshot()
             self._send_json(200, {key: publication.status(snapshot, key)
-                                  for key in publication.ROUTES})
+                                  for key in publication.ROUTES}
+                            | {item["source_id"]: state for item, state in self._pdf_publications()})
         elif self.path.rstrip("/") == "/health":
             self._send_json(200, health_response())
         elif self.path.rstrip("/") in {"/admin", "/admin/sources", "/admin/settings"}:
@@ -377,6 +401,57 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 self._send_json(200, response)
         else:
             self._send_json(404, {"error": "not found"})
+
+    @staticmethod
+    def _pdf_record(record):
+        return (record["source_id"] not in publication.ROUTES
+                and record["configuration"].get("format") == "pdf")
+
+    def _pdf_publications(self):
+        try:
+            catalog = SOURCE_CATALOG.get()
+        except (catalog_store.CatalogError, OSError):
+            return
+        for record in catalog["sources"]:
+            if self._pdf_record(record):
+                artifact = select_lifecycle(record["source_id"], record["configuration"])["artifact"]
+                yield record, pdf_source.status(record, artifact)
+
+    def _serve_pdf(self, sid, document):
+        with ExitStack() as files:
+            try:
+                with publication.LOCK:
+                    if not publication.load().get(sid):
+                        raise ValueError
+                    record = next((item for item in SOURCE_CATALOG.get()["sources"]
+                                   if item["source_id"] == sid and self._pdf_record(item)), None)
+                    if record is None:
+                        raise ValueError
+                    artifact = pdf_source.pin(sid, record["configuration"])
+                    stream = files.enter_context(pdf_source.installed(artifact, verify=True))
+            except (OSError, ValueError):
+                self._send_json(403, {"error": "document unavailable"})
+                return
+            if not document:
+                environment = Environment(loader=FileSystemLoader(ADMIN_TEMPLATE_DIR), autoescape=True)
+                body = environment.get_template("pdf-reader.html.j2").render(
+                    record=record, path=self.path + "/document.pdf").encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "application/pdf")
+            self.send_header("Content-Disposition", f'inline; filename="{sid}.pdf"')
+            self.send_header("Content-Security-Policy", "sandbox; default-src 'none'")
+            self.send_header("Content-Length", str(artifact["bytes"]))
+            self.end_headers()
+            remaining = artifact["bytes"]
+            while remaining and (block := stream.read(min(remaining, pdf_source.CHUNK))):
+                self.wfile.write(block)
+                remaining -= len(block)
 
     def _snapshot(self):
         monitor = getattr(self.server, "acquisition_monitor", None)
@@ -430,8 +505,14 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 state["entry_path"] = publication.ROUTES[sid]["entry_path"]
                 if not artifacts[sid] and not state["enabled"] and not state.get("error"):
                     state = None
+            elif self._pdf_record(record):
+                busy = False
+                pdf_state = pdf_source.status(record, artifacts[sid])
+                if artifacts[sid] or pdf_state["enabled"] or pdf_state.get("error"):
+                    state = pdf_state
             sources.append(dict(record, **lifecycles[sid], acquisition=jobs.get(sid),
-                                installed_verified=publication.verified(matched, sid),
+                                installed_verified=(bool(state and state["verified"]) if self._pdf_record(record)
+                                                    else publication.verified(matched, sid)),
                                 publication=state, mutation_blocked=busy))
         return dict(catalog, sources=sources, acquisition_stale=snapshot["stale"])
 
@@ -502,10 +583,14 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             try:
                 with publication.LOCK:
                     operation, fields, revision = data["operation"], data["fields"], data["revision"]
-                    if isinstance(sid, str) and sid in publication.ROUTES:
+                    existing = next((item for item in SOURCE_CATALOG.get()["sources"] if item["source_id"] == sid), None)
+                    is_pdf = (existing and self._pdf_record(existing)) or (
+                        existing is None and isinstance(sid, str) and sid not in publication.ROUTES
+                        and isinstance(fields, dict) and fields.get("format") == "pdf")
+                    if isinstance(sid, str) and (sid in publication.ROUTES or is_pdf):
                         self._guard_published_mutation(operation, sid, fields, revision)
                     result = SOURCE_CATALOG.mutate(operation, sid, fields, revision,
-                                                   source_busy(self._snapshot(), sid))
+                                                   not is_pdf and source_busy(self._snapshot(), sid))
             except catalog_store.RevisionConflict as exc:
                 self._send_json(409, {"error": str(exc)})
                 return
@@ -523,7 +608,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             data = self._read_body()
             source_id, enabled = data.get("source_id"), data.get("enabled")
             if (set(data) != {"source_id", "enabled", "revision"} or not isinstance(source_id, str)
-                    or source_id not in publication.ROUTES or type(enabled) is not bool
+                    or not catalog_store.ID_RE.fullmatch(source_id) or type(enabled) is not bool
                     or not self._valid_revision(data["revision"])):
                 self._send_json(400, {"error": "invalid publication request"})
                 return
@@ -536,7 +621,17 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 if data["revision"] != catalog["revision"]:
                     self._send_json(409, {"error": "catalog revision changed"})
                     return
-                if enabled:
+                record = next((item for item in catalog["sources"] if item["source_id"] == source_id), None)
+                is_pdf = record is not None and self._pdf_record(record)
+                if source_id not in publication.ROUTES and not is_pdf:
+                    self._send_json(400, {"error": "source has no publication adapter"})
+                    return
+                if enabled and record is not None and is_pdf:
+                    artifact = select_lifecycle(source_id, record["configuration"])["artifact"]
+                    if not pdf_source.ready(artifact, verify=True):
+                        self._send_json(409, {"error": "matching verified PDF content is required"})
+                        return
+                elif enabled:
                     snapshot = self._snapshot()
                     life = self._lifecycles(catalog).get(source_id)
                     artifact = life["artifact"] if life else None
@@ -553,19 +648,54 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         elif self.path.rstrip("/") == "/api/storage-settings":
             data = self._read_body()
             try:
-                settings = storage_settings.save_settings(data)
+                with publication.LOCK:
+                    settings = storage_settings.save_settings(data)
             except (ValueError, OSError):
                 self._send_json(400, {"error": "invalid storage settings"})
                 return
             self._send_json(200, settings)
         elif self.path.rstrip("/") == "/api/action":
-            self._refuse_acquisition(self._read_body())
+            data = self._read_body()
+            if data.get("action") == "import":
+                self._import_pdf(data)
+            else:
+                self._refuse_acquisition(data)
         else:
             self._send_json(404, {"error": "not found"})
 
     @staticmethod
     def _valid_revision(revision):
         return type(revision) is int and revision >= 0
+
+    def _import_pdf(self, data):
+        sid = data.get("source_id")
+        if (set(data) != {"source_id", "action", "revision"} or not isinstance(sid, str)
+                or not catalog_store.ID_RE.fullmatch(sid) or not self._valid_revision(data["revision"])):
+            self._send_json(400, {"error": "import requires a source ID and catalog revision only"})
+            return
+        if not self.headers.get("Origin"):
+            self._send_json(403, {"error": "same-origin request required"})
+            return
+        with publication.LOCK:
+            try:
+                catalog = SOURCE_CATALOG.get()
+                if data["revision"] != catalog["revision"]:
+                    raise ValueError("catalog revision changed")
+                record = next((item for item in catalog["sources"] if item["source_id"] == sid), None)
+                if record is None or not self._pdf_record(record):
+                    raise ValueError("source has no PDF import adapter")
+                artifact = pdf_source.pin(sid, record["configuration"])
+                pdf_source.import_local(sid, artifact)
+            except catalog_store.CatalogError:
+                self._send_json(503, {"error": "source catalog unavailable"})
+                return
+            except ValueError as exc:
+                self._send_json(409, {"error": str(exc)})
+                return
+            except OSError:
+                self._send_json(503, {"error": "PDF inbox or local storage unavailable"})
+                return
+        self._send_json(200, {"accepted": True, "installed_verified": True})
 
     def _refuse_acquisition(self, data):
         def refuse(status, error):
@@ -611,13 +741,18 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             return
         if operation in ("remove", "add"):
             raise catalog_store.RevisionConflict("unpublish source before removing or re-adding it")
-        if isinstance(fields, dict) and fields.keys() & ARTIFACT_FIELDS:
+        guarded_fields = ARTIFACT_FIELDS if sid in publication.ROUTES else catalog_store.CONFIG_FIELDS
+        if isinstance(fields, dict) and fields.keys() & guarded_fields:
             catalog = SOURCE_CATALOG.get()
             if catalog["revision"] != revision:
                 raise catalog_store.RevisionConflict("catalog revision changed")
             record = next((item for item in catalog["sources"] if item["source_id"] == sid), None)
-            if record and not select_lifecycle(sid, record["configuration"] | fields)["artifact"]:
-                raise catalog_store.RevisionConflict("unpublish source before changing artifact configuration")
+            if record:
+                config = record["configuration"]
+                proposed = config | fields
+                if ((sid in publication.ROUTES and not select_lifecycle(sid, proposed)["artifact"])
+                        or (sid not in publication.ROUTES and any(proposed.get(k) != config.get(k) for k in guarded_fields))):
+                    raise catalog_store.RevisionConflict("unpublish source before changing artifact configuration")
 
     def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
         # Suppress default per-request stderr logging; structured logging

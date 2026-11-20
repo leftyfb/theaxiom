@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ record.profile.title }} · The Axiom</title>
+  <style>
+    body { max-width: 48rem; margin: 2rem auto; padding: 0 1rem; font: 1.1rem/1.5 system-ui, sans-serif; }
+    a { color: #176b4d; } dd { overflow-wrap: anywhere; }
+  </style>
+</head>
+<body>
+  <nav><a href="/">← Back to library</a></nav>
+  <main>
+    <h1>{{ record.profile.title }}</h1>
+    <p>{{ record.profile.description }}</p>
+    <p><a href="{{ path }}" target="_blank" rel="noopener">Open offline PDF (new tab)</a></p>
+    <dl>
+      <dt>Source URL</dt><dd>{{ record.configuration.source_url }}</dd>
+      <dt>Provenance</dt><dd>{{ record.configuration.provenance }}</dd>
+      <dt>Redistribution rights</dt><dd>{{ record.configuration.license }}</dd>
+    </dl>
+  </main>
+</body>
+</html>

@@ -13,6 +13,7 @@ class AdminWebUISkeletonTests(unittest.TestCase):
                        "No managed sources configured.", 'name="format"', "fetch('/api/sources'",
                        'id="status-staging"', 'id="status-library"'):
             self.assertIn(marker, text)
-        for marker in ("data-dest=", "auth_basic", "proxy_pass", "fetch('/api/action'",
+        self.assertIn("action:'import'", text)
+        for marker in ("data-dest=", "auth_basic", "proxy_pass",
                        "nginx", "systemd"):
             self.assertNotIn(marker, text.lower())

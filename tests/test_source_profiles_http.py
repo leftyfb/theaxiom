@@ -32,18 +32,23 @@ def app(tmp_path, monkeypatch):
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
 
-        def request(path, payload=None, status=200):
+        def request(path, payload=None, status=200, *, raw=False, origin=None):
             host, port = server.server_address
             conn = http.client.HTTPConnection(host, port, timeout=5)
             try:
                 if payload is None:
                     conn.request("GET", path)
                 else:
-                    conn.request("POST", path, json.dumps(payload), {
-                        "Content-Type": "application/json", "Origin": f"http://{host}:{port}",
-                    })
+                    headers = {"Content-Type": "application/json"}
+                    if origin != "":
+                        headers["Origin"] = origin or f"http://{host}:{port}"
+                    conn.request("POST", path, json.dumps(payload), headers)
                 response = conn.getresponse()
-                body = response.read().decode()
+                data = response.read()
+                if raw:
+                    assert response.status == status, data
+                    return data, dict(response.getheaders())
+                body = data.decode()
                 assert response.status == status, body
                 if response.getheader("Content-Type", "").startswith("application/json"):
                     return json.loads(body)
@@ -176,7 +181,7 @@ def test_monitor_identity_mismatch_does_not_supply_verification(app):
 @pytest.mark.parametrize("format_name,complete,adapter,reason", [
     ("zim", True, "kiwix", "No trusted acquisition manifest"),
     ("zim", False, "kiwix", "ZIM candidate configuration requires"),
-    ("pdf", True, None, "No lifecycle adapter supports this format"),
+    ("other", True, None, "No lifecycle adapter supports this format"),
 ])
 def test_candidate_lifecycle_http_and_dom(app, format_name, complete, adapter, reason):
     request, _ = app

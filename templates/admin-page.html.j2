@@ -169,7 +169,7 @@
             <p class="source-subtitle">{{ source.configuration.format }}{% if source.profile.description %} · {{ source.profile.description }}{% endif %}</p>
             {% if pub %}<span class="compact-publication" data-field="publication-summary">{{ publication_label }}</span>{% endif %}
           </div>
-          <span class="badge" data-field="status" role="status">{% if source.installed_verified %}Archive verified{% elif not source.artifact and not source.mutation_blocked %}Not downloaded{% elif catalog.acquisition_stale %}Status unavailable{% elif not source.artifact %}Acquisition unresolved{% else %}Waiting for status…{% endif %}</span>
+          <span class="badge" data-field="status" role="status">{% if source.adapter == 'pdf' %}{{ 'PDF verified' if source.installed_verified else 'PDF not installed or invalid' }}{% elif source.installed_verified %}Archive verified{% elif not source.artifact and not source.mutation_blocked %}Not downloaded{% elif catalog.acquisition_stale %}Status unavailable{% elif not source.artifact %}Acquisition unresolved{% else %}Waiting for status…{% endif %}</span>
         </summary>
         <div class="source-expanded">
         <div class="source-live">
@@ -185,6 +185,12 @@
           {% for action in source.actions %}
           <button class="button" type="button" data-action="{{ action }}" disabled>{{ action_labels[action] }}</button>
           {% endfor %}
+        </div>
+        {% endif %}
+        {% if source.adapter == 'pdf' and source.artifact %}
+        <div class="source-actions" aria-label="Local PDF import">
+          <button class="button" type="button" data-pdf-import>Import local PDF</button>
+          <span data-pdf-feedback role="status"></span>
         </div>
         {% endif %}
         {% if pub %}
@@ -211,12 +217,12 @@
             <dt>Candidate SHA-256</dt><dd>{{ source.configuration.sha256 or '—' }}</dd>
             <dt>Candidate provenance</dt><dd>{{ source.configuration.provenance or '—' }}</dd>
             <dt>Candidate license</dt><dd>{{ source.configuration.license or '—' }}</dd>
-            {% if source.artifact %}
+            {% if source.artifact and source.adapter != 'pdf' %}
             <dt>Pinned archive filename</dt><dd>{{ source.artifact.filename }}</dd>
             <dt>Pinned archive size (bytes)</dt><dd>{{ source.artifact.bytes }}</dd>
             <dt>Pinned archive SHA-256</dt><dd>{{ source.artifact.sha256 }}</dd>
             {% endif %}
-            <dt>Installed verification</dt><dd data-field="verified">{{ 'Confirmed by acquisition service' if pub and pub.verified else 'Not confirmed' }}</dd>
+            <dt>Installed verification</dt><dd data-field="verified">{{ ('PDF pin verified' if source.adapter == 'pdf' else 'Confirmed by acquisition service') if pub and pub.verified else 'Not confirmed' }}</dd>
             <dt>Last sample</dt><dd data-field="sample">—</dd>
           </dl>
         </section>
@@ -278,6 +284,25 @@
         try { await change('remove', source_id, {}); }
         catch (error) { feedback.textContent = error.message; }
       }));
+      {% if catalog.sources | selectattr('adapter', 'equalto', 'pdf') | selectattr('artifact') | list %}
+      document.querySelectorAll('[data-pdf-import]').forEach(button => button.addEventListener('click', async () => {
+        const card = button.closest('.source-card');
+        const feedback = card.querySelector('[data-pdf-feedback]');
+        button.disabled = true;
+        feedback.textContent = 'Verifying local PDF…';
+        try {
+          const response = await fetch('/api/action', {method:'POST', headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({source_id:card.dataset.sourceId, action:'import', revision})});
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.error || 'Import failed');
+          feedback.textContent = 'PDF verified and installed.';
+        } catch (error) {
+          feedback.textContent = error.message;
+        } finally {
+          button.disabled = false;
+        }
+      }));
+      {% endif %}
       document.querySelectorAll('[data-field="publication-toggle"]').forEach(button => button.addEventListener('click', async () => {
         button.dataset.posting = 'true';
         button.disabled = true;
@@ -384,7 +409,10 @@
           const sources = new Map(data.sources.map(source => [source.source_id, source]));
           cards.forEach(card => {
             const source = sources.get(card.dataset.sourceId);
-            if (source?.artifact) render(card, source.acquisition, data.acquisition_stale !== false);
+            if (source?.adapter === 'pdf') {
+              card.querySelector('[data-field="status"]').textContent = source.installed_verified ? 'PDF verified' : 'PDF not installed or invalid';
+              card.querySelector('[data-field="verified"]').textContent = source.installed_verified ? 'PDF pin verified' : 'Not confirmed';
+            } else if (source?.artifact) render(card, source.acquisition, data.acquisition_stale !== false);
             else card.querySelector('[data-field="status"]').textContent = data.acquisition_stale ? 'Status unavailable' :
               source?.mutation_blocked !== false ? 'Acquisition unresolved' : 'Not downloaded';
             controls(card, source);

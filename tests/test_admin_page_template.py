@@ -63,7 +63,7 @@ def test_page_specific_scripts_and_navigation():
 
 
 def test_candidate_card_has_no_acquisition_buttons():
-    page = render([profile(description="Emergency reference")])
+    page = render([profile(description="Emergency reference", format="other")])
     parser = Parser()
     parser.feed(page)
     assert "Not downloaded</span>" in page

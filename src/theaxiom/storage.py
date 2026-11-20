@@ -21,7 +21,7 @@ def read_mounts() -> list[dict[str, Any]]:
     for line in Path("/proc/self/mountinfo").read_text().splitlines():
         before, after = line.split(" - ", 1)
         left, right = before.split(), after.split()
-        rows.append({"target": _decode(left[4]), "source": _decode(right[1]),
+        rows.append({"id": int(left[0]), "target": _decode(left[4]), "source": _decode(right[1]),
                      "type": right[0], "device": left[2],
                      "read_only": "ro" in left[5].split(",") or "ro" in right[2].split(",")})
     return rows
