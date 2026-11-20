@@ -139,7 +139,7 @@ def test_epub_http_upload(epub_app, disk):
     assert row["profile"]["author"] == "Manual author"
     assert row["profile"]["publisher"] == "Example Press"
     assert row["download_filter"] == "downloaded"
-    request("/api/publication", dict(source_id="fixture-book", enabled=True, revision=updated["revision"]), status=400)
+    request("/api/publication", dict(source_id="fixture-book", enabled=True, revision=updated["revision"]), status=409)
     assert "Upload EPUB" in request("/admin/sources")
 
 
@@ -169,3 +169,38 @@ def test_epub_http_add_download(epub_app, disk, monkeypatch):
     assert row["profile"]["author"] == "Example Author"
     assert row["installed_verified"]
     assert "Downloaded via configured HTTPS URL" in row["configuration"]["provenance"]
+
+
+def test_epub_public_reader_and_revocation(epub_app, disk):
+    import json
+    from urllib.parse import quote
+    request, _ = epub_app
+    revision = request("/api/sources")["revision"]
+    data = book(chapter='<html xmlns="http://www.w3.org/1999/xhtml"><body><h1>Safe chapter</h1><p><a href="https://example.org">External</a><img src="https://example.org/track" alt="Illustration"/>&lt;script&gt;</p></body></html>')
+    headers = {"X-Source-ID": "fixture-book", "X-Catalog-Revision": str(revision),
+               "X-Document-Format": "epub", "X-PDF-Add": "1", "Content-Type": "application/epub+zip",
+               "X-PDF-Metadata": quote(json.dumps({"title": "My book"}))}
+    request("/api/pdf-upload", data, upload_headers=headers)
+    base = "/api/library/epub/fixture-book"
+    request(base, status=403)
+    request(base + "/document.epub", status=403)
+    catalog = request("/api/sources")
+    pub = dict(source_id="fixture-book", enabled=True, revision=catalog["revision"])
+    request("/api/publication", pub, status=409)
+    request("/api/publication", dict(pub, acknowledge_rights=True))
+    assert "Open EPUB" in request("/")
+    assert "My book" in request("/search?q=My+book")
+    page, headers = request(base, raw=True)
+    assert b"Safe chapter" in page and b"Table of contents" in page
+    assert b"https://example.org" not in page and b"<script>" not in page
+    assert b"&lt;script&gt;" in page
+    assert "default-src 'none'" in headers["Content-Security-Policy"]
+    assert b'class="book large"' in request(base + "/chapter/0?size=large", raw=True)[0]
+    original, headers = request(base + "/document.epub", raw=True)
+    assert original == data and headers["Content-Disposition"].startswith("attachment;")
+    catalog = request("/api/sources")
+    request("/api/publication", dict(pub, enabled=False, revision=catalog["revision"]))
+    request(base, status=403)
+    request(base + "/document.epub", status=403)
+    assert "Open EPUB" not in request("/")
+    assert (disk / "library/epub" / source(catalog, "fixture-book")["artifact"]["filename"]).read_bytes() == data

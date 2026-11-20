@@ -98,7 +98,7 @@ def select_lifecycle(source_id, configuration):
             pass
         return dict(adapter=adapter, configuration_valid=artifact is not None, artifact=artifact,
                     pdf_download=pdf_source.valid_source_url(configuration.get("source_url", "")),
-                    acquisition_reason="Upload an EPUB or download from a direct HTTPS URL. Publication is not yet supported.", actions={})
+                    acquisition_reason="Upload an EPUB or download from a direct HTTPS URL. Publication is separate.", actions={})
     if adapter == "pdf" and source_id not in publication.ROUTES:
         artifact = None
         try:
@@ -255,7 +255,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             return False
         public_paths = {"/", "/index.html", "/health", "/health/", "/internal/publication/wikipedia-en", "/read/wikipedia-en", "/api/pdf-reader.mjs"}
         if not post and (self.path in public_paths or self.path.split("?", 1)[0] in {"/", "/index.html", "/search"}
-                         or pdf_source.ROUTE.fullmatch(self.path) or PDFJS_ASSET.fullmatch(self.path)):
+                         or pdf_source.ROUTE.fullmatch(self.path) or epub_source.ROUTE.fullmatch(self.path) or PDFJS_ASSET.fullmatch(self.path)):
             return True
         auth = self.headers.get_all("Authorization", [])
         local_hosts = {f"{config.host}:{config.port}", f"localhost:{config.port}"}
@@ -329,6 +329,10 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         if PDFJS_ASSET.fullmatch(self.path):
             self._serve_pdfjs_asset()
             return
+        epub_route = epub_source.ROUTE.fullmatch(self.path)
+        if epub_route:
+            self._serve_epub(*epub_route.groups())
+            return
         pdf_route = pdf_source.ROUTE.fullmatch(self.path)
         if pdf_route:
             self._serve_pdf(*pdf_route.groups())
@@ -360,10 +364,10 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 if search_page and query:
                     results = library_search.search(query, self._publication_snapshot, source_ids=eligible)
                     for source in sources:
-                        if source["category"] == "PDF" and query.casefold() in (
+                        if source["category"] in {"PDF", "EPUB"} and query.casefold() in (
                                 source["name"] + " " + source["description"]).casefold():
                             results.append(dict(source_id=source["source_id"], name=source["name"],
-                                                status="ok", capability="PDF title and description",
+                                                status="ok", capability=source["category"] + " title and description",
                                                 results=[dict(title=source["name"], href=source["entry_path"], snippet="")]))
             except (ValueError, UnicodeError):
                 error, code = "Invalid search or filter request.", 400
@@ -463,7 +467,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 if state["published"]:
                     profile = record["profile"]
                     sources.append(dict(source_id=record["source_id"], entry_path=state["entry_path"],
-                                        symbol="P", category="PDF", name=profile["title"],
+                                        symbol="E" if self._epub_record(record) else "P", category="EPUB" if self._epub_record(record) else "PDF", name=profile["title"],
                                         description=profile.get("description", ""),
                                         language=profile.get("language") or "Unspecified language"))
             ids = {source["source_id"] for source in sources}
@@ -484,6 +488,9 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             if self._pdf_record(record):
                 artifact = select_lifecycle(record["source_id"], record["configuration"])["artifact"]
                 yield record, pdf_source.status(record, artifact)
+            elif self._epub_record(record):
+                artifact = select_lifecycle(record["source_id"], record["configuration"])["artifact"]
+                yield record, epub_source.status(record, artifact)
 
     def _serve_pdfjs_asset(self):
         """Serve only trusted installed renderer assets, never arbitrary host files."""
@@ -518,6 +525,43 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         if relative == "build/pdf.worker.mjs":
             policy += "; script-src 'self'; connect-src 'self'"
         self.send_header("Content-Security-Policy", policy)
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _serve_epub(self, sid, resource, size):
+        try:
+            with publication.LOCK:
+                if not publication.load().get(sid):
+                    raise ValueError("unpublished")
+                record = next((item for item in SOURCE_CATALOG.get()["sources"]
+                               if item["source_id"] == sid and self._epub_record(item)), None)
+                if record is None:
+                    raise ValueError("unknown EPUB")
+                artifact = epub_source.pin(sid, record["configuration"])
+                with epub_source.installed(artifact, verify=False) as stream:
+                    data = stream.read(artifact["bytes"] + 1)
+                # Validate the exact immutable byte snapshot that will be served.
+                epub_source._verify(BytesIO(data), artifact)
+            if resource == "document.epub":
+                body = data
+            else:
+                index = int(resource.split("/")[1]) if resource else 0
+                content, labels = epub_source.chapter_content(data, index)
+                environment = Environment(loader=FileSystemLoader(ADMIN_TEMPLATE_DIR), autoescape=True)
+                body = environment.get_template("epub-reader.html.j2").render(
+                    record=record, base=epub_source.ROUTE_PREFIX + sid, chapter=index,
+                    labels=labels, content=content, size=size or "medium").encode("utf-8")
+        except (OSError, ValueError):
+            self._send_json(403, {"error": "document unavailable"})
+            return
+        self.send_response(200)
+        if resource == "document.epub":
+            self.send_header("Content-Type", "application/epub+zip")
+            self.send_header("Content-Disposition", f'attachment; filename="{sid}.epub"')
+        else:
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'; sandbox")
+        self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
@@ -616,8 +660,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 state = pdf_state
             elif self._epub_record(record):
                 busy = False
-            verified = (epub_source.ready(artifacts[sid]) if self._epub_record(record) else
-                        bool(state and state["verified"]) if self._pdf_record(record)
+                state = epub_source.status(record, artifacts[sid])
+            verified = (bool(state and state["verified"]) if self._pdf_record(record) or self._epub_record(record)
                         else publication.verified(matched, sid))
             job = jobs.get(sid)
             publication_filter = ("unknown" if state and state.get("error") else
@@ -797,25 +841,27 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     self._send_json(409, {"error": "catalog revision changed"})
                     return
                 record = next((item for item in catalog["sources"] if item["source_id"] == source_id), None)
+                is_epub = record is not None and self._epub_record(record)
                 is_pdf = record is not None and self._pdf_record(record)
-                if source_id not in publication.ROUTES and not is_pdf:
+                is_document = is_pdf or is_epub
+                if source_id not in publication.ROUTES and not is_document:
                     self._send_json(400, {"error": "source has no publication adapter"})
                     return
-                if "acknowledge_rights" in data and not is_pdf:
-                    self._send_json(400, {"error": "rights acknowledgement is for PDFs only"})
+                if "acknowledge_rights" in data and not is_document:
+                    self._send_json(400, {"error": "rights acknowledgement is for documents only"})
                     return
-                if enabled and record is not None and is_pdf:
+                if enabled and record is not None and is_document:
                     artifact = select_lifecycle(source_id, record["configuration"])["artifact"]
-                    if not pdf_source.ready(artifact, verify=True):
-                        self._send_json(409, {"error": "matching verified PDF content is required"})
+                    if not (epub_source.ready(artifact) if is_epub else pdf_source.ready(artifact, verify=True)):
+                        self._send_json(409, {"error": "matching verified EPUB content is required" if is_epub else "matching verified PDF content is required"})
                         return
                     if not record["configuration"].get("license", "").strip():
                         if data.get("acknowledge_rights") is not True:
-                            self._send_json(409, {"error": "Confirm you have permission to make this PDF available to library users"})
+                            self._send_json(409, {"error": "Confirm you have permission to make this EPUB available to library users" if is_epub else "Confirm you have permission to make this PDF available to library users"})
                             return
                         try:
                             SOURCE_CATALOG.mutate("edit", source_id, {
-                                "license": "Administrator confirmed permission to make this PDF available in this library; no publisher license independently verified."
+                                "license": "Administrator confirmed permission to make this " + ("EPUB" if is_epub else "PDF") + " available in this library; no publisher license independently verified."
                             }, data["revision"])
                         except catalog_store.RevisionConflict:
                             self._send_json(409, {"error": "catalog revision changed"})

@@ -1,6 +1,7 @@
 """Bounded EPUB 2/3 package inspection; no extraction, rendering or network access."""
 from contextlib import contextmanager
 import hashlib
+from html import escape
 import io
 import posixpath
 import re
@@ -220,3 +221,59 @@ def ready(artifact):
         except (OSError, ValueError):
             pass
     return False
+
+
+ROUTE_PREFIX = "/api/library/epub/"
+ROUTE = re.compile(ROUTE_PREFIX + r"([a-z0-9-]{1,63})(?:/(document\.epub|chapter/[0-9]{1,4}))?(?:\?size=(small|medium|large))?\Z")
+# Only literal trusted tags are emitted. No original HTML attributes, CSS,
+# hyperlinks, SVG, images, or active content enter the application's origin.
+SAFE_TAGS = frozenset("p div section article h1 h2 h3 h4 h5 h6 blockquote pre code em strong b i u s sub sup ul ol li dl dt dd table thead tbody tfoot tr th td caption br hr span".split())
+DROP_TAGS = frozenset("script style iframe object embed form base head link meta svg math audio video".split())
+
+
+def chapter_content(data, index):
+    metadata = inspect(data)
+    if not 0 <= index < len(metadata["chapters"]):
+        raise ValueError("Unknown EPUB chapter")
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        def safe(node):
+            name = node.tag[len(XHTML):] if node.tag.startswith(XHTML) else ""
+            if not name or name in DROP_TAGS:
+                return ""
+            if name == "img":
+                return escape(node.get("alt", ""))
+            content = escape(node.text or "") + "".join(
+                safe(child) + escape(child.tail or "") for child in node)
+            if name in {"br", "hr"}:
+                return "<" + name + ">"
+            if name in SAFE_TAGS:
+                return "<" + name + ">" + content + "</" + name + ">"
+            return content
+
+        chapter = _xml(archive, metadata["chapters"][index])
+        labels = []
+        for path in metadata["chapters"]:
+            root = _xml(archive, path)
+            heading = next((node for node in root.iter()
+                            if node.tag in {XHTML + "h1", XHTML + "h2", XHTML + "h3"}
+                            and "".join(node.itertext()).strip()), None)
+            label = " ".join("".join(heading.itertext()).split())[:100] if heading is not None else ""
+            labels.append(label or f"Chapter {len(labels) + 1}")
+        return safe(chapter.find(XHTML + "body")), labels
+
+
+def status(record, artifact):
+    from . import publication
+    path = ROUTE_PREFIX + record["source_id"]
+    result = dict(enabled=False, verified=False, serving=False, published=False,
+                  path=path, entry_path=path, publication_reason="")
+    try:
+        enabled = publication.load().get(record["source_id"], False)
+        available = ready(artifact)
+        rights = bool(record["configuration"].get("license", "").strip())
+        return dict(result, enabled=enabled, verified=available, serving=available and rights,
+                    published=enabled and available and rights,
+                    publication_reason="Review usage rights before publishing" if available and not rights else "",
+                    requires_rights_acknowledgement=available and not rights)
+    except (OSError, ValueError):
+        return dict(result, error="publication state unavailable")
