@@ -30,6 +30,7 @@ storage = importlib.import_module(f"{__package__}.storage" if __package__ else "
 catalog_store = importlib.import_module(f"{__package__}.catalog_store" if __package__ else "theaxiom.catalog_store")
 
 security = importlib.import_module(f"{__package__}.admin_security" if __package__ else "theaxiom.admin_security")
+admin_sessions = importlib.import_module(f"{__package__}.admin_sessions" if __package__ else "theaxiom.admin_sessions")
 monitoring = importlib.import_module(f"{__package__}.acquisition_monitor" if __package__ else "theaxiom.acquisition_monitor")
 publication = importlib.import_module(f"{__package__}.publication" if __package__ else "theaxiom.publication")
 pdf_source = importlib.import_module(f"{__package__}.pdf_source" if __package__ else "theaxiom.pdf_source")
@@ -50,6 +51,7 @@ PUBLIC_ICON_PATHS = {
     "/favicon.ico": ("favicon.ico", "image/x-icon"),
 }
 PUBLIC_ICON_DIR = Path(__file__).resolve().parents[2] / "deploy" / "www"
+ADMIN_SESSIONS = admin_sessions.Sessions()
 PDFJS_ROOT = Path("/opt/pdfjs/current")
 PDFJS_PREFIX = "/api/pdfjs/"
 ZIM_READER_ROUTE = re.compile(r'/read/zim/([a-z0-9-]{1,63})\Z')
@@ -261,8 +263,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         super().end_headers()
 
     def _guard(self, *, post: bool = False) -> bool:
-        # The plain server used by legacy local tests must never authorize
-        # an unauthenticated non-loopback listener.
+        """Strict host, Basic/client or browser session, origin and CSRF gate."""
+        import hmac
         config = getattr(self.server, "axiom_config", None)
         if config is None:
             host, port = self.server.server_address[:2]
@@ -273,22 +275,50 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         if len(hosts) != 1 or hosts[0].lower() not in config.allowed_hosts:
             self._send_json(400, {"error": "invalid host"})
             return False
-        public_paths = set(PUBLIC_ICON_PATHS) | {"/", "/index.html", "/health", "/health/", "/internal/publication/wikipedia-en", "/read/wikipedia-en", "/api/pdf-reader.mjs"}
-        if not post and (self.path in public_paths or self.path.split("?", 1)[0] in {"/", "/index.html", "/search"}
+        public_paths = set(PUBLIC_ICON_PATHS) | {"/", "/index.html", "/health", "/health/",
+                        "/internal/publication/wikipedia-en", "/read/wikipedia-en", "/api/pdf-reader.mjs"}
+        if not post and (self.path in public_paths or self.path == "/admin/login"
+                         or self.path.split("?", 1)[0] in {"/", "/index.html", "/search"}
                          or pdf_source.ROUTE.fullmatch(self.path) or epub_source.ROUTE.fullmatch(self.path)
-                          or ZIM_READER_ROUTE.fullmatch(self.path) or PDFJS_ASSET.fullmatch(self.path)
-                          or self.path == "/internal/publication/zim"):
+                         or ZIM_READER_ROUTE.fullmatch(self.path) or PDFJS_ASSET.fullmatch(self.path)
+                         or self.path == "/internal/publication/zim"):
             return True
+
+        # The login submission is public, but still passes all content-type,
+        # size, host, fetch-site and mandatory same-origin checks below.
+        login = post and self.path == "/api/admin/login"
         auth = self.headers.get_all("Authorization", [])
         local_hosts = {f"{config.host}:{config.port}", f"localhost:{config.port}"}
         if config.port == 80:
             local_hosts.update({config.host, "localhost"})
-        if (len(auth) > 1 or (config.store is None and hosts[0].lower() not in local_hosts)
-                or not config.authorized(auth[0] if auth else None)):
-            self.send_response(401)
-            self.send_header("WWW-Authenticate", 'Basic realm="The Axiom", charset="UTF-8"')
-            self.send_header("Content-Length", "0")
-            self.end_headers()
+        self._session_csrf = None
+        self._session_token = None
+        basic = (len(auth) <= 1 and
+                 not (config.store is None and hosts[0].lower() not in local_hosts)
+                 and config.authorized(auth[0] if auth else None))
+        if not basic and not auth and config.store is not None:
+            token = admin_sessions.token_from_headers(self.headers)
+            csrf = ADMIN_SESSIONS.authenticate(token, config.store)
+            if csrf is not None:
+                self._session_csrf, self._session_token = csrf, token
+        if not login and not basic and self._session_csrf is None:
+            if not post and self.path.rstrip("/") in {
+                    "/admin", "/admin/sources", "/admin/settings", "/admin/groupings"}:
+                self.send_response(303)
+                self.send_header("Location", "/admin/login")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return False
+            # Browser fetches never receive a native Basic challenge; explicit
+            # API clients can still discover/challenge the legacy Basic realm.
+            if self.headers.get("Sec-Fetch-Mode") in {"cors", "same-origin"}:
+                self._send_json(401, {"error": "administrator sign in required"})
+            else:
+                self.send_response(401)
+                self.send_header("WWW-Authenticate", 'Basic realm="The Axiom", charset="UTF-8"')
+                self.send_header("Content-Length", "0")
+                self.end_headers()
             return False
         if post:
             origins = self.headers.get_all("Origin", [])
@@ -297,10 +327,20 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 self._send_json(400, {"error": "invalid proxy scheme"})
                 return False
             if (len(origins) > 1 or
-                (origins and origins[0] != scheme + "://" + hosts[0].lower()) or
-                self.headers.get("Sec-Fetch-Site") in {"cross-site", "same-site"}):
+                    (origins and origins[0] != scheme + "://" + hosts[0].lower()) or
+                    self.headers.get("Sec-Fetch-Site") in {"cross-site", "same-site"}):
                 self._send_json(403, {"error": "cross-origin request rejected"})
                 return False
+            if login or self._session_csrf is not None:
+                if not origins:
+                    self._send_json(403, {"error": "same-origin request required"})
+                    return False
+            if self._session_csrf is not None:
+                provided = self.headers.get_all("X-Axiom-CSRF", [])
+                if (len(provided) != 1 or len(provided[0]) > 256 or
+                        not hmac.compare_digest(provided[0], self._session_csrf)):
+                    self._send_json(403, {"error": "invalid request token"})
+                    return False
             upload = self.path == "/api/pdf-upload"
             formats = self.headers.get_all("X-Document-Format", []) if upload else []
             content_type = ("application/epub+zip" if formats == ["epub"] else "application/pdf") if upload else "application/json"
@@ -339,6 +379,17 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802 - http.server convention
         if not self._guard():
+            return
+        if self.path == "/admin/login":
+            environment = Environment(loader=FileSystemLoader(ADMIN_TEMPLATE_DIR), autoescape=True)
+            body = environment.get_template("admin-login.html.j2").render().encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Frame-Options", "DENY")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
             return
         if self.path in PUBLIC_ICON_PATHS:
             filename, mime = PUBLIC_ICON_PATHS[self.path]
@@ -814,6 +865,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             editable_fields=sorted(catalog_store.EDITABLE),
             action_labels=ACTION_LABELS,
             password_change_enabled=bool(getattr(getattr(self.server, "axiom_config", None), "store", None)),
+            session_csrf_token=getattr(self, "_session_csrf", None),
         ).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -823,6 +875,44 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802 - http.server convention
         if not self._guard(post=True):
+            return
+        if self.path == "/api/admin/login":
+            import hmac
+            config = getattr(self.server, "axiom_config", None)
+            if config is None or config.store is None:
+                self._send_json(503, {"error": "administrator authentication unavailable"})
+                return
+            data = self._read_body()
+            if (set(data) != {"username", "password"} or
+                    not all(isinstance(data[k], str) for k in data) or
+                    len(data["username"]) > 64 or len(data["password"]) > 256):
+                self._send_json(400, {"error": "invalid sign-in request"})
+                return
+            if not (hmac.compare_digest(data["username"], config.username) and
+                    config.store.verify(data["password"])):
+                self._send_json(403, {"error": "invalid username or password"})
+                return
+            try:
+                token, _ = ADMIN_SESSIONS.issue(config.store)
+            except (OSError, ValueError):
+                self._send_json(503, {"error": "authentication state unavailable"})
+                return
+            secure = config.proxied and self.headers.get("X-Forwarded-Proto") == "https"
+            self.send_response(204)
+            self.send_header("Set-Cookie", admin_sessions.cookie_header(token, secure=secure))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        if self.path == "/api/admin/logout":
+            ADMIN_SESSIONS.revoke(getattr(self, "_session_token", None))
+            config = getattr(self.server, "axiom_config", None)
+            secure = bool(config and config.proxied and self.headers.get("X-Forwarded-Proto") == "https")
+            self.send_response(204)
+            self.send_header("Set-Cookie", admin_sessions.clear_cookie_header(secure=secure))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
             return
         if self.path == "/api/pdf-upload":
             self._upload_pdf()
@@ -853,6 +943,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             if not changed:
                 self._send_json(403, {"error": "current password is incorrect"})
                 return
+            ADMIN_SESSIONS.clear()  # revoke browser sessions after credential rotation
             self._send_json(200, {"changed": True})
         elif self.path == "/api/groups":
             if not self.headers.get("Origin"):
