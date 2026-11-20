@@ -115,3 +115,15 @@ def test_source_editor_simple_defaults_and_advanced_details():
     assert '<option value="zim">' in basic and '<option value="pdf">' in basic
     assert "generateId()" in page and "data-legacy-format" in page
     assert 'href="#source-help"' in basic
+
+
+def test_offline_source_guide_is_discoverable_and_honest():
+    page = render()
+    assert 'id="source-guide-open"' in page
+    assert '<dialog id="source-guide"' in page
+    assert 'https://download.kiwix.org/zim/' in page
+    assert 'https://www.ready.gov/' in page
+    assert 'network-mounted PDF storage are not yet supported' in page
+    assert 'arbitrary remote downloads are not yet enabled' in page
+    assert 'Removing a profile does not delete installed files' in page
+    assert 'id="source-guide"' not in render(admin_page="settings")

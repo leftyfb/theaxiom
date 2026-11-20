@@ -68,6 +68,8 @@ when no Nginx mode is configured. Real acquisitions remain disabled.
 
 ### Source profiles
 
+For a step-by-step offline content guide, open **Administration → Sources → Content source guide**. The guide is bundled with the application; its upstream links require internet access. See also [adding content sources](docs/adding-sources.md).
+
 Source configuration is stored separately from content at `${XDG_CONFIG_HOME:-~/.config}/theaxiom/sources.json`; set `THEAXIOM_SOURCE_CATALOG` to select an explicit file. The catalog is versioned, revision-checked, atomically replaced, and created with owner-only permissions. A malformed, oversized, unknown-version, or unreadable catalog fails closed rather than being silently reset. Back up this file with configuration; it does not contain or move downloaded content.
 
 `/admin/sources` uses the same card and add/edit form for every persisted record, including initial seed records. An empty catalog shows no source cards. `GET /api/sources` returns the revision and records with `source_id`, `profile` (display metadata), and `configuration` (format and candidate metadata). Separate, nullable `artifact`, `acquisition`, and `publication` fields describe the pinned artifact, matching monitor sample, and reader controls; `mutation_blocked` indicates active or unresolved acquisition. `POST /api/sources` returns the same view and accepts exactly `operation`, `source_id`, `fields`, and `revision`. Use `add`, `edit`, or `remove`, with profile and configuration edits supplied together in `fields`. Mutations require same-origin authenticated requests and the current revision; conflicting revisions return HTTP 409.

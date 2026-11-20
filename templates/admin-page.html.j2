@@ -63,8 +63,8 @@
     .source-details { overflow-wrap: anywhere; }
     .admin-nav { display:flex; flex-wrap:wrap; gap:.5rem; margin-bottom:1.5rem; }
     .admin-nav a[aria-current="page"] { background:var(--dark); color:white; }
-    #source-dialog { width: min(42rem, calc(100% - 2rem)); max-height: calc(100% - 2rem); overflow: auto; border: 1px solid var(--line); border-radius: .85rem; padding: clamp(1rem, 4vw, 1.75rem); color: var(--dark); background: var(--paper); }
-    #source-dialog::backdrop { background: rgba(18,60,50,.55); }
+    #source-dialog, #source-guide { width: min(42rem, calc(100% - 2rem)); max-height: calc(100% - 2rem); overflow: auto; border: 1px solid var(--line); border-radius: .85rem; padding: clamp(1rem, 4vw, 1.75rem); color: var(--dark); background: var(--paper); }
+    #source-dialog::backdrop, #source-guide::backdrop { background: rgba(18,60,50,.55); }
     #source-dialog h3 { margin: 0; font-size: 1.4rem; }
     .editor-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 1rem; margin: 1rem 0; }
     .editor-wide { grid-column: 1 / -1; }
@@ -154,11 +154,12 @@
     <h2 id="sources">Content sources</h2>
     <p class="source-note">Acquisition controls are disabled until safe download and recovery support is ready.</p>
     <button class="button" type="button" id="source-add">Add Source</button>
+    <button class="button" type="button" id="source-guide-open">Content source guide</button>
     <p id="catalog-feedback" role="status" aria-live="polite">Candidate source metadata is not trusted or fetched.</p>
     <dialog id="source-dialog" aria-labelledby="source-dialog-title">
       <form id="source-form">
         <h3 id="source-dialog-title">Add source metadata</h3>
-        <p class="source-note">Choose content to add to your offline library. Saving a profile does not download or publish it. <a href="#source-help">Content source help</a></p>
+        <p class="source-note">Choose content to add to your offline library. Saving a profile does not download or publish it. <a href="#source-help" id="source-guide-link">Content source help</a></p>
         <input id="catalog-id" name="source_id" type="hidden">
         <p id="catalog-id-display" class="source-note" hidden></p>
         <div class="editor-grid">
@@ -183,8 +184,28 @@
         </details>
         <p id="source-form-feedback" role="alert" tabindex="-1"></p>
         <div class="editor-actions"><button class="button" type="button" id="source-cancel">Cancel</button><button class="button editor-save" type="submit">Save source</button></div>
-        <section id="source-help" class="source-note"><strong>Content source help</strong><p>Use a direct .zim or .pdf URL when available. ZIM archives are available from <a href="https://library.kiwix.org/">Kiwix</a>; PDF documents may be obtained from their original publishers. Saving a profile does not establish download eligibility. Full offline source documentation is forthcoming.</p></section>
+        <p class="source-note">For the full offline guide, use Content source guide on the Sources page.</p>
       </form>
+    </dialog>
+    <dialog id="source-guide" aria-labelledby="source-help-title">
+      <section id="source-help" class="source-note" aria-labelledby="source-help-title">
+  <h3 id="source-help-title">Adding offline content sources</h3>
+  <p>This guide is stored with The Axiom and remains available without internet access. Finding and downloading new content generally requires connectivity.</p>
+  <h4>1. Find content</h4>
+  <p>For Kiwix archives, browse the <a href="https://library.kiwix.org/">Kiwix library</a> or <a href="https://download.kiwix.org/zim/">official ZIM download directory</a>. Choose your language, edition and archive size. Copy the direct .zim download link rather than the catalog or article page. For PDF documents, use the original publisher, for example <a href="https://www.ready.gov/">Ready.gov</a>, and look for a direct HTTPS PDF link. Check permission to store and distribute the material offline.</p>
+  <h4>2. Add a source profile</h4>
+  <p>Choose Add Source, enter a recognizable name and the direct artifact URL, confirm the detected format, optionally describe the collection, and Save source. A stable ID is generated automatically and retained when editing. A normal website URL is not a downloadable archive. Unsupported formats can be recorded but cannot be acquired or read.</p>
+  <h4>3. Review advanced details</h4>
+  <p>Publisher, edition and language describe the content. Expected size and SHA-256 are the exact byte count and fingerprint of the intended file. Provenance records where the information came from; license records the permission to use it. Use trustworthy publisher metadata where available. A checksum calculated from a downloaded file can identify those bytes later, but does not independently prove their origin. Saving metadata does not verify it.</p>
+  <h4>4. Acquire and verify</h4>
+  <p><strong>ZIM:</strong> The existing verified Wikipedia archive is supported. New ZIM profiles currently require a matching trusted acquisition manifest; arbitrary remote downloads are not yet enabled.</p>
+  <p><strong>PDF:</strong> Local import currently requires an administrator-reviewed HTTPS publisher URL, provenance, rights note, exact size (maximum 16 MiB) and SHA-256. An operator must stage the file as staging/pdf/&lt;source-id&gt;.pdf in the configured local storage root and provision staging/pdf and library/pdf with application ownership and restrictive permissions. Use Import local PDF to verify and install. Remote PDF acquisition and network-mounted PDF storage are not yet supported; do not change an existing library storage configuration just to import a PDF.</p>
+  <h4>5. Publish and read offline</h4>
+  <p>After matching content is verified and its reader is ready, use Publish on the source card. Open the published collection from The Axiom homepage, even without internet connectivity. PDFs use the browser PDF viewer; PDF full-text search is not yet supported.</p>
+  <h4>6. Edit or remove</h4>
+  <p>Edit display details without changing the stable ID. Unpublish before changing the artifact identity or removing a published profile. Removing a profile does not delete installed files. Changing the URL, size or checksum does not transfer verification to a different artifact. Active or unresolved acquisitions may block editing.</p>
+</section>
+      <form method="dialog"><button class="button">Close guide</button></form>
     </dialog>
     <div id="source-cards">
     {% for source in (catalog|default({})).sources|default([]) %}
@@ -269,6 +290,12 @@
       const revision = {{ (catalog|default({})).revision|default(none)|tojson }};
       const dialog = document.getElementById('source-dialog');
       const form = document.getElementById('source-form');
+      const guide = document.getElementById('source-guide');
+      document.getElementById('source-guide-open').addEventListener('click', () => guide.showModal());
+      document.getElementById('source-guide-link').addEventListener('click', event => {
+        event.preventDefault();
+        guide.showModal();
+      });
       const input = name => form.elements.namedItem(name);
       const formFeedback = document.getElementById('source-form-feedback');
       const fieldsToEdit = Array.from(form.querySelectorAll('[name]:not([name="source_id"])'));
