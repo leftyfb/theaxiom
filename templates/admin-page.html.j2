@@ -308,6 +308,7 @@
           <summary>Advanced Details</summary>
           <p class="source-note">Optional publisher-supplied metadata. These values alone do not establish verification or enable acquisition.</p>
           <div class="editor-grid">
+            <div><label for="catalog-author">Author</label><input id="catalog-author" name="author" maxlength="512"></div>
             <div><label for="catalog-publisher">Publisher</label><input id="catalog-publisher" name="publisher" maxlength="512"></div>
             <div><label for="catalog-edition">Edition / release</label><input id="catalog-edition" name="edition" maxlength="512"></div>
             <div><label for="catalog-language">Language</label><input id="catalog-language" name="language" maxlength="512"></div>
@@ -331,7 +332,7 @@
   <h4>2. Add a source profile</h4>
   <p>Choose Add Source and select a local PDF to populate its title from its filename and install it in one operation. Alternatively, enter a recognizable name and optionally a direct artifact URL, confirm or select the format, optionally describe the collection, and Save source. A stable ID is generated automatically and retained when editing. A normal website URL is not a downloadable archive. Unsupported formats can be recorded but cannot be acquired or read.</p>
   <h4>3. Review advanced details</h4>
-  <p>Publisher, edition and language describe the content. Expected size and SHA-256 are the exact byte count and fingerprint of the intended file. Provenance records where the information came from; license records the permission to use it. Use trustworthy publisher metadata where available. A checksum calculated from a downloaded file can identify those bytes later, but does not independently prove their origin. Saving metadata does not verify it.</p>
+  <p>Author, publisher, edition and language describe the content. Expected size and SHA-256 are the exact byte count and fingerprint of the intended file. Provenance records where the information came from; license records the permission to use it. Use trustworthy publisher metadata where available. A checksum calculated from a downloaded file can identify those bytes later, but does not independently prove their origin. Saving metadata does not verify it.</p>
   <h4>4. Acquire and verify</h4>
   <p><strong>ZIM:</strong> The existing verified Wikipedia archive is supported. New ZIM profiles currently require a matching trusted acquisition manifest; arbitrary remote downloads are not yet enabled.</p>
   <p><strong>PDF:</strong> Use Download from URL for a configured HTTPS PDF link (up to three independently validated HTTPS redirects; query strings and private addresses remain unsupported), or Upload PDF to choose a file from your computer. Both support up to 16 MiB, compute missing size and SHA-256, and record provenance. A URL is optional for uploads. When publishing a PDF without a documented license, confirm you have permission to make it available to library users. Local or explicitly configured NFS storage is supported; the expected mount target and export must match.</p>
@@ -448,7 +449,7 @@
           <h4>Source details</h4>
           <p class="source-note" data-field="acquisition-reason">{{ source.acquisition_reason }}</p>
           <dl class="storage-status source-details">
-            {% for name in ('publisher', 'edition', 'language') %}
+            {% for name in ('author', 'publisher', 'edition', 'language') %}
             <dt>{{ name|capitalize }}</dt><dd>{{ source.profile.get(name) or '—' }}</dd>
             {% endfor %}
             <dt>Candidate URL</dt><dd>{{ source.configuration.source_url or '—' }}</dd>
@@ -862,7 +863,7 @@
           const file = uploadFile.files[0];
           if (form.dataset.operation === 'add' && file) {
             if (!file.size || file.size > 16 * 1024 * 1024) throw new Error('Choose a PDF up to 16 MiB');
-            const metadata = Object.fromEntries(Object.entries(fields).filter(([k]) => ['title','description','publisher','edition','language','source_url','license'].includes(k)));
+            const metadata = Object.fromEntries(Object.entries(fields).filter(([k]) => ['title','description','author','publisher','edition','language','source_url','license'].includes(k)));
             const headers = {'Content-Type':'application/pdf', 'X-Source-ID':source_id,
               'X-Catalog-Revision':String(revision), 'X-PDF-Add':'1',
               'X-PDF-Metadata':encodeURIComponent(JSON.stringify(metadata))};
