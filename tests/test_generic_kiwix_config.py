@@ -27,4 +27,4 @@ def test_nginx_kiwix_proxy_requires_internal_publication_for_all_paths():
     assert "internal;" in guard
     assert "X-Axiom-Original-URI $request_uri" in guard
     assert "proxy_pass http://127.0.0.1:8080/internal/publication/zim;" in guard
-    assert "location ~ ^/read/zim/[a-z0-9-]{1,63}$" in config
+    assert 'location ~ "^/read/zim/[a-z0-9-]{1,63}$"' in config
