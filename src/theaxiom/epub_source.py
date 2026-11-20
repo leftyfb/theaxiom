@@ -1,6 +1,8 @@
 """Bounded EPUB 2/3 package inspection; no extraction, rendering or network access."""
 from contextlib import contextmanager
 import hashlib
+import base64
+import struct
 from html import escape
 import io
 import posixpath
@@ -226,9 +228,39 @@ def ready(artifact):
 ROUTE_PREFIX = "/api/library/epub/"
 ROUTE = re.compile(ROUTE_PREFIX + r"([a-z0-9-]{1,63})(?:/(document\.epub|chapter/[0-9]{1,4}))?(?:\?size=(small|medium|large))?\Z")
 # Only literal trusted tags are emitted. No original HTML attributes, CSS,
-# hyperlinks, SVG, images, or active content enter the application's origin.
+# hyperlinks, SVG, or active content enter the application's origin. Raster
+# images are emitted only as bounded, typed data URLs from manifest entries.
 SAFE_TAGS = frozenset("p div section article h1 h2 h3 h4 h5 h6 blockquote pre code em strong b i u s sub sup ul ol li dl dt dd table thead tbody tfoot tr th td caption br hr span".split())
 DROP_TAGS = frozenset("script style iframe object embed form base head link meta svg math audio video".split())
+
+
+MAX_IMAGE = 2 * 1024 * 1024
+MAX_IMAGE_PIXELS = 16_000_000
+MAX_CHAPTER_IMAGES = 4 * 1024 * 1024
+
+
+def _raster_type(data, media):
+    """Accept bounded PNG/GIF/JPEG headers, not SVG or arbitrary MIME claims."""
+    width = height = 0
+    if media == "image/png" and data.startswith(b"\x89PNG\r\n\x1a\n") and len(data) >= 33 and data[12:16] == b"IHDR":
+        width, height = struct.unpack(">II", data[16:24])
+    elif media == "image/gif" and data[:6] in (b"GIF87a", b"GIF89a") and len(data) >= 13:
+        width, height = struct.unpack("<HH", data[6:10])
+    elif media == "image/jpeg" and data.startswith(b"\xff\xd8"):
+        offset = 2
+        while offset + 4 <= len(data) and data[offset] == 255:
+            marker = data[offset + 1]
+            offset += 2
+            if marker in (0xd9, 0xda):
+                break
+            length = int.from_bytes(data[offset:offset+2], "big")
+            if length < 2 or offset + length > len(data):
+                break
+            if marker in (0xc0, 0xc1, 0xc2) and length >= 8:
+                height, width = struct.unpack(">HH", data[offset+3:offset+7])
+                break
+            offset += length
+    return bool(0 < width <= 8192 and 0 < height <= 8192 and width * height <= MAX_IMAGE_PIXELS)
 
 
 def chapter_content(data, index):
@@ -236,12 +268,36 @@ def chapter_content(data, index):
     if not 0 <= index < len(metadata["chapters"]):
         raise ValueError("Unknown EPUB chapter")
     with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        container = _xml(archive, "META-INF/container.xml")
+        package_path = container.find(CONTAINER + "rootfiles/" + CONTAINER + "rootfile").get("full-path")
+        package = _xml(archive, package_path)
+        images = {}
+        for item in package.findall(OPF + "manifest/" + OPF + "item"):
+            media = item.get("media-type")
+            if media in {"image/png", "image/jpeg", "image/gif"}:
+                images[_resolve(package_path, item.get("href", ""))] = media
+        remaining = MAX_CHAPTER_IMAGES
+
         def safe(node):
+            nonlocal remaining
             name = node.tag[len(XHTML):] if node.tag.startswith(XHTML) else ""
             if not name or name in DROP_TAGS:
                 return ""
             if name == "img":
-                return escape(node.get("alt", ""))
+                alt = escape(node.get("alt", ""), quote=True)
+                try:
+                    path = _resolve(metadata["chapters"][index], node.get("src", ""))
+                    media = images.get(path)
+                    member = archive.getinfo(path)
+                    if media and 0 < member.file_size <= min(MAX_IMAGE, remaining):
+                        raster = archive.read(member)
+                        if _raster_type(raster, media):
+                            remaining -= len(raster)
+                            encoded = base64.b64encode(raster).decode("ascii")
+                            return f'<img src="data:{media};base64,{encoded}" alt="{alt}" loading="lazy">'
+                except (ValueError, KeyError):
+                    pass
+                return alt
             content = escape(node.text or "") + "".join(
                 safe(child) + escape(child.tail or "") for child in node)
             if name in {"br", "hr"}:

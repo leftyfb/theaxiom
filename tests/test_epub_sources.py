@@ -7,12 +7,12 @@ import pytest
 from theaxiom import epub_source
 
 
-def book(*, chapter=None, extra=(), href="chapter.xhtml", version="3.0"):
+def book(*, chapter=None, extra=(), href="chapter.xhtml", version="3.0", manifest_extra=""):
     out = io.BytesIO()
     with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED) as z:
         z.writestr("mimetype", "application/epub+zip", compress_type=zipfile.ZIP_STORED)
         z.writestr("META-INF/container.xml", '<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OPS/book.opf" media-type="application/oebps-package+xml"/></rootfiles></container>')
-        z.writestr("OPS/book.opf", f'<package xmlns="http://www.idpf.org/2007/opf" xmlns:dc="http://purl.org/dc/elements/1.1/" version="{version}"><metadata><dc:title>Offline &amp; safe</dc:title><dc:creator>Example Author</dc:creator><dc:language>en</dc:language><dc:publisher>Example Press</dc:publisher></metadata><manifest><item id="c" href="{href}" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="c"/></spine></package>')
+        z.writestr("OPS/book.opf", f'<package xmlns="http://www.idpf.org/2007/opf" xmlns:dc="http://purl.org/dc/elements/1.1/" version="{version}"><metadata><dc:title>Offline &amp; safe</dc:title><dc:creator>Example Author</dc:creator><dc:language>en</dc:language><dc:publisher>Example Press</dc:publisher></metadata><manifest><item id="c" href="{href}" media-type="application/xhtml+xml"/>{manifest_extra}</manifest><spine><itemref idref="c"/></spine></package>')
         z.writestr("OPS/chapter.xhtml", chapter if chapter is not None else '<html xmlns="http://www.w3.org/1999/xhtml"><body><h1>Chapter one</h1><p>Hello offline.</p></body></html>')
         for name, content in extra:
             z.writestr(name, content)
@@ -204,3 +204,23 @@ def test_epub_public_reader_and_revocation(epub_app, disk):
     request(base + "/document.epub", status=403)
     assert "Open EPUB" not in request("/")
     assert (disk / "library/epub" / source(catalog, "fixture-book")["artifact"]["filename"]).read_bytes() == data
+
+
+def test_embedded_raster_and_external_resources():
+    import base64
+    png = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aV1sAAAAASUVORK5CYII=")
+    data = book(chapter='<html xmlns="http://www.w3.org/1999/xhtml"><body><img src="cover.png" alt="Cover &amp; art"/><img src="evil.png" alt="Rejected"/><img src="https://external.test/img" alt="External"/><img src="hidden.png" alt="Unlisted"/></body></html>',
+                manifest_extra='<item id="i" href="cover.png" media-type="image/png"/><item id="x" href="evil.png" media-type="image/png"/>',
+                extra=[("OPS/cover.png", png), ("OPS/evil.png", b"<svg onload='bad()'/>"), ("OPS/hidden.png", png)])
+    content, labels = epub_source.chapter_content(data, 0)
+    assert content.count("<img ") == 1
+    assert 'src="data:image/png;base64,' in content
+    assert 'alt="Cover &amp; art"' in content
+    assert "Rejected" in content and "External" in content and "Unlisted" in content
+    assert "external.test" not in content and "<svg" not in content
+
+
+def test_image_pixel_budget():
+    import struct
+    header = b"\x89PNG\r\n\x1a\n" + struct.pack(">I", 13) + b"IHDR" + struct.pack(">II", 8192, 8192) + b"\0" * 9
+    assert not epub_source._raster_type(header, "image/png")
