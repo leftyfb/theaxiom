@@ -63,11 +63,12 @@ def _remaining(deadline):
 
 
 class _BoundedBody:
-    def __init__(self, response, deadline, length):
+    def __init__(self, response, deadline, length, limit=None):
         self.response = response
         self.deadline = deadline
         self.length = length
         self.count = 0
+        self.limit = pdf_source.MAX_BYTES if limit is None else limit
 
     def read(self, size):
         _remaining(self.deadline)
@@ -78,7 +79,7 @@ class _BoundedBody:
             raise DownloadError("PDF network response interrupted or timed out") from exc
         _remaining(self.deadline)
         self.count += len(data)
-        if self.count > pdf_source.MAX_BYTES:
+        if self.count > self.limit:
             raise ValueError("PDF exceeds download limit")
         if not data and self.length is not None and self.count != self.length:
             raise ValueError("PDF response body is incomplete")
@@ -86,10 +87,11 @@ class _BoundedBody:
 
 
 @contextmanager
-def open_pdf(url, *, format_name="pdf"):
-    if format_name not in {"pdf", "epub"}:
+def open_pdf(url, *, format_name="pdf", limit=None, total_seconds=None):
+    if format_name not in {"pdf", "epub", "zim"} or (format_name == "zim" and (limit is None or total_seconds is None)):
         raise ValueError("Unsupported document format")
-    deadline = time.monotonic() + TOTAL_SECONDS
+    limit = pdf_source.MAX_BYTES if limit is None else limit
+    deadline = time.monotonic() + (TOTAL_SECONDS if total_seconds is None else total_seconds)
     visited = set()
     for hop in range(MAX_REDIRECTS + 1):
         if not isinstance(url, str) or not pdf_source.valid_source_url(url):
@@ -106,7 +108,7 @@ def open_pdf(url, *, format_name="pdf"):
         connection = _PinnedHTTPS(canonical.hostname, addresses[0], deadline)
         try:
             connection.request("GET", canonical.path, headers={
-                "Accept": ("application/epub+zip" if format_name == "epub" else "application/pdf") + ", application/octet-stream",
+                "Accept": ({"epub": "application/epub+zip", "pdf": "application/pdf", "zim": "application/octet-stream"}[format_name]) + ", application/octet-stream",
                 "Accept-Encoding": "identity", "Connection": "close",
                 "User-Agent": "The-Axiom PDF acquisition",
             })
@@ -134,12 +136,12 @@ def open_pdf(url, *, format_name="pdf"):
                     raise ValueError("Ambiguous PDF response framing")
                 length = None
                 if lengths:
-                    if len(lengths) != 1 or not lengths[0].isascii() or not lengths[0].isdigit() or len(lengths[0]) > 10:
+                    if len(lengths) != 1 or not lengths[0].isascii() or not lengths[0].isdigit() or len(lengths[0]) > (20 if format_name == "zim" else 10):
                         raise ValueError("Invalid PDF response size")
                     length = int(lengths[0])
-                    if not 0 < length <= pdf_source.MAX_BYTES:
+                    if not 0 < length <= limit:
                         raise ValueError("PDF response size exceeds limits")
-                yield _BoundedBody(response, deadline, length)
+                yield _BoundedBody(response, deadline, length, limit)
                 return
             finally:
                 response.close()
