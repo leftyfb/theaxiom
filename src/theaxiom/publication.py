@@ -77,15 +77,17 @@ def reachable(route):
         connection.close()
 
 
-def reader_location(route):
+def reader_location(route, book_id=None):
     """Discover the single local book's content link from Kiwix OPDS.
 
     Only accept a local, prefix-scoped book link. Never follow a remote URL
     or return catalog-supplied executable markup.
     """
+    if book_id is not None and not catalog_store.ID_RE.fullmatch(book_id):
+        return None
     connection = http.client.HTTPConnection("127.0.0.1", route["port"], timeout=2)
     try:
-        connection.request("GET", route["path"] + "catalog/v2/entries?count=2")
+        connection.request("GET", route["path"] + ("catalog/v2/entries?count=101" if book_id else "catalog/v2/entries?count=2"))
         response = connection.getresponse()
         if response.status != 200:
             return None
@@ -94,17 +96,25 @@ def reader_location(route):
             return None
         root = ET.fromstring(data)
         entries = root.findall("{http://www.w3.org/2005/Atom}entry")
-        if len(entries) != 1:
+        if not entries or len(entries) > (100 if book_id else 1):
             return None
         prefix = route["path"] + "content/"
         names = set()
-        for link in entries[0].findall("{http://www.w3.org/2005/Atom}link"):
-            href = link.get("href", "")
-            u = urlsplit(href)
-            if u.scheme or u.netloc or u.query or u.fragment or not u.path.startswith(prefix):
-                continue
-            name = u.path[len(prefix):].rstrip("/")
-            if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,200}", name):
+        for entry in entries:
+            entry_names = set()
+            for link in entry.findall("{http://www.w3.org/2005/Atom}link"):
+                href = link.get("href", "")
+                u = urlsplit(href)
+                if u.scheme or u.netloc or u.query or u.fragment or not u.path.startswith(prefix):
+                    continue
+                name = u.path[len(prefix):].rstrip("/")
+                if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,200}", name):
+                    entry_names.add(name)
+            # An ambiguous entry can never authenticate a reader destination.
+            if len(entry_names) != 1:
+                return None
+            name = next(iter(entry_names))
+            if book_id is None or name == book_id:
                 names.add(name)
         if len(names) != 1:
             return None
