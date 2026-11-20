@@ -297,6 +297,16 @@ def download_resumable(source_id, config, *, offset=0, validator=None,
                     promoting()  # establishes a non-cancellable atomic promotion phase
                     filename = source_id + "." + digest + ".zim"
                     os.link(name, filename, src_dir_fd=staging, dst_dir_fd=library, follow_symlinks=False)
+                    # The staging directory may intentionally be mode 0777. Verify
+                    # that the hard link refers to the exact inode we hashed,
+                    # not a different file swapped into its predictable name.
+                    pinned = os.fstat(fd)
+                    linked = os.stat(filename, dir_fd=library, follow_symlinks=False)
+                    if ((linked.st_dev, linked.st_ino, linked.st_size) !=
+                            (pinned.st_dev, pinned.st_ino, count)):
+                        os.unlink(filename, dir_fd=library)
+                        os.fsync(library)
+                        raise ValueError("Staged ZIM changed during final promotion")
                     os.fsync(library)
                     os.unlink(name, dir_fd=staging)
                     os.fsync(staging)
