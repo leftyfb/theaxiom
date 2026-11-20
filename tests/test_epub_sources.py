@@ -105,3 +105,12 @@ def test_epub_storage_refuses_symlink(disk, tmp_path):
     (disk / "library/epub").symlink_to(tmp_path, target_is_directory=True)
     with pytest.raises(OSError):
         epub_source.install_stream("fixture-book", io.BytesIO(book()))
+
+
+def test_epub_lifecycle_adapter():
+    from theaxiom import admin_api
+    life = admin_api.select_lifecycle("fixture-book", {"format": "epub", "source_url": "https://publisher.org/book.epub"})
+    assert life["adapter"] == "epub"
+    assert life["pdf_download"]
+    assert not life["artifact"]
+    assert not life["actions"]

@@ -86,7 +86,9 @@ class _BoundedBody:
 
 
 @contextmanager
-def open_pdf(url):
+def open_pdf(url, *, format_name="pdf"):
+    if format_name not in {"pdf", "epub"}:
+        raise ValueError("Unsupported document format")
     deadline = time.monotonic() + TOTAL_SECONDS
     visited = set()
     for hop in range(MAX_REDIRECTS + 1):
@@ -104,7 +106,7 @@ def open_pdf(url):
         connection = _PinnedHTTPS(canonical.hostname, addresses[0], deadline)
         try:
             connection.request("GET", canonical.path, headers={
-                "Accept": "application/pdf, application/octet-stream",
+                "Accept": ("application/epub+zip" if format_name == "epub" else "application/pdf") + ", application/octet-stream",
                 "Accept-Encoding": "identity", "Connection": "close",
                 "User-Agent": "The-Axiom PDF acquisition",
             })

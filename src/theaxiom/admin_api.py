@@ -33,6 +33,7 @@ security = importlib.import_module(f"{__package__}.admin_security" if __package_
 monitoring = importlib.import_module(f"{__package__}.acquisition_monitor" if __package__ else "theaxiom.acquisition_monitor")
 publication = importlib.import_module(f"{__package__}.publication" if __package__ else "theaxiom.publication")
 pdf_source = importlib.import_module(f"{__package__}.pdf_source" if __package__ else "theaxiom.pdf_source")
+epub_source = importlib.import_module(f"{__package__}.epub_source" if __package__ else "theaxiom.epub_source")
 pdf_transport = importlib.import_module(f"{__package__}.pdf_transport" if __package__ else "theaxiom.pdf_transport")
 library_search = importlib.import_module(f"{__package__}.search" if __package__ else "theaxiom.search")
 BIND_HOST = "127.0.0.1"
@@ -82,13 +83,22 @@ def _release_revision() -> str | None:
 
 
 ARTIFACT_FIELDS = {"format", "source_url", "expected_size_bytes", "sha256"}
-FORMAT_ADAPTERS = {"zim": "kiwix", "pdf": "pdf"}
+FORMAT_ADAPTERS = {"zim": "kiwix", "pdf": "pdf", "epub": "epub"}
 
 
 def select_lifecycle(source_id, configuration):
     """Select by format first; candidate configuration never creates trust."""
     format_name = configuration.get("format")
     adapter = FORMAT_ADAPTERS.get(format_name) if isinstance(format_name, str) else None
+    if adapter == "epub" and source_id not in publication.ROUTES:
+        artifact = None
+        try:
+            artifact = epub_source.pin(source_id, configuration, require_rights=False)
+        except ValueError:
+            pass
+        return dict(adapter=adapter, configuration_valid=artifact is not None, artifact=artifact,
+                    pdf_download=pdf_source.valid_source_url(configuration.get("source_url", "")),
+                    acquisition_reason="Upload an EPUB or download from a direct HTTPS URL. Publication is not yet supported.", actions={})
     if adapter == "pdf" and source_id not in publication.ROUTES:
         artifact = None
         try:
@@ -429,6 +439,11 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         return (record["source_id"] not in publication.ROUTES
                 and record["configuration"].get("format") == "pdf")
 
+    @staticmethod
+    def _epub_record(record):
+        return (record["source_id"] not in publication.ROUTES
+                and record["configuration"].get("format") == "epub")
+
     def _public_library(self):
         """Return only published sources and groups containing those sources."""
         with publication.LOCK:
@@ -598,7 +613,10 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 busy = False
                 pdf_state = pdf_source.status(record, artifacts[sid])
                 state = pdf_state
-            verified = (bool(state and state["verified"]) if self._pdf_record(record)
+            elif self._epub_record(record):
+                busy = False
+            verified = (epub_source.ready(artifacts[sid]) if self._epub_record(record) else
+                        bool(state and state["verified"]) if self._pdf_record(record)
                         else publication.verified(matched, sid))
             job = jobs.get(sid)
             publication_filter = ("unknown" if state and state.get("error") else
@@ -607,7 +625,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             if verified:
                 download_filter = "downloaded"
             elif not (state and state.get("error")):
-                if self._pdf_record(record):
+                if self._pdf_record(record) or self._epub_record(record):
                     if not artifacts[sid]:
                         download_filter = "not-downloaded"
                     else:
@@ -716,9 +734,9 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     operation, fields, revision = data["operation"], data["fields"], data["revision"]
                     catalog = SOURCE_CATALOG.get()
                     existing = next((item for item in catalog["sources"] if item["source_id"] == sid), None)
-                    is_pdf = (existing and self._pdf_record(existing)) or (
+                    is_pdf = (existing and (self._pdf_record(existing) or self._epub_record(existing))) or (
                         existing is None and isinstance(sid, str) and sid not in publication.ROUTES
-                        and isinstance(fields, dict) and fields.get("format") == "pdf")
+                        and isinstance(fields, dict) and fields.get("format") in {"pdf", "epub"})
                     busy = not is_pdf and source_busy(self._snapshot(), sid)
                     unpublished = False
                     if operation == "remove":
@@ -831,7 +849,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             data = self._read_body()
             if data.get("action") == "import":
                 self._import_pdf(data)
-            elif data.get("action") == "pdf-download":
+            elif data.get("action") in {"pdf-download", "epub-download"}:
                 self._download_pdf(data)
             else:
                 self._refuse_acquisition(data)
@@ -881,6 +899,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         adding = additions == ["1"]
         metadata = self.headers.get_all("X-PDF-Metadata", [])
         auto_title = self.headers.get_all("X-PDF-Auto-Title", [])
+        formats = self.headers.get_all("X-Document-Format", [])
+        requested_format = formats[0] if formats else "pdf"
         if not self.headers.get("Origin"):
             self._send_json(403, {"error": "same-origin request required"})
             return
@@ -889,7 +909,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 or length <= 0 or self.headers.get("Content-Encoding")
                 or (additions and not adding) or (adding and len(metadata) != 1)
                 or (not adding and metadata)
-                or (auto_title and (not adding or auto_title != ["1"]))):
+                or (auto_title and (not adding or auto_title != ["1"]))
+                or len(formats) > 1 or requested_format not in {"pdf", "epub"}):
             self._send_json(400, {"error": "invalid PDF upload metadata"})
             return
         sid, revision = ids[0], int(revisions[0])
@@ -901,7 +922,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 fields = json.loads(unquote(metadata[0], errors="strict"))
                 SOURCE_CATALOG._validate_fields(fields, catalog_store.PROFILE_FIELDS | {"source_url", "license"},
                                                 required={"title"})
-                fields["format"] = "pdf"
+                fields["format"] = requested_format
                 if fields.get("source_url") and not pdf_source.valid_source_url(fields["source_url"]):
                     raise ValueError
             except (ValueError, UnicodeError):
@@ -925,8 +946,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 if adding:
                     if record is not None or sid in publication.ROUTES or len(catalog["sources"]) >= catalog_store.MAX_ENTRIES:
                         raise ValueError("source ID already exists or catalog is full")
-                elif record is None or not self._pdf_record(record):
-                    raise ValueError("source has no PDF upload adapter")
+                elif record is None or not (self._pdf_record(record) if requested_format == "pdf" else self._epub_record(record)):
+                    raise ValueError("source has no matching document upload adapter")
                 if publication.load().get(sid, False):
                     raise ValueError("Unpublish source before uploading")
                 config = {} if adding else record["configuration"]
@@ -934,10 +955,20 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 digest = config.get("sha256") or None
                 if size and int(size) != length:
                     raise ValueError("Upload size does not match the catalog pin")
-                observed = pdf_source.install_stream(sid, BytesIO(data), expected_size=length,
-                                                     expected_sha256=digest)
-                if adding and auto_title:
-                    fields["title"] = pdf_source.simple_document_title(data) or fields["title"]
+                if requested_format == "epub":
+                    observed, extracted = epub_source.install_stream(sid, BytesIO(data), expected_size=length,
+                                                                    expected_sha256=digest)
+                    profile = fields if adding else record["profile"]
+                    for key in ("author", "publisher", "language"):
+                        if not profile.get(key) and extracted.get(key):
+                            fields[key] = extracted[key]
+                    if adding and auto_title and extracted.get("title"):
+                        fields["title"] = extracted["title"]
+                else:
+                    observed = pdf_source.install_stream(sid, BytesIO(data), expected_size=length,
+                                                         expected_sha256=digest)
+                    if adding and auto_title:
+                        fields["title"] = pdf_source.simple_document_title(data) or fields["title"]
                 note = "Uploaded by administrator; SHA-256 calculated locally, not independently publisher-verified."
                 provenance = config.get("provenance", "").strip()
                 if provenance:
@@ -976,8 +1007,9 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 if data["revision"] != catalog["revision"]:
                     raise ValueError("catalog revision changed")
                 record = next((item for item in catalog["sources"] if item["source_id"] == sid), None)
-                if record is None or not self._pdf_record(record):
-                    raise ValueError("source has no PDF download adapter")
+                is_epub = data["action"] == "epub-download"
+                if record is None or not (self._epub_record(record) if is_epub else self._pdf_record(record)):
+                    raise ValueError("source has no matching document download adapter")
                 if publication.load().get(sid, False):
                     raise ValueError("Unpublish source before downloading")
                 config = record["configuration"]
@@ -986,8 +1018,14 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     raise ValueError("A direct HTTPS PDF URL is required")
                 size = config.get("expected_size_bytes") or None
                 digest = config.get("sha256") or None
-                observed = pdf_transport.download(sid, url, expected_size=int(size) if size else None,
-                                                  expected_sha256=digest)
+                extracted = {}
+                if is_epub:
+                    with pdf_transport.open_pdf(url, format_name="epub") as stream:
+                        observed, extracted = epub_source.install_stream(sid, stream,
+                            expected_size=int(size) if size else None, expected_sha256=digest)
+                else:
+                    observed = pdf_transport.download(sid, url, expected_size=int(size) if size else None,
+                                                      expected_sha256=digest)
                 provenance = config.get("provenance", "").strip()
                 if not provenance:
                     provenance = "Downloaded via configured HTTPS URL; SHA-256 calculated locally, not independently publisher-verified."
@@ -996,6 +1034,9 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     provenance = provenance[:catalog_store.MAX_FIELD - len(suffix)] + suffix
                 fields = {"expected_size_bytes": str(observed["bytes"]), "sha256": observed["sha256"],
                           "provenance": provenance}
+                for key in ("author", "publisher", "language"):
+                    if not record["profile"].get(key) and extracted.get(key):
+                        fields[key] = extracted[key]
                 updated = SOURCE_CATALOG.mutate("edit", sid, fields, data["revision"])
             except catalog_store.RevisionConflict as exc:
                 self._send_json(409, {"error": str(exc)})

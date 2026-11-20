@@ -277,11 +277,11 @@
         <input id="catalog-id" name="source_id" type="hidden">
         <p id="catalog-id-display" class="source-note" hidden></p>
         <div class="editor-grid">
-          <div class="editor-wide" id="source-upload-row"><label for="source-upload-file">Upload PDF (optional)</label><input id="source-upload-file" type="file" accept=".pdf,application/pdf"><small>Choose a PDF to populate its name and format automatically.</small></div>
+          <div class="editor-wide" id="source-upload-row"><label for="source-upload-file">Upload PDF or EPUB (optional)</label><input id="source-upload-file" type="file" accept=".pdf,.epub,application/pdf,application/epub+zip"><small>Choose a PDF or EPUB to populate its name and format automatically.</small></div>
           <div class="editor-wide"><label for="catalog-title">Source name</label><input id="catalog-title" name="title" required maxlength="512"></div>
           <div class="editor-wide"><label for="catalog-url">Source URL</label><input id="catalog-url" name="source_url" type="url" maxlength="512">
             <small>Direct HTTP(S) download URL, if available.</small></div>
-          <div><label for="catalog-format">Content format</label><select id="catalog-format" name="format"><option value="unspecified">Auto / not yet specified</option><option value="zim">Kiwix / ZIM</option><option value="pdf">PDF</option></select></div>
+          <div><label for="catalog-format">Content format</label><select id="catalog-format" name="format"><option value="unspecified">Auto / not yet specified</option><option value="zim">Kiwix / ZIM</option><option value="pdf">PDF</option><option value="epub">EPUB</option></select></div>
           <div class="editor-wide"><label for="catalog-description">Description (optional)</label><textarea id="catalog-description" name="description" maxlength="512"></textarea></div>
         </div>
         <details id="source-editor-groups" hidden>
@@ -407,7 +407,7 @@
             {% for kind in ["categories", "collections", "tags"] %}{% set memberships = [] %}{% for group in groups if group.kind == kind and source.source_id in group.source_ids %}{% set _ = memberships.append(group.name) %}{% endfor %}{% if memberships %}<p class="group-membership">{{ kind|capitalize }}: {{ memberships|sort|join(", ") }}</p>{% endif %}{% endfor %}
             {% if pub %}<span class="compact-publication" data-field="publication-summary">{{ publication_label }}</span>{% endif %}
           </div>
-          <span class="badge" data-field="status" role="status">{% if source.adapter == 'pdf' %}{% if source.installed_verified and source.artifact %}{{ source.artifact.bytes | filesizeformat(true) }}{% else %}PDF not installed or invalid{% endif %}{% elif source.installed_verified and source.artifact %}{{ source.artifact.bytes | filesizeformat(true) }}{% elif not source.artifact and not source.mutation_blocked %}Not downloaded{% elif catalog.acquisition_stale %}Status unavailable{% elif not source.artifact %}Acquisition unresolved{% else %}Waiting for status…{% endif %}</span>
+          <span class="badge" data-field="status" role="status">{% if source.adapter in ('pdf','epub') %}{% if source.installed_verified and source.artifact %}{{ source.artifact.bytes | filesizeformat(true) }}{% else %}{{ source.adapter|upper }} not installed or invalid{% endif %}{% elif source.installed_verified and source.artifact %}{{ source.artifact.bytes | filesizeformat(true) }}{% elif not source.artifact and not source.mutation_blocked %}Not downloaded{% elif catalog.acquisition_stale %}Status unavailable{% elif not source.artifact %}Acquisition unresolved{% else %}Waiting for status…{% endif %}</span>
         </summary>
         <div class="source-expanded">
         <div class="source-live">
@@ -425,11 +425,11 @@
           {% endfor %}
         </div>
         {% endif %}
-        {% if source.adapter == 'pdf' and not pub.enabled %}
+        {% if source.adapter in ('pdf','epub') and not pub.enabled %}
         <div class="source-actions" aria-label="PDF acquisition">
           {% if source.pdf_download and not pub.enabled %}<button class="button" type="button" data-pdf-download>Download from URL</button>{% endif %}
-          <button class="button" type="button" data-pdf-upload>Upload PDF</button>
-          <input type="file" accept=".pdf,application/pdf" data-pdf-file hidden aria-label="Choose PDF file">
+          <button class="button" type="button" data-pdf-upload>Upload {{ source.adapter|upper }}</button>
+          <input type="file" accept=".{{ source.adapter }},{{ 'application/epub+zip' if source.adapter == 'epub' else 'application/pdf' }}" data-pdf-file hidden aria-label="Choose PDF file">
           <span data-pdf-feedback role="status"></span>
         </div>
         {% endif %}
@@ -743,19 +743,19 @@
       uploadFile.addEventListener("change", () => {
         const file = uploadFile.files[0];
         if (!file) return;
-        const title = file.name.replace(/\.pdf$/i, "").replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+        const title = file.name.replace(/\.(pdf|epub)$/i, "").replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
         if (!input("title").value.trim() || automaticTitle) {
           input("title").value = title.slice(0, 512) || "Untitled PDF";
           automaticTitle = true;
         }
-        format.value = "pdf";
+        format.value = /\.epub$/i.test(file.name) ? "epub" : "pdf";
         manualFormat = true;
       });
       function detectFormat() {
         if (manualFormat) return;
         try {
           const path = new URL(input('source_url').value).pathname.toLowerCase();
-          format.value = path.endsWith('.zim') ? 'zim' : path.endsWith('.pdf') ? 'pdf' : 'unspecified';
+          format.value = path.endsWith('.zim') ? 'zim' : path.endsWith('.pdf') ? 'pdf' : path.endsWith('.epub') ? 'epub' : 'unspecified';
         } catch (_) { format.value = 'unspecified'; }
       }
       input('source_url').addEventListener('input', detectFormat);
@@ -864,7 +864,7 @@
           if (form.dataset.operation === 'add' && file) {
             if (!file.size || file.size > 16 * 1024 * 1024) throw new Error('Choose a PDF up to 16 MiB');
             const metadata = Object.fromEntries(Object.entries(fields).filter(([k]) => ['title','description','author','publisher','edition','language','source_url','license'].includes(k)));
-            const headers = {'Content-Type':'application/pdf', 'X-Source-ID':source_id,
+            const headers = {'Content-Type':format.value === 'epub' ? 'application/epub+zip' : 'application/pdf', 'X-Document-Format':format.value, 'X-Source-ID':source_id,
               'X-Catalog-Revision':String(revision), 'X-PDF-Add':'1',
               'X-PDF-Metadata':encodeURIComponent(JSON.stringify(metadata))};
             if (automaticTitle) headers['X-PDF-Auto-Title'] = '1';
@@ -886,7 +886,7 @@
         try { await change('remove', source_id, {}); }
         catch (error) { feedback.textContent = error.message; }
       }));
-      {% if catalog.sources | selectattr('adapter', 'equalto', 'pdf') | list %}
+      {% if catalog.sources | selectattr('adapter', 'in', ['pdf','epub']) | list %}
       async function acquirePDF(card, file = null) {
         const feedback = card.querySelector('[data-pdf-feedback]');
         const buttons = card.querySelectorAll('[data-pdf-download], [data-pdf-upload]');
@@ -899,9 +899,9 @@
         try {
           const response = file
             ? await fetch('/api/pdf-upload', {method:'POST', headers:{'Content-Type':'application/pdf',
-                'X-Source-ID':card.dataset.sourceId, 'X-Catalog-Revision':String(revision)}, body:file})
+                'X-Document-Format':card.dataset.filterFormat, 'X-Source-ID':card.dataset.sourceId, 'X-Catalog-Revision':String(revision)}, body:file})
             : await fetch('/api/action', {method:'POST', headers:{'Content-Type':'application/json'},
-                body:JSON.stringify({source_id:card.dataset.sourceId, action:'pdf-download', revision})});
+                body:JSON.stringify({source_id:card.dataset.sourceId, action:card.dataset.filterFormat === 'epub' ? 'epub-download' : 'pdf-download', revision})});
           const result = await response.json().catch(() => ({}));
           if (!response.ok) throw new Error(result.error || 'PDF acquisition failed (HTTP ' + response.status + ')');
           if (!result.installed_verified) throw new Error('PDF installation was not confirmed');
@@ -1114,8 +1114,8 @@
           const sources = new Map(data.sources.map(source => [source.source_id, source]));
           cards.forEach(card => {
             const source = sources.get(card.dataset.sourceId);
-            if (source?.adapter === 'pdf') {
-              card.querySelector('[data-field="status"]').textContent = source.installed_verified ? size(source.artifact?.bytes) : 'PDF not installed or invalid';
+            if (['pdf','epub'].includes(source?.adapter)) {
+              card.querySelector('[data-field="status"]').textContent = source.installed_verified ? size(source.artifact?.bytes) : source.adapter.toUpperCase() + ' not installed or invalid';
               card.querySelector('[data-field="verified"]').textContent = source.installed_verified ? 'PDF pin verified' : 'Not confirmed';
             } else if (source?.artifact) render(card, source.acquisition, data.acquisition_stale !== false);
             else card.querySelector('[data-field="status"]').textContent = data.acquisition_stale ? 'Status unavailable' :
