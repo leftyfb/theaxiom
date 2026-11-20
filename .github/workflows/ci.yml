@@ -58,7 +58,8 @@ jobs:
               "$GITHUB_REPOSITORY" "$GITHUB_SHA" "$GITHUB_REF_NAME" "$TEST_RESULT" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"
             printf '\nTest output (last 30 lines):\n\n'
             if [[ -f "$RUNNER_TEMP/ci-report/axiom-pytest.log" ]]; then
-              printf '    '; tail -n 30 "$RUNNER_TEMP/ci-report/axiom-pytest.log" | sed '2,$s/^/    /'
+              tail -n 30 "$RUNNER_TEMP/ci-report/axiom-pytest.log" | tail -c 12000 | sed 's/^/    /'
+              printf '\nExcerpt limited to 12000 bytes; see workflow artifact for full output.\n'
             else
               printf 'Test log unavailable; inspect workflow run.\n'
             fi

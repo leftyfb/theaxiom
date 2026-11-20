@@ -13,7 +13,9 @@ class AdminWebUISkeletonTests(unittest.TestCase):
                        "No managed sources configured.", 'name="format"', "fetch('/api/sources'",
                        'id="status-staging"', 'id="status-library"'):
             self.assertIn(marker, text)
-        self.assertIn("action:'import'", text)
+        for marker in ("data-pdf-import", "data-pdf-download",
+                       "action:download ? 'pdf-download' : 'import'"):
+            self.assertTrue(marker in text, f"Missing PDF action marker: {marker}")
         for marker in ("data-dest=", "auth_basic", "proxy_pass",
                        "nginx", "systemd"):
             self.assertNotIn(marker, text.lower())
