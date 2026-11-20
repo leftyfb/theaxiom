@@ -44,7 +44,18 @@
     .button:disabled { opacity: .55; cursor: not-allowed; }
     .source-card progress { width: 100%; accent-color: var(--green); height: .9rem; }
     .source-card { padding: 0; margin: .65rem 0; }
-    .source-card > summary { padding: .8rem 1rem; list-style: none; }
+    .source-row { position:relative; margin:.65rem 0; }
+    .source-row > .source-card { margin:0; }
+    .source-row > .group-select { position:absolute; z-index:1; left:.7rem; top:.75rem; width:2rem; min-height:36px; justify-content:center; }
+    .source-row:has(> .group-select:not([hidden])) > .source-card > summary { padding-left:3.25rem; }
+    .source-row[hidden] { display:none !important; }
+    .source-card > summary { padding: .65rem .85rem; list-style:none; flex-wrap:nowrap; }
+    .source-card > summary .source-symbol { width:2.4rem; text-align:center; padding:.5rem .15rem; flex:none; }
+    .source-card > summary .source-subtitle { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin:.15rem 0; }
+    .source-card > summary .compact-publication { display:block; }
+    .source-card > summary .badge { max-width:11rem; text-align:right; }
+    .source-card > summary .summary-progress { display:block; max-width:12rem; height:.45rem; margin-top:.25rem; }
+    @media(max-width:550px) { .source-card > summary { flex-wrap:wrap; gap:.4rem; } .source-card > summary .badge { margin-left:auto; max-width:100%; } .source-card > summary .source-symbol { width:2rem; } }
     .source-card > summary::-webkit-details-marker { display: none; }
     .source-card > summary::after { content: '▾'; color: var(--green); margin-left: .25rem; }
     .source-card[open] > summary::after { content: '▴'; }
@@ -398,18 +409,22 @@
     {% for source in (catalog|default({})).sources|default([]) %}
       {% set pub = source.publication %}
       {% set publication_label = 'Publication status unavailable' if pub.error else 'Published · available in library' if pub.published else 'Enabled · reader unavailable' if pub.enabled else 'Unpublished · ready to publish' if pub.serving else 'Unpublished · ' + pub.publication_reason if pub.publication_reason else 'Unpublished · reader not ready' %}
+      <div class="source-row">
+      <label class="group-select" hidden><input type="checkbox" data-group-select value="{{ source.source_id }}" aria-label="Select {{ source.profile.title }} for grouping"></label>
       <details class="source-card" data-source-id="{{ source.source_id }}" data-filter-title="{{ source.profile.title }}" data-filter-format="{{ source.configuration.format }}" data-filter-publication="{{ source.publication_filter|default('unknown') }}" data-filter-download="{{ source.download_filter|default('unknown') }}"{% for name in editable_fields %} data-catalog-{{ name|replace('_', '-') }}="{{ source.profile.get(name, source.configuration.get(name, '')) }}"{% endfor %}>
         <summary class="source-header">
-          <label class="group-select" hidden><input type="checkbox" data-group-select value="{{ source.source_id }}" aria-label="Select {{ source.profile.title }} for grouping">Select</label>
+          <span class="source-symbol" aria-hidden="true">{{ 'P' if source.adapter == 'pdf' else 'E' if source.adapter == 'epub' else 'Z' if source.adapter == 'kiwix' else '·' }}</span>
           <div>
             <h3>{{ source.profile.title }}</h3>
-            <p class="source-subtitle">{{ source.configuration.format }}{% if source.profile.description %} · {{ source.profile.description }}{% endif %}</p>
-            {% for kind in ["categories", "collections", "tags"] %}{% set memberships = [] %}{% for group in groups if group.kind == kind and source.source_id in group.source_ids %}{% set _ = memberships.append(group.name) %}{% endfor %}{% if memberships %}<p class="group-membership">{{ kind|capitalize }}: {{ memberships|sort|join(", ") }}</p>{% endif %}{% endfor %}
-            {% if pub %}<span class="compact-publication" data-field="publication-summary">{{ publication_label }}</span>{% endif %}
+            <p class="source-subtitle">{{ source.configuration.format|upper }}{% if source.profile.description %} · {{ source.profile.description }}{% endif %}</p>
+
+            {% if pub %}<span class="compact-publication" data-field="publication-summary">{{ "Published" if pub.published else "Reader unavailable" if pub.enabled else "" }}</span>{% endif %}
           </div>
-          <span class="badge" data-field="status" role="status">{% if source.adapter in ('pdf','epub') %}{% if source.installed_verified and source.artifact %}{{ source.artifact.bytes | filesizeformat(true) }}{% else %}{{ source.adapter|upper }} not installed or invalid{% endif %}{% elif source.installed_verified and source.artifact %}{{ source.artifact.bytes | filesizeformat(true) }}{% elif not source.artifact and not source.mutation_blocked %}Not downloaded{% elif catalog.acquisition_stale %}Status unavailable{% elif not source.artifact %}Acquisition unresolved{% else %}Waiting for status…{% endif %}</span>
+          <span class="badge{% if source.installed_verified %} enabled{% endif %}" data-field="status" role="status">{% if not source.adapter %}Not yet supported{% elif source.installed_verified and source.artifact %}{{ source.artifact.bytes | filesizeformat(true) }}{% elif source.adapter in ('pdf','epub') %}{{ 'Not installed or invalid' if source.artifact else 'Not downloaded' }}{% elif source.acquisition and not catalog.acquisition_stale %}{{ {'downloading':'Downloading','verifying':'Verifying','publishing':'Installing','failed':'Failed','retrying':'Retrying','interrupted':'Interrupted','not_started':'Not downloaded','unavailable':'Service unavailable'}.get(source.acquisition.state,'Waiting for status') }}{% elif catalog.acquisition_stale %}Status unavailable{% elif not source.artifact and not source.mutation_blocked %}Not downloaded{% else %}Waiting for status…{% endif %}</span>
+          <progress class="summary-progress" data-field="summary-progress" max="100" value="0" aria-label="Active download progress" hidden></progress>
         </summary>
         <div class="source-expanded">
+            {% for kind in ["categories", "collections", "tags"] %}{% set memberships = [] %}{% for group in groups if group.kind == kind and source.source_id in group.source_ids %}{% set _ = memberships.append(group.name) %}{% endfor %}{% if memberships %}<p class="group-membership">{{ kind|capitalize }}: {{ memberships|sort|join(", ") }}</p>{% endif %}{% endfor %}
         <div class="source-live">
           <p data-field="metrics" hidden></p>
           <progress data-field="transfer" max="100" value="0" aria-label="Archive download progress" hidden></progress>
@@ -467,7 +482,7 @@
           </dl>
         </section>
         </div>
-      </details>
+      </details></div>
     {% else %}
       <p class="empty">No managed sources configured.</p>
     {% endfor %}
@@ -515,7 +530,7 @@
       const groupButtons = Array.from(document.querySelectorAll('#group-panel button, #bulk-selection button'));
       const selectMode = document.getElementById('source-select-mode');
       const selectAll = document.getElementById('group-select-all');
-      const visibleChecks = () => groupChecks.filter(item => !item.closest('.source-card').hidden);
+      const visibleChecks = () => groupChecks.filter(item => !item.closest('.source-row').querySelector('.source-card').hidden);
       let selecting = selectMode.getAttribute('aria-pressed') === 'true';
       let bulkBusy = false;
       const selectedIds = () => selecting ? groupChecks.filter(item => item.checked).map(item => item.value) : [];
@@ -538,7 +553,7 @@
       });
       function bulkPublicationEligible(action, ids) {
         return ids.length > 0 && ids.every(id => {
-          const card = groupChecks.find(item => item.value === id)?.closest('.source-card');
+          const card = groupChecks.find(item => item.value === id)?.closest('.source-row').querySelector('.source-card');
           const toggle = card?.querySelector('[data-field="publication-toggle"]');
           if (!toggle || toggle.disabled || toggle.dataset.posting || card.dataset.filterPublication === 'unknown') return false;
           return action === 'publish'
@@ -988,13 +1003,14 @@
             ['categories','collections','tags'].every(kind => !v[kind] ||
               groups.some(g => g.kind === kind && g.group_id === v[kind] && g.source_ids.includes(data.sourceId)));
           card.hidden = !matches;
+          card.closest('.source-row').hidden = !matches;
           if (matches) visible++;
         }
         if (reorder) {
           cards.sort((a,b) => (v.sort === 'alpha' ? 0 : rank(a)-rank(b)) ||
             a.dataset.filterTitle.localeCompare(b.dataset.filterTitle, undefined, {sensitivity:'base'}) ||
             a.dataset.sourceId.localeCompare(b.dataset.sourceId));
-          for (const card of cards) root.appendChild(card);
+          for (const card of cards) root.appendChild(card.closest('.source-row'));
         }
         const count = document.getElementById('source-filter-count');
         count.textContent = visible + ' of ' + cards.length + ' sources';
@@ -1059,10 +1075,13 @@
         field('status').className = 'badge' + (!stale && job?.state === 'completed' && job.verified === true ?
           ' enabled' : !stale && job?.state === 'failed' ? ' disabled' : '');
         const progress = field('transfer');
-        const valid = Number.isFinite(job?.downloaded_bytes) && job.downloaded_bytes >= 0 &&
+        const valid = job?.active === true && !stale && Number.isFinite(job?.downloaded_bytes) && job.downloaded_bytes >= 0 &&
           Number.isFinite(job.expected_bytes) && job.expected_bytes > 0 && job.downloaded_bytes <= job.expected_bytes;
         progress.hidden = !valid;
         progress.value = valid ? 100 * job.downloaded_bytes / job.expected_bytes : 0;
+        const compact = field('summary-progress');
+        compact.hidden = !valid;
+        compact.value = progress.value;
         put('metrics', valid ? (stale ? 'Last observed download: ' : 'Download: ') +
           progress.value.toFixed(2) + '% · ' + gib(job.downloaded_bytes) + ' / ' + gib(job.expected_bytes) : '');
         const checking = !stale && (job?.state === 'verifying' || job?.state === 'publishing');
@@ -1090,7 +1109,7 @@
           (job.speed_bytes_per_second / 1048576).toFixed(2) + ' MiB/s' +
           (Number.isFinite(job.eta_seconds) ? ' · ' + Math.ceil(job.eta_seconds / 60) + ' min remaining (transfer only)' : '') : '';
         put('rate', rate);
-        put('detail', job?.detail || '');
+        put('detail', verified ? '' : job?.detail || '');
         put('verified', verified ? 'Confirmed by acquisition service' : 'Not confirmed');
         put('sample', Number.isFinite(job?.sampled_at) ? new Date(job.sampled_at * 1000).toLocaleString() : '—');
       }
@@ -1109,7 +1128,8 @@
         toggle.dataset.acknowledgeRights = String(!!pub?.requires_rights_acknowledgement);
         toggle.disabled = !pub?.enabled && (blocked || !(pub?.serving || pub?.requires_rights_acknowledgement));
         field('publication-browse').hidden = !pub?.published;
-        field('publication-summary').textContent = field('publication-status').textContent =
+        field('publication-summary').textContent = !pub || pub.error ? 'Publication status unavailable' : pub.published ? 'Published' : pub.enabled ? 'Reader unavailable' : '';
+        field('publication-status').textContent =
           !pub || pub.error ? 'Publication status unavailable' : pub.published ? 'Published · available in library' :
           pub.enabled ? 'Enabled · reader unavailable' : pub.serving ? 'Unpublished · ready to publish' : pub.publication_reason ? 'Unpublished · ' + pub.publication_reason : 'Unpublished · reader not ready';
       }
@@ -1127,8 +1147,11 @@
           const sources = new Map(data.sources.map(source => [source.source_id, source]));
           cards.forEach(card => {
             const source = sources.get(card.dataset.sourceId);
-            if (['pdf','epub'].includes(source?.adapter)) {
-              card.querySelector('[data-field="status"]').textContent = source.installed_verified ? size(source.artifact?.bytes) : source.adapter.toUpperCase() + ' not installed or invalid';
+            if (source && !source.adapter) {
+              card.querySelector('[data-field="status"]').textContent = 'Not yet supported';
+            } else if (['pdf','epub'].includes(source?.adapter)) {
+              card.querySelector('[data-field="status"]').textContent = source.installed_verified ? size(source.artifact?.bytes) : (source.artifact ? 'Not installed or invalid' : 'Not downloaded');
+              card.querySelector('[data-field="status"]').className = 'badge' + (source.installed_verified ? ' enabled' : '');
               card.querySelector('[data-field="verified"]').textContent = source.installed_verified ? source.adapter.toUpperCase() + ' pin verified' : 'Not confirmed';
             } else if (source?.artifact) render(card, source.acquisition, data.acquisition_stale !== false);
             else card.querySelector('[data-field="status"]').textContent = data.acquisition_stale ? 'Status unavailable' :
@@ -1142,6 +1165,7 @@
           cards.forEach(card => {
             if (card.querySelector('[data-action="download"]')) render(card, null, true, true);
             else card.querySelector('[data-field="status"]').textContent = 'Status unavailable';
+            card.querySelector('[data-field="summary-progress"]').hidden = true;
             controls(card, null);
             card.dataset.filterPublication = "unknown";
             card.dataset.filterDownload = "unknown";

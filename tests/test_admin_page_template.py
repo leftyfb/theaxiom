@@ -66,7 +66,7 @@ def test_candidate_card_has_no_acquisition_buttons():
     page = render([profile(description="Emergency reference", format="other")])
     parser = Parser()
     parser.feed(page)
-    assert "Not downloaded</span>" in page
+    assert "Not yet supported</span>" in page
     assert "Emergency reference" in page
     assert "No lifecycle adapter supports this format." in page
     assert "Coming soon" not in page
@@ -235,3 +235,15 @@ def test_sources_page_omits_obsolete_intro():
     page = render([profile()])
     assert '<h2 id="sources">Content sources</h2>' not in page
     assert "Acquisition controls are disabled until safe download and recovery support is ready." not in page
+
+
+def test_source_summary_is_compact_and_selection_is_separate():
+    page = render([profile("field-guide", "Field guide")])
+    card = page.split('<div class="source-row">', 1)[1].split('    {% else %}', 1)[0]
+    summary = card.split('<summary class="source-header">', 1)[1].split('</summary>', 1)[0]
+    assert 'source-symbol' in summary and 'summary-progress' in summary
+    assert 'data-group-select' not in summary and '<button' not in summary and '<input' not in summary
+    assert card.index('data-group-select') < card.index('<summary')
+    assert card.index('data-catalog-edit') > card.index('</summary>')
+    assert "job?.active === true && !stale" in page
+    assert "root.appendChild(card.closest('.source-row'))" in page
