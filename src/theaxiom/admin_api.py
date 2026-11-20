@@ -1179,8 +1179,9 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
     def _start_zim(self, data):
         sid = data.get("source_id")
         if (set(data) != {"source_id", "action", "revision"} or not isinstance(sid, str)
+                or data.get("action") not in {"zim-download", "zim-resume", "zim-pause", "zim-cancel"}
                 or not catalog_store.ID_RE.fullmatch(sid) or not self._valid_revision(data["revision"])):
-            self._send_json(400, {"error": "ZIM download requires a source ID and current revision only"})
+            self._send_json(400, {"error": "ZIM control requires a source ID and current revision only"})
             return
         if not self.headers.get("Origin"):
             self._send_json(403, {"error": "same-origin request required"})
@@ -1195,7 +1196,11 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     raise ValueError("Source has no supported ZIM download URL")
                 if publication.load().get(sid):
                     raise ValueError("Unpublish before downloading")
-                result = zim_jobs.start(sid, record["configuration"])
+                operation = data["action"]
+                if operation in {"zim-pause", "zim-cancel"}:
+                    result = zim_jobs.control(sid, record["configuration"], operation.removeprefix("zim-"))
+                else:
+                    result = zim_jobs.start(sid, record["configuration"], resume=operation == "zim-resume")
             except BlockingIOError:
                 self._send_json(409, {"error": "Another ZIM acquisition is active"})
                 return
