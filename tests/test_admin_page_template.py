@@ -311,3 +311,14 @@ def test_published_zim_card_hides_routine_notices():
     wiki["mutation_blocked"] = True
     blocked = render([wiki]).split('<div class="source-expanded">', 1)[1].split('</details></div>', 1)[0]
     assert "Acquisition or publication status unresolved; changes are blocked." in blocked
+
+
+def test_zim_download_feedback_is_local_and_does_not_reload():
+    page = render([profile("ready", format="zim", source_url="https://download.kiwix.org/zim/zimit/ready.zim")])
+    card = page.split('data-source-id="ready"', 1)[1].split('</details>', 1)[0]
+    assert 'data-zim-download' in card
+    assert 'data-zim-feedback role="status" aria-live="polite"' in card
+    handler = page.split("document.querySelectorAll('[data-zim-download]').forEach", 1)[1].split("document.querySelectorAll('[data-field=", 1)[0]
+    assert "Starting download" in handler
+    assert "localFeedback.textContent = error.message" in handler
+    assert "reloadSources()" not in handler

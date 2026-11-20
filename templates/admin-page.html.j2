@@ -473,6 +473,7 @@
           <button class="button" type="button" data-catalog-edit="{{ source.source_id }}"{% if source.mutation_blocked or pub.error %} disabled{% endif %}>Edit</button>
           <button class="button danger-action" type="button" data-catalog-remove="{{ source.source_id }}"{% if source.mutation_blocked or pub.error %} disabled{% endif %}>Remove</button>
         </div>
+        {% if source.zim_download %}<p class="source-note" data-zim-feedback role="status" aria-live="polite"></p>{% endif %}
         {% if document %}
         <div class="busy-indicator" data-pdf-busy hidden><span class="busy-spinner" aria-hidden="true"></span><span role="status" data-pdf-busy-text></span></div>
         <p class="source-note" data-pdf-feedback role="status"></p>
@@ -1019,17 +1020,23 @@
         if (button.disabled) return;
         button.disabled = true;
         const card = button.closest('.source-card');
+        const localFeedback = card.querySelector('[data-zim-feedback]');
         card.dataset.zimPosting = 'true';
+        localFeedback.textContent = 'Starting download…';
         try {
           const response = await acquisitionFetch('/api/action', {method:'POST', headers:{'Content-Type':'application/json'},
             body:JSON.stringify({source_id:card.dataset.sourceId, action:'zim-download', revision})});
           const result = await response.json().catch(() => ({}));
-          if (!response.ok || !result.accepted) throw acquisitionError(response, result, 'ZIM acquisition failed');
-          reloadSources();
+          if (!response.ok || !result.accepted) {
+            throw new Error(result.error || acquisitionError(response, result, 'ZIM acquisition failed').message);
+          }
+          localFeedback.textContent = 'Download accepted. Waiting for progress…';
+          card.dataset.zimAccepted = 'true';
         } catch(error) {
-          feedback.textContent = error.message;
+          localFeedback.textContent = error.message;
         } finally {
           delete card.dataset.zimPosting;
+          button.disabled = card.dataset.zimAccepted === 'true' || card.dataset.zimBlocked === 'true';
         }
       }));
       document.querySelectorAll('[data-field="publication-toggle"]').forEach(button => button.addEventListener('click', async () => {
@@ -1215,7 +1222,13 @@
         const zim = card.querySelector('[data-zim-download]');
         if (zim && card.dataset.filterFormat === 'zim') {
           zim.hidden = !!source?.installed_verified;
-          zim.disabled = blocked || !!source?.installed_verified || card.dataset.zimPosting === 'true' || !source?.zim_download;
+          card.dataset.zimBlocked = String(blocked || !!source?.installed_verified || !source?.zim_download);
+          if (source?.acquisition && card.dataset.zimAccepted === 'true') {
+            delete card.dataset.zimAccepted;
+            const localFeedback = card.querySelector('[data-zim-feedback]');
+            if (localFeedback) localFeedback.textContent = '';
+          }
+          zim.disabled = card.dataset.zimBlocked === 'true' || card.dataset.zimPosting === 'true' || card.dataset.zimAccepted === 'true';
         }
         const toggle = field('publication-toggle');
         if (!toggle || toggle.dataset.posting === 'true') return;
@@ -1263,7 +1276,7 @@
           window.axiomSourceFilters?.apply(false);
         } catch (_) {
           cards.forEach(card => {
-            if (card.querySelector('[data-action="download"]')) render(card, null, true, true);
+            if (card.querySelector('[data-action="download"]') || card.querySelector('[data-zim-download]')) render(card, null, true, true);
             else card.querySelector('[data-field="status"]').textContent = 'Status unavailable';
             card.querySelector('[data-field="summary-progress"]').hidden = true;
             controls(card, null);

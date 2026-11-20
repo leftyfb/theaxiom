@@ -1202,8 +1202,14 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             except ValueError as exc:
                 self._send_json(409, {"error": str(exc)})
                 return
+            except FileNotFoundError:
+                self._send_json(503, {"error": "Required storage root or staging/library parent directory is missing. Check Storage settings."})
+                return
+            except PermissionError:
+                self._send_json(503, {"error": "Application cannot write its ZIM job records or configured storage. Check storage permissions."})
+                return
             except OSError:
-                self._send_json(503, {"error": "ZIM job or storage unavailable"})
+                self._send_json(503, {"error": "ZIM job or storage unavailable; check Storage settings before retrying"})
                 return
         self._send_json(202, result)
 

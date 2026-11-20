@@ -376,3 +376,15 @@ def test_bulk_group_assignment_preserves_unrelated_memberships(app):
     assert request("/api/sources")["revision"] == state["revision"]
     state = apply("bulk-replace", "categories", [], [SID])
     assert all(SID not in g["source_ids"] for g in state["groups"] if g["kind"] == "categories")
+
+
+def test_zim_preflight_error_returns_actionable_message(app, monkeypatch):
+    request, _ = app
+    catalog = request("/api/sources")
+    def missing(*args):
+        raise FileNotFoundError("private path")
+    monkeypatch.setattr(admin_api.zim_jobs, "start", missing)
+    body = request("/api/action", dict(source_id="fema-ready", action="zim-download",
+                                       revision=catalog["revision"]), status=503)
+    assert "storage root or staging/library" in body["error"]
+    assert "private path" not in body["error"]
