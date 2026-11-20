@@ -578,6 +578,28 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 self._send_json(403, {"error": "current password is incorrect"})
                 return
             self._send_json(200, {"changed": True})
+        elif self.path == "/api/groups":
+            if not self.headers.get("Origin"):
+                self._send_json(403, {"error": "same-origin request required"})
+                return
+            data = self._read_body()
+            required = {"operation", "kind", "group_id", "revision"}
+            if not required <= data.keys() or data.keys() - (required | {"name", "source_ids"}):
+                self._send_json(400, {"error": "invalid group mutation"})
+                return
+            try:
+                with publication.LOCK:
+                    result = SOURCE_CATALOG.mutate_group(**data)
+            except catalog_store.RevisionConflict as exc:
+                self._send_json(409, {"error": str(exc)})
+                return
+            except catalog_store.CatalogError as exc:
+                self._send_json(400, {"error": str(exc)})
+                return
+            except OSError:
+                self._send_json(503, {"error": "group catalog write failed"})
+                return
+            self._send_json(200, result)
         elif self.path.rstrip("/") == "/api/sources":
             if not self.headers.get("Origin"):
                 self._send_json(403, {"error": "same-origin request required"})

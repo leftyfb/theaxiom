@@ -26,6 +26,9 @@ ID_RE = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z")
 MAX_CATALOG_BYTES = 256 * 1024
 MAX_ENTRIES = 100
 MAX_FIELD = 512
+GROUP_KINDS = frozenset({'categories', 'collections', 'tags'})
+MAX_GROUPS = 100
+MAX_GROUP_NAME = 100
 LOCK = threading.RLock()
 
 
@@ -144,7 +147,7 @@ class CatalogStore:
 
     @staticmethod
     def _validate_collection(state):
-        if state.keys() != HEADER_FIELDS | {"sources"} or not isinstance(state["sources"], list):
+        if state.keys() not in (HEADER_FIELDS | {"sources"}, HEADER_FIELDS | {"sources", "groups"}) or not isinstance(state["sources"], list):
             raise CatalogError("invalid catalog schema")
         if len(state["sources"]) > MAX_ENTRIES:
             raise CatalogError("catalog entry limit exceeded")
@@ -162,6 +165,8 @@ class CatalogStore:
             ids.add(sid)
             self._validate_fields(record["profile"], PROFILE_FIELDS, required={"title"})
             self._validate_fields(record["configuration"], CONFIG_FIELDS, required={"format"})
+        if "groups" in state:
+            self._validate_groups(state["groups"], ids)
 
     def _validated_payload(self, state):
         self._validate_v2(state)
@@ -208,7 +213,7 @@ class CatalogStore:
 
     @staticmethod
     def _snapshot(state):
-        return {key: state[key] for key in ("revision", "updated_at", "sources")}
+        return {key: state[key] for key in ("revision", "updated_at", "sources", "groups") if key in state}
 
     @staticmethod
     def _apply_fields(record, fields):
@@ -309,6 +314,91 @@ class CatalogStore:
                         self._apply_fields(records[source_id], fields)
                     else:
                         state["sources"].remove(records[source_id])
+                        for group in state.get("groups", []):
+                            group["source_ids"] = [sid for sid in group["source_ids"] if sid != source_id]
+                state["revision"] += 1
+                state["updated_at"] = datetime.now(timezone.utc).isoformat()
+                self._atomic_write(self._validated_payload(state))
+                return self._snapshot(state)
+            finally:
+                os.close(fd)
+
+
+    def _validate_groups(self, groups, source_ids):
+        if not isinstance(groups, list) or len(groups) > MAX_GROUPS:
+            raise CatalogError("invalid groups or group limit exceeded")
+        keys, names = set(), set()
+        for group in groups:
+            if not isinstance(group, dict) or group.keys() != {"kind", "group_id", "name", "source_ids"}:
+                raise CatalogError("invalid group")
+            kind, gid, name, members = (group[k] for k in ("kind", "group_id", "name", "source_ids"))
+            if not isinstance(kind, str) or kind not in GROUP_KINDS:
+                raise CatalogError("invalid group kind")
+            self._validate_id(gid)
+            self._validate_field("title", name)
+            if len(name) > MAX_GROUP_NAME or name != name.strip():
+                raise CatalogError("invalid group name")
+            if (kind, gid) in keys or (kind, name.casefold()) in names:
+                raise CatalogError("duplicate group ID or name")
+            keys.add((kind, gid))
+            names.add((kind, name.casefold()))
+            if not isinstance(members, list) or len(members) > MAX_ENTRIES:
+                raise CatalogError("invalid group memberships")
+            for sid in members:
+                self._validate_id(sid)
+            if len(set(members)) != len(members) or not set(members) <= source_ids:
+                raise CatalogError("duplicate or unknown source membership")
+
+    def mutate_group(self, operation, kind, group_id, revision, *, name=None, source_ids=None):
+        if not isinstance(kind, str) or kind not in GROUP_KINDS:
+            raise CatalogError("invalid group kind")
+        self._validate_id(group_id)
+        if type(revision) is not int or revision < 0:
+            raise CatalogError("revision precondition required")
+        if operation not in ("create", "rename", "delete", "add-members", "remove-members"):
+            raise CatalogError("unknown group operation")
+        if operation in ("create", "rename"):
+            self._validate_field("title", name)
+            if len(name) > MAX_GROUP_NAME or name != name.strip() or source_ids is not None:
+                raise CatalogError("invalid group name or fields")
+        elif operation in ("add-members", "remove-members"):
+            if name is not None or not isinstance(source_ids, list) or not 0 < len(source_ids) <= MAX_ENTRIES:
+                raise CatalogError("invalid membership request")
+            for sid in source_ids:
+                self._validate_id(sid)
+            if len(set(source_ids)) != len(source_ids):
+                raise CatalogError("duplicate source IDs")
+        elif name is not None or source_ids is not None:
+            raise CatalogError("delete does not accept group fields")
+        with LOCK:
+            fd = self._file_lock()
+            try:
+                state = self._read()
+                if state["revision"] != revision:
+                    raise RevisionConflict("catalog revision changed")
+                groups = state.setdefault("groups", [])
+                known = {record["source_id"] for record in state["sources"]}
+                group = next((g for g in groups if (g["kind"], g["group_id"]) == (kind, group_id)), None)
+                if operation == "create":
+                    if group is not None:
+                        raise CatalogError("group ID already exists")
+                    groups.append(dict(kind=kind, group_id=group_id, name=name, source_ids=[]))
+                else:
+                    if group is None:
+                        raise CatalogError("group not found")
+                    if operation == "rename":
+                        group["name"] = name
+                    elif operation == "delete":
+                        groups.remove(group)
+                    else:
+                        if not set(source_ids) <= known:
+                            raise CatalogError("unknown source ID")
+                        members = set(group["source_ids"])
+                        if operation == "add-members":
+                            members.update(source_ids)
+                        else:
+                            members.difference_update(source_ids)
+                        group["source_ids"] = sorted(members)
                 state["revision"] += 1
                 state["updated_at"] = datetime.now(timezone.utc).isoformat()
                 self._atomic_write(self._validated_payload(state))

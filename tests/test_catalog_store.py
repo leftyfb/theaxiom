@@ -263,6 +263,44 @@ class CatalogStoreTests(unittest.TestCase):
                     self.store.mutate("add", "other", {"title": "Other"}, 0)
                 self.assertEqual(self.path.read_text(), malformed)
 
+    def test_group_memberships_and_restart(self):
+        state = self.store.get()
+        state = self.store.mutate("add", "manual", {"title": "Manual"}, state["revision"])
+        original = state["sources"]
+        for kind in ("categories", "collections", "tags"):
+            state = self.store.mutate_group("create", kind, "reference", state["revision"], name="Reference")
+            state = self.store.mutate_group("add-members", kind, "reference", state["revision"],
+                                            source_ids=["manual", "wikipedia-en"])
+        self.assertEqual(state["sources"], original)
+        self.assertEqual(catalog_store.CatalogStore(self.path).get(), state)
+        state = self.store.mutate_group("rename", "categories", "reference", state["revision"], name="Guides")
+        state = self.store.mutate_group("remove-members", "tags", "reference", state["revision"], source_ids=["manual"])
+        state = self.store.mutate_group("delete", "collections", "reference", state["revision"])
+        self.assertEqual(state["sources"], original)
+        self.assertEqual(state["groups"][0]["name"], "Guides")
+        self.assertEqual(state["groups"][0]["source_ids"], ["manual", "wikipedia-en"])
+        self.assertEqual(state["groups"][1]["source_ids"], ["wikipedia-en"])
+        state = self.store.mutate("remove", "manual", {}, state["revision"])
+        self.assertTrue(all("manual" not in g["source_ids"] for g in state["groups"]))
+
+    def test_invalid_group_mutations_do_not_change_catalog(self):
+        state = self.store.mutate_group("create", "tags", "one", self.store.get()["revision"], name="One")
+        before = self.path.read_bytes()
+        for operation, kind, gid, kwargs in [
+            ("create", "tags", "two", {"name": "ONE"}),
+            ("create", "bad", "two", {"name": "Two"}),
+            ("add-members", "tags", "one", {"source_ids": ["unknown"]}),
+            ("add-members", "tags", "one", {"source_ids": ["wikipedia-en", "wikipedia-en"]}),
+            ("delete", "tags", "one", {"source_ids": []}),
+        ]:
+            with self.subTest(operation=operation, kwargs=kwargs):
+                with self.assertRaises(catalog_store.CatalogError):
+                    self.store.mutate_group(operation, kind, gid, state["revision"], **kwargs)
+                self.assertEqual(self.path.read_bytes(), before)
+        with self.assertRaises(catalog_store.RevisionConflict):
+            self.store.mutate_group("delete", "tags", "one", state["revision"] - 1)
+        self.assertEqual(self.path.read_bytes(), before)
+
     def test_write_failure_preserves_prior_catalog(self):
         first = self.store.mutate("add", "one", {"title": "One"}, 0)
         before = self.path.read_bytes()
