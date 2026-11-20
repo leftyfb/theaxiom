@@ -75,7 +75,3 @@ a dedicated server-side identity with appropriate share permissions and
 match its numeric UID on the application host; check group requirements
 and test access as the service account. Do not recursively chmod/chown
 the share or map all clients to an administrator.
-
-## PDF language detection dependencies
-
-Fresh installations obtain the pinned parser and classifier from pyproject.toml. Existing deployments require explicit operator preparation before activating the updated code; see [PDF language detection](../docs/pdf-language.md). Do not install packages inside the automatic deployment runner.
