@@ -64,11 +64,9 @@ def test_live_states_and_read_only_polling():
     assert not states[1]["verification"]["hidden"]
     assert not states[2]["verification"]["hidden"]
     assert "100.00%" in states[1]["metrics"]["textContent"]
-    assert states[3]["verified"]["textContent"] == "Confirmed by acquisition service"
     assert states[3]["transfer"]["hidden"]
     assert states[3]["summary-progress"]["hidden"]
     assert states[4]["summary-progress"]["hidden"]
-    assert states[4]["verified"]["textContent"] == "Not confirmed"
     assert states[4]["verification"]["hidden"]
     assert states[5]["status"]["textContent"] == "Status unavailable"
     assert all(r == {"url": "/api/sources", "method": "GET"} for r in result["requests"])

@@ -161,7 +161,9 @@ def test_conflicting_profile_does_not_inherit_trusted_state(app, conflict):
     assert wiki["configuration"] == source(catalog)["configuration"] | conflict
     changed = card(request("/admin/sources"))
     assert "Expected SHA-256" in changed and "Artifact SHA-256" not in changed
-    assert "publication-toggle" not in changed and "Not confirmed" in changed
+    assert "publication-toggle" not in changed
+    assert "Installed verification" not in changed
+    assert 'data-field="verified"' not in changed
     publish(request, True, status=409)
     publication.save(SID, True)  # A stale persisted flag cannot bypass the configuration check.
     assert request("/internal/publication/wikipedia-en", status=403) == ""

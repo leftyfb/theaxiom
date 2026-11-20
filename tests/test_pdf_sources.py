@@ -413,7 +413,8 @@ def test_admin_pdf_header_shows_installed_size(pdf_app, disk):
     page = request("/admin/sources")
     assert "PDF verified" not in page
     assert "Archive verified" not in page
-    assert "PDF pin verified" in page
+    assert "PDF pin verified" not in page
+    assert "Installed verification" not in page
     assert 'data-field="status"' in page
 
 
