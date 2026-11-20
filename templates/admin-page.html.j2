@@ -685,7 +685,7 @@
         const results = [];
         try {
           for (const source_id of ids) {
-            const card = groupChecks.find(item => item.value === source_id).closest('.source-card');
+            const card = groupChecks.find(item => item.value === source_id).closest('.source-row').querySelector('.source-card');
             const title = card.dataset.filterTitle || source_id;
             try {
               const removing = action === 'remove';

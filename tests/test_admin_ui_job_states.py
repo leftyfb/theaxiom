@@ -44,9 +44,9 @@ global.fetch = async (url, options) => {
 
 def job(state, **kwargs):
     return {"revision": 0, "acquisition_stale": False, "sources": [dict(
-        source_id="wikipedia-en", artifact={"bytes": 100}, mutation_blocked=False,
+        source_id="wikipedia-en", adapter="kiwix", artifact={"bytes": 100}, mutation_blocked=False,
         acquisition=dict(state=state, expected_bytes=100, downloaded_bytes=100,
-                         active=False, verified=False, **kwargs))]}
+                         active=state in {"downloading", "verifying", "publishing"}, verified=False, **kwargs))]}
 
 
 def test_live_states_and_read_only_polling():
@@ -58,11 +58,16 @@ def test_live_states_and_read_only_polling():
     result = run_ui([downloading, job("verifying"), job("publishing"), complete, stale, None])
     states = result["states"]
     assert states[0]["transfer"]["value"] == 50
+    assert states[0]["summary-progress"]["value"] == 50
+    assert not states[0]["summary-progress"]["hidden"]
     assert "remaining" in states[0]["rate"]["textContent"]
     assert not states[1]["verification"]["hidden"]
     assert not states[2]["verification"]["hidden"]
     assert "100.00%" in states[1]["metrics"]["textContent"]
     assert states[3]["verified"]["textContent"] == "Confirmed by acquisition service"
+    assert states[3]["transfer"]["hidden"]
+    assert states[3]["summary-progress"]["hidden"]
+    assert states[4]["summary-progress"]["hidden"]
     assert states[4]["verified"]["textContent"] == "Not confirmed"
     assert states[4]["verification"]["hidden"]
     assert states[5]["status"]["textContent"] == "Status unavailable"
@@ -94,8 +99,8 @@ def test_publication_refresh_updates_summary_and_controls():
     sample = job("completed")
     sample["sources"][0]["publication"] = {"enabled": True, "serving": True, "published": True}
     success, failure = run_ui([sample, None])["states"]
-    assert success["publication-summary"]["textContent"] == "Published · available in library"
-    assert success["publication-status"]["textContent"] == success["publication-summary"]["textContent"]
+    assert success["publication-summary"]["textContent"] == "Published"
+    assert success["publication-status"]["textContent"] == "Published · available in library"
     assert success["publication-toggle"]["textContent"] == "Unpublish"
     assert not success["publication-toggle"]["disabled"]
     assert not success["publication-browse"]["hidden"]
@@ -104,3 +109,10 @@ def test_publication_refresh_updates_summary_and_controls():
     assert failure["publication-summary"]["textContent"] == "Publication status unavailable"
     assert failure["publication-toggle"]["disabled"]
     assert failure["publication-browse"]["hidden"]
+
+
+def test_planned_source_keeps_unsupported_label_during_polling():
+    sample = job("not_started")
+    sample["sources"][0].update(adapter=None, artifact=None, acquisition=None)
+    state = run_ui([sample])["states"][0]
+    assert state["status"]["textContent"] == "Not yet supported"

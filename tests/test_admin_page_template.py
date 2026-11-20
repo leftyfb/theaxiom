@@ -244,6 +244,6 @@ def test_source_summary_is_compact_and_selection_is_separate():
     assert 'source-symbol' in summary and 'summary-progress' in summary
     assert 'data-group-select' not in summary and '<button' not in summary and '<input' not in summary
     assert card.index('data-group-select') < card.index('<summary')
-    assert card.index('data-catalog-edit') > card.index('</summary>')
+    assert card.index('<button class="button" type="button" data-catalog-edit=') > card.index('</summary>')
     assert "job?.active === true && !stale" in page
     assert "root.appendChild(card.closest('.source-row'))" in page

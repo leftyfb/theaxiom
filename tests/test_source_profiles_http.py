@@ -203,7 +203,7 @@ def test_candidate_lifecycle_http_and_dom(app, format_name, complete, adapter, r
     rendered = card(request("/admin/sources"), "candidate")
     assert rendered is not None
     summary, details = rendered.split("</summary>", 1)
-    assert 'role="status">Not downloaded</span>' in summary
+    assert ('role="status">Not yet supported</span>' if not adapter else 'role="status">Not downloaded</span>') in summary
     assert reason not in summary and reason in details
     parser = Parser()
     parser.feed(rendered)
