@@ -849,7 +849,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             data = self._read_body()
             if data.get("action") == "import":
                 self._import_pdf(data)
-            elif data.get("action") in {"pdf-download", "epub-download"}:
+            elif data.get("action") in {"pdf-download", "epub-download", "epub-add-download"}:
                 self._download_pdf(data)
             else:
                 self._refuse_acquisition(data)
@@ -994,25 +994,44 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
 
     def _download_pdf(self, data):
         sid = data.get("source_id")
-        if (set(data) != {"source_id", "action", "revision"} or not isinstance(sid, str)
+        adding = data.get("action") == "epub-add-download"
+        required = {"source_id", "action", "revision"} | ({"fields", "auto_title"} if adding else set())
+        if (set(data) != required or not isinstance(sid, str)
                 or not catalog_store.ID_RE.fullmatch(sid) or not self._valid_revision(data["revision"])):
             self._send_json(400, {"error": "download requires a source ID and catalog revision only"})
             return
         if not self.headers.get("Origin"):
             self._send_json(403, {"error": "same-origin request required"})
             return
+        fields = {}
+        if adding:
+            try:
+                if type(data["auto_title"]) is not bool:
+                    raise ValueError("invalid automatic title flag")
+                fields = dict(data["fields"]) if isinstance(data["fields"], dict) else None
+                SOURCE_CATALOG._validate_fields(fields, catalog_store.PROFILE_FIELDS | {"source_url", "license"},
+                                                required={"title", "source_url"})
+                if not pdf_source.valid_source_url(fields["source_url"]):
+                    raise ValueError("A direct HTTPS EPUB URL is required")
+                fields["format"] = "epub"
+            except (ValueError, TypeError):
+                self._send_json(400, {"error": "invalid new EPUB source metadata"})
+                return
         with publication.LOCK:
             try:
                 catalog = SOURCE_CATALOG.get()
                 if data["revision"] != catalog["revision"]:
                     raise ValueError("catalog revision changed")
                 record = next((item for item in catalog["sources"] if item["source_id"] == sid), None)
-                is_epub = data["action"] == "epub-download"
-                if record is None or not (self._epub_record(record) if is_epub else self._pdf_record(record)):
+                is_epub = data["action"] in {"epub-download", "epub-add-download"}
+                if adding:
+                    if record is not None or sid in publication.ROUTES or len(catalog["sources"]) >= catalog_store.MAX_ENTRIES:
+                        raise ValueError("source ID already exists or catalog is full")
+                elif record is None or not (self._epub_record(record) if is_epub else self._pdf_record(record)):
                     raise ValueError("source has no matching document download adapter")
                 if publication.load().get(sid, False):
                     raise ValueError("Unpublish source before downloading")
-                config = record["configuration"]
+                config = fields if adding else record["configuration"]
                 url = config.get("source_url", "")
                 if not pdf_source.valid_source_url(url):
                     raise ValueError("A direct HTTPS PDF URL is required")
@@ -1032,12 +1051,15 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 elif not digest:
                     suffix = " SHA-256 calculated locally, not independently publisher-verified."
                     provenance = provenance[:catalog_store.MAX_FIELD - len(suffix)] + suffix
-                fields = {"expected_size_bytes": str(observed["bytes"]), "sha256": observed["sha256"],
-                          "provenance": provenance}
+                fields.update(expected_size_bytes=str(observed["bytes"]), sha256=observed["sha256"],
+                              provenance=provenance)
+                profile = fields if adding else record["profile"]
                 for key in ("author", "publisher", "language"):
-                    if not record["profile"].get(key) and extracted.get(key):
+                    if not profile.get(key) and extracted.get(key):
                         fields[key] = extracted[key]
-                updated = SOURCE_CATALOG.mutate("edit", sid, fields, data["revision"])
+                if adding and data["auto_title"] and extracted.get("title"):
+                    fields["title"] = extracted["title"]
+                updated = SOURCE_CATALOG.mutate("add" if adding else "edit", sid, fields, data["revision"])
             except catalog_store.RevisionConflict as exc:
                 self._send_json(409, {"error": str(exc)})
                 return

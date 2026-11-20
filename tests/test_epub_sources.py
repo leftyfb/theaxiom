@@ -114,3 +114,58 @@ def test_epub_lifecycle_adapter():
     assert life["pdf_download"]
     assert not life["artifact"]
     assert not life["actions"]
+
+
+from test_source_profiles_http import app as epub_app, source, mutate  # noqa: F401
+
+
+def test_epub_http_upload(epub_app, disk):
+    import json
+    from urllib.parse import quote
+    request, _ = epub_app
+    catalog = request("/api/sources")
+    headers = {"X-Source-ID": "fixture-book", "X-Catalog-Revision": str(catalog["revision"]),
+               "X-Document-Format": "epub", "X-PDF-Add": "1", "X-PDF-Auto-Title": "1",
+               "Content-Type": "application/epub+zip",
+               "X-PDF-Metadata": quote(json.dumps({"title": "Filename", "author": "Manual author"}))}
+    request("/api/pdf-upload", book(), upload_headers=headers, origin="", status=403)
+    request("/api/pdf-upload", b"bad archive", upload_headers=headers, status=409)
+    assert request("/api/sources")["revision"] == catalog["revision"]
+    assert request("/api/pdf-upload", book(), upload_headers=headers)["installed_verified"]
+    updated = request("/api/sources")
+    row = source(updated, "fixture-book")
+    assert row["adapter"] == "epub" and row["installed_verified"]
+    assert row["profile"]["title"] == "Offline & safe"
+    assert row["profile"]["author"] == "Manual author"
+    assert row["profile"]["publisher"] == "Example Press"
+    assert row["download_filter"] == "downloaded"
+    request("/api/publication", dict(source_id="fixture-book", enabled=True, revision=updated["revision"]), status=400)
+    assert "Upload EPUB" in request("/admin/sources")
+
+
+def test_epub_http_add_download(epub_app, disk, monkeypatch):
+    from contextlib import contextmanager
+    from theaxiom import pdf_transport
+    request, _ = epub_app
+    calls = []
+
+    @contextmanager
+    def fake(url, *, format_name):
+        calls.append((url, format_name))
+        yield io.BytesIO(book())
+
+    monkeypatch.setattr(pdf_transport, "open_pdf", fake)
+    revision = request("/api/sources")["revision"]
+    payload = dict(source_id="url-book", action="epub-add-download", revision=revision,
+                   fields=dict(title="Filename", source_url="https://publisher.org/book.epub"),
+                   auto_title=True)
+    request("/api/action", payload, origin="", status=403)
+    request("/api/action", dict(payload, revision=revision-1), status=409)
+    assert not calls
+    assert request("/api/action", payload)["installed_verified"]
+    assert calls == [("https://publisher.org/book.epub", "epub")]
+    row = source(request("/api/sources"), "url-book")
+    assert row["profile"]["title"] == "Offline & safe"
+    assert row["profile"]["author"] == "Example Author"
+    assert row["installed_verified"]
+    assert "Downloaded via configured HTTPS URL" in row["configuration"]["provenance"]

@@ -754,8 +754,13 @@
       function detectFormat() {
         if (manualFormat) return;
         try {
-          const path = new URL(input('source_url').value).pathname.toLowerCase();
-          format.value = path.endsWith('.zim') ? 'zim' : path.endsWith('.pdf') ? 'pdf' : path.endsWith('.epub') ? 'epub' : 'unspecified';
+          const path = new URL(input('source_url').value).pathname;
+          const lower = path.toLowerCase();
+          format.value = lower.endsWith('.zim') ? 'zim' : lower.endsWith('.pdf') ? 'pdf' : lower.endsWith('.epub') ? 'epub' : 'unspecified';
+          if (format.value === 'epub' && form.dataset.operation === 'add' && (!input('title').value.trim() || automaticTitle)) {
+            input('title').value = path.split('/').pop().replace(/\.epub$/i, '').replace(/[_-]+/g, ' ').trim().slice(0,512) || 'Untitled EPUB';
+            automaticTitle = true;
+          }
         } catch (_) { format.value = 'unspecified'; }
       }
       input('source_url').addEventListener('input', detectFormat);
@@ -871,6 +876,13 @@
             const response = await fetch('/api/pdf-upload', {method:'POST', headers, body:file});
             const result = await response.json().catch(() => ({}));
             if (!response.ok || !result.installed_verified) throw new Error(result.error || 'Document upload failed (HTTP ' + response.status + ')');
+            reloadSources();
+          } else if (form.dataset.operation === 'add' && format.value === 'epub' && fields.source_url) {
+            const metadata = Object.fromEntries(Object.entries(fields).filter(([k]) => ['title','description','author','publisher','edition','language','source_url','license'].includes(k)));
+            const response = await fetch('/api/action', {method:'POST', headers:{'Content-Type':'application/json'},
+              body:JSON.stringify({source_id, action:'epub-add-download', revision, fields:metadata, auto_title:automaticTitle})});
+            const result = await response.json().catch(() => ({}));
+            if (!response.ok || !result.installed_verified) throw new Error(result.error || 'EPUB download failed');
             reloadSources();
           } else { await change(form.dataset.operation, source_id, fields, form.dataset.operation === 'edit'); }
         }
