@@ -249,7 +249,7 @@
         busy = true;
         document.querySelectorAll('.group-panel button,.group-panel input,.group-panel select').forEach(e => e.disabled = true);
         try {
-          const response = await fetch('/api/groups',{method:'POST',headers:{...(window.axiomCsrfHeaders?.() || {}),'Content-Type':'application/json'},body:JSON.stringify({...payload,revision})});
+          const response = await fetch('/api/groups',{method:'POST',headers:{...((typeof window !== 'undefined' && window.axiomCsrfHeaders?.()) || {}),'Content-Type':'application/json'},body:JSON.stringify({...payload,revision})});
           const result = await response.json();
           if (!response.ok) throw new Error(result.error || 'Grouping update failed');
           try { sessionStorage.setItem('axiom-group-kind',kind.value); } catch (_) {}
@@ -535,7 +535,7 @@
     };
     document.getElementById('admin-logout')?.addEventListener('click', async () => {
       const response = await fetch('/api/admin/logout', {
-        method:'POST',headers:{...(window.axiomCsrfHeaders?.() || {}),'Content-Type':'application/json',...window.axiomCsrfHeaders()},
+        method:'POST',headers:{...((typeof window !== 'undefined' && window.axiomCsrfHeaders?.()) || {}),'Content-Type':'application/json',...window.axiomCsrfHeaders()},
         body:'{}',cache:'no-store'
       });
       if (response.ok) window.location.assign('/admin/login');
@@ -673,7 +673,7 @@
         return id;
       }
       async function groupPost(payload, currentRevision) {
-        const response = await fetch('/api/groups', {method:'POST', headers:{...(window.axiomCsrfHeaders?.() || {}),'Content-Type':'application/json'},
+        const response = await fetch('/api/groups', {method:'POST', headers:{...((typeof window !== 'undefined' && window.axiomCsrfHeaders?.()) || {}),'Content-Type':'application/json'},
           body:JSON.stringify({...payload, revision:currentRevision})});
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || 'Group change failed');
@@ -747,7 +747,7 @@
                 : {source_id, enabled:action === 'publish', revision:currentRevision};
               if (rightsIds.has(source_id)) payload.acknowledge_rights = true;
               const response = await fetch(removing ? '/api/sources' : '/api/publication', {
-                method:'POST', headers:{...(window.axiomCsrfHeaders?.() || {}),'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+                method:'POST', headers:{...((typeof window !== 'undefined' && window.axiomCsrfHeaders?.()) || {}),'Content-Type':'application/json'}, body:JSON.stringify(payload)});
               const result = await response.json();
               if (!response.ok) {
                 results.push(title + ': ' + (result.error || 'HTTP ' + response.status));
@@ -924,7 +924,7 @@
       }
       async function change(operation, source_id, fields, editGroups = false) {
         if (revision === null) throw new Error('Catalog revision unavailable');
-        const response = await fetch('/api/sources', {method:'POST', headers:{...(window.axiomCsrfHeaders?.() || {}),'Content-Type':'application/json'},
+        const response = await fetch('/api/sources', {method:'POST', headers:{...((typeof window !== 'undefined' && window.axiomCsrfHeaders?.()) || {}),'Content-Type':'application/json'},
           body:JSON.stringify({operation, source_id, fields, revision})});
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || 'Catalog update failed');
@@ -974,7 +974,7 @@
             reloadSources();
           } else if (form.dataset.operation === 'add' && format.value === 'epub' && fields.source_url) {
             const metadata = Object.fromEntries(Object.entries(fields).filter(([k]) => ['title','description','author','publisher','edition','language','source_url','license'].includes(k)));
-            const response = await acquisitionFetch('/api/action', {method:'POST', headers:{...(window.axiomCsrfHeaders?.() || {}),'Content-Type':'application/json'},
+            const response = await acquisitionFetch('/api/action', {method:'POST', headers:{...((typeof window !== 'undefined' && window.axiomCsrfHeaders?.()) || {}),'Content-Type':'application/json'},
               body:JSON.stringify({source_id, action:'epub-add-download', revision, fields:metadata, auto_title:automaticTitle})});
             const result = await response.json().catch(() => ({}));
             if (!response.ok || !result.installed_verified) throw acquisitionError(response, result, 'EPUB download was not confirmed');
@@ -1018,9 +1018,9 @@
         busyText.textContent = (file ? 'Uploading and verifying ' : 'Downloading and verifying ') + formatLabel + '…';
         try {
           const response = file
-            ? await acquisitionFetch('/api/pdf-upload', {method:'POST', headers:{...(window.axiomCsrfHeaders?.() || {}),'Content-Type':card.dataset.filterFormat === 'epub' ? 'application/epub+zip' : 'application/pdf',
+            ? await acquisitionFetch('/api/pdf-upload', {method:'POST', headers:{...((typeof window !== 'undefined' && window.axiomCsrfHeaders?.()) || {}),'Content-Type':card.dataset.filterFormat === 'epub' ? 'application/epub+zip' : 'application/pdf',
                 'X-Document-Format':card.dataset.filterFormat, 'X-Source-ID':card.dataset.sourceId, 'X-Catalog-Revision':String(revision)}, body:file})
-            : await acquisitionFetch('/api/action', {method:'POST', headers:{...(window.axiomCsrfHeaders?.() || {}),'Content-Type':'application/json'},
+            : await acquisitionFetch('/api/action', {method:'POST', headers:{...((typeof window !== 'undefined' && window.axiomCsrfHeaders?.()) || {}),'Content-Type':'application/json'},
                 body:JSON.stringify({source_id:card.dataset.sourceId, action:card.dataset.filterFormat === 'epub' ? 'epub-download' : 'pdf-download', revision})});
           const result = await response.json().catch(() => ({}));
           if (!response.ok) throw acquisitionError(response, result, 'Document acquisition failed');
@@ -1054,7 +1054,7 @@
         card.dataset.zimPosting = 'true';
         localFeedback.textContent = 'Starting download…';
         try {
-          const response = await acquisitionFetch('/api/action', {method:'POST', headers:{...(window.axiomCsrfHeaders?.() || {}),'Content-Type':'application/json'},
+          const response = await acquisitionFetch('/api/action', {method:'POST', headers:{...((typeof window !== 'undefined' && window.axiomCsrfHeaders?.()) || {}),'Content-Type':'application/json'},
             body:JSON.stringify({source_id:card.dataset.sourceId, action:'zim-download', revision})});
           const result = await response.json().catch(() => ({}));
           if (!response.ok || !result.accepted) {
@@ -1078,7 +1078,7 @@
         card.dataset.zimPosting = 'true';
         card.querySelectorAll('[data-zim-control],[data-zim-download]').forEach(b => b.disabled = true);
         try {
-          const response = await acquisitionFetch('/api/action', {method:'POST', headers:{...(window.axiomCsrfHeaders?.() || {}),'Content-Type':'application/json'},
+          const response = await acquisitionFetch('/api/action', {method:'POST', headers:{...((typeof window !== 'undefined' && window.axiomCsrfHeaders?.()) || {}),'Content-Type':'application/json'},
             body:JSON.stringify({source_id:card.dataset.sourceId, action:'zim-' + operation, revision})});
           const result = await response.json().catch(() => ({}));
           if (!response.ok || !result.accepted) throw acquisitionError(response, result, 'ZIM control failed');
@@ -1101,7 +1101,7 @@
         try {
           const payload = {source_id:button.closest('.source-card').dataset.sourceId, enabled, revision};
           if (acknowledge) payload.acknowledge_rights = true;
-          const response = await fetch('/api/publication', {method:'POST', headers:{...(window.axiomCsrfHeaders?.() || {}),'Content-Type':'application/json'},
+          const response = await fetch('/api/publication', {method:'POST', headers:{...((typeof window !== 'undefined' && window.axiomCsrfHeaders?.()) || {}),'Content-Type':'application/json'},
             body:JSON.stringify(payload)});
           if (!response.ok) throw new Error((await response.json()).error || 'Publication failed');
           reloadSources();
@@ -1465,7 +1465,7 @@
         feedback.textContent = 'Saving preferences…';
         try {
           populate(await json('/api/storage-settings', {method: 'POST',
-            headers: {...(window.axiomCsrfHeaders?.() || {}),'Content-Type': 'application/json'}, body: JSON.stringify(settings)}));
+            headers: {...((typeof window !== 'undefined' && window.axiomCsrfHeaders?.()) || {}),'Content-Type': 'application/json'}, body: JSON.stringify(settings)}));
           const ready = await statusCheck();
           feedback.textContent = ready ? 'Preferences saved. Storage is ready (advisory).' :
             'Preferences saved, but storage is not ready. See the status below.';
@@ -1496,7 +1496,7 @@
         feedback.textContent = 'Changing password…';
         try {
           const response = await fetch('/api/admin/password', {
-            method: 'POST', headers: {...(window.axiomCsrfHeaders?.() || {}),'Content-Type': 'application/json'},
+            method: 'POST', headers: {...((typeof window !== 'undefined' && window.axiomCsrfHeaders?.()) || {}),'Content-Type': 'application/json'},
             cache: 'no-store', body: JSON.stringify({current_password: current.value,
               new_password: next.value, confirm_password: confirm.value})
           });
