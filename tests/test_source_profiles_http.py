@@ -388,3 +388,32 @@ def test_zim_preflight_error_returns_actionable_message(app, monkeypatch):
                                        revision=catalog["revision"]), status=503)
     assert "storage root or staging/library" in body["error"]
     assert "private path" not in body["error"]
+
+
+def test_generic_zim_publication_intent_waits_for_verified_reader(app, monkeypatch):
+    request, _ = app
+    sid = "fema-ready"
+    catalog = request("/api/sources")
+    assert next(s for s in catalog["sources"] if s["source_id"] == sid)["adapter"] == "kiwix"
+    job = {"source_id": sid, "state": "completed", "active": False, "verified": True,
+           "configuration": {"format": "zim"}}
+    monkeypatch.setattr(admin_api.zim_jobs, "status", lambda identifier: job if identifier == sid else None)
+    monkeypatch.setattr(admin_api.zim_jobs, "installed",
+                        lambda current, config: {"filename": "fema-ready." + "a"*64 + ".zim",
+                                                 "bytes": 123, "sha256": "a"*64} if current else None)
+    result = request("/api/publication",
+                     dict(source_id=sid, enabled=True, revision=catalog["revision"]), status=409)
+    assert "permission" in result["error"].lower()
+    result = request("/api/publication", dict(source_id=sid, enabled=True,
+                        revision=catalog["revision"], acknowledge_rights=True))
+    assert result["enabled"] is True
+    updated = request("/api/sources")
+    state = next(s for s in updated["sources"] if s["source_id"] == sid)["publication"]
+    assert state["enabled"] and state["verified"] and not state["published"]
+    assert "Awaiting" in state["publication_reason"]
+    assert request("/read/zim/fema-ready", status=403)["error"] == "ZIM collection unavailable"
+    assert sid in request("/api/publication")
+    assert not request("/internal/publication/zim", status=403, raw=True)[0]
+    result = request("/api/publication", dict(source_id=sid, enabled=False,
+                         revision=updated["revision"]))
+    assert result["enabled"] is False
