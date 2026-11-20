@@ -296,3 +296,18 @@ def test_compact_card_and_acquisition_feedback():
     assert "if (formPosting) return;" in page
     assert "Acquisition outcome uncertain" in page
     assert "cancelSave.disabled = false;" in page
+
+
+def test_published_zim_card_hides_routine_notices():
+    pin = WIKIPEDIA_SOURCE
+    wiki = profile("wikipedia-en", format="zim", source_url=pin["source_url"],
+                   expected_size_bytes=str(pin["bytes"]), sha256=pin["sha256"])
+    wiki["publication"] = dict(enabled=True, published=True, verified=True)
+    page = render([wiki])
+    card = page.split('<div class="source-expanded">', 1)[1].split('</details></div>', 1)[0]
+    assert "acquisition disabled pending storage safety integration" not in card
+    assert "Unpublish before changing artifact configuration." not in card
+    assert ">Unpublish</button>" in card
+    wiki["mutation_blocked"] = True
+    blocked = render([wiki]).split('<div class="source-expanded">', 1)[1].split('</details></div>', 1)[0]
+    assert "Acquisition or publication status unresolved; changes are blocked." in blocked

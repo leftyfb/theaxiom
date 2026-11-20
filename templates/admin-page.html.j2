@@ -476,9 +476,9 @@
         <div class="busy-indicator" data-pdf-busy hidden><span class="busy-spinner" aria-hidden="true"></span><span role="status" data-pdf-busy-text></span></div>
         <p class="source-note" data-pdf-feedback role="status"></p>
         {% if url_managed and not source.pdf_download %}<p class="source-note">Configured download URL is unsupported. Edit the source URL.</p>{% endif %}
-        {% else %}<p class="source-note" data-field="acquisition-reason">{{ source.acquisition_reason }}</p>{% endif %}
+        {% elif source.acquisition_reason != 'acquisition disabled pending storage safety integration' %}<p class="source-note" data-field="acquisition-reason">{{ source.acquisition_reason }}</p>{% endif %}
         {% if pub %}<p class="source-note" data-field="publication-status" role="status"{% if pub.published %} hidden{% endif %}>{{ publication_label }}</p>{% endif %}
-        <p class="source-note" data-field="mutation-note">{% if pub.enabled %}Unpublish before changing artifact configuration.{% elif source.mutation_blocked %}Acquisition active or unresolved; changes are blocked.{% endif %}</p>
+        <p class="source-note" data-field="mutation-note">{% if source.mutation_blocked or pub.error %}Acquisition or publication status unresolved; changes are blocked.{% endif %}</p>
         {% if source.profile.author or source.profile.publisher or source.profile.edition or source.profile.language %}
         <dl class="source-metadata">
           {% for name in ('author', 'publisher', 'edition', 'language') if source.profile.get(name) %}
@@ -1182,8 +1182,7 @@
         const blocked = source?.mutation_blocked !== false || !!pub?.error;
         card.querySelector('[data-catalog-edit]').disabled = blocked;
         card.querySelector('[data-catalog-remove]').disabled = blocked;
-        field('mutation-note').textContent = pub?.enabled ? 'Unpublish before changing artifact configuration.' :
-          blocked ? 'Acquisition or publication status unresolved; changes are blocked.' : '';
+        field('mutation-note').textContent = blocked ? 'Acquisition or publication status unresolved; changes are blocked.' : '';
         if (['pdf','epub'].includes(card.dataset.filterFormat)) {
           card.dataset.acquisitionBlocked = String(blocked || !!pub?.enabled);
           for (const button of card.querySelectorAll('[data-pdf-download], [data-pdf-upload]')) {
