@@ -496,7 +496,12 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", types[path.suffix])
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Content-Security-Policy", "default-src 'none'")
+        # A dedicated worker inherits its own response CSP. Permit only
+        # local renderer imports and font/CMap requests, never remote fetches.
+        policy = "default-src 'none'"
+        if relative == "build/pdf.worker.mjs":
+            policy += "; script-src 'self'; connect-src 'self'"
+        self.send_header("Content-Security-Policy", policy)
         self.end_headers()
         self.wfile.write(body)
 

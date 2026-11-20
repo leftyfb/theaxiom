@@ -445,3 +445,24 @@ def test_new_pdf_prefers_simple_metadata_only_when_requested(pdf_app, disk, auto
         headers["X-PDF-Auto-Title"] = "1"
     request("/api/pdf-upload", document(b"Embedded title"), upload_headers=headers)
     assert source(request("/api/sources"), SID)["profile"]["title"] == expected
+
+
+def test_pdfjs_assets_are_local_and_restricted(pdf_app, tmp_path, monkeypatch):
+    root = tmp_path / "pdfjs"
+    build = root / "build"
+    build.mkdir(parents=True)
+    (build / "pdf.worker.mjs").write_text("// worker fixture")
+    (build / "pdf.mjs").write_text("// library fixture")
+    (build / "private.txt").write_text("not public")
+    outside = tmp_path / "outside.mjs"
+    outside.write_text("private")
+    (build / "escape.mjs").symlink_to(outside)
+    monkeypatch.setattr(admin_api, "PDFJS_ROOT", root)
+    request, _ = pdf_app
+    body, headers = request("/api/pdfjs/build/pdf.worker.mjs", raw=True)
+    assert b"worker fixture" in body
+    assert headers["Content-Type"] == "text/javascript"
+    assert "connect-src 'self'" in headers["Content-Security-Policy"]
+    request("/api/pdfjs/build/private.txt", status=404)
+    request("/api/pdfjs/build/escape.mjs", status=404)
+    request("/api/pdfjs/build/../outside.mjs", status=404)

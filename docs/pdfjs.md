@@ -1,9 +1,16 @@
 # Offline PDF reader (#74)
 
 Install the official Mozilla PDF.js legacy generic distribution 6.5.438 at
-`/opt/pdfjs/6.5.438` and link `/opt/pdfjs/current` to it. Use
-`python3 scripts/vendor_pdfjs.py /opt/pdfjs/6.5.438` as an administrator on a
-connected preparation host, then transfer the verified directory if needed.
+`/opt/pdfjs/6.5.438` and link `/opt/pdfjs/current` to it. Download the official release archive on a connected preparation host and verify it before installation:
+
+```sh
+wget https://github.com/mozilla/pdf.js/releases/download/v6.5.438/pdfjs-6.5.438-legacy-dist.zip
+echo '55138aa33b5f1f6f68809895338b947f395f344eb6381d424b2420d6daa6a844  pdfjs-6.5.438-legacy-dist.zip' | sha256sum -c
+```
+
+After successful verification, extract into a new empty versioned directory,
+preserve licensing files, and transfer to the offline server if needed.
+Do not overwrite an existing installation without checking its identity.
 Keep the distribution and license notices root-owned and not writable by the
 application service account. No installation-time changes to content storage
 are needed. No CDN or runtime internet access is used.
