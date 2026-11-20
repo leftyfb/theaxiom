@@ -90,7 +90,7 @@ def test_catalog_management_form_exposes_metadata_and_confirmation_controls():
     assert 'data-catalog-expected-size-bytes="4096"' in page
     assert 'data-catalog-sha256="' + ("a" * 64) + '"' in page
     assert 'data-catalog-remove="field-guide"' in page
-    assert "Installed artifacts will not be deleted." in page
+    assert "It will be unpublished automatically. Installed files will not be deleted." in page
     assert "window.prompt" not in page
     assert "Candidate source metadata is not trusted or fetched." in page
 
@@ -125,5 +125,5 @@ def test_offline_source_guide_is_discoverable_and_honest():
     assert 'https://www.ready.gov/' in page
     assert 'explicitly configured NFS storage is supported' in page
     assert 'arbitrary remote downloads are not yet enabled' in page
-    assert 'Removing a profile does not delete installed files' in page
+    assert 'Removing a published profile automatically unpublishes it and does not delete installed files' in page
     assert 'id="source-guide"' not in render(admin_page="settings")

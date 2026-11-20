@@ -99,7 +99,8 @@ def test_publication_refresh_updates_summary_and_controls():
     assert success["publication-toggle"]["textContent"] == "Unpublish"
     assert not success["publication-toggle"]["disabled"]
     assert not success["publication-browse"]["hidden"]
-    assert success["[data-catalog-remove]"]["disabled"]
+    assert not success["[data-catalog-remove]"]["disabled"]
+    assert failure["[data-catalog-remove]"]["disabled"]
     assert failure["publication-summary"]["textContent"] == "Publication status unavailable"
     assert failure["publication-toggle"]["disabled"]
     assert failure["publication-browse"]["hidden"]

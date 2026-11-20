@@ -267,17 +267,20 @@ class AdminAPIValidationTests(unittest.TestCase):
             self.assertEqual(admin_api.SOURCE_CATALOG.get(), before)
         monitor.snapshot.return_value = {"stale": False, "acquisitions": []}
 
-    def test_published_wikipedia_removal_is_refused(self):
+    def test_published_wikipedia_removal_unpublishes(self):
         from tempfile import TemporaryDirectory
         from pathlib import Path
         from theaxiom import admin_api, catalog_store
         with TemporaryDirectory() as directory, mock.patch.object(
             admin_api, "SOURCE_CATALOG", catalog_store.CatalogStore(Path(directory) / "sources.json")
-        ), mock.patch.object(admin_api.publication, "load", return_value={"wikipedia-en": True}):
+        ), mock.patch.object(admin_api.publication, "load", return_value={"wikipedia-en": True}), mock.patch.object(
+            admin_api.publication, "save"
+        ) as save:
             before = admin_api.SOURCE_CATALOG.get()
             status, _ = self.post_source({"operation": "remove", "source_id": "wikipedia-en", "revision": before["revision"], "fields": {}})
-            self.assertEqual(status, 409)
-            self.assertIn("wikipedia-en", [item["source_id"] for item in admin_api.SOURCE_CATALOG.get()["sources"]])
+            self.assertEqual(status, 200)
+            save.assert_called_once_with("wikipedia-en", False)
+            self.assertNotIn("wikipedia-en", [item["source_id"] for item in admin_api.SOURCE_CATALOG.get()["sources"]])
 
     def test_unknown_source_id(self):
         status, _ = self.post_action("nonexistent-source", "download")
