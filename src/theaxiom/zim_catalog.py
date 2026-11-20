@@ -4,6 +4,7 @@ This module DOES NOT start or expose a Kiwix listener. Deployment can feed its
 generated library into a dedicated, publication-gated reader later. Only
 explicitly published, locally verified completed ZIMs may enter the manifest.
 """
+import argparse
 import os
 from pathlib import Path
 import re
@@ -102,3 +103,21 @@ def write_manifest(records, enabled=None):
     finally:
         Path(name).unlink(missing_ok=True)
     return target
+
+
+def main(argv=None):
+    """Build the private manifest on demand; never start or reload Kiwix."""
+    from . import catalog_store
+    parser = argparse.ArgumentParser(description="Prepare the verified, published ZIM catalog; does not deploy")
+    parser.add_argument("--catalog", type=Path, default=storage_settings.SETTINGS_PATH.with_name("sources.json"),
+                        help="Path to the existing source catalog")
+    args = parser.parse_args(argv)
+    catalog = catalog_store.CatalogStore(args.catalog).get()
+    # publication.load() and file identity checks fail closed before replacement.
+    output = write_manifest(catalog["sources"])
+    print(f"Verified published ZIM manifest written: {output}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -69,3 +69,23 @@ def test_unpublished_manifest_drops_previous_book_without_removing_archive(disk)
     path = zim_catalog.write_manifest([record("ready")], {"ready": False})
     assert ET.fromstring(path.read_bytes()).find("book") is None
     assert (disk / "library/zim" / artifact["filename"]).exists()
+
+
+def test_missing_mount_fails_closed_without_existing_manifest_overwrite(disk):
+    from unittest.mock import patch
+    import pytest
+    marker = zim_catalog.manifest_path()
+    marker.write_bytes(b"existing trusted snapshot")
+    with patch.object(zim_catalog.pdf_source, "_directory", side_effect=ValueError("mount unavailable")):
+        with pytest.raises(ValueError, match="mount unavailable"):
+            zim_catalog.write_manifest([record("ready")], {"ready": True})
+    assert marker.read_bytes() == b"existing trusted snapshot"
+
+
+def test_manifest_write_is_repeatable_and_not_auto_activated(disk):
+    # Writing a private catalog cannot turn on a publication flag by itself.
+    first = zim_catalog.write_manifest([], {})
+    before = first.read_bytes()
+    second = zim_catalog.write_manifest([], {})
+    assert second == first and second.read_bytes() == before
+    assert publication.load() == {}
