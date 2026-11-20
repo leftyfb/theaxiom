@@ -136,3 +136,22 @@ def test_generic_zim_publication_is_pending_until_acknowledged_reader(disk, tmp_
             status = zim_catalog.status(rec, [rec])
             assert status["published"] and status["entry_path"] == "/read/zim/ready"
     assert not zim_catalog.status(record("other"), [rec])["published"]
+
+
+def test_reader_content_auth_requires_specific_published_book(disk):
+    from unittest.mock import patch
+    artifact = zim_source.install_stream("ready", CONFIG, BytesIO(fixture_bytes()))
+    zim_jobs.save({"source_id": "ready", "state": "completed", "active": False,
+                   "verified": True, "configuration": zim_jobs.identity(CONFIG),
+                   "artifact": artifact})
+    rec = record("ready")
+    publication.save("ready", True)
+    with patch.object(zim_catalog, "active_manifest_matches", return_value=True):
+        assert zim_catalog.authorize_reader_uri([rec], "/zim/content/ready/article")
+        assert zim_catalog.authorize_reader_uri([rec], "/zim/viewer")
+        assert not zim_catalog.authorize_reader_uri([rec], "/zim/content/other/article")
+        assert not zim_catalog.authorize_reader_uri([rec], "/zim/content/ready%2Fother/article")
+        assert not zim_catalog.authorize_reader_uri([rec], "/zim/content/../ready")
+        assert not zim_catalog.authorize_reader_uri([rec], "/admin")
+        publication.save("ready", False)
+        assert not zim_catalog.authorize_reader_uri([rec], "/zim/content/ready/article")

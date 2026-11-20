@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import tempfile
+from urllib.parse import urlsplit
 import xml.etree.ElementTree as ET
 
 from . import pdf_source, publication, storage_settings, zim_jobs
@@ -138,6 +139,36 @@ def active_manifest_matches(records, enabled=None, *, acknowledgement=None):
     except (OSError, ValueError, TypeError):
         return False
 
+
+
+
+CONTENT_ROUTE = re.compile(r"/zim/content/([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:/|$)")
+
+
+def authorize_reader_uri(records, uri):
+    """Authorize Kiwix requests while denying unpublished content deep links.
+
+    The trusted Nginx proxy supplies the original request URI. Kiwix's shared
+    UI/assets are accessible only if a current, acknowledged published library
+    exists. Content endpoints additionally require an explicitly published
+    verified source ID. Invalid or encoded book IDs never match.
+    """
+    if not isinstance(uri, str) or len(uri) > 8192 or not uri.startswith("/zim/"):
+        return False
+    try:
+        path = urlsplit(uri).path
+        if not path.startswith("/zim/"):
+            return False
+        if not active_manifest_matches(records):
+            return False
+        if path.startswith("/zim/content/"):
+            match = CONTENT_ROUTE.match(path)
+            if not match:
+                return False
+            return match.group(1) in {book["id"] for book in verified_books(records)}
+        return bool(verified_books(records))
+    except (OSError, ValueError, TypeError):
+        return False
 
 
 GENERIC_READER = {"path": "/zim/", "port": 8082}
