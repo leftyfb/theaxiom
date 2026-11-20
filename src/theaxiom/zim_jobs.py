@@ -246,38 +246,40 @@ def _run(job, guard, signal, offset, validator):
         job.update(state="completed", active=False, verified=True, artifact=artifact,
                    downloaded_bytes=artifact["bytes"], expected_bytes=artifact["bytes"], sampled_at=time.time())
     except zim_source.TransferStopped:
-        if CONTROLS.get(sid, (None, None))[1] == "cancel":
-            try:
-                zim_source.discard_partial(sid)
-            except FileNotFoundError:
-                pass
-            job.update(state="cancelled", active=False, verified=False, downloaded_bytes=0,
-                       detail="Download cancelled; staged bytes removed.", sampled_at=time.time())
-        else:
-            job.update(state="paused", active=False, verified=False, downloaded_bytes=staged_size(sid),
-                       detail="Download paused; partial retained.", sampled_at=time.time())
+        job.update(state="paused", active=False, verified=False,
+                   detail="Download paused; partial retained.", sampled_at=time.time())
     except Exception as exc:
-        requested = CONTROLS.get(sid, (None, None))[1] if signal.is_set() else None
-        if requested == "cancel":
-            try:
-                zim_source.discard_partial(sid)
-            except FileNotFoundError:
-                pass
-            job.update(state="cancelled", active=False, verified=False, downloaded_bytes=0,
-                       detail="Download cancelled; staged bytes removed.", sampled_at=time.time())
-        elif requested == "pause":
-            job.update(state="paused", active=False, verified=False,
-                       detail="Download paused after network interruption.", sampled_at=time.time())
-        else:
-            detail = str(exc)[:240] if isinstance(exc, ValueError) else "ZIM acquisition failed (network or storage I/O)."
-            job.update(state="failed", active=False, verified=False, detail=detail, sampled_at=time.time())
-        try:
-            job["downloaded_bytes"] = staged_size(sid)
-        except (ValueError, OSError):
-            pass
+        detail = str(exc)[:240] if isinstance(exc, ValueError) else "ZIM acquisition failed (network or storage I/O)."
+        job.update(state="failed", active=False, verified=False, detail=detail, sampled_at=time.time())
     finally:
-        try:
-            save(job)
-        finally:
-            CONTROLS.pop(sid, None)
-            guard.__exit__(None, None, None)
+        # Serialize the final outcome with control() so a cancellation accepted
+        # just as the network fails cannot be overwritten by a stale failure.
+        with LOCK:
+            try:
+                request = CONTROLS.get(sid, (None, None))[1]
+                if request == "cancel" and job["state"] != "completed":
+                    try:
+                        zim_source.discard_partial(sid)
+                        job.update(state="cancelled", active=False, verified=False,
+                                   downloaded_bytes=0, detail="Download cancelled; staged bytes removed.",
+                                   sampled_at=time.time())
+                    except FileNotFoundError:
+                        job.update(state="cancelled", active=False, verified=False,
+                                   downloaded_bytes=0, detail="Download cancelled; no staged bytes remain.",
+                                   sampled_at=time.time())
+                    except (OSError, ValueError):
+                        job.update(state="failed", active=False, verified=False,
+                                   detail="Cancellation could not clean the configured staging mount.",
+                                   sampled_at=time.time())
+                elif request == "pause" and job["state"] == "failed":
+                    job.update(state="paused", active=False, verified=False,
+                               detail="Download paused after transport failure.", sampled_at=time.time())
+                if job["state"] in {"failed", "paused"}:
+                    try:
+                        job["downloaded_bytes"] = staged_size(sid)
+                    except (OSError, ValueError):
+                        pass
+                save(job)
+            finally:
+                CONTROLS.pop(sid, None)
+                guard.__exit__(None, None, None)
