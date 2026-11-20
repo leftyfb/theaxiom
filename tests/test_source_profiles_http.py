@@ -298,12 +298,12 @@ def test_group_api_bulk_membership_and_revision(app):
                    revision=catalog["revision"])
     request("/api/groups", payload, status=403, origin="")
     created = request("/api/groups", payload)
-    assert created["groups"][0]["name"] == "Reference"
+    assert next(g for g in created["groups"] if g["kind"] == "categories" and g["group_id"] == "reference")["name"] == "Reference"
     request("/api/groups", payload, status=409)
     add = dict(operation="add-members", kind="categories", group_id="reference",
                source_ids=[SID], revision=created["revision"])
     saved = request("/api/groups", add)
-    assert saved["groups"][0]["source_ids"] == [SID]
+    assert next(g for g in saved["groups"] if g["kind"] == "categories" and g["group_id"] == "reference")["source_ids"] == [SID]
     assert request("/api/sources")["groups"] == saved["groups"]
     request("/api/groups", dict(add, source_ids=["missing"], revision=saved["revision"]), status=400)
 
