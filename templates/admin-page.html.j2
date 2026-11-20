@@ -434,7 +434,7 @@
     <div id="source-cards">
     {% for source in (catalog|default({})).sources|default([]) %}
       {% set pub = source.publication %}
-      {% set publication_label = 'Publication status unavailable' if pub.error else 'Published · available in library' if pub.published else 'Enabled · reader unavailable' if pub.enabled else 'Unpublished · ready to publish' if pub.serving else 'Unpublished · ' + pub.publication_reason if pub.publication_reason else 'Unpublished · reader not ready' %}
+      {% set publication_label = 'Publication status unavailable' if pub.error else 'Published · available in library' if pub.published else ('Verified · awaiting Kiwix reader activation' if pub.ready_for_publication else 'Enabled · reader unavailable') if pub.enabled else 'Unpublished · ready to publish' if pub.serving else 'Verified · ready to publish' if pub.ready_for_publication else 'Unpublished · ' + pub.publication_reason if pub.publication_reason else 'Unpublished · reader not ready' %}
       <div class="source-row">
       <label class="group-select" hidden><input type="checkbox" data-group-select value="{{ source.source_id }}" aria-label="Select {{ source.profile.title }} for grouping"></label>
       <details class="source-card" data-source-id="{{ source.source_id }}" data-filter-title="{{ source.profile.title }}" data-filter-format="{{ source.configuration.format }}" data-filter-publication="{{ source.publication_filter|default('unknown') }}" data-filter-download="{{ source.download_filter|default('unknown') }}"{% for name in editable_fields %} data-catalog-{{ name|replace('_', '-') }}="{{ source.profile.get(name, source.configuration.get(name, '')) }}"{% endfor %}>
@@ -444,7 +444,7 @@
             <h3>{{ source.profile.title }}</h3>
             <p class="source-subtitle">{{ source.configuration.format|upper }}{% if source.profile.description %} · {{ source.profile.description }}{% endif %}</p>
 
-            {% if pub %}<span class="compact-publication" data-field="publication-summary">{{ "Published" if pub.published else "Reader unavailable" if pub.enabled else "" }}</span>{% endif %}
+            {% if pub %}<span class="compact-publication" data-field="publication-summary">{{ "Published" if pub.published else "Kiwix starting" if pub.enabled and pub.ready_for_publication else "Reader unavailable" if pub.enabled else "" }}</span>{% endif %}
           </div>
           <span class="badge{% if source.installed_verified %} enabled{% endif %}" data-field="status" role="status">{% if not source.adapter %}Not yet supported{% elif source.installed_verified and source.artifact %}{{ source.artifact.bytes | filesizeformat(true) }}{% elif source.adapter in ('pdf','epub') %}{{ 'Not installed or invalid' if source.artifact else 'Not downloaded' }}{% elif source.acquisition and not catalog.acquisition_stale %}{{ {'downloading':'Downloading','verifying':'Verifying','publishing':'Installing','failed':'Failed','retrying':'Retrying','interrupted':'Interrupted','not_started':'Not downloaded','unavailable':'Service unavailable'}.get(source.acquisition.state,'Waiting for status') }}{% elif catalog.acquisition_stale %}Status unavailable{% elif not source.artifact and not source.mutation_blocked %}Not downloaded{% else %}Waiting for status…{% endif %}</span>
           <progress class="summary-progress" data-field="summary-progress" max="100" value="0" aria-label="Active download progress" hidden></progress>
@@ -1287,11 +1287,11 @@
         toggle.dataset.acknowledgeRights = String(!!pub?.requires_rights_acknowledgement);
         toggle.disabled = !pub?.enabled && (blocked || !(pub?.serving || pub?.requires_rights_acknowledgement || pub?.ready_for_publication));
         field('publication-browse').hidden = !pub?.published;
-        field('publication-summary').textContent = !pub || pub.error ? 'Publication status unavailable' : pub.published ? 'Published' : pub.enabled ? 'Reader unavailable' : '';
+        field('publication-summary').textContent = !pub || pub.error ? 'Publication status unavailable' : pub.published ? 'Published' : pub.enabled ? (pub.ready_for_publication ? 'Kiwix starting' : 'Reader unavailable') : '';
         field('publication-status').hidden = !!pub?.published;
         field('publication-status').textContent =
           !pub || pub.error ? 'Publication status unavailable' : pub.published ? 'Published · available in library' :
-          pub.enabled ? 'Enabled · reader unavailable' : pub.serving ? 'Unpublished · ready to publish' : pub.publication_reason ? 'Unpublished · ' + pub.publication_reason : 'Unpublished · reader not ready';
+          pub.enabled ? (pub.ready_for_publication ? 'Verified · awaiting Kiwix reader activation' : 'Enabled · reader unavailable') : pub.serving ? 'Unpublished · ready to publish' : pub.ready_for_publication ? 'Verified · ready to publish' : pub.publication_reason ? 'Unpublished · ' + pub.publication_reason : 'Unpublished · reader not ready';
       }
       async function refresh() {
         const controller = new AbortController();
