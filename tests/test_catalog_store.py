@@ -45,10 +45,9 @@ class CatalogStoreTests(unittest.TestCase):
         }, initial["revision"])
         self.assertEqual(saved["revision"], 1)
         source = next(x for x in saved["sources"] if x["source_id"] == "my-reference")
-        self.assertTrue(source["candidate_only"])
-        self.assertFalse(source["builtin"])
-        self.assertEqual(source["expected_size_bytes"], "12345")
-        self.assertEqual(source["sha256"], "a" * 64)
+        self.assertEqual(source.keys(), {"source_id", "profile", "configuration"})
+        self.assertEqual(source["configuration"]["expected_size_bytes"], "12345")
+        self.assertEqual(source["configuration"]["sha256"], "a" * 64)
         self.assertTrue(self.path.exists())
         self.assertEqual(os.stat(self.path).st_mode & 0o777, 0o600)
 
@@ -56,23 +55,21 @@ class CatalogStoreTests(unittest.TestCase):
         loaded = restarted.get()
         self.assertIn("my-reference", [x["source_id"] for x in loaded["sources"]])
         edited = restarted.mutate("edit", "my-reference", {"title": "Updated"}, loaded["revision"])
-        self.assertEqual(next(x for x in edited["sources"] if x["source_id"] == "my-reference")["title"], "Updated")
+        self.assertEqual(next(x for x in edited["sources"] if x["source_id"] == "my-reference")["profile"]["title"], "Updated")
         removed = restarted.mutate("remove", "my-reference", {}, edited["revision"])
         self.assertNotIn("my-reference", [x["source_id"] for x in removed["sources"]])
 
     def test_builtin_metadata_override_is_persistent_and_keeps_stable_id(self):
         initial = self.store.get()
-        original = next(s for s in initial["sources"] if s["source_id"] == "wikipedia-en")
         edited = self.store.mutate("edit", "wikipedia-en", {"title": "Reviewed title", "source_url": "https://example.org/candidate.zim", "sha256": "a" * 64, "license": "Candidate license"}, initial["revision"])
         current = next(s for s in edited["sources"] if s["source_id"] == "wikipedia-en")
-        self.assertEqual(current["title"], "Reviewed title")
-        self.assertEqual(current["source_id"], original["source_id"])
-        self.assertEqual(current["source_url"], original["source_url"])
-        self.assertEqual(current["candidate_source_url"], "https://example.org/candidate.zim")
-        self.assertEqual(current["candidate_sha256"], "a" * 64)
-        self.assertEqual(current["candidate_license"], "Candidate license")
+        self.assertEqual(current["profile"]["title"], "Reviewed title")
+        self.assertEqual(current["source_id"], "wikipedia-en")
+        self.assertEqual(current["configuration"]["source_url"], "https://example.org/candidate.zim")
+        self.assertEqual(current["configuration"]["sha256"], "a" * 64)
+        self.assertEqual(current["configuration"]["license"], "Candidate license")
         restarted = catalog_store.CatalogStore(self.path).get()
-        self.assertEqual(next(s for s in restarted["sources"] if s["source_id"] == "wikipedia-en")["title"], "Reviewed title")
+        self.assertEqual(next(s for s in restarted["sources"] if s["source_id"] == "wikipedia-en")["profile"]["title"], "Reviewed title")
 
     def test_preloaded_remove_and_recreate_preserves_installed_content(self):
         content = Path(self.temp.name) / "content" / "wikipedia-en.zim"
@@ -107,11 +104,8 @@ class CatalogStoreTests(unittest.TestCase):
             self.assertNotIn("seeded", records[sid])
         sources = {s["source_id"]: s for s in added["sources"]}
         wiki, manual = sources["wikipedia-en"], sources["manual"]
-        for key in config.keys() - {"format"}:
-            self.assertEqual(wiki["candidate_" + key], manual["candidate_" + key])
-        self.assertEqual(wiki["sha256"], source_catalog.WIKIPEDIA_SOURCE["sha256"])
-        self.assertEqual(wiki["bytes"], source_catalog.WIKIPEDIA_SOURCE["bytes"])
-        self.assertNotIn("bytes", manual)
+        self.assertEqual(wiki["configuration"], manual["configuration"])
+        self.assertEqual(wiki.keys(), manual.keys())
 
     def test_revision_conflict_does_not_overwrite(self):
         revision = self.store.get()["revision"]
@@ -172,10 +166,9 @@ class CatalogStoreTests(unittest.TestCase):
         self.assertEqual(set(json.loads(converted)), {"schema_version", "revision", "updated_at", "sources"})
         sources = {s["source_id"]: s for s in snapshot["sources"]}
         self.assertNotIn("wikivoyage", sources)
-        self.assertEqual(sources["wikipedia-en"]["title"], "Edited")
-        self.assertEqual(sources["wikipedia-en"]["sha256"], source_catalog.WIKIPEDIA_SOURCE["sha256"])
+        self.assertEqual(sources["wikipedia-en"]["profile"]["title"], "Edited")
         for sid in ("wikipedia-en", "manual"):
-            self.assertEqual(sources[sid]["candidate_sha256"], "a" * 64)
+            self.assertEqual(sources[sid]["configuration"]["sha256"], "a" * 64)
         self.assertEqual(catalog_store.CatalogStore(self.path).get(), snapshot)
         self.assertEqual(self.path.read_bytes(), converted)
 
@@ -199,8 +192,7 @@ class CatalogStoreTests(unittest.TestCase):
         snapshot = self.store.get()
         self.assertEqual(snapshot["revision"], 4)
         source, = snapshot["sources"]
-        self.assertEqual(source["sha256"], source_catalog.WIKIPEDIA_SOURCE["sha256"])
-        self.assertEqual(source["candidate_sha256"], "d" * 64)
+        self.assertEqual(source["configuration"]["sha256"], "d" * 64)
         converted, = json.loads(self.path.read_bytes())["sources"]
         self.assertEqual(converted["configuration"]["sha256"], "d" * 64)
         self.assertEqual(set(converted), {"source_id", "profile", "configuration"})

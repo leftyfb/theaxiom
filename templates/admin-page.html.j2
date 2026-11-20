@@ -143,6 +143,7 @@
         <label for="catalog-id">Stable ID</label><input id="catalog-id" name="source_id" required pattern="[a-z0-9]+(?:-[a-z0-9]+)*" maxlength="64">
         <label for="catalog-title">Title</label><input id="catalog-title" name="title" required maxlength="512">
         <label for="catalog-description">Description</label><textarea id="catalog-description" name="description" maxlength="512"></textarea>
+        <label for="catalog-format">Format (e.g. zim, pdf, unspecified)</label><input id="catalog-format" name="format" value="unspecified" required pattern="[a-z0-9](?:[a-z0-9\-]{0,61}[a-z0-9])?" maxlength="63">
         <label for="catalog-url">Candidate URL (not fetched)</label><input id="catalog-url" name="source_url" type="url" maxlength="512">
         <label for="catalog-publisher">Publisher</label><input id="catalog-publisher" name="publisher" maxlength="512">
         <label for="catalog-edition">Edition / release</label><input id="catalog-edition" name="edition" maxlength="512">
@@ -152,22 +153,23 @@
         <label for="catalog-provenance">Provenance / source of metadata</label><textarea id="catalog-provenance" name="provenance" maxlength="512"></textarea>
         <label for="catalog-license">License / rights note</label><input id="catalog-license" name="license" maxlength="512">
         <p class="source-note">This records candidate metadata only. It does not verify rights or enable acquisition.</p>
+        <p id="source-form-feedback" role="status"></p>
         <button class="button" type="submit">Save source</button>
         <button class="button" type="button" id="source-cancel">Cancel</button>
       </form>
     </dialog>
     <div id="source-cards">
-    {% if offline_library_kiwix_zim_enabled %}
-      {% set source = offline_library_kiwix_zim %}
-      <details class="source-card" data-source-id="wikipedia-en" data-catalog-id="wikipedia-en" data-catalog-builtin="true" data-catalog-title="{{ source.title }}" data-catalog-description="{{ source.description|default('') }}" data-catalog-publisher="{{ source.publisher }}" data-catalog-language="{{ source.language }}" aria-labelledby="wikipedia-title">
+    {% for source in (catalog|default({})).sources|default([]) %}
+      {% set pub = source.publication %}
+      {% set publication_label = 'Publication status unavailable' if pub.error else 'Published · available in library' if pub.published else 'Enabled · reader unavailable' if pub.enabled else 'Unpublished · ready to publish' if pub.serving else 'Unpublished · reader not ready' %}
+      <details class="source-card" data-source-id="{{ source.source_id }}"{% for name in editable_fields %} data-catalog-{{ name|replace('_', '-') }}="{{ source.profile.get(name, source.configuration.get(name, '')) }}"{% endfor %}>
         <summary class="source-header">
-          <span class="source-symbol" aria-hidden="true">W</span>
           <div>
-            <h3 id="wikipedia-title">{{ source.title }}</h3>
-            <p class="source-subtitle">Kiwix ZIM · English · {{ (source.bytes / 1073741824)|round(2) }} GiB</p>
-            <span class="compact-publication" id="publication-summary">Checking publication…</span>
+            <h3>{{ source.profile.title }}</h3>
+            <p class="source-subtitle">{{ source.configuration.format }}{% if source.profile.description %} · {{ source.profile.description }}{% endif %}</p>
+            {% if pub %}<span class="compact-publication" data-field="publication-summary">{{ publication_label }}</span>{% endif %}
           </div>
-          <span class="badge" data-field="status" role="status">Waiting for status…</span>
+          <span class="badge" data-field="status" role="status">{% if not source.artifact %}Candidate only · no matching artifact{% elif pub and pub.verified %}Archive verified{% elif catalog.acquisition_stale %}Status unavailable{% else %}Waiting for status…{% endif %}</span>
         </summary>
         <div class="source-expanded">
         <div class="source-live">
@@ -178,61 +180,50 @@
           <p class="source-note" data-field="rate" hidden></p>
           <p data-field="detail" class="source-note" hidden></p>
         </div>
-        <div class="source-actions" aria-label="Source actions">
-          <button class="button" type="button" data-action="download-zim" disabled>Download</button>
-          <button class="button" type="button" data-action="redownload-zim" disabled>Re-download</button>
-          <button class="button" type="button" data-action="update-zim" disabled>Update</button>
+        {% if source.artifact %}
+        <div class="source-actions" aria-label="Acquisition controls">
+          <button class="button" type="button" data-action="download" disabled>Download</button>
+          <button class="button" type="button" data-action="redownload" disabled>Re-download</button>
+          <button class="button" type="button" data-action="update" disabled>Update</button>
         </div>
+        {% else %}<p class="source-note">Download not supported for this configuration.</p>{% endif %}
+        {% if pub %}
         <div class="source-actions" aria-label="Publication controls">
-          <button class="button" type="button" id="publication-toggle" disabled>Publish</button>
-          <a class="button" id="publication-browse" href="/read/wikipedia-en" hidden>Browse</a>
-          <span id="publication-status" role="status">Checking publication…</span>
+          <button class="button" type="button" data-field="publication-toggle" data-enabled="{{ 'true' if pub.enabled else 'false' }}"{% if not pub.enabled and (not pub.serving or source.mutation_blocked) %} disabled{% endif %}>{{ 'Unpublish' if pub.enabled else 'Publish' }}</button>
+          <a class="button" data-field="publication-browse" href="{{ pub.entry_path }}"{% if not pub.published %} hidden{% endif %}>Browse</a>
+          <span data-field="publication-status" role="status">{{ publication_label }}</span>
         </div>
-        <div class="source-actions"><button class="button" type="button" data-catalog-edit="wikipedia-en">Edit display metadata</button></div>
+        {% endif %}
+        <div class="source-actions" aria-label="Profile controls">
+          <button class="button" type="button" data-catalog-edit="{{ source.source_id }}"{% if source.mutation_blocked or pub.error %} disabled{% endif %}>Edit</button>
+          <button class="button" type="button" data-catalog-remove="{{ source.source_id }}"{% if source.mutation_blocked or pub.enabled or pub.error %} disabled{% endif %}>Remove</button>
+          <span class="source-note" data-field="mutation-note">{% if pub.enabled %}Unpublish before removing or changing artifact configuration.{% elif source.mutation_blocked %}Acquisition active or unresolved; changes are blocked.{% endif %}</span>
+        </div>
         <section aria-label="Source details">
           <h4>Source details</h4>
           <dl class="storage-status source-details">
-            <dt>Archive filename</dt><dd>{{ source.filename }}</dd>
-            <dt>Catalog date</dt><dd>{{ source.catalog_date or '—' }}</dd>
-            <dt>Publisher</dt><dd>{{ source.publisher or '—' }}</dd>
-            <dt>Language</dt><dd>{{ source.language or '—' }}</dd>
-            <dt>Source URL</dt><dd>{{ source.source_url }}</dd>
-            <dt>Expected SHA-256</dt><dd>{{ source.sha256 }}</dd>
-            <dt>License</dt><dd>{{ source.license or '—' }}</dd>
-            <dt>Verification</dt><dd data-field="verified">Not confirmed</dd>
+            {% for name in ('publisher', 'edition', 'language') %}
+            <dt>{{ name|capitalize }}</dt><dd>{{ source.profile.get(name) or '—' }}</dd>
+            {% endfor %}
+            <dt>Candidate URL</dt><dd>{{ source.configuration.source_url or '—' }}</dd>
+            <dt>Candidate size (bytes)</dt><dd>{{ source.configuration.expected_size_bytes or '—' }}</dd>
+            <dt>Candidate SHA-256</dt><dd>{{ source.configuration.sha256 or '—' }}</dd>
+            <dt>Candidate provenance</dt><dd>{{ source.configuration.provenance or '—' }}</dd>
+            <dt>Candidate license</dt><dd>{{ source.configuration.license or '—' }}</dd>
+            {% if source.artifact %}
+            <dt>Pinned archive filename</dt><dd>{{ source.artifact.filename }}</dd>
+            <dt>Pinned archive size (bytes)</dt><dd>{{ source.artifact.bytes }}</dd>
+            <dt>Pinned archive SHA-256</dt><dd>{{ source.artifact.sha256 }}</dd>
+            {% endif %}
+            <dt>Installed verification</dt><dd data-field="verified">{{ 'Confirmed by acquisition service' if pub and pub.verified else 'Not confirmed' }}</dd>
             <dt>Last sample</dt><dd data-field="sample">—</dd>
           </dl>
         </section>
         </div>
       </details>
-    {% endif %}
-    {% for source in offline_library_content_manifest %}
-      <details class="source-card" data-catalog-id="{{ source.source_id }}" data-catalog-builtin="true" data-catalog-title="{{ source.title }}" data-catalog-description="{{ source.description }}" data-catalog-publisher="{{ source.publisher|default('') }}" data-catalog-language="{{ source.language|default('') }}">
-        <summary class="source-header">
-          <div><h3>{{ source.title }}</h3><p class="source-subtitle">{{ source.description or ('Offline reference collection' if source.kind == 'planned' else source.kind) }}</p></div>
-          <span class="badge">{{ 'Not downloaded' if source.kind == 'planned' else 'Status unavailable' }}</span>
-        </summary>
-        <div class="source-expanded">
-          {% if source.kind == 'planned' %}<p class="source-note">Download not supported yet.</p><div class="source-actions"><button class="button" type="button" data-catalog-edit="{{ source.source_id }}">Edit</button><button class="button" type="button" data-catalog-remove="{{ source.source_id }}">Remove</button></div>{% else %}
-          <div class="source-actions">
-            <button class="button" type="button" data-acquisition-action="download" disabled>Download</button>
-            <button class="button" type="button" disabled>Re-download</button>
-            <button class="button" type="button" disabled>Update</button>
-          </div>
-          {% endif %}
-          <h4>Source details</h4><dl class="storage-status"><dt>Retrieved (catalog)</dt><dd>{{ source.retrieved or '—' }}</dd></dl>
-        </div>
-      </details>
-    {% endfor %}
-    {% for source in catalog_custom_sources %}
-      <details class="source-card" data-catalog-id="{{ source.source_id }}" data-catalog-title="{{ source.title }}" data-catalog-description="{{ source.description }}" data-catalog-source-url="{{ source.source_url }}" data-catalog-publisher="{{ source.publisher }}" data-catalog-edition="{{ source.edition }}" data-catalog-language="{{ source.language }}" data-catalog-expected-size-bytes="{{ source.expected_size_bytes }}" data-catalog-sha256="{{ source.sha256 }}" data-catalog-provenance="{{ source.provenance }}" data-catalog-license="{{ source.license }}">
-        <summary class="source-header"><div><h3>{{ source.title }}</h3><p class="source-subtitle">{{ source.description or 'Custom candidate source metadata' }}</p></div><span class="badge">Candidate only · not acquired</span></summary>
-        <div class="source-expanded"><p class="source-note">Candidate URL: {{ source.source_url or '—' }}. This metadata does not identify trusted installed content.</p><div class="source-actions"><button class="button" type="button" data-catalog-edit="{{ source.source_id }}">Edit</button><button class="button" type="button" data-catalog-remove="{{ source.source_id }}">Remove</button></div></div>
-      </details>
-    {% endfor %}
-    {% if not offline_library_content_manifest and not offline_library_kiwix_zim_enabled %}
+    {% else %}
       <p class="empty">No managed sources configured.</p>
-    {% endif %}
+    {% endfor %}
     </div>
     {% endif %}
   </main>
@@ -240,36 +231,22 @@
   <script id="source-catalog-script">
     (() => {
       const feedback = document.getElementById('catalog-feedback');
-      let revision = {{ catalog_revision|default('null') }};
-      async function load() {
-        const response = await fetch('/api/sources', {cache:'no-store'});
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error || 'Catalog unavailable');
-        if (revision === null) revision = data.revision;
-      }
+      const revision = {{ (catalog|default({})).revision|default(none)|tojson }};
       const dialog = document.getElementById('source-dialog');
       const form = document.getElementById('source-form');
       const input = name => form.elements.namedItem(name);
-      const clearForm = () => {
-        form.reset();
-        for (const name of ['source_url', 'expected_size_bytes', 'sha256', 'license']) input(name).disabled = false;
-        input('source_id').disabled = false;
-        document.getElementById('source-dialog-title').textContent = 'Add source metadata';
-        form.dataset.operation = 'add';
-      };
+      const formFeedback = document.getElementById('source-form-feedback');
+      const fieldsToEdit = Array.from(form.querySelectorAll('[name]:not([name="source_id"])'));
       function openForm(operation, card = null) {
-        clearForm();
+        form.reset();
+        formFeedback.textContent = '';
+        input('source_id').disabled = !!card;
+        document.getElementById('source-dialog-title').textContent = card ? 'Edit source profile' : 'Add source profile';
         form.dataset.operation = operation;
         if (card) {
-          input('source_id').value = card.dataset.catalogId;
-          input('source_id').disabled = true;
-          for (const name of ['title', 'description', 'source_url', 'publisher', 'edition', 'language', 'expected_size_bytes', 'sha256', 'provenance', 'license']) {
-            input(name).value = card.dataset['catalog' + name.split('_').map(x => x[0].toUpperCase() + x.slice(1)).join('')] || '';
-          }
-          document.getElementById('source-dialog-title').textContent = 'Edit source metadata';
-          if (card.dataset.catalogBuiltin === 'true') {
-            for (const name of ['source_url', 'expected_size_bytes', 'sha256', 'license']) input(name).disabled = true;
-            document.getElementById('source-dialog-title').textContent = 'Edit built-in display metadata';
+          input('source_id').value = card.dataset.sourceId;
+          for (const field of fieldsToEdit) {
+            field.value = card.getAttribute('data-catalog-' + field.name.replaceAll('_', '-')) || '';
           }
         }
         dialog.showModal();
@@ -287,12 +264,12 @@
       form.addEventListener('submit', async event => {
         event.preventDefault();
         const source_id = input('source_id').value;
-        const fields = Object.fromEntries(['title', 'description', 'source_url', 'publisher', 'edition', 'language', 'expected_size_bytes', 'sha256', 'provenance', 'license'].filter(name => !input(name).disabled).map(name => [name, input(name).value]));
+        const fields = Object.fromEntries(fieldsToEdit.map(field => [field.name, field.value]));
         try { await change(form.dataset.operation, source_id, fields); }
-        catch (error) { feedback.textContent = error.message; }
+        catch (error) { formFeedback.textContent = error.message; }
       });
       document.querySelectorAll('[data-catalog-edit]').forEach(button => button.addEventListener('click', () => {
-        openForm('edit', button.closest('[data-catalog-id]'));
+        openForm('edit', button.closest('.source-card'));
       }));
       document.querySelectorAll('[data-catalog-remove]').forEach(button => button.addEventListener('click', async () => {
         const source_id = button.dataset.catalogRemove;
@@ -300,15 +277,28 @@
         try { await change('remove', source_id, {}); }
         catch (error) { feedback.textContent = error.message; }
       }));
-      load().catch(error => { feedback.textContent = error.message; document.getElementById('source-add').disabled = true; });
+      document.querySelectorAll('[data-field="publication-toggle"]').forEach(button => button.addEventListener('click', async () => {
+        button.dataset.posting = 'true';
+        button.disabled = true;
+        try {
+          const response = await fetch('/api/publication', {method:'POST', headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({source_id:button.closest('.source-card').dataset.sourceId, enabled:button.dataset.enabled !== 'true'})});
+          if (!response.ok) throw new Error((await response.json()).error || 'Publication failed');
+          window.location.reload();
+        } catch (error) {
+          window.alert(error.message);
+          delete button.dataset.posting;
+        }
+      }));
     })();
   </script>
   <script id="acquisition-monitor-script">
     (() => {
       const cards = Array.from(document.querySelectorAll('.source-card[data-source-id]'));
       if (!cards.length) return;
+      const revision = {{ (catalog|default({})).revision|default(none)|tojson }};
       const labels = {downloading: 'Downloading', verifying: 'Verifying checksum',
-        publishing: 'Promoting / verifying final file', completed: 'Archive verified',
+        publishing: 'Promoting / verifying final file', completed: 'Acquisition completed',
         retrying: 'Waiting to retry', failed: 'Failed', interrupted: 'Interrupted',
         not_started: 'Not downloaded', unavailable: 'Service not installed', unknown: 'Status unknown'};
       const gib = bytes => (bytes / 1073741824).toFixed(2) + ' GiB';
@@ -319,8 +309,9 @@
           node.textContent = value;
           node.hidden = !value;
         };
-        const status = unavailable ? 'Status unavailable' : !job ? 'Waiting for status' :
-          stale ? 'Stale sample — status unknown' : (labels[job.state] || 'Status unknown');
+        const verified = !stale && job?.state === 'completed' && job.verified === true && job.active === false;
+        const status = unavailable ? 'Status unavailable' : stale ? 'Stale sample — status unknown' :
+          !job ? 'Waiting for status' : verified ? 'Archive verified' : (labels[job.state] || 'Status unknown');
         put('status', status);
         field('status').className = 'badge' + (!stale && job?.state === 'completed' && job.verified === true ?
           ' enabled' : !stale && job?.state === 'failed' ? ' disabled' : '');
@@ -357,20 +348,49 @@
           (Number.isFinite(job.eta_seconds) ? ' · ' + Math.ceil(job.eta_seconds / 60) + ' min remaining (transfer only)' : '') : '';
         put('rate', rate);
         put('detail', job?.detail || '');
-        put('verified', !stale && job?.verified === true ? 'Confirmed by acquisition service' : 'Not confirmed');
+        put('verified', verified ? 'Confirmed by acquisition service' : 'Not confirmed');
         put('sample', Number.isFinite(job?.sampled_at) ? new Date(job.sampled_at * 1000).toLocaleString() : '—');
+      }
+      function controls(card, source) {
+        const field = name => card.querySelector('[data-field="' + name + '"]');
+        const pub = source?.publication;
+        const blocked = source?.mutation_blocked !== false || !!pub?.error;
+        card.querySelector('[data-catalog-edit]').disabled = blocked;
+        card.querySelector('[data-catalog-remove]').disabled = blocked || !!pub?.enabled;
+        field('mutation-note').textContent = pub?.enabled ? 'Unpublish before removing or changing artifact configuration.' :
+          blocked ? 'Acquisition or publication status unresolved; changes are blocked.' : '';
+        const toggle = field('publication-toggle');
+        if (!toggle || toggle.dataset.posting === 'true') return;
+        toggle.dataset.enabled = String(!!pub?.enabled);
+        toggle.textContent = pub?.enabled ? 'Unpublish' : 'Publish';
+        toggle.disabled = !pub?.enabled && (blocked || !pub?.serving);
+        field('publication-browse').hidden = !pub?.published;
+        field('publication-summary').textContent = field('publication-status').textContent =
+          !pub || pub.error ? 'Publication status unavailable' : pub.published ? 'Published · available in library' :
+          pub.enabled ? 'Enabled · reader unavailable' : pub.serving ? 'Unpublished · ready to publish' : 'Unpublished · reader not ready';
       }
       async function refresh() {
         const controller = new AbortController();
         const timer = window.setTimeout(() => controller.abort(), 5000);
         try {
-          const response = await fetch('/api/acquisitions', {cache: 'no-store', signal: controller.signal});
+          const response = await fetch('/api/sources', {cache: 'no-store', signal: controller.signal});
           if (!response.ok) throw new Error('Status unavailable');
           const data = await response.json();
-          const jobs = new Map((data.acquisitions || []).map(job => [job.source_id, job]));
-          cards.forEach(card => render(card, jobs.get(card.dataset.sourceId), data.stale !== false));
+          if (data.revision !== revision) {
+            document.getElementById('catalog-feedback').textContent = 'Source profiles changed. Reload to see the latest catalog.';
+            throw new Error('Catalog revision changed');
+          }
+          const sources = new Map(data.sources.map(source => [source.source_id, source]));
+          cards.forEach(card => {
+            const source = sources.get(card.dataset.sourceId);
+            if (source?.artifact) render(card, source.acquisition, data.acquisition_stale !== false);
+            controls(card, source);
+          });
         } catch (_) {
-          cards.forEach(card => render(card, null, true, true));
+          cards.forEach(card => {
+            if (card.querySelector('[data-action="download"]')) render(card, null, true, true);
+            controls(card, null);
+          });
         } finally {
           window.clearTimeout(timer);
           window.setTimeout(refresh, 2000);
@@ -379,58 +399,7 @@
       refresh();
     })();
   </script>
-  {% if offline_library_kiwix_zim_enabled %}
-  <script id="publication-script">
-    (() => {
-      const button = document.getElementById('publication-toggle');
-      const browse = document.getElementById('publication-browse');
-      const label = document.getElementById('publication-status');
-      const summary = document.getElementById('publication-summary');
-      let state, busy = false;
-      async function refresh() {
-        if (busy) return;
-        try {
-          const response = await fetch('/api/publication', {cache:'no-store'});
-          if (!response.ok) throw new Error();
-          const next = (await response.json())['wikipedia-en'];
-          if (busy) return;
-          state = next;
-          button.textContent = state.enabled ? 'Unpublish' : 'Publish';
-          button.disabled = !state.enabled && !state.serving;
-          browse.hidden = !state.published;
-          label.textContent = state.published ? 'Published · available in library' :
-            state.enabled ? 'Enabled · reader unavailable' :
-            state.serving ? 'Unpublished · ready to publish' : 'Unpublished · reader not ready';
-          summary.textContent = label.textContent;
-        } catch (_) {
-          button.disabled = true;
-          browse.hidden = true;
-          label.textContent = 'Publication status unavailable';
-          summary.textContent = label.textContent;
-        }
-      }
-      button.addEventListener('click', async () => {
-        if (busy || !state) return;
-        busy = true;
-        button.disabled = true;
-        try {
-          const response = await fetch('/api/publication', {method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({source_id:'wikipedia-en', enabled:!state.enabled})});
-          if (!response.ok) throw new Error((await response.json()).error || 'Publication failed');
-        } catch (error) {
-          label.textContent = error.message;
-          window.alert(error.message);
-        } finally {
-          busy = false;
-          await refresh();
-        }
-      });
-      refresh();
-      window.setInterval(refresh, 3000);
-    })();
-  </script>
-  {% endif %}
+
   {% else %}
   <script id="storage-settings-script">
     (() => {

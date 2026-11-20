@@ -208,28 +208,7 @@ class CatalogStore:
 
     @staticmethod
     def _snapshot(state):
-        # Temporary compatibility projection for the existing admin cards.
-        # Neither card type nor pinned artifact metadata affects catalog CRUD.
-        planned = {entry["source_id"]: entry for entry in source_catalog.PLANNED_SOURCES}
-        artifact = source_catalog.WIKIPEDIA_SOURCE
-        result = []
-        for record in state["sources"]:
-            sid, config = record["source_id"], record["configuration"]
-            has_artifact = sid == artifact["source_id"]
-            builtin = has_artifact or sid in planned
-            entry: dict[str, Any] = dict(record["profile"], source_id=sid, format=config["format"],
-                                         builtin=builtin, candidate_only=not has_artifact)
-            for key in CANDIDATE_FIELDS & config.keys():
-                entry["candidate_" + key] = config[key]
-                if not has_artifact:
-                    entry[key] = config[key]  # Legacy display aliases, not artifact metadata.
-            if has_artifact:
-                entry.update({k: v for k, v in artifact.items() if k not in PROFILE_FIELDS})
-                entry["availability"] = "supported"
-            elif sid in planned:
-                entry.update({k: planned[sid][k] for k in ("kind", "issue", "availability")})
-            result.append(entry)
-        return {"revision": state["revision"], "updated_at": state["updated_at"], "sources": result}
+        return {key: state[key] for key in ("revision", "updated_at", "sources")}
 
     @staticmethod
     def _apply_fields(record, fields):

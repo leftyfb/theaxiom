@@ -145,13 +145,13 @@ class AdminAPIValidationTests(unittest.TestCase):
                 "fields": {"title": "Field Guide", "description": "Candidate", "source_url": "https://example.org/guide.pdf", "publisher": "Example", "edition": "2026 edition", "language": "en", "expected_size_bytes": "1536", "sha256": "b" * 64, "provenance": "Publisher catalog", "license": "CC BY 4.0"},
             })
             self.assertEqual(status, 200)
-            self.assertTrue(next(s for s in added["sources"] if s["source_id"] == "field-guide")["candidate_only"])
+            self.assertIsNone(next(s for s in added["sources"] if s["source_id"] == "field-guide")["artifact"])
             status, stale = self.post_source({"operation": "edit", "source_id": "field-guide", "revision": initial["revision"], "fields": {"title": "Stale"}})
             self.assertEqual(status, 409)
             self.assertEqual(stale, {"error": "catalog revision changed"})
             status, edited = self.post_source({"operation": "edit", "source_id": "field-guide", "revision": added["revision"], "fields": {"title": "Updated Guide"}})
             self.assertEqual(status, 200)
-            self.assertEqual(next(s for s in edited["sources"] if s["source_id"] == "field-guide")["title"], "Updated Guide")
+            self.assertEqual(next(s for s in edited["sources"] if s["source_id"] == "field-guide")["profile"]["title"], "Updated Guide")
             status, removed = self.post_source({"operation": "remove", "source_id": "field-guide", "revision": edited["revision"], "fields": {}})
             self.assertEqual(status, 200)
             self.assertNotIn("field-guide", [s["source_id"] for s in removed["sources"]])
@@ -208,10 +208,10 @@ class AdminAPIValidationTests(unittest.TestCase):
             self.assertIn("text/html", response.headers["Content-Type"])
         self.assertIn("Manage offline sources", body)
         self.assertIn('data-source-id="wikipedia-en"', body)
-        self.assertIn("fetch('/api/acquisitions'", body)
+        self.assertIn("fetch('/api/sources'", body)
         self.assertNotIn("fetch('/api/action'", body)
         for action in ("download", "redownload", "update"):
-            self.assertIn(f'data-action="{action}-zim" disabled', body)
+            self.assertIn(f'data-action="{action}" disabled', body)
         with urllib.request.urlopen(
             f"http://127.0.0.1:{self.port}/api/acquisitions", timeout=5
         ) as response:
@@ -230,7 +230,7 @@ class AdminAPIValidationTests(unittest.TestCase):
             self.assertIn('data-catalog-edit="internet-archive"', body)
             self.assertIn('data-catalog-remove="internet-archive"', body)
             self.assertIn('data-catalog-edit="wikipedia-en"', body)
-            self.assertNotIn('data-catalog-remove="wikipedia-en"', body)
+            self.assertIn('data-catalog-remove="wikipedia-en"', body)
 
     def test_corrupt_catalog_admin_page_returns_503_without_replacement(self):
         from tempfile import TemporaryDirectory
@@ -259,7 +259,7 @@ class AdminAPIValidationTests(unittest.TestCase):
             monitor.snapshot.return_value = {"stale": True, "acquisitions": []}
             status, _ = self.post_source({"operation": "edit", "source_id": source["source_id"], "revision": before["revision"], "fields": {"title": "Changed"}})
             self.assertNotEqual(status, 200)
-            self.assertEqual(next(item for item in admin_api.SOURCE_CATALOG.get()["sources"] if item["source_id"] == source["source_id"])["title"], source["title"])
+            self.assertEqual(admin_api.SOURCE_CATALOG.get(), before)
         monitor.snapshot.return_value = {"stale": False, "acquisitions": []}
 
     def test_published_wikipedia_removal_is_refused(self):

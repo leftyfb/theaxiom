@@ -146,7 +146,7 @@ def success_evidence(unit, entry, final, final_path):
 
 def collect(entry):
     result = {"source_id": entry["source_id"], "title": entry["title"],
-              "filename": entry["filename"], "expected_bytes": entry["bytes"],
+              "filename": entry["filename"], "expected_bytes": entry["bytes"], "sha256": entry["sha256"],
               "downloaded_bytes": None, "state": "unknown", "verified": False,
               "detail": "", "active": False}
     try:
@@ -251,6 +251,7 @@ class Monitor:
         except Exception:
             data = {"source_id": self.entry["source_id"], "title": self.entry["title"],
                     "filename": self.entry["filename"], "expected_bytes": self.entry["bytes"],
+                    "sha256": self.entry["sha256"],
                     "state": "unknown", "downloaded_bytes": None, "verified": False,
                     "detail": "Sampling failed", "active": False}
         now = time.monotonic()

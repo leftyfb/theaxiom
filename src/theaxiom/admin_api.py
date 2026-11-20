@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from jinja2 import Environment, FileSystemLoader, select_autoescape
+from jinja2 import Environment, FileSystemLoader
 
 if __package__:
     from .freshness_probe import probe_source
@@ -74,6 +74,21 @@ def _release_revision() -> str | None:
     return revision if re.fullmatch(r"[0-9a-f]{40}", revision) else None
 
 
+ARTIFACT_FIELDS = {"format", "source_url", "expected_size_bytes", "sha256"}
+
+
+def matching_artifact(source_id, configuration):
+    """Candidate values may select the existing adapter, never define its artifact."""
+    entry = resolve_source(source_id)
+    if (entry and configuration.get("format") == entry["kind"]
+            and configuration.get("source_url") == entry["source_url"]
+            and configuration.get("expected_size_bytes") == str(entry["bytes"])
+            and isinstance(configuration.get("sha256"), str)
+            and configuration["sha256"].lower() == entry["sha256"]):
+        return {key: entry[key] for key in ("filename", "source_url", "bytes", "sha256")}
+    return None
+
+
 RELEASE_REVISION = _release_revision()
 
 
@@ -115,6 +130,18 @@ _active_downloads: dict[str, subprocess.Popen[bytes]] = {}
 _jobs: dict[str, dict[str, Any]] = {}
 _active_downloads_lock = threading.Lock()
 MAX_RETAINED_JOBS = 100
+
+
+def source_busy(snapshot, source_id):
+    if snapshot["stale"] or any(
+        job["source_id"] == source_id and (job.get("active") is not False
+        or job.get("state") not in ("completed", "not_started", "unavailable"))
+        for job in snapshot["acquisitions"]
+    ):
+        return True
+    with _active_downloads_lock:
+        return any(job["source_id"] == source_id and job["process"].poll() is None
+                   for job in _jobs.values())
 
 
 def job_status_response(job_id: str) -> dict[str, Any] | None:
@@ -251,8 +278,9 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             return
         if self.path in {"/", "/index.html"}:
             sources = []
+            snapshot = self._publication_snapshot()
             for source_id, route in publication.ROUTES.items():
-                if publication.status(self._snapshot(), source_id)["published"]:
+                if publication.status(snapshot, source_id)["published"]:
                     sources.append(route)
             environment = Environment(loader=FileSystemLoader(ADMIN_TEMPLATE_DIR), autoescape=True)
             body = environment.get_template("library.html.j2").render(sources=sources).encode("utf-8")
@@ -271,7 +299,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 if set(params) - {"q"} or len(params.get("q", [""])) != 1:
                     raise ValueError("Invalid search request")
                 query = library_search.validate_query(params.get("q", [""])[0])
-                groups = library_search.search(query, self._snapshot)
+                groups = library_search.search(query, self._publication_snapshot)
             except (ValueError, UnicodeError):
                 error, code = "Invalid search query.", 400
             except RuntimeError:
@@ -286,7 +314,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             self.wfile.write(body)
         elif self.path == "/read/wikipedia-en":
             source_id = "wikipedia-en"
-            if not publication.allowed(self._snapshot(), source_id):
+            if not publication.allowed(self._publication_snapshot(), source_id):
                 self._send_json(403, {"error": "collection unavailable"})
                 return
             location = publication.reader_location(publication.ROUTES[source_id])
@@ -298,11 +326,12 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", "0")
             self.end_headers()
         elif self.path == "/internal/publication/wikipedia-en":
-            self.send_response(204 if publication.allowed(self._snapshot(), "wikipedia-en") else 403)
+            self.send_response(204 if publication.allowed(self._publication_snapshot(), "wikipedia-en") else 403)
             self.send_header("Content-Length", "0")
             self.end_headers()
         elif self.path == "/api/publication":
-            self._send_json(200, {key: publication.status(self._snapshot(), key)
+            snapshot = self._publication_snapshot()
+            self._send_json(200, {key: publication.status(snapshot, key)
                                   for key in publication.ROUTES})
         elif self.path.rstrip("/") == "/health":
             self._send_json(200, health_response())
@@ -326,7 +355,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 self._send_json(500, {"error": "stored settings are invalid"})
         elif self.path.rstrip("/") == "/api/sources":
             try:
-                self._send_json(200, SOURCE_CATALOG.get())
+                self._send_json(200, self._source_profiles(SOURCE_CATALOG.get()))
             except (catalog_store.CatalogError, OSError):
                 self._send_json(503, {"error": "source catalog unavailable; stored data was not replaced"})
         elif re.fullmatch(r"/api/jobs/[a-f0-9]{32}", self.path.rstrip("/")):
@@ -341,13 +370,63 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
 
     def _snapshot(self):
         monitor = getattr(self.server, "acquisition_monitor", None)
-        return monitor.snapshot() if monitor else {"acquisitions": [], "stale": True}
+        try:
+            if monitor:
+                snap = monitor.snapshot()
+                jobs = snap["acquisitions"]
+                if (type(snap["stale"]) is bool and isinstance(jobs, list)
+                        and all(isinstance(job, dict) and isinstance(job.get("source_id"), str)
+                                for job in jobs)):
+                    return snap
+        except Exception:
+            pass
+        return {"acquisitions": [], "stale": True}
+
+    @staticmethod
+    def _matched_snapshot(snapshot, artifacts):
+        jobs = []
+        for job in snapshot["acquisitions"]:
+            artifact = artifacts.get(job["source_id"])
+            if artifact and all(job.get(field) == artifact[key] for field, key in (
+                    ("filename", "filename"), ("expected_bytes", "bytes"), ("sha256", "sha256"))):
+                jobs.append(job)
+        return dict(snapshot, acquisitions=jobs)
+
+    @staticmethod
+    def _artifacts(catalog):
+        return {record["source_id"]: matching_artifact(record["source_id"], record["configuration"])
+                for record in catalog["sources"]}
+
+    def _publication_snapshot(self):
+        try:
+            return self._matched_snapshot(self._snapshot(), self._artifacts(SOURCE_CATALOG.get()))
+        except (catalog_store.CatalogError, OSError):
+            return {"acquisitions": [], "stale": True}
+
+    def _source_profiles(self, catalog):
+        snapshot = self._snapshot()
+        artifacts = self._artifacts(catalog)
+        matched = self._matched_snapshot(snapshot, artifacts)
+        jobs = {job["source_id"]: job for job in matched["acquisitions"]}
+        sources = []
+        for record in catalog["sources"]:
+            sid = record["source_id"]
+            busy = source_busy(snapshot, sid)
+            state = None
+            if sid in publication.ROUTES:
+                state = publication.status(matched, sid)
+                state["entry_path"] = publication.ROUTES[sid]["entry_path"]
+                if not artifacts[sid] and not state["enabled"] and not state.get("error"):
+                    state = None
+            sources.append(dict(record, artifact=artifacts[sid], acquisition=jobs.get(sid),
+                                publication=state, mutation_blocked=busy))
+        return dict(catalog, sources=sources, acquisition_stale=snapshot["stale"])
 
     def _send_admin_page(self, page: str = "sources") -> None:
-        """Render the standalone admin page using trusted source metadata."""
+        """Render exactly the persisted source profiles."""
         environment = Environment(
             loader=FileSystemLoader(ADMIN_TEMPLATE_DIR),
-            autoescape=select_autoescape(["html", "htm", "xml"]),
+            autoescape=True,
         )
         template = environment.get_template("admin-page.html.j2")
         try:
@@ -355,18 +434,10 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         except (catalog_store.CatalogError, OSError):
             self._send_json(503, {"error": "source catalog unavailable; stored data was not replaced"})
             return
-        catalog_sources = catalog_snapshot["sources"]
-        effective_builtins = [item for item in catalog_sources if item["builtin"]]
-        effective_wikipedia = next((item for item in effective_builtins if item["source_id"] == "wikipedia-en"), WIKIPEDIA_SOURCE)
         body = template.render(
             admin_page=page,
-            offline_library_content_manifest=[item for item in effective_builtins if item["source_id"] != "wikipedia-en"],
-            offline_library_kiwix_zim_enabled=True,
-            offline_library_kiwix_zim=effective_wikipedia,
-            catalog_revision=catalog_snapshot["revision"],
-            catalog_builtin_sources=effective_builtins,
-            catalog_custom_sources=[item for item in catalog_sources if not item["builtin"]],
-            source_management_enabled=page == "sources",
+            catalog=self._source_profiles(catalog_snapshot) if page == "sources" else None,
+            editable_fields=sorted(catalog_store.EDITABLE),
             password_change_enabled=bool(getattr(getattr(self.server, "axiom_config", None), "store", None)),
         ).encode("utf-8")
         self.send_response(200)
@@ -414,30 +485,13 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 self._send_json(400, {"error": "invalid source mutation"})
                 return
             sid = data.get("source_id")
-            busy = False
-            if data.get("operation") == "remove" and sid == "wikipedia-en":
-                try:
-                    if publication.load().get(sid, False):
-                        self._send_json(409, {"error": "published source cannot be removed"})
-                        return
-                except (OSError, ValueError):
-                    self._send_json(409, {"error": "publication state unavailable; source removal refused"})
-                    return
-            monitor = getattr(self.server, "acquisition_monitor", None)
-            if not monitor:
-                busy = True
-            else:
-                try:
-                    snap = monitor.snapshot()
-                    if not isinstance(snap, dict) or snap.get("stale") is not False or not isinstance(snap.get("acquisitions"), list):
-                        busy = True
-                    busy = busy or any(isinstance(j, dict) and j.get("source_id") == sid and (j.get("active") or j.get("state") not in {"completed", "not_started", "unavailable"}) for j in snap.get("acquisitions", []))
-                except Exception:
-                    busy = True
-            with _active_downloads_lock:
-                busy = busy or any(j.get("source_id") == sid and p.poll() is None for j, p in ((v, v["process"]) for v in _jobs.values()))
             try:
-                result = SOURCE_CATALOG.mutate(data["operation"], sid, data["fields"], data["revision"], busy)
+                with publication.LOCK:
+                    operation, fields, revision = data["operation"], data["fields"], data["revision"]
+                    if isinstance(sid, str) and sid in publication.ROUTES:
+                        self._guard_published_mutation(operation, sid, fields, revision)
+                    result = SOURCE_CATALOG.mutate(operation, sid, fields, revision,
+                                                   source_busy(self._snapshot(), sid))
             except catalog_store.RevisionConflict as exc:
                 self._send_json(409, {"error": str(exc)})
                 return
@@ -447,7 +501,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             except OSError:
                 self._send_json(503, {"error": "source catalog write failed"})
                 return
-            self._send_json(200, result)
+            self._send_json(200, self._source_profiles(result))
         elif self.path == "/api/publication":
             if not self.headers.get("Origin"):
                 self._send_json(403, {"error": "same-origin request required"})
@@ -459,10 +513,16 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 self._send_json(400, {"error": "invalid publication request"})
                 return
             with publication.LOCK:
-                state = publication.status(self._snapshot(), source_id, probe=enabled)
-                if enabled and not state["serving"]:
-                    self._send_json(409, {"error": "verified content and a reachable reader are required"})
-                    return
+                if enabled:
+                    snapshot = self._snapshot()
+                    try:
+                        matched = self._matched_snapshot(snapshot, self._artifacts(SOURCE_CATALOG.get()))
+                    except (catalog_store.CatalogError, OSError):
+                        self._send_json(503, {"error": "source catalog unavailable"})
+                        return
+                    if source_busy(snapshot, source_id) or not publication.status(matched, source_id)["serving"]:
+                        self._send_json(409, {"error": "matching source configuration, verified content and a reachable reader are required"})
+                        return
                 try:
                     publication.save(source_id, enabled)
                 except (OSError, ValueError):
@@ -494,6 +554,26 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             self._send_json(200 if response["accepted"] else 503, response)
         else:
             self._send_json(404, {"error": "not found"})
+
+    @staticmethod
+    def _guard_published_mutation(operation, sid, fields, revision):
+        if operation not in ("remove", "edit", "add"):
+            return
+        try:
+            enabled = publication.load().get(sid, False)
+        except (OSError, ValueError) as exc:
+            raise catalog_store.RevisionConflict("publication state unavailable; source mutation refused") from exc
+        if not enabled:
+            return
+        if operation in ("remove", "add"):
+            raise catalog_store.RevisionConflict("unpublish source before removing or re-adding it")
+        if isinstance(fields, dict) and fields.keys() & ARTIFACT_FIELDS:
+            catalog = SOURCE_CATALOG.get()
+            if catalog["revision"] != revision:
+                raise catalog_store.RevisionConflict("catalog revision changed")
+            record = next((item for item in catalog["sources"] if item["source_id"] == sid), None)
+            if record and not matching_artifact(sid, record["configuration"] | fields):
+                raise catalog_store.RevisionConflict("unpublish source before changing artifact configuration")
 
     def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
         # Suppress default per-request stderr logging; structured logging

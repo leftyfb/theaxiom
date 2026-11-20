@@ -9,9 +9,8 @@ class AdminWebUISkeletonTests(unittest.TestCase):
         text = TEMPLATE.read_text()
         for marker in ("<!doctype html>", 'lang="en"', 'meta name="viewport"',
                        "Skip to administration", 'id="main-content"', "Manage offline sources",
-                       'data-source-id="wikipedia-en"', '<details class="source-card"', '<summary class="source-header">', '<section aria-label="Source details">',
-                       "No managed sources configured.", "offline_library_content_manifest",
-                       "offline_library_kiwix_zim_enabled", "fetch('/api/acquisitions'",
+                       'data-source-id="{{ source.source_id }}"', '<details class="source-card"', '<summary class="source-header">', '<section aria-label="Source details">',
+                       "No managed sources configured.", 'name="format"', "fetch('/api/sources'",
                        'id="status-staging"', 'id="status-library"'):
             self.assertIn(marker, text)
         for marker in ("data-dest=", "auth_basic", "proxy_pass", "fetch('/api/action'",
