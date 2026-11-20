@@ -248,6 +248,25 @@ $("in").onclick = () => { zoom = Math.min(4, zoom * 1.25); show(page); };
 $("out").onclick = () => { zoom = Math.max(0.25, zoom / 1.25); show(page); };
 $("fit").onclick = () => { zoom = 1; show(page); };
 $("toggle").onclick = thumbnails;
+function setSearchOpen(open) {
+  $("search-tools").hidden = !open;
+  $("search-toggle").setAttribute("aria-expanded", String(open));
+  if (open) {
+    $("find").focus();
+  } else {
+    $("find").value = "";
+    find();
+    $("search-toggle").focus();
+  }
+}
+$("search-toggle").onclick = () => setSearchOpen($("search-tools").hidden);
+$("search-close").onclick = () => setSearchOpen(false);
+$("search-tools").addEventListener("keydown", event => {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    setSearchOpen(false);
+  }
+});
 $("find").oninput = find;
 $("find").onkeydown = event => { if (event.key === "Enter") { event.preventDefault(); nextMatch(event.shiftKey ? -1 : 1); } };
 $("find-prev").onclick = () => nextMatch(-1);

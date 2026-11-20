@@ -33,3 +33,5 @@ license and notices, including bundled fonts. Verify actual host installation
 and browser compatibility before acceptance. Track dependency inventory in #79.
 
 The embedded reader deliberately avoids the upstream generic viewer stylesheet. Its canvas, invisible measurement text layer and highlight overlay are independently stacked. Each render uses its own canvas and only replaces the visible page after successful rendering; stale/cancelled generations and text-layer failures cannot clear the visible canvas. Mobile browser acceptance remains required.
+
+The compact toolbar groups page navigation, zoom, and document actions. Search is initially collapsed; opening it focuses the field, and closing it (or pressing Escape within it) clears the active search and returns focus to the search button. Icon controls retain accessible names and titles. No viewer or toolbar resources are loaded from the internet.

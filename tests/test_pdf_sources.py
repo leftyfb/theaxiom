@@ -512,3 +512,40 @@ def test_pdf_canvas_and_text_layer_are_isolated():
     assert 'const container = document.createElement("div")' in show
     assert 'Text highlights unavailable on this page.' in show
     assert 'new ResizeObserver' in script
+
+
+def test_pdf_compact_toolbar_and_disclosed_search():
+    from pathlib import Path
+    from html.parser import HTMLParser
+    root = Path(__file__).parents[1] / "templates"
+    html = (root / "pdf-reader.html.j2").read_text()
+    script = (root / "pdf-reader.mjs").read_text()
+
+    class Parser(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.controls = {}
+        def handle_starttag(self, tag, attrs):
+            attrs = dict(attrs)
+            if "id" in attrs:
+                assert attrs["id"] not in self.controls
+                self.controls[attrs["id"]] = (tag, attrs)
+
+    parser = Parser()
+    parser.feed(html)
+    controls = parser.controls
+    for key in ("toggle", "prev", "next", "out", "fit", "in", "search-toggle",
+                "print", "find-prev", "find-next", "search-close"):
+        tag, attrs = controls[key]
+        assert tag == "button" and attrs["aria-label"] and attrs["title"]
+        assert attrs["type"] == "button"
+    assert "hidden" in controls["search-tools"][1]
+    assert controls["search-toggle"][1]["aria-controls"] == "search-tools"
+    assert controls["search-toggle"][1]["aria-expanded"] == "false"
+    assert controls["page"][1]["inputmode"] == "numeric"
+    assert 'id="matches" role="status" aria-live="polite"' in html
+    assert '#search-tools[hidden]{display:none}' in html
+    assert 'function setSearchOpen(open)' in script
+    assert '$("find").value = "";' in script
+    assert 'event.key === "Escape"' in script
+    assert '$("search-toggle").focus();' in script
