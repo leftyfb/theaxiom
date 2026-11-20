@@ -167,6 +167,7 @@
       <label for="manage-search">Search groupings</label><input id="manage-search" type="search">
       <label for="manage-new">New grouping name</label><input id="manage-new" maxlength="100">
       <button class="button" id="manage-create" type="button">Add grouping</button>
+      <button class="button" id="manage-defaults" type="button">Add missing starter categories and tags</button>
       <p id="manage-feedback" role="status" aria-live="polite"></p>
       <div id="manage-list"></div>
     </section>
@@ -233,6 +234,10 @@
         for (let n=2;used.has(id);n++) id = base+'-'+n;
         mutate({operation:'create',kind:kind.value,group_id:id,name:value});
       };
+      document.getElementById('manage-defaults').onclick = () => {
+        if (window.confirm('Add missing starter categories and tags? Existing groups and memberships are preserved. Previously deleted defaults may be restored.'))
+          mutate({operation:'merge-defaults',kind:'categories',group_id:'defaults'});
+      };
       kind.addEventListener('change',render); search.addEventListener('input',render); render();
     })();
     </script>
@@ -254,7 +259,7 @@
         <div class="editor-wide"><label for="group-name">New group name / rename</label><input id="group-name" maxlength="100" autocomplete="off"></div>
       </div>
       <div class="source-actions">
-        <button class="button" type="button" id="group-defaults">Add predefined categories</button>
+        <button class="button" type="button" id="group-defaults" hidden>Add predefined categories</button>
         <button class="button" type="button" id="group-create" hidden>Create group</button>
         <button class="button" type="button" id="group-rename" hidden>Rename</button>
         <button class="button" type="button" id="group-delete" hidden>Delete group</button>
@@ -508,8 +513,7 @@
         }
         if (groupExisting.selectedOptions[0]?.disabled) groupExisting.value = '';
         document.getElementById('group-count').textContent = ids.length + ' selected (' + groupChecks.filter(item => item.checked && item.closest('.source-card').hidden).length + ' hidden by filters)';
-        document.getElementById('group-defaults').hidden = kind !== 'categories' ||
-          Array.from(groupExisting.options).some(option => option.dataset.kind === 'categories');
+        document.getElementById('group-defaults').hidden = true;
         document.getElementById('group-create-assign').hidden = kind !== 'tags';
         for (const action of ['rename','delete','assign','unassign']) {
           document.getElementById('group-' + action).disabled = !groupExisting.value ||

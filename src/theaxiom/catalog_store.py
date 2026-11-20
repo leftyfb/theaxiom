@@ -44,6 +44,43 @@ DEFAULT_CATEGORIES = (
     ("history-culture", "History & Culture"),
     ("general-reference", "General Reference"),
 )
+DEFAULT_TAGS = (
+    ("first-aid", "First aid"),
+    ("cpr", "CPR"),
+    ("water-purification", "Water purification"),
+    ("drinking-water", "Drinking water"),
+    ("power-outages", "Power outages"),
+    ("solar-power", "Solar power"),
+    ("batteries", "Batteries"),
+    ("generators", "Generators"),
+    ("food-preservation", "Food preservation"),
+    ("canning", "Canning"),
+    ("gardening", "Gardening"),
+    ("foraging", "Foraging"),
+    ("cooking", "Cooking"),
+    ("fire-starting", "Fire starting"),
+    ("shelter", "Shelter"),
+    ("knots", "Knots"),
+    ("woodworking", "Woodworking"),
+    ("electronics", "Electronics"),
+    ("linux", "Linux"),
+    ("networking", "Networking"),
+    ("amateur-radio", "Amateur radio"),
+    ("navigation", "Navigation"),
+    ("weather", "Weather"),
+    ("winter", "Winter"),
+    ("floods", "Floods"),
+    ("hurricanes", "Hurricanes"),
+    ("earthquakes", "Earthquakes"),
+    ("evacuation", "Evacuation"),
+    ("bug-in", "Bug-in"),
+    ("bug-out", "Bug-out"),
+    ("beginner", "Beginner"),
+    ("advanced", "Advanced"),
+    ("field-manual", "Field manual"),
+    ("quick-reference", "Quick reference"),
+    ("step-by-step", "Step-by-step"),
+)
 LOCK = threading.RLock()
 
 
@@ -80,7 +117,8 @@ class CatalogStore:
             if self.path.is_symlink():
                 raise CatalogError("catalog cannot be read safely")
             state = {"schema_version": SCHEMA_VERSION, "revision": 0, "updated_at": None,
-                     "sources": [self._seed_record(entry) for entry in source_catalog.builtin_sources()]}
+                     "sources": [self._seed_record(entry) for entry in source_catalog.builtin_sources()],
+                     "groups": self._default_groups()}
         except OSError as exc:
             raise CatalogError("catalog cannot be read safely") from exc
         else:
@@ -110,6 +148,12 @@ class CatalogStore:
         if initialize:
             self._atomic_write(payload)
         return state
+
+    @staticmethod
+    def _default_groups():
+        return [dict(kind=kind, group_id=gid, name=name, source_ids=[])
+                for kind, defaults in (("categories", DEFAULT_CATEGORIES), ("tags", DEFAULT_TAGS))
+                for gid, name in defaults]
 
     @staticmethod
     def _unique_object(pairs):
@@ -370,7 +414,7 @@ class CatalogStore:
         self._validate_id(group_id)
         if type(revision) is not int or revision < 0:
             raise CatalogError("revision precondition required")
-        if operation not in ("create", "rename", "delete", "add-members", "remove-members", "initialize-categories"):
+        if operation not in ("create", "rename", "delete", "add-members", "remove-members", "initialize-categories", "merge-defaults"):
             raise CatalogError("unknown group operation")
         if operation in ("create", "rename"):
             self._validate_field("title", name)
@@ -385,7 +429,7 @@ class CatalogStore:
                 raise CatalogError("duplicate source IDs")
         elif name is not None or source_ids is not None:
             raise CatalogError("operation does not accept group fields")
-        if operation == "initialize-categories" and (kind != "categories" or group_id != "defaults"):
+        if operation in ("initialize-categories", "merge-defaults") and (kind != "categories" or group_id != "defaults"):
             raise CatalogError("invalid default category request")
         with LOCK:
             fd = self._file_lock()
@@ -396,7 +440,14 @@ class CatalogStore:
                 groups = state.setdefault("groups", [])
                 known = {record["source_id"] for record in state["sources"]}
                 group = next((g for g in groups if (g["kind"], g["group_id"]) == (kind, group_id)), None)
-                if operation == "initialize-categories":
+                if operation == "merge-defaults":
+                    keys = {(g["kind"], g["group_id"]) for g in groups}
+                    names = {(g["kind"], g["name"].casefold()) for g in groups}
+                    for default in self._default_groups():
+                        if ((default["kind"], default["group_id"]) not in keys
+                                and (default["kind"], default["name"].casefold()) not in names):
+                            groups.append(default)
+                elif operation == "initialize-categories":
                     if any(g["kind"] == "categories" for g in groups):
                         raise CatalogError("categories already exist; manage them individually")
                     groups.extend(dict(kind="categories", group_id=gid, name=label, source_ids=[])
