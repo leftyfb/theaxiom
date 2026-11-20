@@ -38,12 +38,14 @@ pdf_language = importlib.import_module(f"{__package__}.pdf_language" if __packag
 pdf_transport = importlib.import_module(f"{__package__}.pdf_transport" if __package__ else "theaxiom.pdf_transport")
 zim_jobs = importlib.import_module(f"{__package__}.zim_jobs" if __package__ else "theaxiom.zim_jobs")
 zim_source = importlib.import_module(f"{__package__}.zim_source" if __package__ else "theaxiom.zim_source")
+zim_catalog = importlib.import_module(f"{__package__}.zim_catalog" if __package__ else "theaxiom.zim_catalog")
 library_search = importlib.import_module(f"{__package__}.search" if __package__ else "theaxiom.search")
 BIND_HOST = "127.0.0.1"
 BIND_PORT = 8080
 ADMIN_TEMPLATE_DIR = Path(__file__).resolve().parents[2] / "templates"
 PDFJS_ROOT = Path("/opt/pdfjs/current")
 PDFJS_PREFIX = "/api/pdfjs/"
+ZIM_READER_ROUTE = re.compile(r'/read/zim/([a-z0-9-]{1,63})\Z')
 PDFJS_ASSET = re.compile(r"/api/pdfjs/(?:build|web|cmaps|standard_fonts|wasm|iccs|image_decoders|locale)/[A-Za-z0-9_./-]+\Z")
 
 ACTION_LABELS = {"download": "Download", "redownload": "Re-download", "update": "Update"}
@@ -266,7 +268,9 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             return False
         public_paths = {"/", "/index.html", "/health", "/health/", "/internal/publication/wikipedia-en", "/read/wikipedia-en", "/api/pdf-reader.mjs"}
         if not post and (self.path in public_paths or self.path.split("?", 1)[0] in {"/", "/index.html", "/search"}
-                         or pdf_source.ROUTE.fullmatch(self.path) or epub_source.ROUTE.fullmatch(self.path) or PDFJS_ASSET.fullmatch(self.path)):
+                         or pdf_source.ROUTE.fullmatch(self.path) or epub_source.ROUTE.fullmatch(self.path)
+                          or ZIM_READER_ROUTE.fullmatch(self.path) or PDFJS_ASSET.fullmatch(self.path)
+                          or self.path == "/internal/publication/zim"):
             return True
         auth = self.headers.get_all("Authorization", [])
         local_hosts = {f"{config.host}:{config.port}", f"localhost:{config.port}"}
@@ -393,6 +397,36 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        elif ZIM_READER_ROUTE.fullmatch(self.path):
+            sid = ZIM_READER_ROUTE.fullmatch(self.path).group(1)
+            try:
+                records = SOURCE_CATALOG.get()["sources"]
+                record = next((r for r in records if r["source_id"] == sid), None)
+                state = zim_catalog.status(record, records) if record else None
+                if not state or not state["published"]:
+                    self._send_json(403, {"error": "ZIM collection unavailable"})
+                    return
+                location = publication.reader_location(zim_catalog.GENERIC_READER, sid)
+                if location is None:
+                    self._send_json(503, {"error": "ZIM reader entry unavailable"})
+                    return
+            except (OSError, ValueError, catalog_store.CatalogError):
+                self._send_json(503, {"error": "ZIM publication state unavailable"})
+                return
+            self.send_response(302)
+            self.send_header("Location", location)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+        elif self.path == "/internal/publication/zim":
+            uri = self.headers.get("X-Axiom-Original-URI", "")
+            try:
+                records = SOURCE_CATALOG.get()["sources"]
+                allowed = zim_catalog.authorize_reader_uri(records, uri)
+            except (OSError, ValueError, catalog_store.CatalogError):
+                allowed = False
+            self.send_response(204 if allowed else 403)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
         elif self.path == "/read/wikipedia-en":
             source_id = "wikipedia-en"
             if not publication.allowed(self._publication_snapshot(), source_id):
@@ -414,7 +448,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             snapshot = self._publication_snapshot()
             self._send_json(200, {key: publication.status(snapshot, key)
                                   for key in publication.ROUTES}
-                            | {item["source_id"]: state for item, state in self._pdf_publications()})
+                            | {item["source_id"]: state for item, state in self._pdf_publications()}
+                            | {item["source_id"]: state for item, state in self._zim_publications()})
         elif self.path.rstrip("/") == "/health":
             self._send_json(200, health_response())
         elif self.path.rstrip("/") in {"/admin", "/admin/sources", "/admin/settings", "/admin/groupings"}:
@@ -460,6 +495,17 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         return (record["source_id"] not in publication.ROUTES
                 and record["configuration"].get("format") == "epub")
 
+    @staticmethod
+    def _zim_record(record):
+        return (record["source_id"] not in publication.ROUTES
+                and record["configuration"].get("format") == "zim")
+
+    def _zim_publications(self, catalog=None):
+        catalog = catalog or SOURCE_CATALOG.get()
+        for record in catalog["sources"]:
+            if self._zim_record(record):
+                yield record, zim_catalog.status(record, catalog["sources"])
+
     def _public_library(self):
         """Return only published sources and groups containing those sources."""
         with publication.LOCK:
@@ -479,6 +525,14 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     profile = record["profile"]
                     sources.append(dict(source_id=record["source_id"], entry_path=state["entry_path"],
                                         symbol="E" if self._epub_record(record) else "P", category="EPUB" if self._epub_record(record) else "PDF", name=profile["title"],
+                                        description=profile.get("description", ""),
+                                        language=profile.get("language") or "Unspecified language"))
+            for record, state in self._zim_publications(catalog):
+                if state["published"]:
+                    profile = record["profile"]
+                    sources.append(dict(source_id=record["source_id"],
+                                        entry_path=state["entry_path"], symbol="Z",
+                                        category="Kiwix", name=profile["title"],
                                         description=profile.get("description", ""),
                                         language=profile.get("language") or "Unspecified language"))
             ids = {source["source_id"] for source in sources}
@@ -694,6 +748,9 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                         busy = False
                 except (ValueError, OSError):
                     busy = True
+            if self._zim_record(record):
+                state = zim_catalog.status(record, catalog["sources"])
+                verified = bool(state["verified"])
             publication_filter = ("unknown" if state and state.get("error") else
                                   "published" if state and state["published"] else "unpublished")
             download_filter = "unknown"
