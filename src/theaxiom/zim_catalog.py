@@ -35,14 +35,17 @@ def verified_books(records, enabled=None):
     root = settings["storage_root"]
     if not root:
         return []
+    candidates = [record for record in records
+                  if record["source_id"] not in publication.ROUTES
+                  and record["configuration"].get("format") == "zim"
+                  and enabled.get(record["source_id"], False)]
+    if not candidates:
+        return []
     result = []
     with pdf_source._directory("library", format_name="zim") as (directory, mount, _):
-        for record in records:
+        for record in candidates:
             sid = record["source_id"]
             config = record["configuration"]
-            if (sid in publication.ROUTES or config.get("format") != "zim"
-                    or not enabled.get(sid, False)):
-                continue
             job = zim_jobs.status(sid)
             artifact = zim_jobs.installed(job, config)
             if not artifact:
