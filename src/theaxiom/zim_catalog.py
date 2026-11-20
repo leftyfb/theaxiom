@@ -139,6 +139,39 @@ def active_manifest_matches(records, enabled=None, *, acknowledgement=None):
         return False
 
 
+
+GENERIC_READER = {"path": "/zim/", "port": 8082}
+
+
+def status(record, records):
+    """User-visible publication state for a generic, acquired ZIM."""
+    sid = record["source_id"]
+    path = "/read/zim/" + sid
+    result = {"enabled": False, "verified": False, "serving": False,
+              "published": False, "path": path, "entry_path": path,
+              "publication_reason": ""}
+    try:
+        config = record["configuration"]
+        if sid in publication.ROUTES or config.get("format") != "zim":
+            return result
+        enabled = publication.load().get(sid, False)
+        job = zim_jobs.status(sid)
+        artifact = (zim_jobs.installed(job, config) if job and
+                    job.get("verified") is True and job.get("active") is False else None)
+        verified = artifact is not None
+        rights = bool(config.get("license", "").strip())
+        ready = (verified and rights and enabled and active_manifest_matches(records)
+                 and publication.reader_location(GENERIC_READER, sid) is not None)
+        reason = ("Confirm permission to share this archive" if verified and not rights
+                  else "Awaiting verified Kiwix reader activation" if enabled and not ready
+                  else "")
+        return dict(result, enabled=enabled, verified=verified, serving=bool(ready),
+                    published=bool(ready), publication_reason=reason,
+                    requires_rights_acknowledgement=verified and not rights)
+    except (OSError, ValueError, TypeError, KeyError):
+        return dict(result, error="ZIM publication state unavailable")
+
+
 def main(argv=None):
     """Build the private manifest on demand; never start or reload Kiwix."""
     from . import catalog_store

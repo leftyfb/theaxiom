@@ -116,3 +116,23 @@ def test_runtime_reader_acknowledgement_must_match_current_publication(disk, tmp
                                                     {"ready": True}, acknowledgement=checkpoint)
     checkpoint.write_text("unverified\n")
     assert not zim_catalog.active_manifest_matches(records, {"ready": True}, acknowledgement=checkpoint)
+
+
+def test_generic_zim_publication_is_pending_until_acknowledged_reader(disk, tmp_path):
+    from unittest.mock import patch
+    artifact = zim_source.install_stream("ready", CONFIG, BytesIO(fixture_bytes()))
+    zim_jobs.save({"source_id": "ready", "state": "completed", "active": False,
+                   "verified": True, "configuration": zim_jobs.identity(CONFIG),
+                   "artifact": artifact})
+    rec = record("ready", config=CONFIG | {"license": "Approved"})
+    zim_catalog.write_manifest([rec], {"ready": True})
+    publication.save("ready", True)
+    status = zim_catalog.status(rec, [rec])
+    assert status["enabled"] and status["verified"]
+    assert not status["published"] and not status["serving"]
+    assert "Awaiting" in status["publication_reason"]
+    with patch.object(zim_catalog, "active_manifest_matches", return_value=True):
+        with patch.object(publication, "reader_location", return_value="/zim/viewer#ready/"):
+            status = zim_catalog.status(rec, [rec])
+            assert status["published"] and status["entry_path"] == "/read/zim/ready"
+    assert not zim_catalog.status(record("other"), [rec])["published"]
