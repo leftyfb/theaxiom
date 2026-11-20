@@ -276,7 +276,7 @@ class BrandingAssetTests(unittest.TestCase):
                 self.assertIn('href="/favicon.png"', html)
                 self.assertIn('href="/favicon.ico"', html)
                 self.assertIn("<title>", html)
-                self.assertIn("The Axiom</title>", html)
+                self.assertRegex(html, r"(?s)<title>[^<]*The Axiom[^<]*</title>")
 
     def test_nginx_serves_icons_without_auth_or_proxy_dependencies(self):
         root = Path(__file__).resolve().parents[1]
