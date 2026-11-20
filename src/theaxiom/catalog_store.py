@@ -118,7 +118,7 @@ class CatalogStore:
                 raise CatalogError("catalog cannot be read safely")
             state = {"schema_version": SCHEMA_VERSION, "revision": 0, "updated_at": None,
                      "sources": [self._seed_record(entry) for entry in source_catalog.builtin_sources()],
-                     "groups": self._default_groups()}
+                     "groups": self._default_groups(), "starter_groups_initialized": True}
         except OSError as exc:
             raise CatalogError("catalog cannot be read safely") from exc
         else:
@@ -135,8 +135,10 @@ class CatalogStore:
                 self._validate_collection(state)
                 if not any("seeded" in record for record in state["sources"] if isinstance(record, dict)):
                     self._validate_v2(state)
-                    return state
-                state = self._convert_draft_v2(state)
+                    if state.get("starter_groups_initialized") is True:
+                        return state
+                else:
+                    state = self._convert_draft_v2(state)
             elif state["schema_version"] == 1:
                 entries = {entry["source_id"]: entry for entry in source_catalog.builtin_sources()}
                 self._validate_v1(state, entries)
@@ -144,6 +146,9 @@ class CatalogStore:
             else:
                 raise CatalogError("invalid catalog schema")
 
+        if not state.get("starter_groups_initialized"):
+            self._merge_starter_groups(state)
+            state["starter_groups_initialized"] = True
         payload = self._validated_payload(state)
         if initialize:
             self._atomic_write(payload)
@@ -154,6 +159,18 @@ class CatalogStore:
         return [dict(kind=kind, group_id=gid, name=name, source_ids=[])
                 for kind, defaults in (("categories", DEFAULT_CATEGORIES), ("tags", DEFAULT_TAGS))
                 for gid, name in defaults]
+
+    @classmethod
+    def _merge_starter_groups(cls, state):
+        groups = state.setdefault("groups", [])
+        keys = {(g["kind"], g["group_id"]) for g in groups}
+        names = {(g["kind"], g["name"].casefold()) for g in groups}
+        for default in cls._default_groups():
+            if len(groups) >= MAX_GROUPS:
+                break
+            if ((default["kind"], default["group_id"]) not in keys
+                    and (default["kind"], default["name"].casefold()) not in names):
+                groups.append(default)
 
     @staticmethod
     def _unique_object(pairs):
@@ -206,7 +223,10 @@ class CatalogStore:
 
     @staticmethod
     def _validate_collection(state):
-        if state.keys() not in (HEADER_FIELDS | {"sources"}, HEADER_FIELDS | {"sources", "groups"}) or not isinstance(state["sources"], list):
+        required = HEADER_FIELDS | {"sources"}
+        if (not required <= state.keys() or state.keys() - (required | {"groups", "starter_groups_initialized"})
+                or not isinstance(state["sources"], list)
+                or ("starter_groups_initialized" in state and state["starter_groups_initialized"] is not True)):
             raise CatalogError("invalid catalog schema")
         if len(state["sources"]) > MAX_ENTRIES:
             raise CatalogError("catalog entry limit exceeded")
@@ -466,12 +486,7 @@ class CatalogStore:
                             members.difference_update(selected)
                         item["source_ids"] = sorted(members)
                 elif operation == "merge-defaults":
-                    keys = {(g["kind"], g["group_id"]) for g in groups}
-                    names = {(g["kind"], g["name"].casefold()) for g in groups}
-                    for default in self._default_groups():
-                        if ((default["kind"], default["group_id"]) not in keys
-                                and (default["kind"], default["name"].casefold()) not in names):
-                            groups.append(default)
+                    self._merge_starter_groups(state)
                 elif operation == "initialize-categories":
                     if any(g["kind"] == "categories" for g in groups):
                         raise CatalogError("categories already exist; manage them individually")

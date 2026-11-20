@@ -163,7 +163,7 @@ class CatalogStoreTests(unittest.TestCase):
         self.assertEqual(snapshot["revision"], 7)
         self.assertEqual(snapshot["updated_at"], state["updated_at"])
         converted = self.path.read_bytes()
-        self.assertEqual(set(json.loads(converted)), {"schema_version", "revision", "updated_at", "sources"})
+        self.assertEqual(set(json.loads(converted)), {"schema_version", "revision", "updated_at", "sources", "groups", "starter_groups_initialized"})
         sources = {s["source_id"]: s for s in snapshot["sources"]}
         self.assertNotIn("wikivoyage", sources)
         self.assertEqual(sources["wikipedia-en"]["profile"]["title"], "Edited")
@@ -306,6 +306,23 @@ class CatalogStoreTests(unittest.TestCase):
         self.assertEqual(winter["source_ids"], ["wikipedia-en"])
         again = self.store.mutate_group("merge-defaults", "categories", "defaults", state["revision"])
         self.assertEqual(again["groups"], state["groups"])
+
+    def test_existing_catalog_get_seeds_once_and_preserves_custom_memberships(self):
+        original = self.store.get()
+        saved = json.loads(self.path.read_bytes())
+        saved.pop("starter_groups_initialized")
+        saved["groups"] = [{"kind": "tags", "group_id": "winter", "name": "Cold season",
+                            "source_ids": ["wikipedia-en"]}]
+        self.path.write_text(json.dumps(saved))
+        initialized = self.store.get()
+        self.assertEqual(initialized["sources"], original["sources"])
+        self.assertEqual(len(initialized["groups"]), len(catalog_store.DEFAULT_CATEGORIES) + len(catalog_store.DEFAULT_TAGS))
+        winter = next(g for g in initialized["groups"] if g["group_id"] == "winter")
+        self.assertEqual(winter["name"], "Cold season")
+        self.assertEqual(winter["source_ids"], ["wikipedia-en"])
+        self.assertTrue(json.loads(self.path.read_bytes())["starter_groups_initialized"])
+        removed = self.store.mutate_group("delete", "categories", "communications", initialized["revision"])
+        self.assertEqual(catalog_store.CatalogStore(self.path).get(), removed)
 
     def test_invalid_group_mutations_do_not_change_catalog(self):
         state = self.store.mutate_group("create", "tags", "one", self.store.get()["revision"], name="One")
