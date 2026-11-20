@@ -158,10 +158,43 @@ def test_local_storage_guards(disk, monkeypatch):
         mounts = storage.read_mounts()
         m.setattr(storage, "read_mounts", lambda: mounts + [dict(storage._covering(library, mounts),
                                                             target=str(library), type="nfs")])
-        with pytest.raises(ValueError, match="local mount"):
+        with pytest.raises(ValueError, match="configured mount"):
             pdf_source.import_local(SID, artifact)
     settings = storage_settings.load_settings()
     storage_settings.save_settings(dict(settings, minimum_free_bytes=2**63 - 1))
     with pytest.raises(ValueError, match="capacity"):
         pdf_source.import_local(SID, artifact)
     assert list(library.iterdir()) == []
+
+
+def test_explicit_nfs_mount_identity_and_local_fallback(disk, monkeypatch):
+    inbox, library = disk
+    data = document()
+    inbox.write_bytes(data)
+    inbox.chmod(0o600)
+    artifact = pdf_source.pin(SID, fields(data))
+    settings = storage_settings.load_settings()
+    root = settings["storage_root"]
+    real_mounts = storage.read_mounts()
+    mount = dict(storage._covering(library, real_mounts), target=root,
+                 source="192.168.0.5:/volume1/offline", type="nfs4")
+    monkeypatch.setattr(storage, "read_mounts", lambda: real_mounts + [mount])
+    with pytest.raises(ValueError, match="configured mount"):
+        pdf_source.import_local(SID, artifact)
+    settings.update(storage_mount=root, storage_source=mount["source"])
+    storage_settings.save_settings(settings)
+    pdf_source.import_local(SID, artifact)
+    assert pdf_source.ready(artifact, verify=True)
+    installed = library / artifact["filename"]
+    assert installed.read_bytes() == data
+    # Missing mount must not fall back to the underlying local directory.
+    monkeypatch.setattr(storage, "read_mounts", lambda: real_mounts)
+    assert not pdf_source.ready(artifact, verify=True)
+    with pytest.raises(ValueError, match="missing or replaced"):
+        pdf_source.import_local(SID, artifact)
+    # Same target but wrong export also fails closed.
+    monkeypatch.setattr(storage, "read_mounts", lambda: real_mounts + [
+        dict(mount, source="192.168.0.5:/volume1/wrong")])
+    with pytest.raises(ValueError, match="missing or replaced"):
+        pdf_source.import_local(SID, artifact)
+    assert installed.read_bytes() == data

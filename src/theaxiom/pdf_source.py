@@ -1,4 +1,4 @@
-"""Local-only PDF lifecycle adapter. Catalog URLs are provenance, never fetched."""
+"""PDF lifecycle adapter for local and explicitly configured NFS storage. Catalog URLs are provenance, never fetched."""
 from contextlib import contextmanager
 import hashlib
 import os
@@ -13,6 +13,7 @@ from . import catalog_store, storage, storage_settings
 MAX_BYTES = 16 * 1024 * 1024
 CHUNK = 128 * 1024
 LOCAL_FILESYSTEMS = {"ext4", "ext3", "ext2", "xfs", "btrfs", "tmpfs", "zfs"}
+NETWORK_FILESYSTEMS = {"nfs", "nfs4"}
 DIRECTORY = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
 FILES = os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW
 # The existing frontend proxies /api/ to this application, not /read/.
@@ -61,21 +62,25 @@ def _mount_id(fd):
 def _check_directory(fd, mount_id):
     info = os.fstat(fd)
     if (_mount_id(fd) != mount_id or info.st_uid != os.geteuid() or info.st_mode & 0o022):
-        raise ValueError("PDF directories must be owned by the application user, not group/world writable, and on the configured local mount")
+        raise ValueError("PDF directories must be owned by the application user, not group/world writable, and on the configured mount")
 
 
 @contextmanager
 def _directory(branch, *, writing=False):
     config = storage_settings.load_settings()
     root = Path(config["storage_root"])
-    if not config["storage_root"] or config["storage_mount"] or root.anchor != "/":
-        raise ValueError("PDFs require an explicitly configured local storage root")
+    if not config["storage_root"] or root.anchor != "/":
+        raise ValueError("PDFs require an explicitly configured storage root")
     path = root / branch / "pdf"
     mounts = storage.read_mounts()
     mount = storage._covering(root, mounts)
-    if (mount["type"] not in LOCAL_FILESYSTEMS or (writing and mount["read_only"])
+    required = config["storage_mount"]
+    if required and (mount["target"] != required or mount["source"] != config["storage_source"]):
+        raise ValueError("PDF required mount missing or replaced")
+    allowed = LOCAL_FILESYSTEMS | (NETWORK_FILESYSTEMS if required else set())
+    if (mount["type"] not in allowed or (writing and mount["read_only"])
             or storage._covering(path, mounts) != mount):
-        raise ValueError("PDF storage must be on the configured local mount without nested mounts")
+        raise ValueError("PDF storage must be on the configured mount without nested mounts")
     fd = os.open("/", DIRECTORY)
     try:
         for part in path.parts[1:]:
@@ -83,6 +88,8 @@ def _directory(branch, *, writing=False):
             os.close(fd)
             fd = child
         _check_directory(fd, mount["id"])
+        if storage._covering(path, storage.read_mounts()) != mount:
+            raise ValueError("PDF mount changed during directory opening")
         yield fd, mount["id"], config["minimum_free_bytes"]
     finally:
         os.close(fd)

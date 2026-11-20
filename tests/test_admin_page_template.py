@@ -123,7 +123,7 @@ def test_offline_source_guide_is_discoverable_and_honest():
     assert '<dialog id="source-guide"' in page
     assert 'https://download.kiwix.org/zim/' in page
     assert 'https://www.ready.gov/' in page
-    assert 'network-mounted PDF storage are not yet supported' in page
+    assert 'explicitly configured NFS storage is supported' in page
     assert 'arbitrary remote downloads are not yet enabled' in page
     assert 'Removing a profile does not delete installed files' in page
     assert 'id="source-guide"' not in render(admin_page="settings")
