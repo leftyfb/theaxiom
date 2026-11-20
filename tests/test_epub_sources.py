@@ -160,7 +160,7 @@ def test_epub_http_add_download(epub_app, disk, monkeypatch):
                    fields=dict(title="Filename", source_url="https://publisher.org/book.epub"),
                    auto_title=True)
     request("/api/action", payload, origin="", status=403)
-    request("/api/action", dict(payload, revision=revision-1), status=409)
+    request("/api/action", dict(payload, revision=revision+1), status=409)
     assert not calls
     assert request("/api/action", payload)["installed_verified"]
     assert calls == [("https://publisher.org/book.epub", "epub")]

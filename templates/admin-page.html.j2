@@ -462,7 +462,7 @@
             <dt>Pinned archive size (bytes)</dt><dd>{{ source.artifact.bytes }}</dd>
             <dt>Pinned archive SHA-256</dt><dd>{{ source.artifact.sha256 }}</dd>
             {% endif %}
-            <dt>Installed verification</dt><dd data-field="verified">{{ ('PDF pin verified' if source.adapter == 'pdf' else 'Confirmed by acquisition service') if pub and pub.verified else 'Not confirmed' }}</dd>
+            <dt>Installed verification</dt><dd data-field="verified">{{ (source.adapter|upper ~ ' pin verified') if source.adapter in ('pdf','epub') and source.installed_verified else 'Confirmed by acquisition service' if pub and pub.verified else 'Not confirmed' }}</dd>
             <dt>Last sample</dt><dd data-field="sample">—</dd>
           </dl>
         </section>
@@ -1129,7 +1129,7 @@
             const source = sources.get(card.dataset.sourceId);
             if (['pdf','epub'].includes(source?.adapter)) {
               card.querySelector('[data-field="status"]').textContent = source.installed_verified ? size(source.artifact?.bytes) : source.adapter.toUpperCase() + ' not installed or invalid';
-              card.querySelector('[data-field="verified"]').textContent = source.installed_verified ? 'PDF pin verified' : 'Not confirmed';
+              card.querySelector('[data-field="verified"]').textContent = source.installed_verified ? source.adapter.toUpperCase() + ' pin verified' : 'Not confirmed';
             } else if (source?.artifact) render(card, source.acquisition, data.acquisition_stale !== false);
             else card.querySelector('[data-field="status"]').textContent = data.acquisition_stale ? 'Status unavailable' :
               source?.mutation_blocked !== false ? 'Acquisition unresolved' : 'Not downloaded';

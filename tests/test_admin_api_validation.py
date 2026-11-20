@@ -214,7 +214,7 @@ class AdminAPIValidationTests(unittest.TestCase):
         self.assertIn("Manage offline sources", body)
         self.assertIn('data-source-id="wikipedia-en"', body)
         self.assertIn("fetch('/api/sources'", body)
-        self.assertNotIn("fetch('/api/action'", body)
+        self.assertIn("action:'epub-add-download'", body)
         for action in ("download", "redownload", "update"):
             self.assertIn(f'data-action="{action}" disabled', body)
         with urllib.request.urlopen(

@@ -280,7 +280,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 self._send_json(403, {"error": "cross-origin request rejected"})
                 return False
             upload = self.path == "/api/pdf-upload"
-            content_type = "application/pdf" if upload else "application/json"
+            formats = self.headers.get_all("X-Document-Format", []) if upload else []
+            content_type = ("application/epub+zip" if formats == ["epub"] else "application/pdf") if upload else "application/json"
             if self.headers.get_content_type() != content_type:
                 self._send_json(415, {"error": content_type + " required"})
                 return False
