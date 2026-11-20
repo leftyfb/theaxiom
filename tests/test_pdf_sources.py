@@ -58,7 +58,7 @@ def test_pdf_lifecycle(pdf_app, disk, tmp_path, monkeypatch):  # noqa: F811
     revision = catalog["revision"]
     assert source(catalog, SID)["adapter"] == "pdf"
     page = request("/admin/sources")
-    assert "Upload PDF" in page and "Download from URL" in page
+    assert ">Upload PDF</button>" not in page and ">Download from URL</button>" in page
     assert "data-pdf-import" not in page
     action = dict(source_id=SID, action="import", revision=revision)
     publication = dict(source_id=SID, enabled=True, revision=revision)

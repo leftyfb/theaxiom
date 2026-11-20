@@ -250,3 +250,49 @@ def test_source_summary_is_compact_and_selection_is_separate():
     assert card.index('<button class="button" type="button" data-catalog-edit=') > card.index('</summary>')
     assert "job?.active === true && !stale" in page
     assert "root.appendChild(card.closest('.source-row'))" in page
+
+
+def test_document_card_actions_are_contextual():
+    for format_name in ("pdf", "epub"):
+        label = format_name.upper()
+        manual = profile(format=format_name)
+        page = render([manual])
+        assert f">Upload {label}</button>" in page
+        assert ">Download from URL</button>" not in page
+        manual["installed_verified"] = True
+        manual["artifact"] = dict(bytes=4096, sha256="a" * 64, filename="guide")
+        page = render([manual])
+        assert f">Replace {label}</button>" in page
+        assert "Artifact size (bytes)</dt><dd>4096" in page
+        assert "<dt>Author" not in page
+        assert "Technical details</summary>" in page
+        url = profile(format=format_name, source_url="https://example.org/guide." + format_name)
+        page = render([url])
+        assert ">Download from URL</button>" in page
+        assert f">Upload {label}</button>" not in page
+        url["installed_verified"] = True
+        assert ">Re-download</button>" in render([url])
+        invalid = profile(format=format_name, source_url="http://example.org/guide." + format_name)
+        assert f">Upload {label}</button>" not in render([invalid])
+        manual["publication"] = dict(enabled=True, published=True)
+        parser = Parser()
+        parser.feed(render([manual]))
+        assert all("hidden" in attrs and "disabled" in attrs
+                   for tag, attrs in parser.tags if tag == "button" and "data-pdf-upload" in attrs)
+    for format_name in ("other", "zim"):
+        parser = Parser()
+        parser.feed(render([profile(format=format_name)]))
+        assert not any("data-pdf-upload" in attrs or "data-pdf-download" in attrs for _, attrs in parser.tags)
+
+
+def test_compact_card_and_acquisition_feedback():
+    page = render([profile()])
+    card = page.split('<div class="source-expanded">', 1)[1].split('</details></div>', 1)[0]
+    assert card.count('class="source-actions"') == 1
+    assert "Download from the configured HTTPS URL or upload a PDF from your computer." not in card
+    assert "Candidate " not in card
+    assert 'id="source-form-busy"' in page
+    assert 'data-pdf-busy hidden' in card
+    assert "if (formPosting) return;" in page
+    assert "Acquisition outcome uncertain" in page
+    assert "cancelSave.disabled = false;" in page
