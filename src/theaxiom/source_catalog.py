@@ -21,6 +21,21 @@ WIKIPEDIA_SOURCE: dict[str, Any] = {
 
 
 # Planned sources are discovery metadata, NOT trusted acquisition manifests.
+READY_GOV_SOURCE: dict[str, Any] = {
+    "source_id": "fema-ready",
+    "title": "FEMA / Ready.gov",
+    "description": "Emergency preparedness library, English offline website archive",
+    "kind": "zim",
+    "filename": "ready.gov_en_all_2026-10.zim",
+    "source_url": "https://download.kiwix.org/zim/zimit/ready.gov_en_all_2026-10.zim",
+    "language": "eng",
+    "publisher": "FEMA / Ready.gov via Kiwix",
+    "edition": "2026-10",
+    "provenance": "Official Kiwix ZIM download directory, checked 2026-11-20; exact size and SHA-256 not verified.",
+    "availability": "candidate",
+    "issue": 21,
+}
+
 PLANNED_SOURCES = [
     {
         "source_id": "wikivoyage",
@@ -54,14 +69,7 @@ PLANNED_SOURCES = [
         "issue": 20,
         "availability": "planned"
     },
-    {
-        "source_id": "fema-ready",
-        "title": "FEMA / Ready.gov",
-        "description": "emergency preparedness library",
-        "kind": "planned",
-        "issue": 21,
-        "availability": "planned"
-    },
+
     {
         "source_id": "openstreetmap",
         "title": "OpenStreetMap",
@@ -242,7 +250,7 @@ PLANNED_SOURCES = [
 
 def builtin_sources():
     """Return independent copies; stable IDs survive application upgrades."""
-    return [dict(deepcopy(WIKIPEDIA_SOURCE), availability="supported")] + deepcopy(PLANNED_SOURCES)
+    return [dict(deepcopy(WIKIPEDIA_SOURCE), availability="supported"), deepcopy(READY_GOV_SOURCE)] + deepcopy(PLANNED_SOURCES)
 
 def planned_sources():
     return deepcopy(PLANNED_SOURCES)

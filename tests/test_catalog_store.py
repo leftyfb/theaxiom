@@ -342,6 +342,40 @@ class CatalogStoreTests(unittest.TestCase):
             self.store.mutate_group("delete", "tags", "one", state["revision"] - 1)
         self.assertEqual(self.path.read_bytes(), before)
 
+    def test_ready_gov_seed_and_exact_placeholder_upgrade(self):
+        expected = self.store._seed_record(source_catalog.READY_GOV_SOURCE)
+        initial = self.store.get()
+        self.assertEqual(next(s for s in initial["sources"] if s["source_id"] == "fema-ready"), expected)
+        self.assertEqual(expected["configuration"]["format"], "zim")
+        self.assertTrue(expected["configuration"]["source_url"].endswith("ready.gov_en_all_2026-10.zim"))
+        self.assertNotIn("sha256", expected["configuration"])
+        self.assertNotIn("expected_size_bytes", expected["configuration"])
+        old = self.store._record("fema-ready", {"title": "FEMA / Ready.gov",
+                                              "description": "emergency preparedness library"})
+        saved = json.loads(self.path.read_bytes())
+        saved["sources"] = [old if row["source_id"] == "fema-ready" else row for row in saved["sources"]]
+        saved["groups"][0]["source_ids"] = ["fema-ready"]
+        self.path.write_text(json.dumps(saved))
+        updated = self.store.get()
+        self.assertEqual(updated["revision"], initial["revision"] + 1)
+        self.assertEqual(next(s for s in updated["sources"] if s["source_id"] == "fema-ready"), expected)
+        self.assertEqual(updated["groups"][0]["source_ids"], ["fema-ready"])
+        self.assertEqual(self.store.get(), updated)
+        removed = self.store.mutate("remove", "fema-ready", {}, updated["revision"])
+        self.assertEqual(self.store.get(), removed)
+
+    def test_ready_gov_upgrade_does_not_overwrite_customized_placeholder(self):
+        self.store.get()
+        saved = json.loads(self.path.read_bytes())
+        edited = self.store._record("fema-ready", {"title": "My emergency guide",
+                                                 "description": "emergency preparedness library"})
+        saved["sources"] = [edited if row["source_id"] == "fema-ready" else row for row in saved["sources"]]
+        self.path.write_text(json.dumps(saved))
+        before = self.path.read_bytes()
+        result = self.store.get()
+        self.assertEqual(next(s for s in result["sources"] if s["source_id"] == "fema-ready"), edited)
+        self.assertEqual(self.path.read_bytes(), before)
+
     def test_write_failure_preserves_prior_catalog(self):
         first = self.store.mutate("add", "one", {"title": "One"}, 0)
         before = self.path.read_bytes()

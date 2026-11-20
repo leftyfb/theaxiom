@@ -1,4 +1,23 @@
-# FEMA / Ready.gov — proposed offline collection (#21)
+# FEMA / Ready.gov — offline collection (#21)
+
+## Selected initial source
+
+Owner approved the English Ready.gov ZIM edition October 2026 on 2026-11-20.
+
+- Stable source ID: `fema-ready`.
+- Title: FEMA / Ready.gov.
+- Source: [Kiwix ZIM directory](https://download.kiwix.org/zim/zimit/).
+- [English archive](https://download.kiwix.org/zim/zimit/ready.gov_en_all_2026-10.zim), directory timestamp 2026-10-15, listed size approximately 1.9 GB.
+- Publisher: FEMA / Ready.gov via Kiwix; language English.
+- Exact byte count and SHA-256 are not verified. Do not treat the directory's rounded size as an integrity pin.
+- Default catalog contains this candidate instead of the former placeholder; an unchanged existing placeholder is upgraded atomically. Edited/deleted records are preserved.
+
+The existing Wikipedia-specific trusted acquisition manifest, monitor, Kiwix route and publication authorization do not constitute generic ZIM support. Before acquisition and publication, implement a reusable per-source verified ZIM lifecycle, preserve the existing Wikipedia service, and obtain exact archive integrity metadata. Do not grant publication merely based on a filename or a reachable Kiwix service. Review redistribution conditions and archive-specific third-party content; do not imply endorsement. Validate offline navigation, embedded documents, and search where supported.
+
+## Earlier PDF collection proposal
+
+The ZIM is the initial priority. Individual official Ready.gov PDFs can be added later if missing or unusable in the archive, using the existing PDF adapter.
+
 
 ## Scope for operator approval
 
