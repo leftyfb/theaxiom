@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+from io import BytesIO
 import importlib
 import os
 import re
@@ -265,12 +266,14 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 self.headers.get("Sec-Fetch-Site") in {"cross-site", "same-site"}):
                 self._send_json(403, {"error": "cross-origin request rejected"})
                 return False
-            if self.headers.get_content_type() != "application/json":
-                self._send_json(415, {"error": "application/json required"})
+            upload = self.path == "/api/pdf-upload"
+            content_type = "application/pdf" if upload else "application/json"
+            if self.headers.get_content_type() != content_type:
+                self._send_json(415, {"error": content_type + " required"})
                 return False
             lengths = self.headers.get_all("Content-Length", [])
-            if (len(lengths) != 1 or not re.fullmatch(r"[0-9]{1,6}", lengths[0]) or
-                    int(lengths[0]) > 16384 or self.headers.get("Transfer-Encoding")):
+            if (len(lengths) != 1 or not re.fullmatch(r"[0-9]{1,8}", lengths[0]) or
+                    int(lengths[0]) > (pdf_source.MAX_BYTES if upload else 16384) or self.headers.get("Transfer-Encoding")):
                 self._send_json(400, {"error": "invalid request length"})
                 return False
         return True
@@ -546,6 +549,9 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802 - http.server convention
         if not self._guard(post=True):
             return
+        if self.path == "/api/pdf-upload":
+            self._upload_pdf()
+            return
         if self.path.rstrip("/") == "/api/admin/password":
             config = getattr(self.server, "axiom_config", None)
             if config is None or config.store is None:
@@ -700,6 +706,69 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 self._send_json(503, {"error": "PDF inbox or local storage unavailable"})
                 return
         self._send_json(200, {"accepted": True, "installed_verified": True})
+
+    def _upload_pdf(self):
+        # Raw bytes; never accept a client filename or a filesystem path.
+        ids = self.headers.get_all("X-Source-ID", [])
+        revisions = self.headers.get_all("X-Catalog-Revision", [])
+        length = int(self.headers["Content-Length"])
+        if not self.headers.get("Origin"):
+            self._send_json(403, {"error": "same-origin request required"})
+            return
+        if (len(ids) != 1 or not catalog_store.ID_RE.fullmatch(ids[0])
+                or len(revisions) != 1 or not re.fullmatch(r"[0-9]{1,20}", revisions[0])
+                or length <= 0 or self.headers.get("Content-Encoding")):
+            self._send_json(400, {"error": "invalid PDF upload metadata"})
+            return
+        sid, revision = ids[0], int(revisions[0])
+        # Read at most the verified request length before acquiring the shared lock.
+        try:
+            data = self.rfile.read(length)
+        except OSError:
+            self._send_json(400, {"error": "PDF upload interrupted"})
+            return
+        if len(data) != length:
+            self._send_json(400, {"error": "PDF upload incomplete"})
+            return
+        with publication.LOCK:
+            try:
+                catalog = SOURCE_CATALOG.get()
+                if revision != catalog["revision"]:
+                    raise ValueError("catalog revision changed")
+                record = next((item for item in catalog["sources"] if item["source_id"] == sid), None)
+                if record is None or not self._pdf_record(record):
+                    raise ValueError("source has no PDF upload adapter")
+                if publication.load().get(sid, False):
+                    raise ValueError("Unpublish source before uploading")
+                config = record["configuration"]
+                size = config.get("expected_size_bytes") or None
+                digest = config.get("sha256") or None
+                if size and int(size) != length:
+                    raise ValueError("Upload size does not match the catalog pin")
+                observed = pdf_source.install_stream(sid, BytesIO(data), expected_size=length,
+                                                     expected_sha256=digest)
+                note = "Uploaded by administrator; SHA-256 calculated locally, not independently publisher-verified."
+                provenance = config.get("provenance", "").strip()
+                if provenance:
+                    provenance = provenance[:catalog_store.MAX_FIELD-len(note)-1] + " " + note
+                else:
+                    provenance = note
+                updated = SOURCE_CATALOG.mutate("edit", sid, {
+                    "expected_size_bytes": str(observed["bytes"]), "sha256": observed["sha256"],
+                    "provenance": provenance}, revision)
+            except catalog_store.RevisionConflict as exc:
+                self._send_json(409, {"error": str(exc)})
+                return
+            except catalog_store.CatalogError:
+                self._send_json(503, {"error": "source catalog unavailable"})
+                return
+            except ValueError as exc:
+                self._send_json(409, {"error": str(exc)})
+                return
+            except OSError:
+                self._send_json(503, {"error": "PDF storage or catalog I/O failed"})
+                return
+        self._send_json(200, {"accepted": True, "installed_verified": True, "revision": updated["revision"]})
 
     def _download_pdf(self, data):
         sid = data.get("source_id")

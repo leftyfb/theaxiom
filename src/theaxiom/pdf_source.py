@@ -48,11 +48,11 @@ def pin(source_id, config):
     size, digest = config.get("expected_size_bytes", ""), config.get("sha256", "")
     valid_url = valid_source_url(url)
     if (not catalog_store.ID_RE.fullmatch(source_id) or config.get("format") != "pdf"
-            or not valid_url or not config.get("provenance", "").strip()
+            or (url and not valid_url) or not config.get("provenance", "").strip()
             or not config.get("license", "").strip()
             or not re.fullmatch(r"[1-9][0-9]{0,7}", size) or int(size) > MAX_BYTES
             or not re.fullmatch(r"[a-fA-F0-9]{64}", digest)):
-        raise ValueError("PDF import requires a plain HTTPS source URL, provenance, redistribution rights, size (up to 16 MiB) and SHA-256.")
+        raise ValueError("PDF publication requires provenance, redistribution rights, size (up to 16 MiB) and SHA-256; any source URL must be plain HTTPS.")
     return {"filename": f"{source_id}.{digest.lower()}.pdf", "source_url": url,
             "bytes": int(size), "sha256": digest.lower()}
 

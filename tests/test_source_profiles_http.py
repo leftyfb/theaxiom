@@ -32,17 +32,19 @@ def app(tmp_path, monkeypatch):
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
 
-        def request(path, payload=None, status=200, *, raw=False, origin=None):
+        def request(path, payload=None, status=200, *, raw=False, origin=None, upload_headers=None):
             host, port = server.server_address
             conn = http.client.HTTPConnection(host, port, timeout=5)
             try:
                 if payload is None:
                     conn.request("GET", path)
                 else:
-                    headers = {"Content-Type": "application/json"}
+                    headers = {"Content-Type": "application/pdf" if upload_headers is not None else "application/json"}
+                    if upload_headers is not None:
+                        headers.update(upload_headers)
                     if origin != "":
                         headers["Origin"] = origin or f"http://{host}:{port}"
-                    conn.request("POST", path, json.dumps(payload), headers)
+                    conn.request("POST", path, payload if upload_headers is not None else json.dumps(payload), headers)
                 response = conn.getresponse()
                 data = response.read()
                 if raw:

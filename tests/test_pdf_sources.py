@@ -286,3 +286,33 @@ def test_pdf_download_storage_permission_error_is_actionable(pdf_app, disk, monk
     result = request("/api/action", dict(source_id=SID, action="pdf-download", revision=catalog["revision"]), status=503)
     assert "not writable" in result["error"]
     assert "private path" not in result["error"]
+
+
+def test_raw_pdf_upload_without_url(pdf_app, disk):
+    request, _ = pdf_app
+    data = document()
+    catalog = mutate(request, request("/api/sources"), "add",
+                     dict(title="Uploaded guide", format="pdf"), sid=SID)
+    headers = {"X-Source-ID": SID, "X-Catalog-Revision": str(catalog["revision"])}
+    def upload(body, status=200, extra=None, origin=None):
+        return request("/api/pdf-upload", body, status=status, origin=origin,
+                       upload_headers=headers | (extra or {}))
+    upload(data, 403, origin="")
+    upload(data, 403, origin="https://wrong.example.org")
+    upload(data, 400, {"X-Source-ID": "../inside"})
+    upload(data, 409, {"X-Catalog-Revision": str(catalog["revision"]-1)})
+    upload(b"not a PDF", 409)
+    assert not list(disk[1].iterdir())
+    result = upload(data)
+    assert result["installed_verified"]
+    catalog = request("/api/sources")
+    config = source(catalog, SID)["configuration"]
+    assert config["sha256"] == hashlib.sha256(data).hexdigest()
+    assert config["expected_size_bytes"] == str(len(data))
+    assert "Uploaded by administrator" in config["provenance"]
+    pub = dict(source_id=SID, enabled=True, revision=catalog["revision"])
+    request("/api/publication", pub, status=409)
+    catalog = mutate(request, catalog, "edit", {"license": "Fixture redistribution authorized"}, sid=SID)
+    request("/api/publication", dict(pub, revision=catalog["revision"]))
+    upload(data, 409, {"X-Catalog-Revision": str(catalog["revision"])})
+    assert request(READER + "/document.pdf", raw=True)[0] == data
