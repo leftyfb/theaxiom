@@ -204,7 +204,7 @@
   <h4>5. Publish and read offline</h4>
   <p>After matching content is verified and its reader is ready, use Publish on the source card. Open the published collection from The Axiom homepage, even without internet connectivity. PDFs use the browser PDF viewer; PDF full-text search is not yet supported.</p>
   <h4>6. Edit or remove</h4>
-  <p>Edit display details without changing the stable ID. Unpublish before changing the artifact identity or removing a published profile. Removing a profile does not delete installed files. Changing the URL, size or checksum does not transfer verification to a different artifact. Active or unresolved acquisitions may block editing.</p>
+  <p>Edit display details without changing the stable ID. Unpublish before changing the artifact identity. Removing a published profile automatically unpublishes it and does not delete installed files. Changing the URL, size or checksum does not transfer verification to a different artifact. Active or unresolved acquisitions may block editing.</p>
 </section>
       <form method="dialog"><button class="button">Close guide</button></form>
     </dialog>
@@ -254,8 +254,8 @@
         {% endif %}
         <div class="source-actions" aria-label="Profile controls">
           <button class="button" type="button" data-catalog-edit="{{ source.source_id }}"{% if source.mutation_blocked or pub.error %} disabled{% endif %}>Edit</button>
-          <button class="button" type="button" data-catalog-remove="{{ source.source_id }}"{% if source.mutation_blocked or pub.enabled or pub.error %} disabled{% endif %}>Remove</button>
-          <span class="source-note" data-field="mutation-note">{% if pub.enabled %}Unpublish before removing or changing artifact configuration.{% elif source.mutation_blocked %}Acquisition active or unresolved; changes are blocked.{% endif %}</span>
+          <button class="button" type="button" data-catalog-remove="{{ source.source_id }}"{% if source.mutation_blocked or pub.error %} disabled{% endif %}>Remove</button>
+          <span class="source-note" data-field="mutation-note">{% if pub.enabled %}Unpublish before changing artifact configuration.{% elif source.mutation_blocked %}Acquisition active or unresolved; changes are blocked.{% endif %}</span>
         </div>
         <section aria-label="Source details">
           <h4>Source details</h4>
@@ -426,7 +426,7 @@
       }));
       document.querySelectorAll('[data-catalog-remove]').forEach(button => button.addEventListener('click', async () => {
         const source_id = button.dataset.catalogRemove;
-        if (!window.confirm('Remove this source metadata? Installed artifacts will not be deleted.')) return;
+        if (!window.confirm('Remove this source? It will be unpublished automatically. Installed files will not be deleted.')) return;
         try { await change('remove', source_id, {}); }
         catch (error) { feedback.textContent = error.message; }
       }));
@@ -559,8 +559,8 @@
         const pub = source?.publication;
         const blocked = source?.mutation_blocked !== false || !!pub?.error;
         card.querySelector('[data-catalog-edit]').disabled = blocked;
-        card.querySelector('[data-catalog-remove]').disabled = blocked || !!pub?.enabled;
-        field('mutation-note').textContent = pub?.enabled ? 'Unpublish before removing or changing artifact configuration.' :
+        card.querySelector('[data-catalog-remove]').disabled = blocked;
+        field('mutation-note').textContent = pub?.enabled ? 'Unpublish before changing artifact configuration.' :
           blocked ? 'Acquisition or publication status unresolved; changes are blocked.' : '';
         const toggle = field('publication-toggle');
         if (!toggle || toggle.dataset.posting === 'true') return;

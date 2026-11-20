@@ -110,11 +110,10 @@ def test_published_profile_edit_unpublish_remove_and_equivalent_readd(app, tmp_p
     assert 'name="format"' in page
     assert 'data-catalog-format="zim"' in card(page)
     assert "Unpublish" in card(page)
-    assert "disabled" in control(card(page), "data-catalog-remove", SID)
+    assert "disabled" not in control(card(page), "data-catalog-remove", SID)
     assert request("/read/wikipedia-en", status=302) == "/wikipedia/viewer#fixture/"
     assert request("/internal/publication/wikipedia-en", status=204) == ""
     assert 'href="/read/wikipedia-en"' in request("/")
-    mutate(request, initial, "remove", status=409)
     mutate(request, initial, "edit", {"format": "pdf"}, status=409)
     edited = mutate(request, initial, "edit", {"title": 'Local <reference> "edition"', "license": "Operator note"})
     assert source(edited)["artifact"] == original["artifact"]
@@ -257,3 +256,36 @@ def test_acquisition_requires_current_revision_and_fresh_monitor(app):
     snapshot["stale"] = True
     assert "unresolved" in refuse_action(request, catalog, 409)
     assert not source(request("/api/sources"))["installed_verified"]
+
+
+def test_remove_published_zim_automatically(app, tmp_path, monkeypatch):
+    request, snapshot = app
+    publication.save(SID, True)
+    catalog = request("/api/sources")
+    assert source(catalog)["publication"]["published"]
+    mutate(request, dict(catalog, revision=catalog["revision"] + 1), "remove", status=409)
+    mutate(request, catalog, "remove", {"title": "invalid"}, status=400)
+    assert publication.load()[SID]
+    snapshot["acquisitions"][0].update(state="downloading", active=True)
+    mutate(request, catalog, "remove", status=400)
+    assert publication.load()[SID]
+    snapshot["acquisitions"][0].update(state="completed", active=False)
+    with monkeypatch.context() as patch:
+        def fail(*args, **kwargs):
+            raise OSError("fixture failure")
+        patch.setattr(publication, "save", fail)
+        mutate(request, catalog, "remove", status=409)
+        assert publication.load()[SID]
+        assert source(request("/api/sources"))["publication"]["published"]
+    with monkeypatch.context() as patch:
+        patch.setattr(admin_api.SOURCE_CATALOG, "mutate", fail)
+        result = mutate(request, catalog, "remove", status=409)
+        assert "unpublished but profile removal failed" in result["error"]
+    assert not publication.load()[SID]
+    assert request("/internal/publication/wikipedia-en", status=403) == ""
+    publish(request, True)
+    removed = mutate(request, catalog, "remove")
+    assert not any(row["source_id"] == SID for row in removed["sources"])
+    assert not publication.load()[SID]
+    assert request("/read/wikipedia-en", status=403)
+    assert request("/internal/publication/wikipedia-en", status=403) == ""

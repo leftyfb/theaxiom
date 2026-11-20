@@ -43,4 +43,4 @@ The same guide is available offline from Administration → Sources → Content 
   
 ## 6. Edit or remove
 
-  Edit display details without changing the stable ID. Unpublish before changing the artifact identity or removing a published profile. Removing a profile does not delete installed files. Changing the URL, size or checksum does not transfer verification to a different artifact. Active or unresolved acquisitions may block editing.
+  Edit display details without changing the stable ID. Unpublish before changing the artifact identity. Removing a published profile automatically unpublishes it and does not delete installed files. If removal fails after unpublishing, the source stays unpublished; reload and retry removal. Changing the URL, size or checksum does not transfer verification to a different artifact. Active or unresolved acquisitions may block editing.

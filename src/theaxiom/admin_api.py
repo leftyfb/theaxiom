@@ -590,14 +590,37 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             try:
                 with publication.LOCK:
                     operation, fields, revision = data["operation"], data["fields"], data["revision"]
-                    existing = next((item for item in SOURCE_CATALOG.get()["sources"] if item["source_id"] == sid), None)
+                    catalog = SOURCE_CATALOG.get()
+                    existing = next((item for item in catalog["sources"] if item["source_id"] == sid), None)
                     is_pdf = (existing and self._pdf_record(existing)) or (
                         existing is None and isinstance(sid, str) and sid not in publication.ROUTES
                         and isinstance(fields, dict) and fields.get("format") == "pdf")
-                    if isinstance(sid, str) and (sid in publication.ROUTES or is_pdf):
+                    busy = not is_pdf and source_busy(self._snapshot(), sid)
+                    unpublished = False
+                    if operation == "remove":
+                        # Validate all preconditions before changing publication.
+                        SOURCE_CATALOG._validate_id(sid)
+                        if not self._valid_revision(revision) or revision != catalog["revision"]:
+                            raise catalog_store.RevisionConflict("catalog revision changed")
+                        if existing is None or not isinstance(fields, dict) or fields:
+                            raise catalog_store.CatalogError("remove requires an existing source and empty fields")
+                        if busy:
+                            raise catalog_store.CatalogError("source has active or unresolved acquisition")
+                        try:
+                            if publication.load().get(sid, False):
+                                publication.save(sid, False)
+                                unpublished = True
+                        except (OSError, ValueError) as exc:
+                            raise catalog_store.RevisionConflict("could not unpublish source; removal refused") from exc
+                    elif isinstance(sid, str) and (sid in publication.ROUTES or is_pdf):
                         self._guard_published_mutation(operation, sid, fields, revision)
-                    result = SOURCE_CATALOG.mutate(operation, sid, fields, revision,
-                                                   not is_pdf and source_busy(self._snapshot(), sid))
+                    try:
+                        result = SOURCE_CATALOG.mutate(operation, sid, fields, revision, busy)
+                    except (catalog_store.CatalogError, OSError) as exc:
+                        if unpublished:
+                            # Never restore public access automatically after a failed removal.
+                            raise catalog_store.RevisionConflict("source unpublished but profile removal failed; reload and retry removal") from exc
+                        raise
             except catalog_store.RevisionConflict as exc:
                 self._send_json(409, {"error": str(exc)})
                 return

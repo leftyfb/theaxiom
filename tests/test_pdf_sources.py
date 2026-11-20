@@ -97,7 +97,6 @@ def test_pdf_lifecycle(pdf_app, disk, tmp_path, monkeypatch):  # noqa: F811
     request("/api/action", action, status=403, origin="")
 
     mutate(request, catalog, "edit", {"license": "new license"}, sid=SID, status=409)
-    mutate(request, catalog, "remove", sid=SID, status=409)
     inbox.write_bytes(document(b"Changed"))
     request("/api/action", action, status=409)
     assert not list(inbox.parent.glob(".import-*"))
@@ -108,9 +107,11 @@ def test_pdf_lifecycle(pdf_app, disk, tmp_path, monkeypatch):  # noqa: F811
     assert READER not in request("/")
     inbox.write_bytes(data)
     request("/api/action", action)
-    request("/api/publication", dict(publication, enabled=False))
+    removed = mutate(request, catalog, "remove", sid=SID)
+    assert not any(row["source_id"] == SID for row in removed["sources"])
     request(READER + "/document.pdf", status=403)
-    mutate(request, catalog, "remove", sid=SID)
+    request(READER, status=403)
+    assert READER not in request("/")
     assert output.read_bytes() == data
 
 
