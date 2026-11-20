@@ -135,8 +135,8 @@ class HTTPAuthTests(unittest.TestCase):
         """Browser favicon requests must not trigger an admin password prompt."""
         icons = {
             "/favicon.svg": ("image/svg+xml", b"<svg"),
-            "/favicon.png": ("image/png", b"\\x89PNG\\r\\n\\x1a\\n"),
-            "/favicon.ico": ("image/x-icon", b"\\x00\\x00\\x01\\x00"),
+            "/favicon.png": ("image/png", b"\x89PNG\r\n\x1a\n"),
+            "/favicon.ico": ("image/x-icon", b"\x00\x00\x01\x00"),
         }
         for path, (mime, magic) in icons.items():
             with self.subTest(path=path):
@@ -288,5 +288,5 @@ class BrandingAssetTests(unittest.TestCase):
             self.assertNotIn("proxy_pass", block)
         icons = root / "deploy/www"
         self.assertTrue((icons / "favicon.svg").read_bytes().startswith(b"<svg"))
-        self.assertTrue((icons / "favicon.png").read_bytes().startswith(b"\\x89PNG\\r\\n\\x1a\\n"))
-        self.assertTrue((icons / "favicon.ico").read_bytes().startswith(b"\\x00\\x00\\x01\\x00"))
+        self.assertTrue((icons / "favicon.png").read_bytes().startswith(b"\x89PNG\r\n\x1a\n"))
+        self.assertTrue((icons / "favicon.ico").read_bytes().startswith(b"\x00\x00\x01\x00"))
