@@ -16,7 +16,8 @@ import time
 
 from . import catalog_store, storage_settings, zim_source, pdf_source
 
-ACTIVE = {"queued", "downloading"}
+ACTIVE = {"queued", "downloading", "verifying", "pausing", "cancelling"}
+CONTROLS = {}
 LOCK = threading.RLock()
 
 
@@ -40,7 +41,7 @@ def read(sid):
         raise ValueError("ZIM job record exceeds size limit")
     job = json.loads(raw)
     if (not isinstance(job, dict) or job.get("source_id") != sid
-            or job.get("state") not in ACTIVE | {"completed", "failed", "interrupted"}
+            or job.get("state") not in ACTIVE | {"completed", "failed", "interrupted", "paused", "cancelled"}
             or not isinstance(job.get("configuration"), dict)):
         raise ValueError("Invalid ZIM job record")
     return job
@@ -83,7 +84,7 @@ def status(sid):
         if job and job["state"] in ACTIVE:
             try:
                 with worker_lock():
-                    job.update(state="interrupted", active=False, detail="Transfer interrupted; retry explicitly.")
+                    job.update(state="paused", active=False, detail="Backend restarted; resume explicitly.")
                     save(job)
             except BlockingIOError:
                 pass
@@ -118,58 +119,148 @@ def installed(job, config):
         return None
 
 
-def start(sid, config):
+
+def staged_size(sid):
+    import stat
+    with pdf_source._directory("staging", writing=True, format_name="zim") as (root, _, _):
+        try:
+            fd = os.open(zim_source.partial_name(sid), os.O_RDONLY | os.O_NOFOLLOW, dir_fd=root)
+        except FileNotFoundError:
+            return 0
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_uid != os.geteuid() or info.st_mode & 0o077:
+                raise ValueError("Unsafe staged ZIM file")
+            return info.st_size
+        finally:
+            os.close(fd)
+
+
+def start(sid, config, *, resume=False):
     configuration = identity(config)
     with LOCK:
-        # Hold the OS lock continuously from job creation until worker exit.
         guard = worker_lock()
         guard.__enter__()
         try:
             old = read(sid)
-            if old and old["state"] == "completed" and installed(old, config):
+            if old and installed(old, config):
                 raise ValueError("Archive already installed; replacement is not yet supported.")
-            # Preflight both paths before returning acceptance; no network yet.
+            if resume:
+                if not old or old["state"] not in {"paused", "failed", "interrupted"} or not matches(old, config):
+                    raise ValueError("No matching paused ZIM download")
+                offset = staged_size(sid)
+                validator = old.get("etag") or old.get("last_modified")
+                if not offset or not validator:
+                    raise ValueError("Safe resume requires retained bytes and a publisher validator")
+                if old.get("expected_bytes") and offset >= old["expected_bytes"]:
+                    raise ValueError("Invalid resumable offset")
+                job = old
+            else:
+                if old and old["state"] in ACTIVE | {"paused", "failed", "interrupted"} and staged_size(sid):
+                    raise ValueError("Partial download exists; resume or cancel it first")
+                offset, validator = 0, None
+                job = dict(source_id=sid, configuration=configuration, verified=False, downloaded_bytes=0,
+                           expected_bytes=int(configuration["expected_size_bytes"]) if configuration["expected_size_bytes"] else None)
             with (pdf_source._directory("staging", writing=True, format_name="zim") as (sfd, sm, _),
                   pdf_source._directory("library", writing=True, format_name="zim") as (_, lm, reserve)):
                 cap = os.fstatvfs(sfd)
-                if sm != lm or cap.f_flag & os.ST_RDONLY or cap.f_bavail * cap.f_frsize < reserve + (int(configuration["expected_size_bytes"] or 96)):
+                need = max(96, (int(configuration["expected_size_bytes"] or 0) - offset))
+                if sm != lm or cap.f_flag & os.ST_RDONLY or cap.f_bavail * cap.f_frsize < reserve + need:
                     raise ValueError("Insufficient writable ZIM storage capacity")
-            job = dict(source_id=sid, configuration=configuration, state="queued", active=True,
-                       verified=False, downloaded_bytes=0,
-                       expected_bytes=int(configuration["expected_size_bytes"]) if configuration["expected_size_bytes"] else None,
-                       sampled_at=time.time())
+            job.update(state="queued", active=True, detail="", downloaded_bytes=offset, sampled_at=time.time())
             save(job)
-            thread = threading.Thread(target=_run, args=(job, guard), daemon=True, name="zim-acquisition")
-            thread.start()
+            signal = threading.Event()
+            CONTROLS[sid] = (signal, None)
+            threading.Thread(target=_run, args=(job, guard, signal, offset, validator),
+                             daemon=True, name="zim-acquisition").start()
         except BaseException:
             guard.__exit__(None, None, None)
             raise
     return {"accepted": True, "source_id": sid, "state": "queued"}
 
 
-def _run(job, guard):
+def control(sid, config, action):
+    if action not in {"pause", "cancel"}:
+        raise ValueError("Invalid ZIM control")
+    with LOCK:
+        job = status(sid)
+        if not matches(job, config):
+            raise ValueError("No matching ZIM job")
+        if job["state"] in ACTIVE:
+            pair = CONTROLS.get(sid)
+            if not pair:
+                raise ValueError("Transfer is owned by another process")
+            signal, previous = pair
+            if previous and previous != action:
+                raise ValueError("Stop request already pending")
+            CONTROLS[sid] = (signal, action)
+            job.update(state="pausing" if action == "pause" else "cancelling",
+                       detail="Stopping transfer…", sampled_at=time.time())
+            save(job)
+            signal.set()
+            return {"accepted": True, "state": job["state"]}
+        if action == "cancel" and job["state"] in {"paused", "failed", "interrupted"}:
+            with worker_lock():
+                if staged_size(sid):
+                    zim_source.discard_partial(sid)
+                job.update(state="cancelled", active=False, verified=False, downloaded_bytes=0,
+                           detail="Download cancelled; partial removed.", sampled_at=time.time())
+                save(job)
+            return {"accepted": True, "state": "cancelled"}
+        if action == "pause" and job["state"] == "paused":
+            return {"accepted": True, "state": "paused"}
+        raise ValueError("ZIM job cannot be " + action + "d in current state")
+
+
+def _run(job, guard, signal, offset, validator):
+    sid = job["source_id"]
     last = 0.0
-    start_time = time.monotonic()
-    def progress(current, total):
+    begun = time.monotonic()
+
+    def progress(current, total, metadata):
         nonlocal last
         now = time.monotonic()
-        if now - last >= 1:
-            job.update(downloaded_bytes=current, expected_bytes=total, sampled_at=time.time(),
-                       speed_bytes_per_second=current / max(1, now-start_time))
+        for key in ("etag", "last_modified"):
+            if metadata.get(key):
+                job[key] = metadata[key]
+        if total is not None:
+            job["expected_bytes"] = total
+        if metadata.get("verifying"):
+            job["state"] = "verifying"
+        if now - last >= 1 or metadata.get("verifying") or current == offset:
+            job.update(downloaded_bytes=current, sampled_at=time.time(),
+                       speed_bytes_per_second=max(0, current-offset) / max(1, now-begun))
             save(job)
             last = now
+
     try:
         job.update(state="downloading", sampled_at=time.time())
         save(job)
-        artifact = zim_source.download(job["source_id"], job["configuration"], progress=progress)
+        artifact = zim_source.download_resumable(sid, job["configuration"], offset=offset,
+                     validator=validator, progress=progress, stopped=signal.is_set)
         job.update(state="completed", active=False, verified=True, artifact=artifact,
                    downloaded_bytes=artifact["bytes"], expected_bytes=artifact["bytes"], sampled_at=time.time())
+    except zim_source.TransferStopped:
+        if CONTROLS.get(sid, (None, None))[1] == "cancel":
+            try:
+                zim_source.discard_partial(sid)
+            except FileNotFoundError:
+                pass
+            job.update(state="cancelled", active=False, verified=False, downloaded_bytes=0,
+                       detail="Download cancelled; staged bytes removed.", sampled_at=time.time())
+        else:
+            job.update(state="paused", active=False, verified=False, downloaded_bytes=staged_size(sid),
+                       detail="Download paused; partial retained.", sampled_at=time.time())
     except Exception as exc:
-        # Network/OS error strings can disclose local paths; use a bounded generic message.
         detail = str(exc)[:240] if isinstance(exc, ValueError) else "ZIM acquisition failed (network or storage I/O)."
         job.update(state="failed", active=False, verified=False, detail=detail, sampled_at=time.time())
+        try:
+            job["downloaded_bytes"] = staged_size(sid)
+        except (ValueError, OSError):
+            pass
     finally:
         try:
             save(job)
         finally:
+            CONTROLS.pop(sid, None)
             guard.__exit__(None, None, None)
