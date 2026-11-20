@@ -168,3 +168,13 @@ def test_source_editor_group_membership_controls():
     assert '<option value="winter">Winter</option>' in page
     assert "wasMember === option.selected" in page
     assert "grouping changes may be incomplete" in page
+
+
+def test_standalone_groupings_page():
+    groups = [{"kind":"tags","group_id":"winter","name":"Winter","source_ids":["fixture"]}]
+    page = render(admin_page="groupings", catalog=dict(sources=[],revision=1,groups=groups))
+    assert 'href="/admin/groupings" aria-current="page"' in page
+    for marker in ('id="manage-kind"', 'id="manage-search"', 'id="manage-create"', 'id="manage-list"'):
+        assert marker in page
+    assert 'Winter' in page and 'source assignments?' in page
+    assert 'source-catalog-script' not in page

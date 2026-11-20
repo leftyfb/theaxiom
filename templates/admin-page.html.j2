@@ -99,7 +99,7 @@
     <span class="brand">Admin</span>
   </header>
   <main id="main-content">
-    <nav class="admin-nav" aria-label="Administration"><a class="button" href="/admin/sources"{% if page == "sources" %} aria-current="page"{% endif %}>Sources</a><a class="button" href="/admin/settings"{% if page == "settings" %} aria-current="page"{% endif %}>Settings</a></nav>
+    <nav class="admin-nav" aria-label="Administration"><a class="button" href="/admin/sources"{% if page == "sources" %} aria-current="page"{% endif %}>Sources</a><a class="button" href="/admin/groupings"{% if page == "groupings" %} aria-current="page"{% endif %}>Groupings</a><a class="button" href="/admin/settings"{% if page == "settings" %} aria-current="page"{% endif %}>Settings</a></nav>
     {% if page == "settings" %}
     <h1>Settings</h1>
     <section class="settings-panel" id="storage-settings" aria-labelledby="storage-title">
@@ -158,6 +158,84 @@
       <p id="password-feedback" role="status" aria-live="polite"></p>
     </section>
     {% endif %}
+    {% elif page == "groupings" %}
+    <h1>Manage groupings</h1>
+    <p>Categories classify subjects, collections curate resources, and tags describe sources. Assign memberships from Sources. Deleting a grouping never deletes sources or installed content.</p>
+    <section class="group-panel" aria-label="Grouping management">
+      <label for="manage-kind">Grouping type</label>
+      <select id="manage-kind"><option value="categories">Categories</option><option value="tags">Tags</option><option value="collections">Collections</option></select>
+      <label for="manage-search">Search groupings</label><input id="manage-search" type="search">
+      <label for="manage-new">New grouping name</label><input id="manage-new" maxlength="100">
+      <button class="button" id="manage-create" type="button">Add grouping</button>
+      <p id="manage-feedback" role="status" aria-live="polite"></p>
+      <div id="manage-list"></div>
+    </section>
+    <script>
+    (() => {
+      const groups = {{ catalog.groups|default([])|tojson }};
+      const revision = {{ catalog.revision|tojson }};
+      const kind = document.getElementById('manage-kind');
+      const search = document.getElementById('manage-search');
+      const name = document.getElementById('manage-new');
+      const list = document.getElementById('manage-list');
+      const feedback = document.getElementById('manage-feedback');
+      let busy = false;
+      try { kind.value = sessionStorage.getItem('axiom-group-kind') || 'categories'; } catch (_) {}
+      if (!kind.value) kind.value = 'categories';
+      async function mutate(payload) {
+        if (busy) return;
+        busy = true;
+        document.querySelectorAll('.group-panel button,.group-panel input,.group-panel select').forEach(e => e.disabled = true);
+        try {
+          const response = await fetch('/api/groups',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...payload,revision})});
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.error || 'Grouping update failed');
+          try { sessionStorage.setItem('axiom-group-kind',kind.value); } catch (_) {}
+          location.reload();
+        } catch (error) {
+          feedback.textContent = error.message;
+          busy = false;
+          document.querySelectorAll('.group-panel button,.group-panel input,.group-panel select').forEach(e => e.disabled = false);
+        }
+      }
+      function render() {
+        list.replaceChildren();
+        const matches = groups.filter(g => g.kind === kind.value && g.name.toLowerCase().includes(search.value.toLowerCase())).sort((a,b)=>a.name.localeCompare(b.name));
+        if (!matches.length) list.textContent = 'No matching groupings.';
+        for (const group of matches) {
+          const row = document.createElement('div');
+          row.className = 'source-actions';
+          const label = document.createElement('label');
+          const field = document.createElement('input');
+          field.value = group.name; field.maxLength = 100;
+          field.setAttribute('aria-label','Name of ' + group.name);
+          label.append(field);
+          const count = document.createElement('span');
+          count.textContent = group.source_ids.length + ' sources';
+          const rename = document.createElement('button');
+          rename.className = 'button'; rename.type = 'button'; rename.textContent = 'Rename';
+          rename.onclick = () => mutate({operation:'rename',kind:group.kind,group_id:group.group_id,name:field.value.trim()});
+          const remove = document.createElement('button');
+          remove.className = 'button'; remove.type = 'button'; remove.textContent = 'Delete';
+          remove.onclick = () => {
+            if (window.confirm('Delete ' + group.name + ' and its ' + group.source_ids.length + ' source assignments? Sources and files will remain.'))
+              mutate({operation:'delete',kind:group.kind,group_id:group.group_id});
+          };
+          row.append(label,count,rename,remove); list.append(row);
+        }
+      }
+      document.getElementById('manage-create').onclick = () => {
+        const value = name.value.trim();
+        if (!value) { feedback.textContent = 'Enter a name.'; return; }
+        const base = value.normalize('NFKD').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,50).replace(/-$/,'') || 'group';
+        const used = new Set(groups.filter(g => g.kind === kind.value).map(g => g.group_id));
+        let id = base;
+        for (let n=2;used.has(id);n++) id = base+'-'+n;
+        mutate({operation:'create',kind:kind.value,group_id:id,name:value});
+      };
+      kind.addEventListener('change',render); search.addEventListener('input',render); render();
+    })();
+    </script>
     {% else %}
     <h1>Manage offline sources</h1>
     <h2 id="sources">Content sources</h2>
@@ -168,7 +246,7 @@
     <p id="catalog-feedback" role="status" aria-live="polite">Candidate source metadata is not trusted or fetched.</p>
     <details class="group-panel" id="group-panel">
       <summary>Organize sources · Categories, collections &amp; tags</summary>
-      <p class="source-note">Categories classify subjects, collections curate resources, and tags describe anything you choose. Select source cards below to assign a group to one or several sources.</p>
+      <p class="source-note">Select source cards to assign groupings. <a href="/admin/groupings">Manage categories, tags and collections separately.</a></p>
       {% set groups = (catalog|default({})).groups|default([]) %}
       <div class="editor-grid">
         <div><label for="group-kind">Grouping type</label><select id="group-kind"><option value="categories">Categories</option><option value="collections">Collections</option><option value="tags">Tags</option></select></div>
@@ -177,9 +255,9 @@
       </div>
       <div class="source-actions">
         <button class="button" type="button" id="group-defaults">Add predefined categories</button>
-        <button class="button" type="button" id="group-create">Create group</button>
-        <button class="button" type="button" id="group-rename">Rename</button>
-        <button class="button" type="button" id="group-delete">Delete group</button>
+        <button class="button" type="button" id="group-create" hidden>Create group</button>
+        <button class="button" type="button" id="group-rename" hidden>Rename</button>
+        <button class="button" type="button" id="group-delete" hidden>Delete group</button>
       </div>
       <div id="bulk-selection" hidden>
       <div class="source-actions">

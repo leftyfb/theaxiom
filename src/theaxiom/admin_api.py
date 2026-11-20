@@ -391,8 +391,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                             | {item["source_id"]: state for item, state in self._pdf_publications()})
         elif self.path.rstrip("/") == "/health":
             self._send_json(200, health_response())
-        elif self.path.rstrip("/") in {"/admin", "/admin/sources", "/admin/settings"}:
-            page = "settings" if self.path.rstrip("/") == "/admin/settings" else "sources"
+        elif self.path.rstrip("/") in {"/admin", "/admin/sources", "/admin/settings", "/admin/groupings"}:
+            page = {"/admin/settings": "settings", "/admin/groupings": "groupings"}.get(self.path.rstrip("/"), "sources")
             self._send_admin_page(page)
         elif self.path.rstrip("/") == "/api/freshness":
             self._send_json(200, freshness_response())
@@ -630,13 +630,13 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         )
         template = environment.get_template("admin-page.html.j2")
         try:
-            catalog_snapshot = SOURCE_CATALOG.get() if page == "sources" else {"revision": None, "sources": []}
+            catalog_snapshot = SOURCE_CATALOG.get() if page in {"sources", "groupings"} else {"revision": None, "sources": []}
         except (catalog_store.CatalogError, OSError):
             self._send_json(503, {"error": "source catalog unavailable; stored data was not replaced"})
             return
         body = template.render(
             admin_page=page,
-            catalog=self._source_profiles(catalog_snapshot) if page == "sources" else None,
+            catalog=self._source_profiles(catalog_snapshot) if page == "sources" else catalog_snapshot if page == "groupings" else None,
             editable_fields=sorted(catalog_store.EDITABLE),
             action_labels=ACTION_LABELS,
             password_change_enabled=bool(getattr(getattr(self.server, "axiom_config", None), "store", None)),
