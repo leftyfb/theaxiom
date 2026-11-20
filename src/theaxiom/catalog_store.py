@@ -16,7 +16,7 @@ from urllib.parse import urlsplit
 from . import source_catalog
 
 SCHEMA_VERSION = 2
-PROFILE_FIELDS = {"title", "description", "publisher", "edition", "language"}
+PROFILE_FIELDS = {"title", "description", "publisher", "edition", "language", "author"}
 CANDIDATE_FIELDS = {"source_url", "expected_size_bytes", "sha256", "provenance", "license"}
 CONFIG_FIELDS = CANDIDATE_FIELDS | {"format"}
 V1_FIELDS = PROFILE_FIELDS | CANDIDATE_FIELDS

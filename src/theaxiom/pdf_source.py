@@ -71,12 +71,14 @@ def _check_directory(fd, mount_id):
 
 
 @contextmanager
-def _directory(branch, *, writing=False):
+def _directory(branch, *, writing=False, format_name="pdf"):
+    if format_name not in {"pdf", "epub"}:
+        raise ValueError("Unsupported storage format")
     config = storage_settings.load_settings()
     root = Path(config["storage_root"])
     if not config["storage_root"] or root.anchor != "/":
         raise ValueError("PDFs require an explicitly configured storage root")
-    path = root / branch / "pdf"
+    path = root / branch / format_name
     mounts = storage.read_mounts()
     mount = storage._covering(root, mounts)
     required = config["storage_mount"]
@@ -94,7 +96,7 @@ def _directory(branch, *, writing=False):
             except FileNotFoundError:
                 # Create only the PDF leaf, on the already configured mount.
                 # Never create the mount, storage root or parent directories.
-                if not writing or index != len(path.parts) - 2 or part != "pdf":
+                if not writing or index != len(path.parts) - 2 or part != format_name:
                     raise
                 if (_mount_id(fd) != mount["id"]
                         or storage._covering(path.parent, storage.read_mounts()) != mount):
@@ -277,19 +279,27 @@ def import_local(source_id, artifact):
 
 
 def install_stream(source_id, stream, *, expected_size=None, expected_sha256=None):
+    return _install_stream(source_id, stream, expected_size=expected_size, expected_sha256=expected_sha256)
+
+
+def _install_stream(source_id, stream, *, expected_size=None, expected_sha256=None,
+                    format_name="pdf", verify=None):
     """Install bounded incoming PDF bytes, returning their observed identity.
 
     The caller must authorize acquisition and persist provenance separately.
     A computed digest is not an independent publisher attestation.
     """
+    if format_name not in {"pdf", "epub"} or (format_name == "epub" and verify is None):
+        raise ValueError("Unsupported document format or missing validator")
+    verify = verify or _verify
     if not catalog_store.ID_RE.fullmatch(source_id):
         raise ValueError("Invalid PDF source ID")
     if expected_size is not None and (type(expected_size) is not int or not 0 < expected_size <= MAX_BYTES):
         raise ValueError("Invalid expected PDF size")
     if expected_sha256 is not None and not re.fullmatch(r"[a-fA-F0-9]{64}", expected_sha256):
         raise ValueError("Invalid expected PDF SHA-256")
-    with (_directory("staging", writing=True) as (staging, smount, _),
-          _directory("library", writing=True) as (library, lmount, minimum)):
+    with (_directory("staging", writing=True, format_name=format_name) as (staging, smount, _),
+          _directory("library", writing=True, format_name=format_name) as (library, lmount, minimum)):
         if smount != lmount:
             raise ValueError("PDF staging and library must share one mount")
         capacity = os.fstatvfs(staging)
@@ -315,10 +325,10 @@ def install_stream(source_id, stream, *, expected_size=None, expected_sha256=Non
                     raise ValueError("PDF size does not match the catalog pin")
                 if expected_sha256 is not None and observed != expected_sha256.lower():
                     raise ValueError("PDF SHA-256 does not match the catalog pin")
-                artifact = {"filename": f"{source_id}.{observed}.pdf",
+                artifact = {"filename": f"{source_id}.{observed}.{format_name}",
                             "bytes": count, "sha256": observed}
                 target.seek(0)
-                _verify(target, artifact)
+                verify(target, artifact)
                 target.flush()
                 os.fsync(target.fileno())
             os.replace(temporary, artifact["filename"], src_dir_fd=staging, dst_dir_fd=library)

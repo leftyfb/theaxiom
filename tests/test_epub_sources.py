@@ -56,3 +56,52 @@ def test_expanded_budget(monkeypatch):
     monkeypatch.setattr(epub_source, "MAX_EXPANDED", 100)
     with pytest.raises(ValueError):
         epub_source.inspect(book())
+
+
+@pytest.fixture
+def disk(tmp_path, monkeypatch):
+    from theaxiom import pdf_source, storage, storage_settings
+    root = tmp_path / "disk"
+    (root / "staging").mkdir(parents=True)
+    (root / "library").mkdir()
+    monkeypatch.setattr(storage_settings, "SETTINGS_PATH", tmp_path / "storage.json")
+    storage_settings.save_settings(dict(storage_settings.DEFAULT_SETTINGS, storage_root=str(root)))
+    mount = storage._covering(root, storage.read_mounts())
+    monkeypatch.setattr(pdf_source, "LOCAL_FILESYSTEMS", {mount["type"]})
+    return root
+
+
+def test_install_pin_and_verify(disk):
+    import hashlib
+    data = book()
+    artifact, metadata = epub_source.install_stream("fixture-book", io.BytesIO(data))
+    assert metadata["author"] == "Example Author"
+    assert artifact["sha256"] == hashlib.sha256(data).hexdigest()
+    assert artifact["bytes"] == len(data)
+    assert artifact["filename"].endswith(".epub")
+    config = dict(format="epub", provenance="Local fixture", license="",
+                  expected_size_bytes=str(len(data)), sha256=artifact["sha256"])
+    assert epub_source.pin("fixture-book", config, require_rights=False)["filename"] == artifact["filename"]
+    with pytest.raises(ValueError):
+        epub_source.pin("fixture-book", config)
+    assert epub_source.ready(artifact)
+    with epub_source.installed(artifact) as stream:
+        assert stream.read() == data
+    assert not list((disk / "staging/epub").iterdir())
+    output = disk / "library/epub" / artifact["filename"]
+    output.write_bytes(b"x" * len(data))
+    assert not epub_source.ready(artifact)
+
+
+def test_invalid_install_never_promotes(disk):
+    for data in (b"not an epub", book(extra=[("../escape", b"x")])):
+        with pytest.raises(ValueError):
+            epub_source.install_stream("fixture-book", io.BytesIO(data))
+    assert not list((disk / "staging/epub").iterdir())
+    assert not list((disk / "library/epub").iterdir())
+
+
+def test_epub_storage_refuses_symlink(disk, tmp_path):
+    (disk / "library/epub").symlink_to(tmp_path, target_is_directory=True)
+    with pytest.raises(OSError):
+        epub_source.install_stream("fixture-book", io.BytesIO(book()))

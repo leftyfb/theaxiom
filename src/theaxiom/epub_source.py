@@ -1,4 +1,6 @@
 """Bounded EPUB 2/3 package inspection; no extraction, rendering or network access."""
+from contextlib import contextmanager
+import hashlib
 import io
 import posixpath
 import re
@@ -6,6 +8,8 @@ import stat
 import zipfile
 from urllib.parse import unquote, urlsplit
 from xml.etree import ElementTree as ET
+
+from . import catalog_store, pdf_source
 
 MAX_BYTES = 16 * 1024 * 1024
 MAX_EXPANDED = 64 * 1024 * 1024
@@ -162,3 +166,57 @@ def inspect(data):
     except (KeyError, ET.ParseError, zipfile.BadZipFile, RuntimeError,
             NotImplementedError, OSError, UnicodeError, EOFError) as exc:
         raise ValueError("Invalid EPUB archive or package") from exc
+
+
+def pin(source_id, config, *, require_rights=True):
+    if config.get("format") != "epub":
+        raise ValueError("Expected EPUB format")
+    artifact = pdf_source.pin(source_id, dict(config, format="pdf"),
+                              require_rights=require_rights)
+    return dict(artifact, filename=artifact["filename"][:-4] + ".epub")
+
+
+def _verify(stream, artifact):
+    size = artifact["bytes"]
+    if not 0 < size <= MAX_BYTES:
+        raise ValueError("Invalid EPUB pin size")
+    data = stream.read(size + 1)
+    if len(data) != size or hashlib.sha256(data).hexdigest() != artifact["sha256"]:
+        raise ValueError("EPUB size or SHA-256 does not match pin")
+    metadata = inspect(data)
+    stream.seek(0)
+    return metadata
+
+
+def install_stream(source_id, stream, *, expected_size=None, expected_sha256=None):
+    metadata = {}
+
+    def validate(staged, artifact):
+        metadata.update(_verify(staged, artifact))
+
+    artifact = pdf_source._install_stream(
+        source_id, stream, expected_size=expected_size, expected_sha256=expected_sha256,
+        format_name="epub", verify=validate)
+    return artifact, metadata
+
+
+@contextmanager
+def installed(artifact, *, verify=True):
+    filename = artifact["filename"]
+    if not re.fullmatch(r"[a-z0-9-]{1,63}\.[a-f0-9]{64}\.epub", filename):
+        raise ValueError("Invalid EPUB artifact filename")
+    with pdf_source._directory("library", format_name="epub") as (directory, mount, _):
+        with pdf_source._file(directory, mount, filename, artifact["bytes"]) as stream:
+            if verify:
+                _verify(stream, artifact)
+            yield stream
+
+
+def ready(artifact):
+    if artifact:
+        try:
+            with installed(artifact):
+                return True
+        except (OSError, ValueError):
+            pass
+    return False
