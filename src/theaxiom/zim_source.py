@@ -264,11 +264,15 @@ def download_resumable(source_id, config, *, offset=0, validator=None,
                     if remaining < 80:
                         raise ValueError("Incomplete staged ZIM")
                     while block := target.read(CHUNK):
+                        if stopped():
+                            raise TransferStopped()
                         sha.update(block)
                     target.seek(0)
                     check_header(target.read(80), count)
                     target.seek(0)
                     while remaining:
+                        if stopped():
+                            raise TransferStopped()
                         block = target.read(min(CHUNK, remaining))
                         if not block:
                             raise ValueError("Incomplete staged ZIM")
