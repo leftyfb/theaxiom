@@ -151,7 +151,7 @@ def test_source_filter_toolbar():
 def test_selection_mode_and_bulk_lifecycle_controls():
     page = render([profile("field-guide", "Field guide")])
     for marker in ('id="source-select-mode" aria-pressed="false"',
-                   'class="group-select" hidden', 'id="bulk-selection" hidden',
+                   'class="group-select" hidden', 'id="bulk-selection" aria-label="Selected source actions" hidden',
                    'id="bulk-actions" hidden', 'id="bulk-publish"',
                    'id="bulk-unpublish"', 'id="bulk-remove"'):
         assert marker in page
@@ -192,7 +192,7 @@ def test_bulk_group_multi_select_and_replace_controls():
 def test_compact_source_layout_and_checkbox_editor():
     page = render([profile()])
     assert '<section class="source-filters" id="source-filters-panel" aria-label="Filter and sort sources" hidden>' in page
-    assert page.index('id="source-filter-search"') < page.index('id="group-panel"') < page.index('id="source-selection-bar"') < page.index('id="source-select-mode"') < page.index('id="source-filter-toggle"') < page.index('id="source-filters-panel"') < page.index('id="source-cards"')
+    assert page.index('id="source-filter-search"') < page.index('id="source-selection-bar"') < page.index('id="source-select-mode"') < page.index('id="source-filter-toggle"') < page.index('id="bulk-selection"') < page.index('id="group-panel"') < page.index('id="source-filters-panel"') < page.index('id="source-cards"')
     assert '<details id="source-editor-groups" hidden>' in page
     assert 'No categories available.' in page
     assert 'Add starter categories and tags' in page
@@ -202,7 +202,8 @@ def test_bulk_lifecycle_controls_separate_from_grouping_panel():
     page = render([profile()])
     selection = page.index('id="bulk-selection"')
     organize = page.index('id="group-panel"')
-    assert selection < page.index('id="bulk-publish"') < organize
+    assert page.index('id="source-selection-bar"') < selection < page.index('id="bulk-publish"') < organize
+    assert '<strong>Selected source actions</strong>' not in page
     assert selection < page.index('id="bulk-unpublish"') < organize
     assert selection < page.index('id="bulk-remove"') < organize
     assert organize < page.index('id="group-assign"') < page.index('id="source-cards"')

@@ -342,8 +342,14 @@
 </section>
       <form method="dialog"><button class="button">Close guide</button></form>
     </dialog>
-    <section class="group-panel" id="bulk-selection" hidden>
-      <strong>Selected source actions</strong>
+    <div class="source-selection-bar" id="source-selection-bar">
+      <button class="button" type="button" id="source-select-mode" aria-pressed="false">Select</button>
+      <label id="select-all-label" hidden><input type="checkbox" id="group-select-all" aria-label="Select all visible sources">Select all</label>
+      <span id="group-count" class="source-note" aria-live="polite" hidden>0 selected</span>
+      <span id="source-filter-count" class="source-note" role="status"></span>
+      <button class="button source-filter-toggle" type="button" id="source-filter-toggle" aria-label="Filter and sort sources" title="Filter and sort sources" aria-controls="source-filters-panel" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg><span id="source-filter-active" hidden></span></button>
+    </div>
+    <section class="group-panel" id="bulk-selection" aria-label="Selected source actions" hidden>
       <div class="source-actions" id="bulk-actions" hidden>
         <button class="button" type="button" id="bulk-publish" disabled>Publish</button>
         <button class="button" type="button" id="bulk-unpublish" disabled>Unpublish</button>
@@ -374,13 +380,6 @@
       <p id="group-feedback" role="status" aria-live="polite"></p>
       {% if not groups %}<p class="source-note">No groupings available yet. <a href="/admin/groupings">Add starter categories and tags</a>.</p>{% endif %}
     </details>
-    <div class="source-selection-bar" id="source-selection-bar">
-      <button class="button" type="button" id="source-select-mode" aria-pressed="false">Select</button>
-      <label id="select-all-label" hidden><input type="checkbox" id="group-select-all" aria-label="Select all visible sources">Select all</label>
-      <span id="group-count" class="source-note" aria-live="polite" hidden>0 selected</span>
-      <span id="source-filter-count" class="source-note" role="status"></span>
-      <button class="button source-filter-toggle" type="button" id="source-filter-toggle" aria-label="Filter and sort sources" title="Filter and sort sources" aria-controls="source-filters-panel" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg><span id="source-filter-active" hidden></span></button>
-    </div>
     <section class="source-filters" id="source-filters-panel" aria-label="Filter and sort sources" hidden>
       <div class="editor-grid">
         <div><label for="source-filter-publication">Publication</label><select id="source-filter-publication"><option value="">All</option><option value="published">Published</option><option value="unpublished">Unpublished</option><option value="unknown">Unknown</option></select></div>
