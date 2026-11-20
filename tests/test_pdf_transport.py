@@ -1,0 +1,103 @@
+"""Offline tests for SSRF-resistant PDF transport."""
+from email.message import Message
+from io import BytesIO
+import socket
+
+import pytest
+
+from theaxiom import pdf_transport
+
+
+def addresses(*ips):
+    return [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", (ip, 443))
+            for ip in ips]
+
+
+@pytest.mark.parametrize("ip", ["127.0.0.1", "192.168.0.10", "169.254.169.254",
+                                "10.0.0.1", "100.64.0.1", "224.0.0.1", "0.0.0.0"])
+def test_reject_nonpublic_or_mixed_dns(monkeypatch, ip):
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: addresses("8.8.8.8", ip))
+    with pytest.raises(ValueError, match="non-public"):
+        pdf_transport._public_addresses("publisher.org")
+
+
+def test_public_dns_addresses_pinned(monkeypatch):
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: addresses("8.8.8.8"))
+    assert pdf_transport._public_addresses("publisher.org")[0][-1] == ("8.8.8.8", 443)
+
+
+@pytest.mark.parametrize("url", ["http://publisher.org/a.pdf", "https://127.0.0.1/a.pdf",
+                                  "https://user@publisher.org/a.pdf", "https://publisher.org:444/a.pdf"])
+def test_unsafe_url_rejected_before_dns(monkeypatch, url):
+    def unexpected(*a, **k):
+        pytest.fail("DNS must not run for invalid URL")
+    monkeypatch.setattr(socket, "getaddrinfo", unexpected)
+    with pytest.raises(ValueError):
+        with pdf_transport.open_pdf(url):
+            pass
+
+
+class Response:
+    def __init__(self, status, headers, body):
+        self.status = status
+        self.headers = Message()
+        for key, value in headers:
+            self.headers[key] = value
+        self.body = BytesIO(body)
+
+    def getheader(self, name):
+        return self.headers.get(name)
+
+    def read1(self, size):
+        return self.body.read(size)
+
+    def close(self):
+        self.body.close()
+
+
+def mock_response(monkeypatch, status, headers, body=b"abc"):
+    response = Response(status, headers, body)
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: addresses("8.8.8.8"))
+
+    class Connection:
+        def __init__(self, host, address, deadline):
+            assert host == "publisher.org"
+            assert address[-1] == ("8.8.8.8", 443)
+
+        def request(self, method, path, headers):
+            assert method == "GET" and path == "/guide.pdf"
+            assert headers["Accept-Encoding"] == "identity"
+
+        def getresponse(self):
+            return response
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(pdf_transport, "_PinnedHTTPS", Connection)
+
+
+@pytest.mark.parametrize("status,headers", [
+    (302, [("Location", "http://127.0.0.1/")]),
+    (200, [("Content-Length", "999999999")]),
+    (200, [("Content-Length", "2"), ("Content-Length", "3")]),
+    (200, [("Content-Encoding", "gzip")]),
+    (200, [("Transfer-Encoding", "chunked"), ("Content-Length", "3")]),
+])
+def test_response_rejected(monkeypatch, status, headers):
+    mock_response(monkeypatch, status, headers)
+    with pytest.raises(ValueError):
+        with pdf_transport.open_pdf("https://publisher.org/guide.pdf"):
+            pass
+
+
+def test_direct_response_and_truncated_body(monkeypatch):
+    mock_response(monkeypatch, 200, [("Content-Length", "3")])
+    with pdf_transport.open_pdf("https://publisher.org/guide.pdf") as body:
+        assert body.read(10) == b"abc"
+        assert body.read(10) == b""
+    mock_response(monkeypatch, 200, [("Content-Length", "4")])
+    with pdf_transport.open_pdf("https://publisher.org/guide.pdf") as body:
+        assert body.read(10) == b"abc"
+        with pytest.raises(ValueError, match="incomplete"):
+            body.read(10)

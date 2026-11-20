@@ -21,10 +21,7 @@ ROUTE_PREFIX = "/api/library/pdf/"
 ROUTE = re.compile(ROUTE_PREFIX + r"([a-z0-9-]{1,63})(/document\.pdf)?\Z")
 
 
-def pin(source_id, config):
-    """Return an import pin only for explicitly documented, bounded PDF content."""
-    url = config.get("source_url", "")
-    size, digest = config.get("expected_size_bytes", ""), config.get("sha256", "")
+def valid_source_url(url):
     # Deliberately require a plain HTTPS document URL (no credentials, query,
     # fragments, encoded path components, port overrides, or address literals).
     try:
@@ -42,6 +39,14 @@ def pin(source_id, config):
         )
     except ValueError:
         valid_url = False
+    return bool(valid_url)
+
+
+def pin(source_id, config):
+    """Return an import pin only for explicitly documented, bounded PDF content."""
+    url = config.get("source_url", "")
+    size, digest = config.get("expected_size_bytes", ""), config.get("sha256", "")
+    valid_url = valid_source_url(url)
     if (not catalog_store.ID_RE.fullmatch(source_id) or config.get("format") != "pdf"
             or not valid_url or not config.get("provenance", "").strip()
             or not config.get("license", "").strip()
