@@ -194,12 +194,12 @@
   <h4>1. Find content</h4>
   <p>For Kiwix archives, browse the <a href="https://library.kiwix.org/">Kiwix library</a> or <a href="https://download.kiwix.org/zim/">official ZIM download directory</a>. Choose your language, edition and archive size. Copy the direct .zim download link rather than the catalog or article page. For PDF documents, use the original publisher, for example <a href="https://www.ready.gov/">Ready.gov</a>, and look for a direct HTTPS PDF link. Check permission to store and distribute the material offline.</p>
   <h4>2. Add a source profile</h4>
-  <p>Choose Add Source, enter a recognizable name and the direct artifact URL, confirm the detected format, optionally describe the collection, and Save source. A stable ID is generated automatically and retained when editing. A normal website URL is not a downloadable archive. Unsupported formats can be recorded but cannot be acquired or read.</p>
+  <p>Choose Add Source, enter a recognizable name and optionally a direct artifact URL, confirm or select the format, optionally describe the collection, and Save source. A stable ID is generated automatically and retained when editing. A normal website URL is not a downloadable archive. Unsupported formats can be recorded but cannot be acquired or read.</p>
   <h4>3. Review advanced details</h4>
   <p>Publisher, edition and language describe the content. Expected size and SHA-256 are the exact byte count and fingerprint of the intended file. Provenance records where the information came from; license records the permission to use it. Use trustworthy publisher metadata where available. A checksum calculated from a downloaded file can identify those bytes later, but does not independently prove their origin. Saving metadata does not verify it.</p>
   <h4>4. Acquire and verify</h4>
   <p><strong>ZIM:</strong> The existing verified Wikipedia archive is supported. New ZIM profiles currently require a matching trusted acquisition manifest; arbitrary remote downloads are not yet enabled.</p>
-  <p><strong>PDF:</strong> Local import currently requires an administrator-reviewed HTTPS publisher URL, provenance, rights note, exact size (maximum 16 MiB) and SHA-256. An operator must stage the file as staging/pdf/&lt;source-id&gt;.pdf in the configured storage root and provision staging/pdf and library/pdf with application ownership and restrictive permissions. Use Import local PDF to verify and install. Download PDF retrieves an HTTPS URL (up to three independently validated HTTPS redirects; query strings and private addresses remain unsupported), computes missing size and SHA-256, and records locally calculated provenance. Review rights and enter a rights note before publishing. Browser upload is not yet supported. Local or explicitly configured NFS storage is supported; the expected mount target and export must match.</p>
+  <p><strong>PDF:</strong> Use Download from URL for a configured HTTPS PDF link (up to three independently validated HTTPS redirects; query strings and private addresses remain unsupported), or Upload PDF to choose a file from your computer. Both support up to 16 MiB, compute missing size and SHA-256, and record provenance. A URL is optional for uploads. Review rights and enter a rights note before publishing. Local or explicitly configured NFS storage is supported; the expected mount target and export must match.</p>
   <h4>5. Publish and read offline</h4>
   <p>After matching content is verified and its reader is ready, use Publish on the source card. Open the published collection from The Axiom homepage, even without internet connectivity. PDFs use the browser PDF viewer; PDF full-text search is not yet supported.</p>
   <h4>6. Edit or remove</h4>
@@ -236,10 +236,11 @@
           {% endfor %}
         </div>
         {% endif %}
-        {% if source.adapter == 'pdf' and (source.artifact or source.pdf_download) %}
+        {% if source.adapter == 'pdf' and not pub.enabled %}
         <div class="source-actions" aria-label="PDF acquisition">
-          {% if source.pdf_download and not pub.enabled %}<button class="button" type="button" data-pdf-download>Download PDF</button>{% endif %}
-          {% if source.artifact %}<button class="button" type="button" data-pdf-import>Import local PDF</button>{% endif %}
+          {% if source.pdf_download and not pub.enabled %}<button class="button" type="button" data-pdf-download>Download from URL</button>{% endif %}
+          <button class="button" type="button" data-pdf-upload>Upload PDF</button>
+          <input type="file" accept=".pdf,application/pdf" data-pdf-file hidden aria-label="Choose PDF file">
           <span data-pdf-feedback role="status"></span>
         </div>
         {% endif %}
@@ -289,6 +290,26 @@
     (() => {
       const feedback = document.getElementById('catalog-feedback');
       const revision = {{ (catalog|default({})).revision|default(none)|tojson }};
+      const stateKey = 'theaxiom-source-view';
+      try {
+        const saved = JSON.parse(sessionStorage.getItem(stateKey) || 'null');
+        sessionStorage.removeItem(stateKey);
+        if (saved) {
+          document.querySelectorAll('.source-card').forEach(card => {
+            card.open = saved.open.includes(card.dataset.sourceId);
+          });
+          requestAnimationFrame(() => window.scrollTo(0, saved.scroll));
+        }
+      } catch (_) { /* Storage may be disabled. */ }
+      function reloadSources() {
+        try {
+          sessionStorage.setItem(stateKey, JSON.stringify({
+            open: Array.from(document.querySelectorAll('.source-card[open]'), card => card.dataset.sourceId),
+            scroll: window.scrollY
+          }));
+        } catch (_) { /* Reload remains available without session storage. */ }
+        window.location.reload();
+      }
       const dialog = document.getElementById('source-dialog');
       const form = document.getElementById('source-form');
       const guide = document.getElementById('source-guide');
@@ -351,7 +372,7 @@
           body:JSON.stringify({operation, source_id, fields, revision})});
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || 'Catalog update failed');
-        window.location.reload();
+        reloadSources();
       }
       document.getElementById('source-add').addEventListener('click', () => openForm('add'));
       document.getElementById('source-cancel').addEventListener('click', () => dialog.close());
@@ -378,24 +399,41 @@
         catch (error) { feedback.textContent = error.message; }
       }));
       {% if catalog.sources | selectattr('adapter', 'equalto', 'pdf') | list %}
-      document.querySelectorAll('[data-pdf-import], [data-pdf-download]').forEach(button => button.addEventListener('click', async () => {
-        const card = button.closest('.source-card');
+      async function acquirePDF(card, file = null) {
         const feedback = card.querySelector('[data-pdf-feedback]');
-        button.disabled = true;
-        const download = button.hasAttribute('data-pdf-download');
-        feedback.textContent = download ? 'Downloading and verifying PDF…' : 'Verifying local PDF…';
+        const buttons = card.querySelectorAll('[data-pdf-download], [data-pdf-upload]');
+        if (file && (!file.size || file.size > 16 * 1024 * 1024)) {
+          feedback.textContent = 'Choose a PDF file between 1 byte and 16 MiB.';
+          return;
+        }
+        buttons.forEach(button => button.disabled = true);
+        feedback.textContent = file ? 'Uploading and verifying PDF…' : 'Downloading and verifying PDF…';
         try {
-          const response = await fetch('/api/action', {method:'POST', headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({source_id:card.dataset.sourceId, action:download ? 'pdf-download' : 'import', revision})});
-          const result = await response.json();
-          if (!response.ok) throw new Error(result.error || 'Import failed');
-          feedback.textContent = 'PDF verified and installed.';
-          if (download) window.location.reload();
+          const response = file
+            ? await fetch('/api/pdf-upload', {method:'POST', headers:{'Content-Type':'application/pdf',
+                'X-Source-ID':card.dataset.sourceId, 'X-Catalog-Revision':String(revision)}, body:file})
+            : await fetch('/api/action', {method:'POST', headers:{'Content-Type':'application/json'},
+                body:JSON.stringify({source_id:card.dataset.sourceId, action:'pdf-download', revision})});
+          const result = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(result.error || 'PDF acquisition failed (HTTP ' + response.status + ')');
+          if (!result.installed_verified) throw new Error('PDF installation was not confirmed');
+          reloadSources();
         } catch (error) {
           feedback.textContent = error.message;
         } finally {
-          button.disabled = false;
+          buttons.forEach(button => button.disabled = false);
         }
+      }
+      document.querySelectorAll('[data-pdf-download]').forEach(button => button.addEventListener('click', () => {
+        acquirePDF(button.closest('.source-card'));
+      }));
+      document.querySelectorAll('[data-pdf-upload]').forEach(button => button.addEventListener('click', () => {
+        button.closest('.source-card').querySelector('[data-pdf-file]').click();
+      }));
+      document.querySelectorAll('[data-pdf-file]').forEach(input => input.addEventListener('change', () => {
+        const file = input.files[0];
+        input.value = '';
+        if (file) acquirePDF(input.closest('.source-card'), file);
       }));
       {% endif %}
       document.querySelectorAll('[data-field="publication-toggle"]').forEach(button => button.addEventListener('click', async () => {
@@ -405,7 +443,7 @@
           const response = await fetch('/api/publication', {method:'POST', headers:{'Content-Type':'application/json'},
             body:JSON.stringify({source_id:button.closest('.source-card').dataset.sourceId, enabled:button.dataset.enabled !== 'true', revision})});
           if (!response.ok) throw new Error((await response.json()).error || 'Publication failed');
-          window.location.reload();
+          reloadSources();
         } catch (error) {
           window.alert(error.message);
           delete button.dataset.posting;

@@ -90,7 +90,7 @@ def select_lifecycle(source_id, configuration):
         artifact = None
         try:
             artifact = pdf_source.pin(source_id, configuration)
-            reason = "Import from the local PDF inbox or download the configured HTTPS document."
+            reason = "Download from the configured HTTPS URL or upload a PDF from your computer."
         except ValueError as exc:
             reason = str(exc)
         return dict(adapter=adapter, configuration_valid=artifact is not None, artifact=artifact,
@@ -513,8 +513,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             elif self._pdf_record(record):
                 busy = False
                 pdf_state = pdf_source.status(record, artifacts[sid])
-                if artifacts[sid] or pdf_state["enabled"] or pdf_state.get("error"):
-                    state = pdf_state
+                state = pdf_state
             sources.append(dict(record, **lifecycles[sid], acquisition=jobs.get(sid),
                                 installed_verified=(bool(state and state["verified"]) if self._pdf_record(record)
                                                     else publication.verified(matched, sid)),

@@ -16,7 +16,7 @@ The same guide is available offline from Administration → Sources → Content 
   
 ## 2. Add a source profile
 
-  Choose Add Source, enter a recognizable name and the direct artifact URL, confirm the detected format, optionally describe the collection, and Save source. A stable ID is generated automatically and retained when editing. A normal website URL is not a downloadable archive. Unsupported formats can be recorded but cannot be acquired or read.
+  Choose Add Source, enter a recognizable name and optionally a direct artifact URL, confirm or select the format, optionally describe the collection, and Save source. A stable ID is generated automatically and retained when editing. A normal website URL is not a downloadable archive. Unsupported formats can be recorded but cannot be acquired or read.
 
 
   
@@ -31,7 +31,7 @@ The same guide is available offline from Administration → Sources → Content 
   **ZIM:** The existing verified Wikipedia archive is supported. New ZIM profiles currently require a matching trusted acquisition manifest; arbitrary remote downloads are not yet enabled.
 
 
-  **PDF:** Local import currently requires an administrator-reviewed HTTPS publisher URL, provenance, rights note, exact size (maximum 16 MiB) and SHA-256. An operator must stage the file as staging/pdf/<source-id>.pdf in the configured storage root and provision staging/pdf and library/pdf with application ownership and restrictive permissions. Use Import local PDF to verify and install. Download PDF retrieves an HTTPS URL (up to three independently validated HTTPS redirects; query strings and private addresses remain unsupported), computes missing size and SHA-256, and records locally calculated provenance. Review rights and enter a rights note before publishing. Browser upload is not yet supported. Local or explicitly configured NFS storage is supported; the expected mount target and export must match.
+  **PDF:** Use Download from URL for a configured HTTPS PDF link (up to three independently validated HTTPS redirects; query strings and private addresses remain unsupported), or Upload PDF to choose a file from your computer. Both support up to 16 MiB, compute missing size and SHA-256, and record provenance. A URL is optional for uploads. Review rights and enter a rights note before publishing. Local or explicitly configured NFS storage is supported; the expected mount target and export must match.
 
 
   
