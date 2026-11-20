@@ -197,7 +197,8 @@ def status(record, records):
                   else "Awaiting verified Kiwix reader activation" if enabled and not ready
                   else "")
         return dict(result, enabled=enabled, verified=verified, serving=bool(ready),
-                    published=bool(ready), publication_reason=reason,
+                    published=bool(ready), ready_for_publication=verified,
+                    publication_reason=reason,
                     requires_rights_acknowledgement=verified and not rights)
     except (OSError, ValueError, TypeError, KeyError):
         return dict(result, error="ZIM publication state unavailable")
