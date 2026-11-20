@@ -89,7 +89,7 @@ def select_lifecycle(source_id, configuration):
     if adapter == "pdf" and source_id not in publication.ROUTES:
         artifact = None
         try:
-            artifact = pdf_source.pin(source_id, configuration)
+            artifact = pdf_source.pin(source_id, configuration, require_rights=False)
             reason = "Download from the configured HTTPS URL or upload a PDF from your computer."
         except ValueError as exc:
             reason = str(exc)
@@ -635,6 +635,9 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     return
                 if enabled and record is not None and is_pdf:
                     artifact = select_lifecycle(source_id, record["configuration"])["artifact"]
+                    if not record["configuration"].get("license", "").strip():
+                        self._send_json(409, {"error": "Review usage rights before publishing"})
+                        return
                     if not pdf_source.ready(artifact, verify=True):
                         self._send_json(409, {"error": "matching verified PDF content is required"})
                         return

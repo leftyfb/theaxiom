@@ -312,9 +312,32 @@ def test_raw_pdf_upload_without_url(pdf_app, disk):
     assert config["sha256"] == hashlib.sha256(data).hexdigest()
     assert config["expected_size_bytes"] == str(len(data))
     assert "Uploaded by administrator" in config["provenance"]
+    assert source(catalog, SID)["installed_verified"]
+    assert "Review usage rights before publishing" in request("/admin/sources")
     pub = dict(source_id=SID, enabled=True, revision=catalog["revision"])
     request("/api/publication", pub, status=409)
     catalog = mutate(request, catalog, "edit", {"license": "Fixture redistribution authorized"}, sid=SID)
     request("/api/publication", dict(pub, revision=catalog["revision"]))
     upload(data, 409, {"X-Catalog-Revision": str(catalog["revision"])})
     assert request(READER + "/document.pdf", raw=True)[0] == data
+
+
+def test_new_pdf_leaf_corrects_server_inherited_write_permissions(disk, monkeypatch):
+    from io import BytesIO
+    inbox, library = disk
+    inbox.parent.rmdir()
+    library.rmdir()
+    mkdir = os.mkdir
+    def permissive(path, mode=0o777, *, dir_fd=None):
+        mkdir(path, mode=0o777 if path == "pdf" else mode, dir_fd=dir_fd)
+        if path == "pdf":
+            os.chmod(path, 0o777, dir_fd=dir_fd)
+    monkeypatch.setattr(os, "mkdir", permissive)
+    artifact = pdf_source.install_stream(SID, BytesIO(document()))
+    assert pdf_source.ready(artifact, verify=True)
+    assert inbox.parent.stat().st_mode & 0o777 == 0o700
+    assert library.stat().st_mode & 0o777 == 0o700
+    library.chmod(0o777)
+    with pytest.raises(ValueError, match="PDF directories"):
+        pdf_source.install_stream(SID, BytesIO(document()))
+    assert library.stat().st_mode & 0o777 == 0o777

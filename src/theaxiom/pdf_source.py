@@ -42,14 +42,14 @@ def valid_source_url(url):
     return bool(valid_url)
 
 
-def pin(source_id, config):
+def pin(source_id, config, *, require_rights=True):
     """Return an import pin only for explicitly documented, bounded PDF content."""
     url = config.get("source_url", "")
     size, digest = config.get("expected_size_bytes", ""), config.get("sha256", "")
     valid_url = valid_source_url(url)
     if (not catalog_store.ID_RE.fullmatch(source_id) or config.get("format") != "pdf"
             or (url and not valid_url) or not config.get("provenance", "").strip()
-            or not config.get("license", "").strip()
+            or (require_rights and not config.get("license", "").strip())
             or not re.fullmatch(r"[1-9][0-9]{0,7}", size) or int(size) > MAX_BYTES
             or not re.fullmatch(r"[a-fA-F0-9]{64}", digest)):
         raise ValueError("PDF publication requires provenance, redistribution rights, size (up to 16 MiB) and SHA-256; any source URL must be plain HTTPS.")
@@ -99,11 +99,21 @@ def _directory(branch, *, writing=False):
                 if (_mount_id(fd) != mount["id"]
                         or storage._covering(path.parent, storage.read_mounts()) != mount):
                     raise ValueError("PDF parent directory is not on the configured mount")
+                created = False
                 try:
                     os.mkdir(part, mode=0o700, dir_fd=fd)
+                    created = True
                 except FileExistsError:
                     pass
                 child = os.open(part, DIRECTORY, dir_fd=fd)
+                if created:
+                    try:
+                        if _mount_id(child) != mount["id"] or os.fstat(child).st_uid != os.geteuid():
+                            raise ValueError("New PDF directory has unexpected mount or owner")
+                        os.fchmod(child, 0o700)
+                    except BaseException:
+                        os.close(child)
+                        raise
             os.close(fd)
             fd = child
         _check_directory(fd, mount["id"])
@@ -273,10 +283,13 @@ def status(record, artifact):
     from . import publication
     sid = record["source_id"]
     path = ROUTE_PREFIX + sid
-    result = dict(enabled=False, verified=False, serving=False, published=False, path=path, entry_path=path)
+    result = dict(enabled=False, verified=False, serving=False, published=False, path=path, entry_path=path, publication_reason="")
     try:
         enabled = publication.load().get(sid, False)
         available = ready(artifact, verify=True)
-        return dict(result, enabled=enabled, verified=available, serving=available, published=enabled and available)
+        rights = bool(record["configuration"].get("license", "").strip())
+        return dict(result, enabled=enabled, verified=available, serving=available and rights,
+                    published=enabled and available and rights,
+                    publication_reason="Review usage rights before publishing" if available and not rights else "")
     except (OSError, ValueError):
         return dict(result, error="publication state unavailable")

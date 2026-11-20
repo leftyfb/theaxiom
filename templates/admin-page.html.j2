@@ -210,7 +210,7 @@
     <div id="source-cards">
     {% for source in (catalog|default({})).sources|default([]) %}
       {% set pub = source.publication %}
-      {% set publication_label = 'Publication status unavailable' if pub.error else 'Published · available in library' if pub.published else 'Enabled · reader unavailable' if pub.enabled else 'Unpublished · ready to publish' if pub.serving else 'Unpublished · reader not ready' %}
+      {% set publication_label = 'Publication status unavailable' if pub.error else 'Published · available in library' if pub.published else 'Enabled · reader unavailable' if pub.enabled else 'Unpublished · ready to publish' if pub.serving else 'Unpublished · ' + pub.publication_reason if pub.publication_reason else 'Unpublished · reader not ready' %}
       <details class="source-card" data-source-id="{{ source.source_id }}"{% for name in editable_fields %} data-catalog-{{ name|replace('_', '-') }}="{{ source.profile.get(name, source.configuration.get(name, '')) }}"{% endfor %}>
         <summary class="source-header">
           <div>
@@ -526,7 +526,7 @@
         field('publication-browse').hidden = !pub?.published;
         field('publication-summary').textContent = field('publication-status').textContent =
           !pub || pub.error ? 'Publication status unavailable' : pub.published ? 'Published · available in library' :
-          pub.enabled ? 'Enabled · reader unavailable' : pub.serving ? 'Unpublished · ready to publish' : 'Unpublished · reader not ready';
+          pub.enabled ? 'Enabled · reader unavailable' : pub.serving ? 'Unpublished · ready to publish' : pub.publication_reason ? 'Unpublished · ' + pub.publication_reason : 'Unpublished · reader not ready';
       }
       async function refresh() {
         const controller = new AbortController();
