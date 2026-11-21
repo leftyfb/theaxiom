@@ -65,6 +65,12 @@ archives. The test harness starts and closes its own loopback-only server.
 
 ## Boundaries and expansion
 
+The isolated Kiwix smoke test also starts actual kiwix-serve with a synthetic
+two-article ZIM. Desktop and mobile Chromium navigate the generated article
+link and return using browser history; its native search endpoint is probed
+independently for server failures. The test also verifies Kiwix library reload
+after synthetic publication changes. No installed production ZIM is inspected.
+
 Chromium browser tests complement (do not replace) the independent real Nginx
 publication/authentication tests, Kiwix fixture smoke test, and application
 unit tests. They currently do not test production-specific Tailscale routing,
@@ -94,7 +100,7 @@ matrix must not be mistaken for owner acceptance or a live production test.
 | #6 | Public library displays only eligible verified and published content | Unit/CI: publication gate; partial browser: public navigation |
 | #13, #67 | Eight-character password policy, branded login/favicon, session logout | Unit/CI for password policy and icons; browser for login, incorrect password, logout; external 1Password remains owner-only |
 | #15 | Separate Sources, Groupings and Settings routes with correct scripts | Browser navigation and page errors; template assertions prohibit Settings script on Groupings |
-| #16, #44, #90–92, #97 | Shared Kiwix, UUID book identity, reader navigation/back, native search | Real isolated Kiwix CI fixture and unit tests; full native browser article/search coverage still pending |
+| #16, #44, #90–92, #97 | Shared Kiwix, UUID book identity, reader navigation/back, native search | Real isolated Kiwix CI fixture and native search/OPDS tests; desktop/mobile Chromium article links and browser-back verified; full search UI still pending |
 | #45 | Public homepage compact mobile layout, no overflow, navigable Getting Started | Partial browser: public home/search; further responsive tests needed |
 | #69 | Discoverable offline content source guide | Browser modal open/dismiss and static template tests |
 | #70, #75, #77 | PDF/EPUB URLs, local upload, metadata and language, reader navigation | Browser: real isolated PDF/EPUB fixture uploads, reload persistence and source removal, two-chapter EPUB reader/download |
