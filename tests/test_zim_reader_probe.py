@@ -1,5 +1,6 @@
 """Kiwix reader startup must acknowledge the exact published archive set."""
 from io import BytesIO
+import uuid
 from unittest.mock import patch
 import xml.etree.ElementTree as ET
 
@@ -96,10 +97,16 @@ def test_shared_manifest_includes_only_verified_published_wikipedia(disk):
     evidence = {"state": "completed", "verified": True, "active": False,
                 "filename": trusted["filename"], "sha256": trusted["sha256"],
                 "expected_bytes": trusted["bytes"]}
+    # Sparse fixture mimics a large, verified archive without allocating its bytes.
+    wikipedia_path = disk / "library" / "zim" / trusted["filename"]
+    wikipedia_path.parent.mkdir(parents=True, exist_ok=True)
+    with wikipedia_path.open("wb") as stream:
+        stream.write(fixture_bytes()[:24])
+        stream.truncate(trusted["bytes"])
     with patch.object(acquisition_monitor, "collect", return_value=evidence) as probe:
         publication.save("wikipedia-en", True)
         books = zim_catalog.verified_books([])
-        assert [book["id"] for book in books] == ["wikipedia-en"]
+        assert [book["id"] for book in books] == [str(uuid.UUID(int=0))]
         assert books[0]["path"].endswith("/library/zim/" + trusted["filename"])
         assert zim_catalog.content_name(books[0]) == trusted["filename"][:-4]
         assert probe.call_count == 1
