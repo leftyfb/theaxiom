@@ -192,6 +192,65 @@ def exercise(browser, base, viewport_name, viewport, artifact_dir):
         context.close()
 
 
+def exercise_bulk(browser, base, artifacts):
+    """Bulk changes affect only disposable profiles and never installed production files."""
+    context = browser.new_context(viewport={"width": 1366, "height": 900})
+    page = context.new_page()
+    page.set_default_timeout(15000)
+    try:
+        page.goto(base + "/admin")
+        page.locator("#username").fill("admin")
+        page.locator("#password").fill("fixture-password-not-production")
+        page.locator("#submit").click()
+        expect(page).to_have_url(base + "/admin")
+        page.on("dialog", lambda dialog: dialog.accept())
+
+        def select(*ids):
+            mode = page.locator("#source-select-mode")
+            if mode.get_attribute("aria-pressed") != "true":
+                mode.click()
+            for sid in ("reader-pdf", "reader-epub", "bulk-ineligible-a", "bulk-ineligible-b"):
+                check = page.locator(f'[data-group-select][value="{sid}"]')
+                if sid in ids:
+                    check.check()
+                elif check.is_checked():
+                    check.uncheck()
+
+        select("reader-pdf", "reader-epub")
+        expect(page.locator("#bulk-unpublish")).to_be_enabled()
+        expect(page.locator("#bulk-publish")).to_be_disabled()
+        select("reader-pdf", "reader-epub", "bulk-ineligible-a")
+        expect(page.locator("#bulk-unpublish")).to_be_disabled()
+        expect(page.locator("#bulk-publish")).to_be_disabled()
+
+        select("reader-pdf", "reader-epub")
+        with page.expect_navigation(wait_until="domcontentloaded", timeout=30000):
+            page.locator("#bulk-unpublish").click()
+        select("reader-pdf", "reader-epub")
+        expect(page.locator("#bulk-publish")).to_be_enabled()
+        expect(page.locator("#bulk-unpublish")).to_be_disabled()
+        with page.expect_navigation(wait_until="domcontentloaded", timeout=30000):
+            page.locator("#bulk-publish").click()
+
+        select("bulk-ineligible-a", "bulk-ineligible-b")
+        expect(page.locator("#bulk-publish")).to_be_disabled()
+        expect(page.locator("#bulk-remove")).to_be_enabled()
+        with page.expect_navigation(wait_until="domcontentloaded", timeout=30000):
+            page.locator("#bulk-remove").click()
+        for sid in ("bulk-ineligible-a", "bulk-ineligible-b"):
+            expect(page.locator(f'.source-card[data-source-id="{sid}"]')).to_have_count(0)
+        page.goto(base + "/")
+        expect(page.get_by_text("Fixture PDF")).to_be_visible()
+        expect(page.get_by_text("Fixture EPUB")).to_be_visible()
+        print("PASS desktop: mixed eligibility, bulk unpublish/publish/remove")
+    except Exception:
+        artifacts.mkdir(parents=True, exist_ok=True)
+        page.screenshot(path=str(artifacts / "bulk-fixture-failure.png"), full_page=True)
+        raise
+    finally:
+        context.close()
+
+
 def main():
     artifacts = Path(os.environ.get("AXIOM_BROWSER_ARTIFACTS", "/tmp/axiom-browser-artifacts"))
     pdfjs_root = Path(os.environ["AXIOM_TEST_PDFJS_ROOT"]).resolve()
@@ -213,6 +272,9 @@ def main():
             credential = root / "password"
             PasswordStore.initialize(credential, "fixture-password-not-production")
             seed(catalog, disk)
+            for sid in ("bulk-ineligible-a", "bulk-ineligible-b"):
+                catalog.mutate("add", sid, {"title": sid, "format": "unspecified"},
+                               catalog.get()["revision"])
             server = admin_api.ThreadingHTTPServer(("127.0.0.1", 0), admin_api.AdminAPIHandler)
             host, port = server.server_address
             server.axiom_config = ServerConfig(host, port, frozenset({f"{host}:{port}"}),
@@ -227,6 +289,7 @@ def main():
                         for name, viewport in (("desktop", {"width": 1366, "height": 900}),
                                                ("mobile", {"width": 390, "height": 844})):
                             exercise(browser, f"http://{host}:{port}", name, viewport, artifacts)
+                        exercise_bulk(browser, f"http://{host}:{port}", artifacts)
                         # Publication is independent of browser sessions. Withdraw only the
                         # disposable fixtures, then verify every reader entry/asset fails closed.
                         publication.save("reader-pdf", False)
