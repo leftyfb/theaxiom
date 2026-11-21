@@ -190,3 +190,24 @@ def test_manifest_mtime_increases_with_fast_atomic_updates(disk, monkeypatch):
     third = path.stat().st_mtime_ns
     assert second >= first + 1_000_000_000
     assert third >= second + 1_000_000_000
+
+
+def test_reader_auth_does_not_reverify_archives_per_request(disk):
+    import hashlib
+    from unittest.mock import patch
+    artifact = zim_source.install_stream("ready", CONFIG, BytesIO(fixture_bytes()))
+    zim_jobs.save({"source_id": "ready", "state": "completed", "active": False,
+                   "verified": True, "configuration": zim_jobs.identity(CONFIG),
+                   "artifact": artifact})
+    rec = record("ready")
+    publication.save("ready", True)
+    manifest = zim_catalog.write_manifest([rec], {"ready": True})
+    ack = disk / "fast-reader-ack.sha256"
+    ack.write_text(hashlib.sha256(manifest.read_bytes()).hexdigest() + "\n")
+    name = "ready." + artifact["sha256"]
+    with patch.object(zim_catalog, "RUNTIME_ACK", ack), \\
+         patch.object(zim_catalog, "verified_books", side_effect=AssertionError("expensive verification")), \\
+         patch.object(zim_catalog, "render_xml", side_effect=AssertionError("expensive manifest generation")):
+        assert zim_catalog.authorize_reader_uri([rec], "/zim/content/" + name + "/article")
+        publication.save("ready", False)
+        assert not zim_catalog.authorize_reader_uri([rec], "/zim/content/" + name + "/article")
