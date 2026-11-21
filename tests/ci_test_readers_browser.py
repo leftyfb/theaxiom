@@ -99,7 +99,10 @@ def exercise(browser, base, viewport_name, viewport, artifact_dir):
         expect(page.locator("#chapter-content")).to_contain_text("First isolated chapter")
         page.get_by_role("link", name="Large").click()
         expect(page.locator("#chapter-content")).to_have_class("book large")
-        page.keyboard.press("Tab")
+        # Activate the chapter link using keyboard focus and Enter.
+        page.locator('nav[aria-label="Chapter navigation"] [data-chapter-nav="next"]').focus()
+        page.keyboard.press("Enter")
+        expect(page.locator("#chapter-content")).to_contain_text("Second isolated chapter")
         page.goto(epub + "/chapter/1?size=small")
         expect(page.locator("#chapter-content")).to_have_class("book small")
         expect(page.locator("#chapter-content")).to_contain_text("Second isolated chapter")
@@ -120,6 +123,7 @@ def exercise(browser, base, viewport_name, viewport, artifact_dir):
         expect(page.locator("#search-tools")).to_be_visible()
         page.locator("#find").fill("alpha")
         expect(page.locator("#matches")).to_contain_text("3", timeout=20000)
+        expect(page.locator("#highlights .active-match").first).to_be_visible(timeout=15000)
         page.get_by_role("button", name="Next match").click()
         expect(page.locator("#matches")).to_contain_text("of 3")
         page.get_by_role("button", name="Close search").click()
@@ -131,6 +135,19 @@ def exercise(browser, base, viewport_name, viewport, artifact_dir):
         expect(page.locator("#thumbs button")).to_have_count(2)
         page.locator("#thumbs button").nth(1).click()
         expect(page.locator("#page")).to_have_value("2")
+        # Verify all pages prepare for printing without opening an OS dialog.
+        page.evaluate("window.__printInvoked = 0; window.print = () => { window.__printInvoked += 1; }")
+        page.get_by_role("button", name="Print").click()
+        page.wait_for_function("window.__printInvoked === 1")
+        with page.expect_download() as download:
+            page.get_by_role("link", name="Download PDF").click()
+        assert download.value.suggested_filename.endswith(".pdf")
+        for reader_page in (epub + "/chapter/1?size=small", pdf):
+            page.goto(reader_page)
+            if reader_page == pdf:
+                expect(page.locator("#message")).to_be_empty(timeout=20000)
+            overflow = page.evaluate("({scroll: document.documentElement.scrollWidth, width: document.documentElement.clientWidth})")
+            assert overflow["scroll"] <= overflow["width"] + 2, (viewport_name, reader_page, overflow)
         page.get_by_role("link", name="Back to library").click()
         expect(page).to_have_url(base + "/")
         assert not errors, f"{viewport_name}: reader JS errors {errors}"
