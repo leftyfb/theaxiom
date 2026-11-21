@@ -190,30 +190,76 @@ def source_content_name(record):
         return None
 
 
-def authorize_reader_uri(records, uri):
-    """Authorize Kiwix requests while denying unpublished content deep links.
+def acknowledged_reader_books(records):
+    """Fast request-time authorization against the startup-verified generation.
 
-    The trusted Nginx proxy supplies the original request URI. Kiwix's shared
-    UI/assets are accessible only if a current, acknowledged published library
-    exists. Content endpoints additionally require an explicitly published
-    verified source ID. Invalid or encoded book IDs never match.
+    No acquisition monitor, subprocess, archive reads, or NFS directory probes
+    are performed here. Publication intent is reloaded for every request so
+    unpublishing immediately denies access even before Kiwix reloads.
     """
+    try:
+        enabled = publication.load()
+        stored = manifest_path().read_bytes()
+        if len(stored) > MAX_MANIFEST_BYTES or not stored or b"<!DOCTYPE" in stored.upper() or b"<!ENTITY" in stored.upper():
+            return {}
+        stamp = RUNTIME_ACK.read_bytes()
+        if stamp != (hashlib.sha256(stored).hexdigest() + "\n").encode("ascii"):
+            return {}
+        root = ET.fromstring(stored)
+        if root.tag != "library" or root.get("version") != "20110515":
+            return {}
+        from .source_catalog import WIKIPEDIA_SOURCE
+        trusted = WIKIPEDIA_SOURCE
+        known = {record["source_id"]: record for record in records}
+        result = {}
+        seen = set()
+        for book in root:
+            if book.tag != "book" or set(book.attrib) != {"id", "path", "title", "language"}:
+                return {}
+            sid = book.get("id")
+            if sid in seen or not enabled.get(sid, False):
+                return {}
+            seen.add(sid)
+            filename = Path(book.get("path", "")).name
+            name = Path(filename).stem
+            if not publication.valid_book_id(name) or not filename.endswith(".zim"):
+                return {}
+            if sid == trusted["source_id"]:
+                if filename != trusted["filename"] or book.get("title") != trusted["title"] or book.get("language") != trusted["language"]:
+                    return {}
+            else:
+                record = known.get(sid)
+                if not record or record["configuration"].get("format") != "zim":
+                    return {}
+                if not re.fullmatch(re.escape(sid) + r"\\.[a-f0-9]{64}\\.zim", filename):
+                    return {}
+                if book.get("title") != record["profile"].get("title", "").strip():
+                    return {}
+                language = record["profile"].get("language", "").strip().lower()
+                language = LANGUAGES.get(language, language if re.fullmatch(r"[a-z]{3}", language) else "und")
+                if book.get("language") != language:
+                    return {}
+            result[name] = sid
+        return result
+    except (OSError, ValueError, TypeError, KeyError, ET.ParseError):
+        return {}
+
+
+def authorize_reader_uri(records, uri):
+    """Authorize only acknowledged, currently published Kiwix book identities."""
     if not isinstance(uri, str) or len(uri) > 8192 or not uri.startswith("/zim/"):
         return False
     try:
         path = urlsplit(uri).path
         if not path.startswith("/zim/"):
             return False
-        if not active_manifest_matches(records):
+        books = acknowledged_reader_books(records)
+        if not books:
             return False
         if path.startswith("/zim/content/"):
             match = CONTENT_ROUTE.match(path)
-            if not match:
-                return False
-            book_id = match.group("book")
-            return (publication.valid_book_id(book_id)
-                    and book_id in {content_name(book) for book in verified_books(records)})
-        return bool(verified_books(records))
+            return bool(match and match.group("book") in books)
+        return True
     except (OSError, ValueError, TypeError):
         return False
 
