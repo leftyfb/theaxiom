@@ -21,7 +21,8 @@ def exercise(browser, base, name, viewport, artifacts):
     page = context.new_page()
     page.set_default_timeout(10000)
     errors = []
-    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.on("pageerror", lambda error: errors.append(
+        f"{page.url}: {error}\\n{getattr(error, 'stack', '')}"))
     try:
         # Test the application through real browser requests, not mock HTML.
         page.goto(base + "/")
