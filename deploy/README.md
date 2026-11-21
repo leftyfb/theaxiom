@@ -22,17 +22,17 @@ or create content directories during deployment.
    `sudo -u theaxiom /opt/theaxiom/app/.venv/bin/python -m theaxiom.admin_security init /var/lib/theaxiom/admin-credential.json`.
    The command refuses to overwrite an existing credential.
 3. Copy `server.env.example` to `/etc/theaxiom/server.env`, root-owned, and
-   replace the sample host names with the exact LAN DNS name/IP. No passwords
+   keep the loopback backend settings; no public host allowlist is needed. No passwords
    are kept in the environment. The credential file is a private salted hash.
 4. Install `theaxiom.service` in `/etc/systemd/system/`, run
    `systemctl daemon-reload` and `systemctl enable --now theaxiom.service`.
    Verify only 127.0.0.1:8080 is listening.
 5. Install the two Nginx files from `nginx/` as indicated by their comments.
-   Replace the example LAN address and server names in the site with the actual
-   values. Enable that site, resolve conflicting default/listening sites only
-   with operator approval, run `nginx -t`, then enable/start or reload Nginx.
-   Bind only the intended interface and restrict access with existing firewall
-   policy; do not expose publicly or forward ports.
+   The site listens on all IPv4 and IPv6 interfaces on port 80, including
+   LAN and Tailscale interfaces, and accepts any requested hostname or IP.
+   Enable the site, resolve conflicting default/listening sites with operator
+   approval, run `nginx -t`, then reload Nginx. Do not port-forward to the
+   public Internet unless that is a deliberate operator decision.
 6. Verify unauthenticated GET / returns the public homepage; /admin and
    /api/storage-settings return 401 without credentials; authenticated admin
    opens and settings work; acquisition POST returns 503; service units enabled.
