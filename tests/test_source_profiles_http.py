@@ -144,7 +144,7 @@ def test_published_profile_edit_unpublish_remove_and_equivalent_readd(app, tmp_p
         assert "acquisition disabled" in refuse_action(request, added, 503, action=action)
     publish(request, True, status=409, revision=removed["revision"])
     publish(request, True)
-    assert request("/read/wikipedia-en", status=302) == "/wikipedia/viewer#fixture/"
+    assert request("/read/wikipedia-en", status=302) == "/zim/viewer#fixture/"
     assert archive.read_bytes() == b"installed fixture bytes"
 
 
