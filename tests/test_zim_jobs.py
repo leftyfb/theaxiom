@@ -247,4 +247,4 @@ def test_invalid_header_after_complete_transfer_is_retained_without_publication(
     assert job["attempt_history"][-1]["state"] == "failed"
     assert job["attempt_history"][-1]["expected_bytes"] == len(data)
     assert (disk / "staging/zim/.download-ready.partial").read_bytes() == data
-    assert not list((disk / "library/zim").iterdir()
+    assert not list((disk / "library/zim").iterdir())
