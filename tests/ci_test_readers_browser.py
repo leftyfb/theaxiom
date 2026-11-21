@@ -136,6 +136,10 @@ def exercise(browser, base, viewport_name, viewport, artifact_dir):
         page.keyboard.press("Enter")
         expect(page.locator("#search-tools")).to_be_visible()
         expect(page.locator("#find")).to_be_focused()
+        # Opening search must expose an accessible text field; focus should
+        # not remain trapped on the toolbar toggle.
+        expect(page.locator("#find")).to_be_visible()
+        expect(page.locator("#find")).to_be_enabled()
         page.locator("#find").fill("alpha")
         expect(page.locator("#matches")).to_contain_text("3", timeout=20000)
         expect(page.locator("#highlights .active-match").first).to_be_visible(timeout=15000)
