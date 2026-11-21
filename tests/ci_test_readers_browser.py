@@ -139,7 +139,11 @@ def exercise(browser, base, viewport_name, viewport, artifact_dir):
         page.locator("#find").fill("alpha")
         expect(page.locator("#matches")).to_contain_text("3", timeout=20000)
         expect(page.locator("#highlights .active-match").first).to_be_visible(timeout=15000)
-        page.get_by_role("button", name="Next match").click()
+        # Match navigation must be available from a focused native button.
+        next_match = page.get_by_role("button", name="Next match")
+        next_match.focus()
+        expect(next_match).to_be_focused()
+        page.keyboard.press("Enter")
         expect(page.locator("#matches")).to_contain_text("of 3")
         # A missing term must clear stale highlights and allow a new query.
         page.locator("#find").fill("unfindable-synthetic-term")
