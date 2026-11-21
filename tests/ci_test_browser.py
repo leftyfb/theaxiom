@@ -50,6 +50,9 @@ def exercise(browser, base, name, viewport, artifacts):
         expect(page.locator("#source-guide")).to_be_visible()
         page.keyboard.press("Escape")
         expect(page.locator("#source-guide")).to_be_hidden()
+        # Dismissed guidance must not trap subsequent keyboard navigation.
+        guide_trigger.focus()
+        expect(guide_trigger).to_be_focused()
 
         filter_toggle = page.locator("#source-filter-toggle")
         filter_toggle.focus()
@@ -57,8 +60,10 @@ def exercise(browser, base, name, viewport, artifacts):
         page.keyboard.press("Enter")
         expect(page.locator("#source-filters-panel")).to_be_visible()
         expect(page.locator("#source-filter-toggle")).to_have_attribute("aria-expanded", "true")
-        page.locator("#source-filter-toggle").click()
+        filter_toggle.focus()
+        page.keyboard.press("Enter")
         expect(page.locator("#source-filters-panel")).to_be_hidden()
+        expect(filter_toggle).to_have_attribute("aria-expanded", "false")
 
         # Exercise live JS form submission, dynamic reload, search and edit.
         page.locator("#source-add").click()
