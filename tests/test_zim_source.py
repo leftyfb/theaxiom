@@ -18,6 +18,34 @@ def fixture_bytes():
     return body + hashlib.md5(body, usedforsecurity=False).digest()
 
 
+@pytest.mark.parametrize("title_pointer", [0, 0xffffffffffffffff, 88])
+def test_zim_6_header_accepts_legacy_title_pointer_or_retired_sentinel(title_pointer):
+    data = bytearray(fixture_bytes())
+    # Title pointer occupies bytes 40..47 in the 80-byte ZIM header.
+    struct.pack_into("<Q", data, 40, title_pointer)
+    zim_source.check_header(bytes(data[:80]), len(data))
+
+
+@pytest.mark.parametrize("title_pointer", [1, 79, 89, 0xfffffffffffffffe])
+def test_zim_6_header_rejects_invalid_title_pointer(title_pointer):
+    data = bytearray(fixture_bytes())
+    struct.pack_into("<Q", data, 40, title_pointer)
+    with pytest.raises(ValueError, match="Invalid ZIM header or index bounds"):
+        zim_source.check_header(bytes(data[:80]), len(data))
+
+
+def test_zim_6_3_retired_title_pointer_matches_ready_gov_header():
+    # The observed Ready.gov ZIM 6.3 header has a retired title-index sentinel.
+    header = struct.pack(
+        "<IHH16sIIQQQQIIQ", 0x044D495A, 6, 3, bytes(16),
+        7991, 831, 2063824816, 0xffffffffffffffff,
+        2063888744, 80, 7991, 0xffffffff, 2063895392,
+    )
+    zim_source.check_header(header, 2063895408)
+    with pytest.raises(ValueError, match="Invalid ZIM header or index bounds"):
+        zim_source.check_header(header, 2063895407)
+
+
 @pytest.fixture
 def disk(tmp_path, monkeypatch):
     root = tmp_path / "storage"
