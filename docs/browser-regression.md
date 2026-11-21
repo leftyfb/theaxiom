@@ -10,7 +10,8 @@ start downloads, publish sources, or use production credentials.
 
 The `Application CI` workflow runs this check after the existing Python,
 Kiwix, and Nginx tests. It installs Playwright, Chromium, and the pinned PDF.js distribution and exercises
-both 1366×900 desktop and 390×844 mobile viewports. A failed run uploads
+1366×900 desktop and 390×844 mobile viewports for the administrator suite,
+and 1366×900, 768×1024, 390×844, and 320×640 reader viewports. A failed run uploads
 screenshots and uncaught JavaScript errors as the
 `browser-regression-failures` workflow artifact.
 
@@ -20,10 +21,11 @@ In addition, `tests/ci_test_readers_browser.py` runs with a pinned CI-local PDF.
 renderer. It generates a two-page searchable PDF with real PDF cross-reference
 objects and a two-chapter EPUB ZIP package, writes those artifacts only to an
 ephemeral, mounted test-storage directory and publishes them in a disposable
-catalog. Desktop and mobile Chromium navigate the real reader HTTP routes.
+catalog. Four Chromium viewport sizes navigate the real reader HTTP routes.
 These checks also use the real browser upload flow to import and remove
 additional synthetic PDF and EPUB sources, exercise PDF highlights/print
-preparation/download, EPUB keyboard activation, and verify unpublished reader
+preparation/download, EPUB keyboard and skip-link focus activation, PDF search focus
+restoration and no-match recovery, and verify unpublished reader
 URLs return 403. Bulk publish/unpublish/remove and tag/collection membership operations use
 additional disposable catalog records only. These checks never contact production, download source
 material, or mutate operator publication state.
@@ -52,6 +54,10 @@ python -m pip install -e '.[dev]'
 python -m pip install 'playwright>=1.50,<2'
 python -m playwright install chromium
 python tests/ci_test_browser.py
+# Reader journey additionally needs pdfjs-dist@6.5.438 locally.
+npm install --no-save --prefix /tmp/axiom-pdfjs pdfjs-dist@6.5.438
+AXIOM_TEST_PDFJS_ROOT=/tmp/axiom-pdfjs/node_modules/pdfjs-dist \
+  python tests/ci_test_readers_browser.py
 ```
 
 Playwright downloads its own test browser; it does not download ZIM or document
