@@ -31,7 +31,7 @@ def manifest_path():
 def archive_uuid(stream):
     """Read the 16-byte ZIM header UUID (offset 8) without scanning the archive."""
     header = stream.read(24)
-    if len(header) != 24 or header[:4] != b"ZIM\\x04":
+    if len(header) != 24 or header[:4] != b"ZIM\x04":
         raise ValueError("Invalid ZIM header")
     return str(uuid.UUID(bytes=header[8:24]))
 
