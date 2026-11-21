@@ -31,6 +31,21 @@ jobs:
         run: python tests/ci_test_nginx_syntax.py
       - name: Verify real Nginx publication gate in isolated CI
         run: python tests/ci_test_nginx_auth.py
+      - name: Install Chromium browser regression dependencies
+        run: |
+          python -m pip install 'playwright>=1.50,<2'
+          python -m playwright install --with-deps chromium
+      - name: Run real Chromium desktop and mobile usability journeys
+        env:
+          AXIOM_BROWSER_ARTIFACTS: ${{ runner.temp }}/axiom-browser
+        run: python tests/ci_test_browser.py
+      - name: Upload browser failure screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-regression-failures
+          path: ${{ runner.temp }}/axiom-browser/
+          if-no-files-found: ignore
       - name: Upload test summary
         if: always()
         uses: actions/upload-artifact@v4
