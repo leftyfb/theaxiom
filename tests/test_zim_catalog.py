@@ -205,9 +205,9 @@ def test_reader_auth_does_not_reverify_archives_per_request(disk):
     ack = disk / "fast-reader-ack.sha256"
     ack.write_text(hashlib.sha256(manifest.read_bytes()).hexdigest() + "\n")
     name = "ready." + artifact["sha256"]
-    with patch.object(zim_catalog, "RUNTIME_ACK", ack), \\
-         patch.object(zim_catalog, "verified_books", side_effect=AssertionError("expensive verification")), \\
-         patch.object(zim_catalog, "render_xml", side_effect=AssertionError("expensive manifest generation")):
+    with (patch.object(zim_catalog, "RUNTIME_ACK", ack),
+          patch.object(zim_catalog, "verified_books", side_effect=AssertionError("expensive verification")),
+          patch.object(zim_catalog, "render_xml", side_effect=AssertionError("expensive manifest generation"))):
         assert zim_catalog.authorize_reader_uri([rec], "/zim/content/" + name + "/article")
         publication.save("ready", False)
         assert not zim_catalog.authorize_reader_uri([rec], "/zim/content/" + name + "/article")
