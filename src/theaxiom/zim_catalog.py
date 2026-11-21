@@ -231,7 +231,7 @@ def acknowledged_reader_books(records):
                 record = known.get(sid)
                 if not record or record["configuration"].get("format") != "zim":
                     return {}
-                if not re.fullmatch(re.escape(sid) + r"\\.[a-f0-9]{64}\\.zim", filename):
+                if not re.fullmatch(re.escape(sid) + r"\.[a-f0-9]{64}\.zim", filename):
                     return {}
                 if book.get("title") != record["profile"].get("title", "").strip():
                     return {}
