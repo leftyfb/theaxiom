@@ -33,7 +33,11 @@ def main():
         pages = base / "pages"
         pages.mkdir()
         (pages / "index.html").write_text(
-            "<!doctype html><title>Offline Ready</title><h1>Ready for offline use</h1>")
+            '<!doctype html><title>Offline Ready</title><h1>Ready for offline use</h1>'
+            '<a href="second.html">Next offline topic</a>')
+        (pages / "second.html").write_text(
+            '<!doctype html><title>Second topic</title><h1>Second offline article</h1>'
+            '<a href="index.html">Back to first article</a>')
         # zimwriterfs requires a proper 48x48 PNG illustration.
         def chunk(kind, data):
             return (struct.pack(">I", len(data)) + kind + data +
@@ -183,6 +187,37 @@ def main():
                     direct_process.communicate(timeout=5)
             assert not search_failures, f"native Kiwix search crashes: {search_failures!r}"
             assert selected_search_status == 200, f"native library search HTTP {selected_search_status}"
+            # Real Chromium follows articles in a tiny fixture, not production
+            # Wikipedia/Ready.gov. Search is tested via native Kiwix HTTP as above.
+            from playwright.sync_api import sync_playwright, expect
+            with sync_playwright() as playwright:
+                browser = playwright.chromium.launch(headless=True)
+                try:
+                    for label, viewport in (
+                        ("desktop", {"width": 1366, "height": 900}),
+                        ("mobile", {"width": 390, "height": 844}),
+                    ):
+                        context = browser.new_context(viewport=viewport)
+                        page = context.new_page()
+                        page.set_default_timeout(15000)
+                        try:
+                            origin = f"http://127.0.0.1:{port}"
+                            start = origin + f"/zim/content/{expected}/index.html"
+                            response = page.goto(start)
+                            assert response.status == 200, (label, response.status)
+                            expect(page.get_by_role("heading", name="Ready for offline use")).to_be_visible()
+                            page.get_by_role("link", name="Next offline topic").click()
+                            expect(page.get_by_role("heading", name="Second offline article")).to_be_visible()
+                            page.go_back()
+                            expect(page.get_by_role("heading", name="Ready for offline use")).to_be_visible()
+                            viewport_width = page.evaluate("document.documentElement.clientWidth")
+                            content_width = page.evaluate("document.documentElement.scrollWidth")
+                            assert content_width <= viewport_width + 2, (label, content_width, viewport_width)
+                            print(f"PASS {label}: native ZIM browser article navigation and back")
+                        finally:
+                            context.close()
+                finally:
+                    browser.close()
             print(f"PASS isolated native Kiwix search diagnostics completed: {expected}")
             print(f"PASS real ZIM OPDS and viewer: {expected}")
             # The live service must pick up a second book without a restart,
