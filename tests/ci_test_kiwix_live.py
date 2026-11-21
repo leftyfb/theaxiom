@@ -70,11 +70,11 @@ def main():
                               capture_output=True, text=True, timeout=15)
         print("ZIMDUMP INFO:", (info.stdout + info.stderr)[-2000:], flush=True)
         import re
-        uuid_match = re.search(r"(?im)^\\s*(?:uuid|id)\\s*[:=]\\s*([a-f0-9-]{32,36})\\s*$", info.stdout)
+        uuid_match = re.search(r"(?im)^\s*(?:uuid|id)\s*[:=]\s*([a-f0-9-]{32,36})\s*$", info.stdout)
         if uuid_match:
             diagnostic_root.find("book").set("id", uuid_match.group(1))
         else:
-            print("ZIM UUID not parsed; retaining source ID for diagnostic", flush=True)
+            raise AssertionError("Could not parse archive UUID; cannot test XML UUID hypothesis")
         content = ET.tostring(diagnostic_root, encoding="utf-8", xml_declaration=True)
         manifest.write_bytes(content)
         assert ET.fromstring(content).find("book").get("path") == str(archive)
