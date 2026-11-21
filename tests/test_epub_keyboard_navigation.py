@@ -40,3 +40,16 @@ def test_epub_reader_has_no_inline_script_under_restrictive_csp():
     assert '<script' not in html.lower()
     assert 'data-chapter-nav="previous"' in html
     assert 'data-chapter-nav="next"' in html
+
+
+def test_epub_reader_mobile_controls_remain_accessible():
+    html = render(1)
+    assert '@media(max-width:600px)' in html
+    assert 'min-height:44px' in html
+    assert 'a:focus-visible,summary:focus-visible' in html
+    assert 'aria-label="Reading controls"' in html
+    assert 'aria-label="Chapter navigation"' in html
+    assert 'aria-label="Continue reading"' in html
+    assert 'Table of contents' in html
+    assert 'Download EPUB' in html
+    assert 'Return to library' in html
