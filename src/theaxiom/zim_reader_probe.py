@@ -96,19 +96,43 @@ def acknowledge(records, *, path=None, book_ids=None):
     return destination
 
 
+def _failure_category(exc):
+    """Classify failed handshakes without including paths, URLs, or exception text."""
+    if isinstance(exc, OSError):
+        return "listener-or-filesystem-unavailable"
+    message = str(exc)
+    if message == "Kiwix reader not ready":
+        return "listener-not-ready"
+    if message in {"Could not validate Kiwix OPDS catalog",
+                   "Invalid Kiwix catalog response", "Kiwix catalog size is unexpected",
+                   "Ambiguous Kiwix book identity", "Duplicate Kiwix book ID"}:
+        return "opds-invalid"
+    if message == "Kiwix listener is serving an unexpected set of archives":
+        return "opds-book-set-mismatch"
+    if message in {"Configured Kiwix manifest differs from publication state",
+                   "Publication changed during Kiwix startup"}:
+        return "publication-state-changed"
+    if message == "No verified published ZIMs to serve":
+        return "no-published-archives"
+    return "readiness-validation-failed"
+
+
 def main():
-    from . import catalog_store
-    import os
+    import sys
     catalog_path = Path(os.environ.get("THEAXIOM_SOURCE_CATALOG",
                         storage_settings.SETTINGS_PATH.with_name("sources.json")))
     records = catalog_store.CatalogStore(catalog_path).get()["sources"]
     deadline = time.monotonic() + 20
+    attempts = 0
     while True:
+        attempts += 1
         try:
             acknowledge(records)
             return 0
-        except (OSError, ValueError):
+        except (OSError, ValueError) as exc:
             if time.monotonic() >= deadline:
+                print(f"Kiwix readiness timed out after {attempts} attempts; "
+                      f"last_failure={_failure_category(exc)}", file=sys.stderr)
                 return 1
             time.sleep(0.25)
 
