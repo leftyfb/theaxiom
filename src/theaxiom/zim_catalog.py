@@ -42,8 +42,6 @@ def verified_books(records, enabled=None):
                   if record["source_id"] not in publication.ROUTES
                   and record["configuration"].get("format") == "zim"
                   and enabled.get(record["source_id"], False)]
-    if not candidates:
-        return []
     result = []
     with pdf_source._directory("library", format_name="zim") as (directory, mount, _):
         for record in candidates:
