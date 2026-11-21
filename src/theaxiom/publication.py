@@ -77,13 +77,18 @@ def reachable(route):
         connection.close()
 
 
+# Generic Kiwix book IDs are derived from verified digest-suffixed filenames.
+# Keep this separate from catalog source IDs, which must never contain dots.
+GENERIC_BOOK_ID_RE = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.[a-f0-9]{64}\\Z")
+
+
 def reader_location(route, book_id=None):
     """Discover the single local book's content link from Kiwix OPDS.
 
     Only accept a local, prefix-scoped book link. Never follow a remote URL
     or return catalog-supplied executable markup.
     """
-    if book_id is not None and not catalog_store.ID_RE.fullmatch(book_id):
+    if book_id is not None and not GENERIC_BOOK_ID_RE.fullmatch(book_id):
         return None
     connection = http.client.HTTPConnection("127.0.0.1", route["port"], timeout=2)
     try:
