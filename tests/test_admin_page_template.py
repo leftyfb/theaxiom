@@ -344,3 +344,16 @@ def test_add_source_document_upload_sends_session_csrf_header():
     # Existing source card imports must also retain the CSRF header.
     card_upload = page.split("? await acquisitionFetch('/api/pdf-upload'", 1)[1]
     assert "window.axiomCsrfHeaders?.()" in card_upload.split("body:file", 1)[0]
+
+
+def test_retained_zim_offline_revalidation_is_explicit_and_gated():
+    page = render([profile("retained-guide", "Retained guide", format="zim",
+                           source_url="https://example.org/guide.zim")])
+    assert 'data-zim-control="revalidate" hidden' in page
+    assert "Recheck saved file (offline)" in page
+    assert "action:'zim-' + operation" in page
+    assert "operation === 'revalidate'" in page
+    assert "No network download will occur." in page
+    assert "canRevalidate = recoverable && complete" in page
+    assert "source?.acquisition?.retained === true" in page
+    assert "Number.isSafeInteger(expected)" in page
