@@ -115,7 +115,15 @@ def exercise(browser, base, viewport_name, viewport, artifact_dir):
         page.goto(epub + "/chapter/1?size=small")
         expect(page.locator("#chapter-content")).to_have_class("book small")
         expect(page.locator("#chapter-content")).to_contain_text("Second isolated chapter")
-        expect(page.get_by_role("link", name="Return to library")).to_have_attribute("href", "/")
+        return_link = page.get_by_role("link", name="Return to library")
+        expect(return_link).to_have_attribute("href", "/")
+        return_link.focus()
+        expect(return_link).to_be_focused()
+        page.keyboard.press("Enter")
+        expect(page).to_have_url(base + "/")
+        # Returning to the EPUB reader must preserve a working chapter URL.
+        page.goto(epub + "/chapter/1?size=small")
+        expect(page.locator("#chapter-content")).to_contain_text("Second isolated chapter")
         with page.expect_download() as download:
             page.get_by_role("link", name="Download EPUB").click()
         assert download.value.suggested_filename.endswith(".epub")
