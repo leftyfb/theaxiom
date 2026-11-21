@@ -61,3 +61,10 @@ def test_epub_reader_skip_link_targets_focusable_chapter():
     assert 'id="chapter-content" tabindex="-1"' in html
     assert '.skip-reading:focus{' in html
     assert '<script' not in html.lower()
+
+
+def test_collapsed_toc_identifies_current_chapter():
+    for chapter, label in enumerate(("First", "Second", "Third")):
+        html = render(chapter)
+        assert f'<summary>Table of contents <span class="toc-current">— {label}</span></summary>' in html
+        assert '<script' not in html.lower()
