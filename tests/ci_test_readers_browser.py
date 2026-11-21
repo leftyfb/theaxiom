@@ -107,6 +107,11 @@ def exercise(browser, base, viewport_name, viewport, artifact_dir):
         page.locator('nav[aria-label="Chapter navigation"] [data-chapter-nav="next"]').focus()
         page.keyboard.press("Enter")
         expect(page.locator("#chapter-content")).to_contain_text("Second isolated chapter")
+        # The chapter route must survive a full refresh, not just a client-side
+        # navigation; the server must render the selected chapter consistently.
+        page.reload()
+        expect(page.locator("#chapter-content")).to_contain_text("Second isolated chapter")
+        expect(page.get_by_role("navigation", name="Chapter navigation")).to_contain_text("2 of 2")
         page.goto(epub + "/chapter/1?size=small")
         expect(page.locator("#chapter-content")).to_have_class("book small")
         expect(page.locator("#chapter-content")).to_contain_text("Second isolated chapter")
