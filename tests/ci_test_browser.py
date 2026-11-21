@@ -197,22 +197,31 @@ def exercise(browser, base, name, viewport, artifacts):
         renamed = "Browser Renamed " + name
         page.locator("#manage-kind").select_option("collections")
         page.locator("#manage-new").fill(group_name)
+        create_group = page.locator("#manage-create")
+        create_group.focus()
+        expect(create_group).to_be_focused()
         with page.expect_navigation(wait_until="domcontentloaded"):
-            page.locator("#manage-create").click()
+            page.keyboard.press("Enter")
         page.locator("#manage-kind").select_option("collections")
         row_input = page.get_by_role("textbox", name="Name of " + group_name)
         expect(row_input).to_be_visible()
         row_input.fill(renamed)
         row = row_input.locator("xpath=..").locator("xpath=..")
+        rename_group = row.get_by_role("button", name="Rename")
+        rename_group.focus()
+        expect(rename_group).to_be_focused()
         with page.expect_navigation(wait_until="domcontentloaded"):
-            row.get_by_role("button", name="Rename").click()
+            page.keyboard.press("Enter")
         page.locator("#manage-kind").select_option("collections")
         row_input = page.get_by_role("textbox", name="Name of " + renamed)
         expect(row_input).to_have_value(renamed)
         row = row_input.locator("xpath=..").locator("xpath=..")
+        delete_group = row.get_by_role("button", name="Delete")
+        delete_group.focus()
+        expect(delete_group).to_be_focused()
         page.once("dialog", lambda dialog: dialog.accept())
         with page.expect_navigation(wait_until="domcontentloaded"):
-            row.get_by_role("button", name="Delete").click()
+            page.keyboard.press("Enter")
         page.locator("#manage-kind").select_option("collections")
         expect(page.get_by_role("textbox", name="Name of " + renamed)).to_have_count(0)
 
@@ -241,6 +250,13 @@ def exercise(browser, base, name, viewport, artifacts):
             expect(logout).to_be_visible()
             logout.click()
             expect(page).to_have_url(base + "/admin/login")
+        # Browser history and direct URL navigation must not restore a
+        # revoked admin session after logout (closed authentication issues).
+        page.goto(base + "/admin/sources")
+        expect(page).to_have_url(base + "/admin/login")
+        page.go_back()
+        page.goto(base + "/admin/settings")
+        expect(page).to_have_url(base + "/admin/login")
         assert not errors, f"{name} uncaught browser JavaScript errors: {errors}"
         print(f"PASS {name}: login, navigation, guide, filters, add/edit, selection, overflow, logout")
     except Exception:
@@ -280,6 +296,7 @@ def main():
                                 for name, viewport in (
                                     ("desktop", {"width": 1366, "height": 900}),
                                     ("mobile", {"width": 390, "height": 844}),
+                                    ("narrow", {"width": 320, "height": 640}),
                                 ):
                                     exercise(browser, f"http://{host}:{port}", name, viewport, artifacts)
                             finally:
