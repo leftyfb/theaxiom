@@ -53,3 +53,11 @@ def test_epub_reader_mobile_controls_remain_accessible():
     assert 'Table of contents' in html
     assert 'Download EPUB' in html
     assert 'Return to library' in html
+
+
+def test_epub_reader_skip_link_targets_focusable_chapter():
+    html = render(1)
+    assert 'href="#chapter-content">Skip to chapter text</a>' in html
+    assert 'id="chapter-content" tabindex="-1"' in html
+    assert '.skip-reading:focus{' in html
+    assert '<script' not in html.lower()
