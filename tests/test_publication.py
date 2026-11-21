@@ -24,3 +24,23 @@ def test_reader_failure_and_corrupt_state(tmp_path):
         assert not publication.status(snapshot(), "wikipedia-en")["published"]
         publication.state_path().write_text("invalid")
         assert not publication.allowed(snapshot(), "wikipedia-en")
+
+
+def test_wikipedia_reachability_uses_shared_reader_and_exact_book():
+    from theaxiom.source_catalog import WIKIPEDIA_SOURCE
+    from pathlib import Path
+    expected = Path(WIKIPEDIA_SOURCE["filename"]).stem
+    with patch.object(publication, "reader_location", return_value="/zim/viewer#" + expected + "/") as locate:
+        assert publication.reachable(publication.ROUTES["wikipedia-en"])
+        locate.assert_called_once_with({"path": "/zim/", "port": 8081}, expected)
+    with patch.object(publication, "reader_location", return_value=None):
+        assert not publication.reachable(publication.ROUTES["wikipedia-en"])
+
+
+def test_wikipedia_status_available_with_shared_reader_and_readygov(tmp_path):
+    with (patch.object(storage_settings, "SETTINGS_PATH", tmp_path / "storage.json"),
+          patch.object(publication, "reader_location", return_value="/zim/viewer#wikipedia_en_all_maxi_2026-08/")):
+        publication.save("wikipedia-en", True)
+        assert publication.status(snapshot(), "wikipedia-en")["published"]
+        with patch.object(publication, "reader_location", return_value=None):
+            assert not publication.status(snapshot(), "wikipedia-en")["published"]
