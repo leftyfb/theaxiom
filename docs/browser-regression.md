@@ -16,6 +16,14 @@ screenshots and uncaught JavaScript errors as the
 
 Current browser scenarios:
 
+In addition, `tests/ci_test_readers_browser.py` runs with a pinned CI-local PDF.js
+renderer. It generates a two-page searchable PDF with real PDF cross-reference
+objects and a two-chapter EPUB ZIP package, writes those artifacts only to an
+ephemeral, mounted test-storage directory and publishes them in a disposable
+catalog. Desktop and mobile Chromium navigate the real reader HTTP routes.
+These checks never contact production, download source material, or mutate
+operator publication state.
+
 - Public homepage and search navigation
 - Administrator sign-in boundary, incorrect password and valid login
 - Administrator guide modal and expandable filter panel
@@ -51,7 +59,9 @@ Chromium browser tests complement (do not replace) the independent real Nginx
 publication/authentication tests, Kiwix fixture smoke test, and application
 unit tests. They currently do not test production-specific Tailscale routing,
 1Password browser integration, accessibility with a screen reader, actual
-network interruptions, large downloads, or the full offline PDF/EPUB reader.
+network interruptions, large downloads, or full PDF print workflows. The
+synthetic reader fixtures exercise basic actual PDF/EPUB journeys rather than
+comprehensive search accessibility, keyboard or print verification.
 
 Next browser coverage should use isolated small PDF, EPUB and ZIM fixtures to
 exercise reader navigation and search, source publication controls and role
@@ -76,11 +86,11 @@ matrix must not be mistaken for owner acceptance or a live production test.
 | #16, #44, #90–92, #97 | Shared Kiwix, UUID book identity, reader navigation/back, native search | Real isolated Kiwix CI fixture and unit tests; full native browser article/search coverage still pending |
 | #45 | Public homepage compact mobile layout, no overflow, navigable Getting Started | Partial browser: public home/search; further responsive tests needed |
 | #69 | Discoverable offline content source guide | Browser modal open/dismiss and static template tests |
-| #70, #75, #77 | PDF/EPUB URLs, local upload, metadata and language, reader navigation | Browser: filename-derived title/format only; fixture-based upload/reader journeys pending |
+| #70, #75, #77 | PDF/EPUB URLs, local upload, metadata and language, reader navigation | Browser: filename-derived title/format; two-chapter EPUB reader/download fixture added; upload/persistence journey pending |
 | #71, #76, #78 | Group management, selection/bulk safety, publication independent filters, sorting, automatic unpublish | Browser: create/rename/delete grouping, filter/reset/ordering, bulk-selection gating and safe catalog removal; actual eligible publish/unpublish with small fixtures pending |
 | #73 | Correct Bug-In Guide authorship/source choice | Catalog metadata/source unit validation; no live download |
-| #74, #80, #81, #84 | Embedded PDF.js controls, search/matches, mobile toolbar | Unit/DOM tests; browser with disposable multi-page searchable PDF fixture pending |
-| #83 | EPUB chapters, TOC, text size, keyboard navigation, return to library | Unit tests; browser with disposable EPUB fixture pending |
+| #74, #80, #81, #84 | Embedded PDF.js controls, search/matches, mobile toolbar | Unit/DOM tests; browser with disposable two-page searchable PDF, navigation, zoom and thumbnails (CI verification pending) |
+| #83 | EPUB chapters, TOC, text size, keyboard navigation, return to library | Unit tests; browser with two-chapter disposable EPUB fixture, TOC, text sizing and download (CI verification pending) |
 | #86 | Pause/resume/cancel source-scoped ZIM download | Unit/CI state-machine tests; browser transport simulation with small disposable ZIM pending |
 | #89 | LAN and Tailscale Host syntax, login and publication isolation | Unit/CI Host validation and real Nginx auth smoke; network-path test remains deployment-specific |
 | #96 | User-accepted mobile checklist | Retain historical owner acceptance; never auto-check or alter its completed boxes |
@@ -93,9 +103,9 @@ or rely on the owner's external password manager.
 
 Highest-impact next phases:
 
-1. Use **tiny synthetic PDF and EPUB documents** in isolated fixture storage to
-   cover reader toolbar, EPUB chapter navigation, bookmarks, PDF text search,
-   safe unpublished denial and publication changes.
+1. Extend the **tiny synthetic PDF and EPUB** browser fixtures with
+   unpublished denial/publication changes, PDF highlights and print,
+   EPUB keyboard and focus behavior, and real browser upload journeys.
 2. Exercise multiple disposable source profiles and grouping memberships in
    Chromium, including bulk add/remove, active/busy controls and permissions.
 3. Add keyboard-only navigation checks, automated accessibility audits, and
