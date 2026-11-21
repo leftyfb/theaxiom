@@ -1,6 +1,6 @@
 # Generic ZIM publication: acceptance and deployment gate
 
-**Deployment hold:** Do not deploy, restart services, touch Vancouver, or create a deployment request until the operator explicitly confirms the active Ready.gov download has completed and authorizes deployment.
+**Deployment authorization:** The operator lifted the prior blanket deployment hold on 2026-11-21. Deployment is permitted once the relevant changes pass CI and the deployment plan protects existing Wikipedia service and installed ZIM artifacts. This authorization does not waive testing, migration checks, or rollback safeguards.
 
 ## Design
 
@@ -16,11 +16,11 @@ Application CI generates a small real ZIM with zimwriterfs and launches a real l
 
 The ZIM acquisition suite also covers restart/resume using persisted range validators, rejected changed validators, partial retention, cancellation cleanup and completed-archive protection. Existing 0777 managed storage directory modes are an accepted operator policy; code may validate owner, mount and individual-file integrity but must never chmod them to 0700.
 
-## Live acceptance checklist (ONLY after the deployment hold is lifted)
+## Live acceptance checklist (deployment hold lifted; safety checks still required)
 
-1. Confirm Ready.gov completed and the full archive was verified; record deployed SHA and preserve all partial and installed files. Do not restart an active acquisition.
+1. Confirm Ready.gov completed and its recorded verification remains valid; record deployed SHA and preserve all partial and installed files. Do not restart an active acquisition.
 2. Confirm the installed kiwix-serve/libkiwix version reads the generated XML manifest. Note that libkiwix 15 plans to drop legacy library XML in favor of OPDS; a migration must be separately developed and verified before upgrading to an incompatible binary.
-3. Review and explicitly approve the optional 8082 service and new Nginx configuration, validate nginx -t, and verify Wikipedia on 8081 still retains its original search, home navigation and deep links.
+3. Validate the unified reader service and new Nginx configuration, run nginx -t, and verify Wikipedia retains its original search, home navigation and deep links throughout migration.
 4. Use a separate small test ZIM to check acquisition, verified state, Publish/Unpublish, rights acknowledgement, reader redirects, mobile viewing, direct content links, asset delivery and search.
 5. With two published ZIMs, test automatic Kiwix library reload and ensure an unpublished or removed book becomes inaccessible, including after reader or backend restarts.
 6. Test pause, resume and cancel with a NEW small transfer, not the current Ready.gov download. Check that resume starts at the retained byte offset, verifies the entire file and that cancel never touches installed archives.
