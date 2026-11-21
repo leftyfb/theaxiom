@@ -206,6 +206,52 @@ class HTTPAuthTests(unittest.TestCase):
         self.assertIn("Max-Age=0", response_headers["Set-Cookie"])
         self.assertEqual(self.request("/admin", headers={"Cookie": cookie, "Accept": "text/html"})[0], 303)
 
+    def test_browser_cannot_bypass_sign_out_with_cached_basic_credentials(self):
+        """Browser navigation uses revocable sessions, even with cached Basic auth."""
+        browser = {"Accept": "text/html", "Sec-Fetch-Mode": "navigate"}
+        status, headers, _ = self.request("/admin/sources", auth=self.auth, headers=browser)
+        self.assertEqual(status, 303)
+        self.assertEqual(headers["Location"], "/admin/login")
+
+        login_headers = {"Origin": "http://" + self.host, "Content-Type": "application/json"}
+        code, headers, _ = self.request(
+            "/api/admin/login", "POST", headers=login_headers,
+            body=json.dumps({"username": "admin", "password": "fixture-password-only"})
+        )
+        self.assertEqual(code, 204)
+        cookie = headers["Set-Cookie"].split(";", 1)[0]
+        code, _, html = self.request(
+            "/admin/sources", auth=self.auth, headers={**browser, "Cookie": cookie}
+        )
+        self.assertEqual(code, 200)
+        self.assertIn(b'id="admin-logout"', html)
+        self.assertNotIn(b'id="admin-logout" class="button" type="button" hidden', html)
+        import re
+        match = re.search(rb'<meta name="theaxiom-csrf" content="([A-Za-z0-9_-]+)"', html)
+        self.assertIsNotNone(match)
+        token = match.group(1).decode()
+
+        # Sign out invalidates the cookie even when a browser supplies old
+        # Authorization credentials; cached Basic must not reopen admin.
+        code, _, _ = self.request(
+            "/api/admin/logout", "POST", auth=self.auth,
+            headers={**login_headers, "Cookie": cookie, "X-Axiom-CSRF": token,
+                     "Sec-Fetch-Mode": "cors"}, body="{}"
+        )
+        self.assertEqual(code, 204)
+        status, headers, _ = self.request(
+            "/admin/sources", auth=self.auth, headers={**browser, "Cookie": cookie}
+        )
+        self.assertEqual(status, 303)
+        self.assertEqual(headers["Location"], "/admin/login")
+
+        # Explicit command-line Basic clients and health/deployment checks
+        # remain supported without browser request metadata.
+        self.assertEqual(self.request("/admin/sources", auth=self.auth)[0], 200)
+        self.assertEqual(self.request("/api/sources", auth=self.auth)[0], 200)
+        self.assertEqual(self.request("/api/sources", auth=self.auth,
+                         headers={"Sec-Fetch-Mode": "cors"})[0], 401)
+
     def test_password_rotation_invalidates_browser_session_and_keeps_basic_clients(self):
         login_headers = {"Origin": "http://" + self.host, "Content-Type": "application/json"}
         code, headers, _ = self.request("/api/admin/login", "POST",
