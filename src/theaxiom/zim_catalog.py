@@ -318,10 +318,17 @@ def status(record, records):
                     job.get("verified") is True and job.get("active") is False else None)
         verified = artifact is not None
         rights = bool(config.get("license", "").strip())
-        ready = (verified and rights and enabled and active_manifest_matches(records)
-                 and publication.reader_location(GENERIC_READER, source_content_name(record)) is not None)
+        # Distinguish missing prerequisites from a reader that has not yet
+        # acknowledged the current manifest. Do not probe archives or services.
+        acknowledged = (active_manifest_matches(records)
+                        if verified and rights and enabled else False)
+        location = (publication.reader_location(GENERIC_READER, source_content_name(record))
+                    if acknowledged else None)
+        ready = bool(location)
         reason = ("Confirm permission to share this archive" if verified and not rights
-                  else "Awaiting verified Kiwix reader activation" if enabled and not ready
+                  else "Download and verify the archive before publishing" if enabled and not verified
+                  else "Waiting for Kiwix to acknowledge the current library catalog" if enabled and not acknowledged
+                  else "Kiwix reader entry could not be resolved" if enabled and not ready
                   else "")
         return dict(result, enabled=enabled, verified=verified, serving=bool(ready),
                     published=bool(ready), ready_for_publication=verified,

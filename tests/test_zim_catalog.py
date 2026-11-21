@@ -211,4 +211,27 @@ def test_reader_auth_does_not_reverify_archives_per_request(disk):
           patch.object(zim_catalog, "render_xml", side_effect=AssertionError("expensive manifest generation"))):
         assert zim_catalog.authorize_reader_uri([rec], "/zim/content/" + name + "/article")
         publication.save("ready", False)
-        assert not zim_catalog.authorize_reader_uri([rec], "/zim/content/" + name + "/article")
+        assert not zim_catalog.authorize_reader_uri([rec], "/zim/content/" + name + "/article")def test_reader_status_explains_activation_stage(disk):
+    from unittest.mock import patch
+    config = CONFIG | {"license": "CC-BY"}
+    rec = record("ready", config=config)
+    publication.save("ready", True)
+    missing = zim_catalog.status(rec, [rec])
+    assert missing["published"] is False
+    assert missing["publication_reason"] == "Download and verify the archive before publishing"
+    artifact = zim_source.install_stream("ready", config, BytesIO(fixture_bytes()))
+    zim_jobs.save({"source_id": "ready", "state": "completed", "active": False,
+                   "verified": True, "configuration": zim_jobs.identity(config),
+                   "artifact": artifact})
+    with patch.object(zim_catalog, "active_manifest_matches", return_value=False):
+        waiting = zim_catalog.status(rec, [rec])
+    assert waiting["publication_reason"] == "Waiting for Kiwix to acknowledge the current library catalog"
+    with (patch.object(zim_catalog, "active_manifest_matches", return_value=True),
+          patch.object(publication, "reader_location", return_value=None)):
+        unresolved = zim_catalog.status(rec, [rec])
+    assert unresolved["publication_reason"] == "Kiwix reader entry could not be resolved"
+    with (patch.object(zim_catalog, "active_manifest_matches", return_value=True),
+          patch.object(publication, "reader_location", return_value="/zim/content/ready")):
+        ready = zim_catalog.status(rec, [rec])
+    assert ready["published"] is True
+    assert ready["publication_reason"] == ""
