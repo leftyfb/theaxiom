@@ -118,7 +118,8 @@ def main():
                     readable = re.sub(r"\\s+", " ", unescape(readable))
                     print(f"SEARCH DIAGNOSTIC {selector}={value[:28]} "
                           f"HTTP {response.status}: {readable[-900:]}", flush=True)
-                    # Capture failures for every selector before evaluating\n                    # which identities are valid and whether indexing exists.
+                    # Capture failures for every selector before evaluating
+                    # which identities are valid and whether indexing exists.
                 finally:
                     connection.close()
             # Probe all selectors even when one fails: the fixture may not
@@ -131,7 +132,7 @@ def main():
             print("ZIMWRITERFS HELP (index options):", flush=True)
             help_result = subprocess.run(["zimwriterfs", "--help"],
                                          capture_output=True, text=True, timeout=10)
-            print("\\n".join(line for line in
+            print("\n".join(line for line in
                   (help_result.stdout + help_result.stderr).splitlines()
                   if "index" in line.lower() or "search" in line.lower()), flush=True)
             print(f"PASS isolated native Kiwix search diagnostics completed: {expected}")
