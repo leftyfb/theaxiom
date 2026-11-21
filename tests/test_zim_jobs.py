@@ -182,3 +182,46 @@ def test_pausing_or_cancelling_completed_zim_never_deletes_installed_archive(dis
         with pytest.raises(ValueError):
             zim_jobs.control("ready", CONFIG, operation)
     assert (disk / "library/zim" / artifact["filename"]).read_bytes() == data
+
+
+def test_failed_download_retains_bytes_and_records_provenance(disk):
+    from contextlib import contextmanager
+    data = fixture_bytes()
+    class Body(BytesIO):
+        total_size = len(data)
+        etag = '"edition-1"'
+        last_modified = "Thu, 15 Oct 2026 06:29:28 GMT"
+    @contextmanager
+    def transport(url, **kwargs):
+        yield Body(data[:-1] + bytes([data[-1] ^ 1]))
+    with patch.object(zim_source.pdf_transport, "open_pdf", transport):
+        zim_jobs.start("ready", CONFIG)
+        join_worker()
+    job = zim_jobs.read("ready")
+    assert job["state"] == "failed"
+    assert job["retained"] is True
+    assert job["downloaded_bytes"] == len(data)
+    assert job["verified"] is False
+    assert len(job["attempt_history"]) == 1
+    attempt = job["attempt_history"][0]
+    assert attempt["state"] == "failed"
+    assert attempt["retained"] is True
+    assert attempt["downloaded_bytes"] == len(data)
+    assert attempt["etag"] == '"edition-1"'
+    assert attempt["source_url"] == CONFIG["source_url"]
+    assert (disk / "staging/zim/.download-ready.partial").stat().st_size == len(data)
+    assert not list((disk / "library/zim").iterdir())
+    with pytest.raises(ValueError, match="Partial download exists"):
+        zim_jobs.start("ready", CONFIG)
+    assert len(zim_jobs.read("ready")["attempt_history"]) == 1
+
+
+def test_attempt_history_is_bounded_and_preserves_outcomes():
+    job = {"configuration": {"source_url": CONFIG["source_url"]}, "downloaded_bytes": 0}
+    for index in range(20):
+        zim_jobs._record_attempt(job, started=True)
+        job.update(state="failed", detail="failure", downloaded_bytes=index, retained=True)
+        zim_jobs._record_attempt(job)
+    assert len(job["attempt_history"]) == zim_jobs.HISTORY_LIMIT
+    assert job["attempt_history"][0]["downloaded_bytes"] == 8
+    assert job["attempt_history"][-1]["downloaded_bytes"] == 19
