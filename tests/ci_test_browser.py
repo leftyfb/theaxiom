@@ -101,7 +101,10 @@ def exercise(browser, base, name, viewport, artifacts):
 
         card = page.locator(".source-card[data-source-id='" + sid + "']")
         card.locator("summary.source-header").click()
-        card.locator("[data-catalog-edit]").click()
+        edit_source = card.locator("[data-catalog-edit]")
+        edit_source.focus()
+        expect(edit_source).to_be_focused()
+        page.keyboard.press("Enter")
         expect(page.locator("#source-dialog")).to_be_visible()
         expect(page.locator("#catalog-title")).to_have_value(title)
         page.locator("#catalog-description").fill("Verified through real browser UI")
@@ -138,7 +141,10 @@ def exercise(browser, base, name, viewport, artifacts):
         page.locator("#source-filter-download").select_option("")
         page.locator("#source-filter-publication").select_option("published")
         expect(page.locator(".source-card[data-source-id='" + sid + "']")).to_be_hidden()
-        page.locator("#source-filter-reset").click()
+        reset_filters = page.locator("#source-filter-reset")
+        reset_filters.focus()
+        expect(reset_filters).to_be_focused()
+        page.keyboard.press("Enter")
         expect(page.locator(".source-card[data-source-id='" + sid + "']")).to_be_visible()
         page.locator("#source-filter-sort").select_option("alpha")
         names = page.locator("#source-cards .source-row:not([hidden]) .source-card").evaluate_all(
