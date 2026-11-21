@@ -179,6 +179,27 @@ def main():
                         for name, viewport in (("desktop", {"width": 1366, "height": 900}),
                                                ("mobile", {"width": 390, "height": 844})):
                             exercise(browser, f"http://{host}:{port}", name, viewport, artifacts)
+                        # Publication is independent of browser sessions. Withdraw only the
+                        # disposable fixtures, then verify every reader entry/asset fails closed.
+                        publication.save("reader-pdf", False)
+                        publication.save("reader-epub", False)
+                        guard = browser.new_page()
+                        try:
+                            for route in (
+                                "/api/library/pdf/reader-pdf",
+                                "/api/library/pdf/reader-pdf/document.pdf",
+                                "/api/library/epub/reader-epub",
+                                "/api/library/epub/reader-epub/chapter/1",
+                                "/api/library/epub/reader-epub/document.epub",
+                            ):
+                                response = guard.goto(f"http://{host}:{port}" + route)
+                                assert response.status == 403, (route, response.status)
+                            guard.goto(f"http://{host}:{port}/")
+                            assert guard.get_by_text("Fixture PDF").count() == 0
+                            assert guard.get_by_text("Fixture EPUB").count() == 0
+                            print("PASS fixture publication revocation and reader denial")
+                        finally:
+                            guard.close()
                     finally:
                         browser.close()
             finally:
