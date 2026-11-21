@@ -90,6 +90,23 @@ def main():
                 assert result.status == 200, f"viewer status: {result.status}"
             finally:
                 connection.close()
+            # Exercise native search, not only the viewer landing page. A
+            # missing search index must not cause an uncaught map::at error.
+            from urllib.parse import urlencode
+            search_path = "/zim/search?" + urlencode(
+                {"content": expected, "pattern": "offline"})
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            try:
+                connection.request("GET", search_path)
+                search_response = connection.getresponse()
+                search_body = search_response.read(256 * 1024)
+                assert search_response.status != 500, (
+                    f"native Kiwix search returned 500: {search_body[:300]!r}")
+                assert b"map::at" not in search_body, (
+                    "native Kiwix search exposed an uncaught map::at exception")
+            finally:
+                connection.close()
+            print(f"PASS isolated native Kiwix search response: {expected}")
             print(f"PASS real ZIM OPDS and viewer: {expected}")
             # The live service must pick up a second book without a restart,
             # then remove the first when publication changes.
