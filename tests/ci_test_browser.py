@@ -66,7 +66,10 @@ def exercise(browser, base, name, viewport, artifacts):
         expect(filter_toggle).to_have_attribute("aria-expanded", "false")
 
         # Exercise live JS form submission, dynamic reload, search and edit.
-        page.locator("#source-add").click()
+        add_source = page.locator("#source-add")
+        add_source.focus()
+        expect(add_source).to_be_focused()
+        page.keyboard.press("Enter")
         expect(page.locator("#source-dialog")).to_be_visible()
         title = "Browser Regression " + name
         sid = "browser-regression-" + name
@@ -118,7 +121,10 @@ def exercise(browser, base, name, viewport, artifacts):
         })
         expect(page.locator("#catalog-title")).to_have_value("Offline Guide")
         expect(page.locator("#catalog-format")).to_have_value("epub")
-        page.locator("#source-cancel").click()
+        cancel_source = page.locator("#source-cancel")
+        cancel_source.focus()
+        expect(cancel_source).to_be_focused()
+        page.keyboard.press("Enter")
         expect(page.locator("#source-dialog")).to_be_hidden()
         assert page.locator(".source-card[data-source-id='offline-guide']").count() == 0
 
@@ -148,11 +154,16 @@ def exercise(browser, base, name, viewport, artifacts):
         # remains gated for the unverified disposable source.
         page.locator("#source-select-mode").click()
         check = page.locator('[data-group-select][value="' + sid + '"]')
-        check.check()
+        check.focus()
+        expect(check).to_be_focused()
+        page.keyboard.press("Space")
+        expect(check).to_be_checked()
         expect(page.locator("#group-count")).to_contain_text("1 selected")
         expect(page.locator("#bulk-publish")).to_be_disabled()
         expect(page.locator("#bulk-unpublish")).to_be_disabled()
-        check.uncheck()
+        check.focus()
+        page.keyboard.press("Space")
+        expect(check).not_to_be_checked()
         expect(page.locator("#bulk-selection")).to_be_hidden()
         page.locator("#source-select-mode").click()
 
