@@ -111,7 +111,7 @@ def test_published_profile_edit_unpublish_remove_and_equivalent_readd(app, tmp_p
     assert 'data-catalog-format="zim"' in card(page)
     assert "Unpublish" in card(page)
     assert "disabled" not in control(card(page), "data-catalog-remove", SID)
-    assert request("/read/wikipedia-en", status=302) == "/wikipedia/viewer#fixture/"
+    assert request("/read/wikipedia-en", status=302) == "/zim/viewer#fixture/"
     assert request("/internal/publication/wikipedia-en", status=204) == ""
     assert 'href="/read/wikipedia-en"' in request("/")
     mutate(request, initial, "edit", {"format": "pdf"}, status=409)
