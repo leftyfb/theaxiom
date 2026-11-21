@@ -151,6 +151,11 @@ def exercise(browser, base, viewport_name, viewport, artifact_dir):
         expect(page.locator("#highlights .active-match")).to_have_count(0)
         page.locator("#find").fill("alpha")
         expect(page.locator("#matches")).to_contain_text("3", timeout=20000)
+        # Whitespace-only queries must not preserve stale highlights.
+        page.locator("#find").fill("   ")
+        expect(page.locator("#highlights .active-match")).to_have_count(0, timeout=20000)
+        page.locator("#find").fill("alpha")
+        expect(page.locator("#matches")).to_contain_text("3", timeout=20000)
         # A focused native button must remain operable without a pointer.
         close_search = page.get_by_role("button", name="Close search")
         close_search.focus()
