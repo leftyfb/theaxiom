@@ -6,7 +6,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_optional_generic_kiwix_unit_requires_reader_acknowledgement():
     unit = (ROOT / "templates/kiwix-serve.service").read_text()
-    assert not (ROOT / "templates/theaxiom-kiwix.service").exists()\n    assert "User=theaxiom" in unit
+    assert not (ROOT / "templates/theaxiom-kiwix.service").exists()
+    assert "User=theaxiom" in unit
     assert "RuntimeDirectory=theaxiom-kiwix" in unit
     assert "ExecStartPre=/usr/bin/rm -f /run/theaxiom-kiwix/manifest.sha256" in unit
     assert "ExecStartPre=/opt/theaxiom/app/.venv/bin/python -m theaxiom.zim_catalog" in unit
