@@ -2,13 +2,15 @@
 
 **Deployment authorization:** The operator lifted the prior blanket deployment hold on 2026-11-21. Deployment is permitted once the relevant changes pass CI and the deployment plan protects existing Wikipedia service and installed ZIM artifacts. This authorization does not waive testing, migration checks, or rollback safeguards.
 
-## Design
+## Design (single-reader migration in progress)
 
-The existing Wikipedia Kiwix reader stays on loopback port 8081. An independent optional generic Kiwix reader would bind only to 127.0.0.1:8082 behind the separate /zim/ Nginx publication gate. Its systemd file (templates/theaxiom-kiwix.service) is committed as an example, not installed or activated.
+The intended deployment uses **one** Kiwix listener on `127.0.0.1:8081`, with the shared `/zim/` URL root and `/var/lib/theaxiom/kiwix-library.xml` manifest. The existing Wikipedia archive and the verified Ready.gov archive are entries in that manifest. There is **no separate 8082 sidecar**. The proposed service template is `templates/kiwix-serve.service`; it is not yet installed on Vancouver. Until migration is accepted, the deployed Wikipedia service continues using its original `/wikipedia/` root.
 
-Generic ZIM downloads are source-scoped, SHA-256 checked, and promoted after ZIM internal checksum verification. Download completion never implicitly publishes an archive. The operator must explicitly publish and confirm redistribution rights. The private kiwix-library.xml includes only currently published, verified installed archives, and is refreshed after publication changes. Kiwix monitors that file; the Axiom authorizes serving only when a separate OPDS probe verifies the exact filename-derived content ID set and writes a matching runtime generation acknowledgement.
+Downloads remain source-scoped and verified; completion never publishes an archive. Publication requires explicit operator intent and appropriate rights. Startup prepares a private manifest, probes the reader's exact OPDS book IDs, and writes a generation acknowledgement only when they match. The backend gates `/zim/` requests and checks exact filename-derived IDs for content routes. The trusted Wikipedia filename stem is a narrowly scoped legacy exception to digest-suffixed generic IDs.
 
-The browser-facing route /read/zim/<source-id> resolves the installed filename-derived book name, not the human catalog source ID. Every request for /zim/content/<installed-filename-stem>/... is guarded against the current verified and published set. Missing, stale or unacknowledged manifests fail closed. Generic publication does not change the existing Wikipedia reader.
+`/read/wikipedia-en` resolves the trusted Wikipedia ID in the shared OPDS catalog, not whichever book happens to appear first. Legacy `/wikipedia/` bookmarks redirect to `/zim/`. The shared `/zim/viewer` shell adds **Back to library** navigation for every ZIM source, while PDF and future EPUB readers should provide the same homepage navigation.
+
+**Unresolved deployment gate:** HTTP request-time manifest authorization currently recomputes verified books, including Wikipedia acquisition evidence. This can invoke subprocesses and filesystem checks on each request. Refactor to an efficient fail-closed publication/manifest check and test unpublish/reload behavior before deploying. A passing unit suite alone does not clear this gate.
 
 ## Isolated CI
 
