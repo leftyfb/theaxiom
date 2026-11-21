@@ -104,3 +104,9 @@ def test_multi_book_reader_can_resolve_trusted_legacy_wikipedia_id():
         response.read.return_value = xml.encode()
         assert publication.reader_location(route, legacy) == f"/zim/viewer#{legacy}/"
         assert publication.reader_location(route, READY) == f"/zim/viewer#{READY}/"
+
+
+def test_shared_reader_defaults_to_existing_wikipedia_port(monkeypatch):
+    from theaxiom import zim_catalog
+    monkeypatch.delenv("THEAXIOM_KIWIX_PORT", raising=False)
+    assert zim_catalog.generic_reader() == {"path": "/zim/", "port": 8081}
