@@ -306,7 +306,7 @@ def test_revalidate_refuses_incomplete_or_mismatched_jobs(disk, monkeypatch):
     assert partial.read_bytes() == data[:80]
     with pytest.raises(ValueError, match="matching retained"):
         zim_jobs.revalidate("ready", CONFIG | {"source_url": "https://example.org/another.zim"})
-    assert not list((disk / "library/zim").iterdir())
+    assert not (disk / "library/zim").exists() or not list((disk / "library/zim").iterdir())
 
 
 def test_revalidate_checksum_failure_preserves_complete_retained_file(disk):
