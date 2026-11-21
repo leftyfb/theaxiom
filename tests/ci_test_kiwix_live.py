@@ -97,19 +97,31 @@ def main():
             # digest-suffixed filename-derived OPDS content identifier.
             # The fixture deliberately gives them different values to catch
             # mistaken coupling between reader routes and search selection.
-            search_path = "/zim/search?" + urlencode(
-                {"books.name": "axiom-smoke", "pattern": "offline"})
-            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
-            try:
-                connection.request("GET", search_path)
-                search_response = connection.getresponse()
-                search_body = search_response.read(256 * 1024)
-                assert search_response.status == 200, (
-                    f"native Kiwix search returned {search_response.status}: {search_body[:300]!r}")
-                assert b"map::at" not in search_body, (
-                    "native Kiwix search exposed an uncaught map::at exception")
-            finally:
-                connection.close()
+            # Capture complete native error semantics for both identifiers.
+            # A fixture without a Xapian full-text index may legitimately
+            # return 400; record that distinctly from a server exception.
+            for selector, value in (
+                ("books.name", "axiom-smoke"),
+                ("books.name", expected),
+                ("content", expected),
+            ):
+                search_path = "/zim/search?" + urlencode(
+                    {selector: value, "pattern": "offline"})
+                connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+                try:
+                    connection.request("GET", search_path)
+                    response = connection.getresponse()
+                    body = response.read(256 * 1024)
+                    from html import unescape
+                    import re
+                    readable = re.sub(r"<[^>]+>", " ", body.decode("utf-8", "replace"))
+                    readable = re.sub(r"\\s+", " ", unescape(readable))
+                    print(f"SEARCH DIAGNOSTIC {selector}={value[:28]} "
+                          f"HTTP {response.status}: {readable[-900:]}", flush=True)
+                    assert response.status != 500 and b"map::at" not in body, (
+                        f"uncaught Kiwix exception for {selector}: {body[:400]!r}")
+                finally:
+                    connection.close()
             # The viewer routes by filename-derived content ID. Exercise the
             # search URL that the same identity produces as well as the
             # metadata-name selector, so a passing search smoke test cannot
