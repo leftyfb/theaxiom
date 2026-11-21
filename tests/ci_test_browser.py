@@ -92,6 +92,93 @@ def exercise(browser, base, name, viewport, artifacts):
             page.locator('#source-form [type="submit"]').click()
         expect(page.locator(".source-card[data-source-id='" + sid + "']")).to_be_visible(timeout=15000)
 
+        # Closed #68/#70/#77: browser-provided filename populates a new
+        # document's title and format. Cancel must not persist the candidate.
+        page.locator("#source-add").click()
+        page.locator("#source-upload-file").set_input_files({
+            "name": "Offline_Guide.epub",
+            "mimeType": "application/epub+zip",
+            "buffer": b"disposable metadata-only fixture",
+        })
+        expect(page.locator("#catalog-title")).to_have_value("Offline Guide")
+        expect(page.locator("#catalog-format")).to_have_value("epub")
+        page.locator("#source-cancel").click()
+        expect(page.locator("#source-dialog")).to_be_hidden()
+        assert page.locator(".source-card[data-source-id='offline-guide']").count() == 0
+
+        # Closed #78: independent search/format/publication/download filters,
+        # reset, counts and stable alphabetical sorting without duplicates.
+        page.locator("#source-filter-toggle").click()
+        page.locator("#source-filter-format").select_option("unspecified")
+        expect(page.locator(".source-card[data-source-id='" + sid + "']")).to_be_visible()
+        page.locator("#source-filter-download").select_option("downloaded")
+        expect(page.locator(".source-card[data-source-id='" + sid + "']")).to_be_hidden()
+        page.locator("#source-filter-download").select_option("")
+        page.locator("#source-filter-publication").select_option("published")
+        expect(page.locator(".source-card[data-source-id='" + sid + "']")).to_be_hidden()
+        page.locator("#source-filter-reset").click()
+        expect(page.locator(".source-card[data-source-id='" + sid + "']")).to_be_visible()
+        page.locator("#source-filter-sort").select_option("alpha")
+        names = page.locator("#source-cards .source-row:not([hidden]) .source-card").evaluate_all(
+            "(cards) => cards.map(card => card.dataset.filterTitle.toLocaleLowerCase())")
+        assert names == sorted(names), f"{name} alphabetical source order regression"
+        ids = page.locator("#source-cards .source-card").evaluate_all(
+            "(cards) => cards.map(card => card.dataset.sourceId)")
+        assert len(ids) == len(set(ids)), "source cards duplicated during sort"
+        page.locator("#source-filter-reset").click()
+        page.locator("#source-filter-toggle").click()
+
+        # Closed #71: selection checkboxes are opt-in and bulk publication
+        # remains gated for the unverified disposable source.
+        page.locator("#source-select-mode").click()
+        check = page.locator('[data-group-select][value="' + sid + '"]')
+        check.check()
+        expect(page.locator("#group-count")).to_contain_text("1 selected")
+        expect(page.locator("#bulk-publish")).to_be_disabled()
+        expect(page.locator("#bulk-unpublish")).to_be_disabled()
+        check.uncheck()
+        expect(page.locator("#bulk-selection")).to_be_hidden()
+        page.locator("#source-select-mode").click()
+
+        # Closed #3/#76: explicit cancel leaves source intact, confirmed
+        # removal deletes ONLY the test catalog entry (no artifact exists).
+        card = page.locator(".source-card[data-source-id='" + sid + "']")
+        card.locator("summary.source-header").click()
+        page.once("dialog", lambda dialog: dialog.dismiss())
+        card.locator("[data-catalog-remove]").click()
+        expect(card).to_be_visible()
+        page.once("dialog", lambda dialog: dialog.accept())
+        with page.expect_navigation(wait_until="domcontentloaded"):
+            card.locator("[data-catalog-remove]").click()
+        expect(page.locator(".source-card[data-source-id='" + sid + "']")).to_have_count(0)
+        page.reload()
+        expect(page.locator(".source-card[data-source-id='" + sid + "']")).to_have_count(0)
+
+        # Closed #71: manage an ephemeral collection in its own namespace.
+        page.goto(base + "/admin/groupings")
+        group_name = "Browser Group " + name
+        renamed = "Browser Renamed " + name
+        page.locator("#manage-kind").select_option("collections")
+        page.locator("#manage-new").fill(group_name)
+        with page.expect_navigation(wait_until="domcontentloaded"):
+            page.locator("#manage-create").click()
+        page.locator("#manage-kind").select_option("collections")
+        row_input = page.get_by_role("textbox", name="Name of " + group_name)
+        expect(row_input).to_be_visible()
+        row_input.fill(renamed)
+        row = row_input.locator("xpath=..").locator("xpath=..")
+        with page.expect_navigation(wait_until="domcontentloaded"):
+            row.get_by_role("button", name="Rename").click()
+        page.locator("#manage-kind").select_option("collections")
+        row_input = page.get_by_role("textbox", name="Name of " + renamed)
+        expect(row_input).to_have_value(renamed)
+        row = row_input.locator("xpath=..").locator("xpath=..")
+        page.once("dialog", lambda dialog: dialog.accept())
+        with page.expect_navigation(wait_until="domcontentloaded"):
+            row.get_by_role("button", name="Delete").click()
+        page.locator("#manage-kind").select_option("collections")
+        expect(page.get_by_role("textbox", name="Name of " + renamed)).to_have_count(0)
+
         # Mobile usability guard: horizontal viewport overflow breaks controls.
         page.goto(base + "/admin/groupings")
         expect(page.locator("h1")).to_be_visible()
