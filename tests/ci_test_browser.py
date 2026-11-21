@@ -29,6 +29,16 @@ def exercise(browser, base, name, viewport, artifacts):
         expect(page.locator("body")).to_contain_text("offline")
         page.goto(base + "/search?q=emergency")
         expect(page.locator("body")).to_be_visible()
+        # Public pages are the primary mobile entry points. Protect their
+        # layout independently of the authenticated administrator pages.
+        for public_path in ("/", "/search?q=emergency"):
+            page.goto(base + public_path)
+            public_overflow = page.evaluate("""() => ({
+                scroll: document.documentElement.scrollWidth,
+                viewport: document.documentElement.clientWidth
+            })""")
+            assert public_overflow["scroll"] <= public_overflow["viewport"] + 2, (
+                f"{name} {public_path} public horizontal overflow: {public_overflow}")
 
         # Browser navigation must not bypass the sign-in boundary.
         page.goto(base + "/admin/sources")
