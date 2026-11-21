@@ -93,8 +93,12 @@ def main():
             # Exercise native search, not only the viewer landing page. A
             # missing search index must not cause an uncaught map::at error.
             from urllib.parse import urlencode
+            # Kiwix's search selector is the ZIM metadata Name, not the
+            # digest-suffixed filename-derived OPDS content identifier.
+            # The fixture deliberately gives them different values to catch
+            # mistaken coupling between reader routes and search selection.
             search_path = "/zim/search?" + urlencode(
-                {"content": expected, "pattern": "offline"})
+                {"books.name": "axiom-smoke", "pattern": "offline"})
             connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
             try:
                 connection.request("GET", search_path)
