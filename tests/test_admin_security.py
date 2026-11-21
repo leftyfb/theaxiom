@@ -344,7 +344,7 @@ class AdminProxyRouteTests(unittest.TestCase):
         for route in ("/admin/sources", "/admin/groupings", "/admin/settings"):
             for path in (route, route + "/"):
                 with self.subTest(path=path):
-                    self.assertIn("location = " + path + " { include /etc/nginx/snippets/theaxiom-backend.conf; }", config)
+                    self.assertIn("location = " + path + " { include /opt/theaxiom/app/templates/theaxiom-backend.conf; }", config)
 
 
 class BrandingAssetTests(unittest.TestCase):
@@ -366,15 +366,18 @@ class BrandingAssetTests(unittest.TestCase):
                 self.assertIn("<title>", html)
                 self.assertRegex(html, r"(?s)<title>[^<]*The Axiom[^<]*</title>")
 
-    def test_nginx_serves_icons_without_auth_or_proxy_dependencies(self):
+    def test_nginx_serves_public_icons_without_auth(self):
         root = Path(__file__).resolve().parents[1]
         conf = (root / "deploy/nginx/theaxiom.conf").read_text()
-        for icon in ("favicon.svg", "favicon.png", "favicon.ico"):
-            block = conf.split("location = /" + icon + " {", 1)[1].split("}", 1)[0]
-            self.assertIn("try_files $uri =404;", block)
-            self.assertNotIn("auth_request", block)
-            self.assertNotIn("proxy_pass", block)
-        icons = root / "deploy/www"
+        svg = conf.split("location = /favicon.svg {",1)[1].split("}",1)[0]
+        self.assertIn("try_files $uri =404;", svg)
+        for name in ("favicon.png","favicon.ico"):
+            block = conf.split("location = /" + name + " {",1)[1].split("}",1)[0]
+            self.assertIn("include /opt/theaxiom/app/templates/theaxiom-backend.conf;",block)
+            self.assertNotIn("auth_request",block)
+        icons = root / "templates"
         self.assertTrue((icons / "favicon.svg").read_bytes().startswith(b"<svg"))
-        self.assertTrue((icons / "favicon.png").read_bytes().startswith(b"\x89PNG\r\n\x1a\n"))
-        self.assertTrue((icons / "favicon.ico").read_bytes().startswith(b"\x00\x00\x01\x00"))
+        self.assertTrue((icons / "favicon.png").read_bytes().startswith(bytes.fromhex("89504e470d0a1a0a")))
+        self.assertTrue((icons / "favicon.ico").read_bytes().startswith(bytes.fromhex("00000100")))
+        self.assertIn('proxy_set_header Cookie "theaxiom_session=$cookie_theaxiom_session";',
+                      (icons / "theaxiom-backend.conf").read_text())

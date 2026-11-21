@@ -40,7 +40,8 @@ class Archive(BaseHTTPRequestHandler):
 
     def do_GET(self):
         self.requests.append(self.path)
-        body = b"archive reached"
+        body = ((SITE.parent.parent.parent / "templates" / self.path.lstrip("/")).read_bytes()
+                if self.path in ("/favicon.png","/favicon.ico") else b"archive reached")
         self.send_response(200)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
@@ -78,7 +79,7 @@ def main():
         # any deployed host path. This runner must never contact Vancouver.
         site = site.replace("/opt/theaxiom/app/deploy/www",
                             str(SITE.parent.parent / "www"))
-        site = site.replace("include /etc/nginx/snippets/theaxiom-backend.conf;", "return 404;")
+        site = site.replace("include /opt/theaxiom/app/templates/theaxiom-backend.conf;", f"proxy_pass http://127.0.0.1:{content_port};")
         site = site.replace("proxy_pass http://127.0.0.1:8080/internal/publication/zim;",
                             f"proxy_pass http://127.0.0.1:{gate_port}/internal/publication/zim;")
         site = site.replace("proxy_pass http://127.0.0.1:8082;",

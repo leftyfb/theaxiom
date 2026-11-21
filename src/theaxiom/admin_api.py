@@ -50,7 +50,7 @@ PUBLIC_ICON_PATHS = {
     "/favicon.png": ("favicon.png", "image/png"),
     "/favicon.ico": ("favicon.ico", "image/x-icon"),
 }
-PUBLIC_ICON_DIR = Path(__file__).resolve().parents[2] / "deploy" / "www"
+PUBLIC_ICON_DIR = ADMIN_TEMPLATE_DIR
 ADMIN_SESSIONS = admin_sessions.Sessions()
 PDFJS_ROOT = Path("/opt/pdfjs/current")
 PDFJS_PREFIX = "/api/pdfjs/"

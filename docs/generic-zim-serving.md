@@ -4,7 +4,7 @@
 
 ## Design
 
-The existing Wikipedia Kiwix reader stays on loopback port 8081. An independent optional generic Kiwix reader would bind only to 127.0.0.1:8082 behind the separate /zim/ Nginx publication gate. Its systemd file (deploy/theaxiom-kiwix.service) is committed as an example, not installed or activated.
+The existing Wikipedia Kiwix reader stays on loopback port 8081. An independent optional generic Kiwix reader would bind only to 127.0.0.1:8082 behind the separate /zim/ Nginx publication gate. Its systemd file (templates/theaxiom-kiwix.service) is committed as an example, not installed or activated.
 
 Generic ZIM downloads are source-scoped, SHA-256 checked, and promoted after ZIM internal checksum verification. Download completion never implicitly publishes an archive. The operator must explicitly publish and confirm redistribution rights. The private kiwix-library.xml includes only currently published, verified installed archives, and is refreshed after publication changes. Kiwix monitors that file; the Axiom authorizes serving only when a separate OPDS probe verifies the exact filename-derived content ID set and writes a matching runtime generation acknowledgement.
 

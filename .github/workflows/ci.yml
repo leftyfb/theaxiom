@@ -26,11 +26,11 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq kiwix-tools zim-tools nginx
       - name: Run real ZIM serving smoke test
-        run: python scripts/test_kiwix_live.py
+        run: python tests/ci_test_kiwix_live.py
       - name: Validate actual nginx site grammar in an isolated CI configuration
-        run: python scripts/test_nginx_syntax.py
+        run: python tests/ci_test_nginx_syntax.py
       - name: Verify real Nginx publication gate in isolated CI
-        run: python scripts/test_nginx_auth.py
+        run: python tests/ci_test_nginx_auth.py
       - name: Upload test summary
         if: always()
         uses: actions/upload-artifact@v4

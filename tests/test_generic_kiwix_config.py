@@ -5,7 +5,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_optional_generic_kiwix_unit_requires_reader_acknowledgement():
-    unit = (ROOT / "deploy/theaxiom-kiwix.service").read_text()
+    unit = (ROOT / "templates/theaxiom-kiwix.service").read_text()
     assert "User=theaxiom" in unit
     assert "RuntimeDirectory=theaxiom-kiwix" in unit
     assert "ExecStartPre=/usr/bin/rm -f /run/theaxiom-kiwix/manifest.sha256" in unit

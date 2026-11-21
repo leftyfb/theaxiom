@@ -1,8 +1,5 @@
 # Standard Nginx deployment (Ubuntu)
 
-**CURRENT DEPLOYMENT HOLD:** Vancouver has an active Ready.gov download. These instructions are for future operator-approved work only. Do not run them, restart services, or touch storage until the download has completed and a separate deployment authorization is given. See [the deployment acceptance register](../docs/deployment-acceptance-register.md).
-
-
 Nginx owns public HTTP delivery. The Python backend runs as an unprivileged,
 loopback-only process; it owns admin authentication and password rotation.
 The public homepage is static and requires no login. No Kiwix or acquisition
@@ -36,32 +33,22 @@ or create content directories during deployment.
    with operator approval, run `nginx -t`, then enable/start or reload Nginx.
    Bind only the intended interface and restrict access with existing firewall
    policy; do not expose publicly or forward ports.
-6. Verify unauthenticated GET / returns the public homepage, /admin redirects
-   to the branded /admin/login page without a browser-native Basic prompt, and
-   /api/storage-settings denies anonymous requests. Test the HTML sign-in form,
-   HttpOnly/SameSite browser session cookie, logout, bounded session expiry,
-   CSRF rejection and password-rotation session invalidation. Confirm explicit
-   Basic Authorization still works for API clients. Never put real credentials
-   or session cookies in test transcripts. Verify the existing content and
-   acquisition safeguards after any auth change.
+6. Verify unauthenticated GET / returns the public homepage; /admin and
+   /api/storage-settings return 401 without credentials; authenticated admin
+   opens and settings work; acquisition POST returns 503; service units enabled.
+   Verify password rotation using the admin form, including old credentials
+   failing, new credentials working, and persistence across a backend restart.
+   Do not put real credentials in test transcripts.
 
 Password changes require the current password and confirmation and take effect
 without Nginx or backend reload. For recovery stop the backend, preserve the
 private existing hash under an operator-controlled backup name, initialize a
 new credential as the service account, then restart. Never silently reset a
-credential. Browser sessions use random, in-memory server-side tokens with a
-30-minute idle limit and an absolute eight-hour limit; cookie values do not
-contain passwords. The backend checks strict same-origin requests and session
-CSRF tokens for mutations; Nginx forwards only its dedicated theaxiom_session
-cookie to the trusted backend, never to Kiwix. Existing clients may continue
-to send HTTP Basic Authorization explicitly; their browser-native credential
-dialogs are no longer needed for ordinary interactive administration.
-HTTP **does not encrypt passwords, Basic credentials or session cookies**; use
-this HTTP example only on a trusted isolated development LAN. Configure Nginx
-HTTPS with a trusted certificate before use on untrusted networks. The backend
-uses the trusted proxy scheme for Origin checks and sets Secure on session
-cookies when accessed over HTTPS. Live Chrome/1Password save-and-fill behavior
-and naming still require owner acceptance.
+credential. Browser Basic authentication may cache credentials until the browser
+session is closed. Basic authentication over HTTP is **not encrypted**; use this
+HTTP example only on a trusted isolated development LAN. Configure Nginx HTTPS
+with a trusted certificate before use on untrusted networks. The backend uses
+the scheme forwarded by the configured local Nginx proxy when checking Origin.
 
 The example IP and host names are deployment examples, not application defaults.
 Ansible may consume these files from the application repository. Keep actual
