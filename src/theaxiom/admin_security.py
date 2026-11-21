@@ -138,6 +138,19 @@ class ServerConfig:
                     and self.store.verify(password))
 
 
+def valid_public_host(value: str) -> bool:
+    """Accept syntactically valid public hostnames/IPs, never arbitrary header data."""
+    if not isinstance(value, str) or len(value) > 255 or not value or any(ord(c) < 33 or ord(c) > 126 for c in value):
+        return False
+    if re.fullmatch(r"\\[[0-9a-fA-F:.]+\\](?::[0-9]{1,5})?", value):
+        try:
+            ipaddress.IPv6Address(value[1:value.index("]")])
+            return True
+        except ValueError:
+            return False
+    return bool(re.fullmatch(r"[a-zA-Z0-9](?:[a-zA-Z0-9.-]{0,252}[a-zA-Z0-9])?(?::[0-9]{1,5})?", value))
+
+
 def load_config(env: Mapping[str, str] | None = None) -> ServerConfig:
     env = os.environ if env is None else env
     address = ipaddress.IPv4Address(env.get("THEAXIOM_BIND_HOST", "127.0.0.1"))
@@ -158,8 +171,6 @@ def load_config(env: Mapping[str, str] | None = None) -> ServerConfig:
             if not re.fullmatch(r"[a-z0-9][a-z0-9.-]{0,252}(?::[0-9]{1,5})?", item):
                 raise ValueError("invalid public host")
             hosts.add(item)
-        if not env.get("THEAXIOM_PUBLIC_HOSTS", "").strip():
-            raise ValueError("Nginx mode requires explicit public host names")
     username = env.get("THEAXIOM_ADMIN_USER", "")
     credential_file = env.get("THEAXIOM_ADMIN_CREDENTIALS_FILE", "")
     store = None
