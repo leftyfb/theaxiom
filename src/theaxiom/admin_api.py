@@ -515,7 +515,11 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             if not publication.allowed(self._publication_snapshot(), source_id):
                 self._send_json(403, {"error": "collection unavailable"})
                 return
-            location = publication.reader_location(publication.ROUTES[source_id])
+            # Resolve Wikipedia by its trusted filename in the shared OPDS catalog.
+            # Never choose the first book: it may be a different published ZIM.
+            from .source_catalog import WIKIPEDIA_SOURCE
+            location = publication.reader_location(
+                zim_catalog.GENERIC_READER, Path(WIKIPEDIA_SOURCE["filename"]).stem)
             if location is None:
                 self._send_json(503, {"error": "reader entry unavailable"})
                 return
