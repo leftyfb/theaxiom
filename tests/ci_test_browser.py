@@ -37,6 +37,11 @@ def exercise(browser, base, name, viewport, artifacts):
         page.locator("#password").fill("wrong-password")
         page.locator("#submit").click()
         expect(page.locator("#feedback")).to_contain_text("Invalid")
+        # An invalid login must not establish a session, even if the user
+        # navigates directly to another protected route in the same tab.
+        page.goto(base + "/admin/settings")
+        expect(page).to_have_url(base + "/admin/login")
+        page.locator("#username").fill("admin")
         page.locator("#password").fill("browser-only-fixture-password")
         page.locator("#submit").click()
         expect(page).to_have_url(base + "/admin")
@@ -230,7 +235,7 @@ def exercise(browser, base, name, viewport, artifacts):
         expect(page.locator("h1")).to_be_visible()
         page.goto(base + "/admin/settings")
         expect(page.locator("h1")).to_be_visible()
-        for path in ("/admin", "/admin/groupings", "/admin/settings"):
+        for path in ("/admin", "/admin/sources", "/admin/groupings", "/admin/settings"):
             page.goto(base + path)
             overflow = page.evaluate("""() => ({
                 scroll: document.documentElement.scrollWidth,
@@ -254,6 +259,7 @@ def exercise(browser, base, name, viewport, artifacts):
         # revoked admin session after logout (closed authentication issues).
         page.goto(base + "/admin/sources")
         expect(page).to_have_url(base + "/admin/login")
+        # Back/forward navigation must not authorize subsequent requests.
         page.go_back()
         page.goto(base + "/admin/settings")
         expect(page).to_have_url(base + "/admin/login")
