@@ -12,6 +12,8 @@ EnvironmentFile=/etc/theaxiom/server.env
 Environment=PYTHONDONTWRITEBYTECODE=1
 RuntimeDirectory=theaxiom-kiwix
 RuntimeDirectoryMode=0700
+# Manifest schema upgrades (including ZIM UUID book IDs) require restarting
+# this unit to regenerate the manifest and acknowledge the loaded catalog.
 # Clear the previous reader generation BEFORE building a new manifest.
 # The nginx auth gate stays closed until OPDS has acknowledged exact book IDs.
 ExecStartPre=/usr/bin/rm -f /run/theaxiom-kiwix/manifest.sha256
