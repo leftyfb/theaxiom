@@ -197,6 +197,44 @@ def start(sid, config, *, resume=False):
     return {"accepted": True, "source_id": sid, "state": "queued"}
 
 
+
+def revalidate(sid, config):
+    """Explicitly recheck a complete retained ZIM with no network request."""
+    configuration = identity(config)
+    with LOCK:
+        guard = worker_lock()
+        guard.__enter__()
+        try:
+            old = read(sid)
+            if not old or old["state"] not in {"failed", "paused", "interrupted"} or not matches(old, config):
+                raise ValueError("No matching retained ZIM download")
+            if installed(old, config):
+                raise ValueError("Archive already installed")
+            expected = old.get("expected_bytes")
+            actual = staged_size(sid)
+            if type(expected) is not int or expected < 96 or actual != expected:
+                raise ValueError("Local revalidation requires a complete retained file of known size")
+            with (pdf_source._directory("staging", writing=True, format_name="zim") as (sfd, sm, _),
+                  pdf_source._directory("library", writing=True, format_name="zim") as (_, lm, reserve)):
+                cap = os.fstatvfs(sfd)
+                if sm != lm or cap.f_flag & os.ST_RDONLY or cap.f_bavail * cap.f_frsize < reserve:
+                    raise ValueError("Insufficient writable ZIM storage capacity")
+            old.update(state="queued", active=True, verified=False,
+                       detail="Local revalidation requested; no download.", sampled_at=time.time())
+            _record_attempt(old, started=True)
+            old["attempt_history"][-1]["operation"] = "revalidate"
+            save(old)
+            signal = threading.Event()
+            CONTROLS[sid] = (signal, None)
+            threading.Thread(target=_run, args=(old, guard, signal, expected, None),
+                             kwargs={"local": True}, daemon=True,
+                             name="zim-local-revalidation").start()
+        except BaseException:
+            guard.__exit__(None, None, None)
+            raise
+    return {"accepted": True, "source_id": sid, "state": "queued"}
+
+
 def control(sid, config, action):
     if action not in {"pause", "cancel"}:
         raise ValueError("Invalid ZIM control")
@@ -232,7 +270,7 @@ def control(sid, config, action):
         raise ValueError("ZIM job cannot be " + action + "d in current state")
 
 
-def _run(job, guard, signal, offset, validator):
+def _run(job, guard, signal, offset, validator, *, local=False):
     sid = job["source_id"]
     last = 0.0
     begun = time.monotonic()
@@ -254,15 +292,22 @@ def _run(job, guard, signal, offset, validator):
             last = now
 
     try:
-        job.update(state="downloading", sampled_at=time.time())
+        job.update(state="verifying" if local else "downloading", sampled_at=time.time())
         save(job)
         def promoting():
             job.update(state="publishing", sampled_at=time.time())
             save(job)
 
-        artifact = zim_source.download_resumable(sid, job["configuration"], offset=offset,
-                     validator=validator, progress=progress, stopped=signal.is_set,
-                     promote_lock=LOCK, promoting=promoting)
+        if local:
+            artifact = zim_source.revalidate_retained(
+                sid, job["configuration"], expected_bytes=offset,
+                progress=progress, stopped=signal.is_set,
+                promote_lock=LOCK, promoting=promoting)
+        else:
+            artifact = zim_source.download_resumable(
+                sid, job["configuration"], offset=offset,
+                validator=validator, progress=progress, stopped=signal.is_set,
+                promote_lock=LOCK, promoting=promoting)
         job.update(state="completed", active=False, verified=True, artifact=artifact,
                    downloaded_bytes=artifact["bytes"], expected_bytes=artifact["bytes"], sampled_at=time.time())
     except zim_source.TransferStopped:
