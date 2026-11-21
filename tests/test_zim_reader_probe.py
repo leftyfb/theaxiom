@@ -88,3 +88,23 @@ def test_opds_accepts_only_exact_trusted_legacy_wikipedia_identity():
                     "wikipedia_en_all_maxi_2026-08%2fother"):
         with pytest.raises(ValueError, match="Ambiguous"):
             read(invalid)
+
+
+def test_shared_manifest_includes_only_verified_published_wikipedia(disk):
+    from theaxiom import source_catalog, acquisition_monitor
+    trusted = source_catalog.WIKIPEDIA_SOURCE
+    evidence = {"state": "completed", "verified": True, "active": False,
+                "filename": trusted["filename"], "sha256": trusted["sha256"],
+                "expected_bytes": trusted["bytes"]}
+    with patch.object(acquisition_monitor, "collect", return_value=evidence) as probe:
+        publication.save("wikipedia-en", True)
+        books = zim_catalog.verified_books([])
+        assert [book["id"] for book in books] == ["wikipedia-en"]
+        assert books[0]["path"].endswith("/library/zim/" + trusted["filename"])
+        assert zim_catalog.content_name(books[0]) == trusted["filename"][:-4]
+        assert probe.call_count == 1
+        publication.save("wikipedia-en", False)
+        assert zim_catalog.verified_books([]) == []
+    with patch.object(acquisition_monitor, "collect", return_value={**evidence, "verified": False}):
+        publication.save("wikipedia-en", True)
+        assert zim_catalog.verified_books([]) == []
