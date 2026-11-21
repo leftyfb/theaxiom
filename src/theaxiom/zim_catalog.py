@@ -43,40 +43,41 @@ def verified_books(records, enabled=None):
                   and record["configuration"].get("format") == "zim"
                   and enabled.get(record["source_id"], False)]
     result = []
-    with pdf_source._directory("library", format_name="zim") as (directory, mount, _):
-        for record in candidates:
-            sid = record["source_id"]
-            config = record["configuration"]
-            job = zim_jobs.status(sid)
-            if not job or job.get("verified") is not True or job.get("active") is not False:
-                continue
-            artifact = zim_jobs.installed(job, config)
-            if not artifact:
-                continue
-            digest = artifact["sha256"]
-            size = artifact["bytes"]
-            filename = artifact["filename"]
-            if (not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest)
-                    or type(size) is not int or size < 96
-                    or filename != f"{sid}.{digest}.zim"):
-                continue
-            # O_NOFOLLOW and verified mount, ownership, size and installed-file
-            # mode checks live in the existing storage adapter.
-            try:
-                with pdf_source._file(directory, mount, filename, size):
-                    pass
-            except (OSError, ValueError):
-                continue
-            profile = record["profile"]
-            title = profile.get("title", "").strip()
-            if not title or len(title) > 256:
-                continue
-            language = profile.get("language", "").strip().lower()
-            language = LANGUAGES.get(language, language if re.fullmatch(r"[a-z]{3}", language) else "und")
-            result.append({
-                "id": sid, "path": str(Path(root) / "library" / "zim" / filename),
-                "title": title, "language": language,
-            })
+    if candidates:
+        with pdf_source._directory("library", format_name="zim") as (directory, mount, _):
+            for record in candidates:
+                sid = record["source_id"]
+                config = record["configuration"]
+                job = zim_jobs.status(sid)
+                if not job or job.get("verified") is not True or job.get("active") is not False:
+                    continue
+                artifact = zim_jobs.installed(job, config)
+                if not artifact:
+                    continue
+                digest = artifact["sha256"]
+                size = artifact["bytes"]
+                filename = artifact["filename"]
+                if (not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest)
+                        or type(size) is not int or size < 96
+                        or filename != f"{sid}.{digest}.zim"):
+                    continue
+                # O_NOFOLLOW and verified mount, ownership, size and installed-file
+                # mode checks live in the existing storage adapter.
+                try:
+                    with pdf_source._file(directory, mount, filename, size):
+                        pass
+                except (OSError, ValueError):
+                    continue
+                profile = record["profile"]
+                title = profile.get("title", "").strip()
+                if not title or len(title) > 256:
+                    continue
+                language = profile.get("language", "").strip().lower()
+                language = LANGUAGES.get(language, language if re.fullmatch(r"[a-z]{3}", language) else "und")
+                result.append({
+                    "id": sid, "path": str(Path(root) / "library" / "zim" / filename),
+                    "title": title, "language": language,
+                })
     # Wikipedia is the existing trusted acquisition, not a generic ZIM job.
     # Require the acquisition monitor's current, independent verification
     # evidence; never hash or modify the 127 GB archive at reader startup.
