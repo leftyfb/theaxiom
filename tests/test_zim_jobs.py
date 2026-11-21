@@ -11,7 +11,7 @@ from test_zim_source import CONFIG, disk, fixture_bytes
 
 def join_worker():
     for thread in threading.enumerate():
-        if thread.name == "zim-acquisition":
+        if thread.name in {"zim-acquisition", "zim-local-revalidation"}:
             thread.join(5)
             assert not thread.is_alive()
 
@@ -248,3 +248,90 @@ def test_invalid_header_after_complete_transfer_is_retained_without_publication(
     assert job["attempt_history"][-1]["expected_bytes"] == len(data)
     assert (disk / "staging/zim/.download-ready.partial").read_bytes() == data
     assert not list((disk / "library/zim").iterdir())
+
+
+def _retained_fixture(disk, payload, *, expected=None, state="failed"):
+    stage = disk / "staging/zim"
+    stage.mkdir(exist_ok=True)
+    partial = stage / ".download-ready.partial"
+    partial.write_bytes(payload)
+    partial.chmod(0o600)
+    zim_jobs.save(dict(source_id="ready", state=state, active=False, verified=False,
+                       retained=True, configuration=zim_jobs.identity(CONFIG),
+                       downloaded_bytes=len(payload),
+                       expected_bytes=len(payload) if expected is None else expected,
+                       etag='"original-validator"'))
+    return partial
+
+
+def test_revalidate_complete_retained_zim_without_network(disk, monkeypatch):
+    data = fixture_bytes()
+    partial = _retained_fixture(disk, data)
+    monkeypatch.setattr(zim_source.pdf_transport, "open_pdf",
+                        lambda *args, **kwargs: pytest.fail("Offline revalidation used the network"))
+    assert zim_jobs.revalidate("ready", CONFIG)["accepted"]
+    join_worker()
+    job = zim_jobs.status("ready")
+    assert job["state"] == "completed" and job["verified"] is True
+    assert not partial.exists()
+    assert zim_jobs.installed(job, CONFIG)["bytes"] == len(data)
+    assert job["attempt_history"][-1]["operation"] == "revalidate"
+    assert job["attempt_history"][-1]["state"] == "completed"
+    with pytest.raises(ValueError, match="No matching retained"):
+        zim_jobs.revalidate("ready", CONFIG)
+
+
+def test_revalidate_invalid_header_preserves_retained_bytes(disk, monkeypatch):
+    data = bytearray(fixture_bytes())
+    data[0] = 0
+    partial = _retained_fixture(disk, bytes(data))
+    monkeypatch.setattr(zim_source.pdf_transport, "open_pdf",
+                        lambda *args, **kwargs: pytest.fail("Offline revalidation used the network"))
+    assert zim_jobs.revalidate("ready", CONFIG)["accepted"]
+    join_worker()
+    job = zim_jobs.status("ready")
+    assert job["state"] == "failed" and not job["verified"] and job["retained"]
+    assert "Invalid ZIM header" in job["detail"]
+    assert partial.read_bytes() == data
+    assert not list((disk / "library/zim").iterdir())
+
+
+def test_revalidate_refuses_incomplete_or_mismatched_jobs(disk, monkeypatch):
+    data = fixture_bytes()
+    partial = _retained_fixture(disk, data[:80], expected=len(data))
+    monkeypatch.setattr(zim_source.pdf_transport, "open_pdf",
+                        lambda *args, **kwargs: pytest.fail("Unexpected network request"))
+    with pytest.raises(ValueError, match="complete retained file"):
+        zim_jobs.revalidate("ready", CONFIG)
+    assert partial.read_bytes() == data[:80]
+    with pytest.raises(ValueError, match="matching retained"):
+        zim_jobs.revalidate("ready", CONFIG | {"source_url": "https://example.org/another.zim"})
+    assert not list((disk / "library/zim").iterdir())
+
+
+def test_revalidate_checksum_failure_preserves_complete_retained_file(disk):
+    data = bytearray(fixture_bytes())
+    data[-1] ^= 1
+    partial = _retained_fixture(disk, bytes(data))
+    zim_jobs.revalidate("ready", CONFIG)
+    join_worker()
+    job = zim_jobs.read("ready")
+    assert job["state"] == "failed" and job["retained"] is True
+    assert "checksum mismatch" in job["detail"]
+    assert partial.read_bytes() == data
+    assert not list((disk / "library/zim").iterdir())
+
+
+def test_revalidate_recovered_worker_uses_retained_file(disk, monkeypatch):
+    data = fixture_bytes()
+    partial = _retained_fixture(disk, data, state="paused")
+    job = zim_jobs.read("ready")
+    job.update(state="verifying", active=True)
+    zim_jobs.save(job)
+    assert zim_jobs.status("ready")["state"] == "paused"
+    monkeypatch.setattr(zim_source.pdf_transport, "open_pdf",
+                        lambda *args, **kwargs: pytest.fail("Unexpected download"))
+    zim_jobs.revalidate("ready", CONFIG)
+    join_worker()
+    assert zim_jobs.status("ready")["verified"] is True
+    assert not partial.exists()
