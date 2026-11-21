@@ -272,6 +272,7 @@ def _verify_and_promote(fd, staging, library, name, source_id, url, count,
     check_mount()
     progress(count, count, {"verifying": True})
     with os.fdopen(os.dup(fd), "rb") as target:
+        target.seek(0)
         sha = hashlib.sha256()
         while block := target.read(CHUNK):
             if stopped():
