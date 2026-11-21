@@ -141,6 +141,44 @@ def main():
             print("\n".join(line for line in
                   (help_result.stdout + help_result.stderr).splitlines()
                   if "index" in line.lower() or "search" in line.lower()), flush=True)
+            # Isolate the archive and search engine from library XML loading.
+            # The direct-file server must never access production archives.
+            with socket.socket() as direct_sock:
+                direct_sock.bind(("127.0.0.1", 0))
+                direct_port = direct_sock.getsockname()[1]
+            direct_process = subprocess.Popen(
+                ["kiwix-serve", "--address=127.0.0.1",
+                 f"--port={direct_port}", "--urlRootLocation=/zim/", str(archive)],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            try:
+                for attempt in range(40):
+                    if direct_process.poll() is not None:
+                        raise RuntimeError("direct-file Kiwix exited: " + direct_process.stdout.read())
+                    try:
+                        direct_names = zim_reader_probe.listed_book_ids(port=direct_port)
+                        break
+                    except (OSError, ValueError):
+                        time.sleep(0.25)
+                else:
+                    raise RuntimeError("direct-file Kiwix did not start")
+                print(f"DIRECT-FILE OPDS: {direct_names!r}", flush=True)
+                direct_connection = http.client.HTTPConnection("127.0.0.1", direct_port, timeout=5)
+                try:
+                    direct_connection.request("GET", "/zim/search?" + urlencode(
+                        {"books.name": expected, "pattern": "offline"}))
+                    direct_response = direct_connection.getresponse()
+                    direct_body = direct_response.read(256 * 1024)
+                    print(f"DIRECT-FILE SEARCH HTTP {direct_response.status} "
+                          f"map::at={b'map::at' in direct_body}", flush=True)
+                finally:
+                    direct_connection.close()
+            finally:
+                direct_process.terminate()
+                try:
+                    direct_process.communicate(timeout=5)
+                except subprocess.TimeoutExpired:
+                    direct_process.kill()
+                    direct_process.communicate(timeout=5)
             assert not search_failures, f"native Kiwix search crashes: {search_failures!r}"
             print(f"PASS isolated native Kiwix search diagnostics completed: {expected}")
             print(f"PASS real ZIM OPDS and viewer: {expected}")
