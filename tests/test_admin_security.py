@@ -18,7 +18,7 @@ class ConfigTests(unittest.TestCase):
         config = load_config({})
         self.assertEqual((config.host, config.port), ("127.0.0.1", 8080))
 
-    def test_nginx_requires_hashed_credentials_and_public_host(self):
+    def test_nginx_requires_hashed_credentials_but_not_public_host_allowlist(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "credential"
             PasswordStore.initialize(path, "fixture-password-only")
@@ -28,6 +28,8 @@ class ConfigTests(unittest.TestCase):
             env.update(THEAXIOM_ADMIN_USER="admin", THEAXIOM_ADMIN_CREDENTIALS_FILE=str(path))
             config = load_config(env)
             self.assertIn("vancouver", config.allowed_hosts)
+            env.pop("THEAXIOM_PUBLIC_HOSTS")
+            self.assertTrue(load_config(env).proxied)
             self.assertFalse(config.authorized(None))
             self.assertTrue(config.authorized("Basic " + base64.b64encode(b"admin:fixture-password-only").decode()))
             path.chmod(0o644)
@@ -381,3 +383,15 @@ class BrandingAssetTests(unittest.TestCase):
         self.assertTrue((icons / "favicon.ico").read_bytes().startswith(bytes.fromhex("00000100")))
         self.assertIn('proxy_set_header Cookie "theaxiom_session=$cookie_theaxiom_session";',
                       (icons / "theaxiom-backend.conf").read_text())
+
+
+    def test_proxied_hosts_allow_lan_and_tailscale_names(self):
+        from theaxiom.admin_security import valid_public_host
+        for host in ("vancouver", "vancouver.tailnet.ts.net", "100.101.102.103",
+                     "192.168.0.4", "[fd7a:115c:a1e0::1]", "vancouver:80"):
+            with self.subTest(host=host):
+                self.assertTrue(valid_public_host(host))
+        for host in ("", "bad host", "host/evil", "host\\r\\nInjected: yes",
+                     "host@evil", "[not-ipv6]", "host:bad"):
+            with self.subTest(host=host):
+                self.assertFalse(valid_public_host(host))
