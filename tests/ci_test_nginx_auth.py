@@ -83,7 +83,7 @@ def main():
         site = site.replace("include /opt/theaxiom/app/templates/theaxiom-backend.conf;", f"proxy_pass http://127.0.0.1:{content_port};")
         site = site.replace("proxy_pass http://127.0.0.1:8080/internal/publication/zim;",
                             f"proxy_pass http://127.0.0.1:{gate_port}/internal/publication/zim;")
-        site = site.replace("proxy_pass http://127.0.0.1:8082;",
+        site = site.replace("proxy_pass http://127.0.0.1:8081;",
                             f"proxy_pass http://127.0.0.1:{content_port};")
         with tempfile.TemporaryDirectory(prefix="axiom-nginx-auth-") as tmp:
             base = Path(tmp)
