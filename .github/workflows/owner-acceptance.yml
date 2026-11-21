@@ -1,0 +1,50 @@
+name: Owner acceptance checklist sync
+
+on:
+  issues:
+    types: [edited]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  close-accepted-issues:
+    if: ${{ github.event.issue.number == 96 && github.event.sender.login == 'leftyfb' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Close only fully accepted and allowlisted source issues
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const expected = new Map([
+              [70, 3], [67, 3], [15, 2], [3, 3],
+              [2, 2], [86, 3], [16, 2], [44, 2],
+              [45, 2], [83, 3], [84, 2], [89, 2],
+            ]);
+            const body = context.payload.issue.body || '';
+            const lines = body.split(/\r?\n/);
+            const matches = new Map([...expected.keys()].map(id => [id, []]));
+            const check = /^- \[([ xX])\] .+ <!-- axiom-accept:(\d+) -->\s*$/;
+            for (const line of lines) {
+              const match = line.match(check);
+              if (!match) continue;
+              const id = Number(match[2]);
+              if (matches.has(id)) matches.get(id).push(match[1].toLowerCase() === 'x');
+            }
+            const {owner, repo} = context.repo;
+            for (const [id, requiredCount] of expected) {
+              const checked = matches.get(id);
+              // Fail closed on missing, duplicated or unexpectedly edited checklist items.
+              if (checked.length !== requiredCount || !checked.every(Boolean)) continue;
+              const {data: issue} = await github.rest.issues.get({owner, repo, issue_number: id});
+              if (issue.state !== 'open' || issue.pull_request) continue;
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: id,
+                body: 'Owner acceptance confirmed: all checks for this issue were completed in #96. Automated closure via the owner acceptance checklist (no deployment performed).',
+              });
+              await github.rest.issues.update({
+                owner, repo, issue_number: id, state: 'closed', state_reason: 'completed',
+              });
+              core.info('Closed owner-accepted issue #' + id);
+            }
