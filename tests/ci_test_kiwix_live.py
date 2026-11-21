@@ -55,7 +55,9 @@ def main():
         filename = "ready." + digest + ".zim"
         archive = base / filename
         shutil.move(output, archive)
-        book = {"id": "ready", "path": str(archive),
+        with archive.open("rb") as stream:
+            book_id = zim_catalog.archive_uuid(stream)
+        book = {"id": book_id, "path": str(archive),
                 "title": "Isolated Test", "language": "eng"}
         with patch.object(zim_catalog, "verified_books", return_value=[book]):
             content = zim_catalog.render_xml([])
