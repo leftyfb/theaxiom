@@ -142,7 +142,7 @@ def valid_public_host(value: str) -> bool:
     """Accept syntactically valid public hostnames/IPs, never arbitrary header data."""
     if not isinstance(value, str) or len(value) > 255 or not value or any(ord(c) < 33 or ord(c) > 126 for c in value):
         return False
-    if re.fullmatch(r"\\[[0-9a-fA-F:.]+\\](?::[0-9]{1,5})?", value):
+    if re.fullmatch(r"\[[0-9a-fA-F:.]+\](?::[0-9]{1,5})?", value):
         try:
             ipaddress.IPv6Address(value[1:value.index("]")])
             return True
