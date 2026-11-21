@@ -129,12 +129,19 @@ def exercise(browser, base, name, viewport, artifacts):
         })
         expect(page.locator("#catalog-title")).to_have_value("Offline Guide")
         expect(page.locator("#catalog-format")).to_have_value("epub")
+        # The canceled browser upload must not create a catalog record or
+        # retain the selected file when the dialog is reopened.
+        assert page.locator(".source-card[data-source-id='offline-guide']").count() == 0
         cancel_source = page.locator("#source-cancel")
         cancel_source.focus()
         expect(cancel_source).to_be_focused()
         page.keyboard.press("Enter")
         expect(page.locator("#source-dialog")).to_be_hidden()
         assert page.locator(".source-card[data-source-id='offline-guide']").count() == 0
+        page.locator("#source-add").click()
+        expect(page.locator("#source-dialog")).to_be_visible()
+        expect(page.locator("#source-upload-file")).to_have_value("")
+        page.locator("#source-cancel").click()
 
         # Closed #78: independent search/format/publication/download filters,
         # reset, counts and stable alphabetical sorting without duplicates.
