@@ -149,7 +149,7 @@ def valid_public_host(value: str) -> bool:
         return False
 
     if value.startswith("["):
-        match = re.fullmatch(r"\\[([0-9a-fA-F:.]+)\\](?::([0-9]{1,5}))?", value)
+        match = re.fullmatch(r"\[([0-9a-fA-F:.]+)\](?::([0-9]{1,5}))?", value)
         if match is None:
             return False
         try:
