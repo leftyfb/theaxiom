@@ -10,7 +10,7 @@ start downloads, publish sources, or use production credentials.
 
 The `Application CI` workflow runs this check after the existing Python,
 Kiwix, and Nginx tests. It installs Playwright, Chromium, and the pinned PDF.js distribution and exercises
-1366×900 desktop and 390×844 mobile viewports for the administrator suite,
+1366×900 desktop, 390×844 mobile and 320×640 narrow viewports for the administrator suite,
 and 1366×900, 768×1024, 390×844, and 320×640 reader viewports. A failed run uploads
 screenshots and uncaught JavaScript errors as the
 `browser-regression-failures` workflow artifact.
@@ -27,7 +27,9 @@ additional synthetic PDF and EPUB sources, exercise PDF highlights/print
 preparation/download, EPUB keyboard and skip-link focus activation, PDF search focus
 restoration and no-match recovery, and verify unpublished reader
 URLs return 403. Bulk publish/unpublish/remove and tag/collection membership operations use
-additional disposable catalog records only. These checks never contact production, download source
+additional disposable catalog records only. Bulk publication tests also verify
+real PDF/EPUB reader and download HTTP routes become forbidden on unpublish
+and reachable again after republishing, with no live content involved. These checks never contact production, download source
 material, or mutate operator publication state.
 
 - Public homepage and search navigation
@@ -37,8 +39,8 @@ material, or mutate operator publication state.
 - Filter behavior with matching and non-matching source names
 - Source bulk-selection toggle behavior, without carrying out a bulk action
 - Groupings and Settings navigation
-- Horizontal overflow checks on the admin pages at both viewport widths
-- Logout and session invalidation
+- Horizontal overflow checks on public home/search and admin pages at all three administrator viewport widths
+- Login failure isolation, cross-browser session isolation, multi-tab logout revocation, and session invalidation
 - Uncaught browser JavaScript errors
 
 These are **behavioral regression checks**, not screenshot-golden tests.
