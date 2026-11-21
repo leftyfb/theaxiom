@@ -315,7 +315,10 @@ def exercise_bulk(browser, base, artifacts, catalog):
                           "/api/library/pdf/reader-pdf/document.pdf",
                           "/api/library/epub/reader-epub",
                           "/api/library/epub/reader-epub/document.epub"):
-                response = public.goto(base + route)
+                # A successful document endpoint starts a browser download;
+                # use the same browser context HTTP client to assert status
+                # without turning navigation into a Playwright download error.
+                response = context.request.get(base + route)
                 assert response.status == 200, (route, response.status)
         finally:
             public.close()
