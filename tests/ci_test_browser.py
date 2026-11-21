@@ -59,8 +59,8 @@ def exercise(browser, base, name, viewport, artifacts):
             outsider.goto(base + "/")
             expect(outsider.locator("body")).to_be_visible()
             # The original authenticated context must remain signed in.
-            page.goto(base + "/admin/sources")
-            expect(page).to_have_url(base + "/admin/sources")
+            page.goto(base + "/admin")
+            expect(page.locator("h1")).to_contain_text("Manage offline sources")
         finally:
             isolated.close()
 
