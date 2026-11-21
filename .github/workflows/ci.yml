@@ -11,8 +11,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - name: Install application and test dependencies
@@ -41,14 +41,14 @@ jobs:
         run: python tests/ci_test_browser.py
       - name: Upload browser failure screenshots
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: browser-regression-failures
           path: ${{ runner.temp }}/axiom-browser/
           if-no-files-found: ignore
       - name: Upload test summary
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: pytest-output
           path: ${{ runner.temp }}/axiom-pytest.log
@@ -61,7 +61,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Retrieve test output
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         continue-on-error: true
         with:
           name: pytest-output
