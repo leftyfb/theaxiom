@@ -43,12 +43,18 @@ def exercise(browser, base, name, viewport, artifacts):
         expect(page.locator("h1")).to_contain_text("Manage offline sources")
 
         # A real modal and its controls need to be operable at both widths.
-        page.locator("#source-guide-open").click()
+        guide_trigger = page.locator("#source-guide-open")
+        guide_trigger.focus()
+        expect(guide_trigger).to_be_focused()
+        page.keyboard.press("Enter")
         expect(page.locator("#source-guide")).to_be_visible()
         page.keyboard.press("Escape")
         expect(page.locator("#source-guide")).to_be_hidden()
 
-        page.locator("#source-filter-toggle").click()
+        filter_toggle = page.locator("#source-filter-toggle")
+        filter_toggle.focus()
+        expect(filter_toggle).to_be_focused()
+        page.keyboard.press("Enter")
         expect(page.locator("#source-filters-panel")).to_be_visible()
         expect(page.locator("#source-filter-toggle")).to_have_attribute("aria-expanded", "true")
         page.locator("#source-filter-toggle").click()
@@ -74,8 +80,11 @@ def exercise(browser, base, name, viewport, artifacts):
         page.locator("#source-filter-search").fill("")
 
         # Bulk-selection state and keyboard access: no action is executed.
-        page.locator("#source-select-mode").click()
-        expect(page.locator("#source-select-mode")).to_have_attribute("aria-pressed", "true")
+        selection_toggle = page.locator("#source-select-mode")
+        selection_toggle.focus()
+        expect(selection_toggle).to_be_focused()
+        page.keyboard.press("Enter")
+        expect(selection_toggle).to_have_attribute("aria-pressed", "true")
         expect(page.locator("#group-select-all")).to_be_visible()
         page.locator("#source-select-mode").click()
         expect(page.locator("#source-select-mode")).to_have_attribute("aria-pressed", "false")
