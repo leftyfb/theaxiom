@@ -126,7 +126,7 @@ def exercise(browser, base, viewport_name, viewport, artifact_dir):
         expect(page.locator("#search-tools")).to_be_hidden()
         page.get_by_role("button", name="Zoom in").click()
         expect(page.locator("#paper")).to_be_visible()
-        page.get_by_role("button", name="Page thumbnails").click()
+        page.get_by_role("button", name="Thumbnails").click()
         expect(page.locator("#thumbs")).to_be_visible()
         expect(page.locator("#thumbs button")).to_have_count(2)
         page.locator("#thumbs button").nth(1).click()
