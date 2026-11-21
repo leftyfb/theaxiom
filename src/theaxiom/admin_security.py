@@ -139,16 +139,36 @@ class ServerConfig:
 
 
 def valid_public_host(value: str) -> bool:
-    """Accept syntactically valid public hostnames/IPs, never arbitrary header data."""
-    if not isinstance(value, str) or len(value) > 255 or not value or any(ord(c) < 33 or ord(c) > 126 for c in value):
+    """Accept well-formed DNS names and IP literals, not a configured allowlist.
+
+    This validates syntax only. The loopback-only backend and Nginx remain
+    the trust boundary; arbitrary future LAN and Tailscale names work.
+    """
+    if (not isinstance(value, str) or not value or len(value) > 255 or
+            any(ord(c) < 33 or ord(c) > 126 for c in value)):
         return False
-    if re.fullmatch(r"\[[0-9a-fA-F:.]+\](?::[0-9]{1,5})?", value):
+
+    if value.startswith("["):
+        match = re.fullmatch(r"\\[([0-9a-fA-F:.]+)\\](?::([0-9]{1,5}))?", value)
+        if match is None:
+            return False
         try:
-            ipaddress.IPv6Address(value[1:value.index("]")])
-            return True
+            ipaddress.IPv6Address(match.group(1))
         except ValueError:
             return False
-    return bool(re.fullmatch(r"[a-zA-Z0-9](?:[a-zA-Z0-9.-]{0,252}[a-zA-Z0-9])?(?::[0-9]{1,5})?", value))
+        port = match.group(2)
+        return port is None or 1 <= int(port) <= 65535
+
+    if value.count(":") > 1:
+        return False  # IPv6 literals must be bracketed per HTTP Host syntax
+    host, separator, port = value.partition(":")
+    if separator and (not re.fullmatch(r"[0-9]{1,5}", port) or
+                      not 1 <= int(port) <= 65535):
+        return False
+    if len(host) > 253:
+        return False
+    return all(re.fullmatch(r"[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?", label)
+               for label in host.split("."))
 
 
 def load_config(env: Mapping[str, str] | None = None) -> ServerConfig:
