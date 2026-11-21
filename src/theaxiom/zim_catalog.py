@@ -154,7 +154,7 @@ def active_manifest_matches(records, enabled=None, *, acknowledgement=None):
 
 
 
-CONTENT_ROUTE = re.compile(r"/zim/content/(" + publication.GENERIC_BOOK_ID_RE.pattern[:-2] + r")(?:/|$)")
+CONTENT_ROUTE = re.compile(r"/zim/content/(?P<book>[^/]+)(?:/|$)")
 
 
 def content_name(book):
@@ -196,7 +196,9 @@ def authorize_reader_uri(records, uri):
             match = CONTENT_ROUTE.match(path)
             if not match:
                 return False
-            return match.group(1) in {content_name(book) for book in verified_books(records)}
+            book_id = match.group("book")
+            return (publication.GENERIC_BOOK_ID_RE.fullmatch(book_id) is not None
+                    and book_id in {content_name(book) for book in verified_books(records)})
         return bool(verified_books(records))
     except (OSError, ValueError, TypeError):
         return False
