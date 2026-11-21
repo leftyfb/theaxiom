@@ -74,7 +74,8 @@ def main():
     archive = start_server(content_port, Archive)
     try:
         site = SITE.read_text().replace(
-            "listen 192.168.0.4:80;", f"listen 127.0.0.1:{front_port};")
+            "listen 80;", f"listen 127.0.0.1:{front_port};")
+        site = site.replace("listen [::]:80;", "")
         # Keep real static icon routing, using checkout content rather than
         # any deployed host path. This runner must never contact Vancouver.
         site = site.replace("/opt/theaxiom/app/deploy/www",
