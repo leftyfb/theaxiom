@@ -36,6 +36,24 @@ class ConfigTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 load_config(env)
 
+    def test_public_host_syntax_accepts_lan_tailscale_and_ipv6(self):
+        from theaxiom.admin_security import valid_public_host
+        for value in ("vancouver", "vancouver.tailnet-name.ts.net",
+                      "100.109.10.20", "192.168.1.40:8080",
+                      "host-name.example.org", "[::1]", "[fd7a:115c:a1e0::1]:80"):
+            with self.subTest(value=value):
+                self.assertTrue(valid_public_host(value))
+
+    def test_public_host_syntax_rejects_malformed_authorities(self):
+        from theaxiom.admin_security import valid_public_host
+        for value in ("", ".example.org", "host..example", "-host.example",
+                      "host-.example", "host:0", "host:65536", "host:99999",
+                      "host:garbage", "host:80:90", "::1", "[::1]:99999",
+                      "[::zzz]", "host/other", "host@other", "host\\r\\nX-Injected: yes",
+                      "a" * 64 + ".example"):
+            with self.subTest(value=value):
+                self.assertFalse(valid_public_host(value))
+
     def test_initialization_never_overwrites(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "credential"
