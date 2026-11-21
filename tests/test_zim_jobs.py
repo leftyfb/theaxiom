@@ -225,3 +225,26 @@ def test_attempt_history_is_bounded_and_preserves_outcomes():
     assert len(job["attempt_history"]) == zim_jobs.HISTORY_LIMIT
     assert job["attempt_history"][0]["downloaded_bytes"] == 8
     assert job["attempt_history"][-1]["downloaded_bytes"] == 19
+
+
+def test_invalid_header_after_complete_transfer_is_retained_without_publication(disk):
+    from contextlib import contextmanager
+    data = bytearray(fixture_bytes())
+    data[0] = 0
+    class Body(BytesIO):
+        total_size = len(data)
+        etag = '"stable-header"'
+        last_modified = None
+    @contextmanager
+    def transport(url, **kwargs):
+        yield Body(bytes(data))
+    with patch.object(zim_source.pdf_transport, "open_pdf", transport):
+        zim_jobs.start("ready", CONFIG)
+        join_worker()
+    job = zim_jobs.read("ready")
+    assert job["state"] == "failed" and job["retained"]
+    assert "Invalid ZIM header" in job["detail"]
+    assert job["attempt_history"][-1]["state"] == "failed"
+    assert job["attempt_history"][-1]["expected_bytes"] == len(data)
+    assert (disk / "staging/zim/.download-ready.partial").read_bytes() == data
+    assert not list((disk / "library/zim").iterdir()
