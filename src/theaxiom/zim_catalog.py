@@ -197,7 +197,7 @@ def authorize_reader_uri(records, uri):
             if not match:
                 return False
             book_id = match.group("book")
-            return (publication.GENERIC_BOOK_ID_RE.fullmatch(book_id) is not None
+            return (publication.valid_book_id(book_id)
                     and book_id in {content_name(book) for book in verified_books(records)})
         return bool(verified_books(records))
     except (OSError, ValueError, TypeError):
