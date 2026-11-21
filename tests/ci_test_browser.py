@@ -91,8 +91,10 @@ def exercise(browser, base, name, viewport, artifacts):
         page.keyboard.press("Enter")
         expect(selection_toggle).to_have_attribute("aria-pressed", "true")
         expect(page.locator("#group-select-all")).to_be_visible()
-        page.locator("#source-select-mode").click()
-        expect(page.locator("#source-select-mode")).to_have_attribute("aria-pressed", "false")
+        selection_toggle.focus()
+        page.keyboard.press("Enter")
+        expect(selection_toggle).to_have_attribute("aria-pressed", "false")
+        expect(page.locator("#group-select-all")).to_be_hidden()
 
         card = page.locator(".source-card[data-source-id='" + sid + "']")
         card.locator("summary.source-header").click()
