@@ -180,6 +180,10 @@ def exercise(browser, base, name, viewport, artifacts):
         expect(reset_filters).to_be_focused()
         page.keyboard.press("Enter")
         expect(page.locator(".source-card[data-source-id='" + sid + "']")).to_be_visible()
+        expect(page.locator("#source-filter-format")).to_have_value("")
+        expect(page.locator("#source-filter-download")).to_have_value("")
+        expect(page.locator("#source-filter-publication")).to_have_value("")
+        expect(page.locator("#source-filter-search")).to_have_value("")
         page.locator("#source-filter-sort").select_option("alpha")
         names = page.locator("#source-cards .source-row:not([hidden]) .source-card").evaluate_all(
             "(cards) => cards.map(card => card.dataset.filterTitle.toLocaleLowerCase())")
@@ -188,6 +192,7 @@ def exercise(browser, base, name, viewport, artifacts):
             "(cards) => cards.map(card => card.dataset.sourceId)")
         assert len(ids) == len(set(ids)), "source cards duplicated during sort"
         page.locator("#source-filter-reset").click()
+        expect(page.locator("#source-filter-sort")).not_to_have_value("alpha")
         page.locator("#source-filter-toggle").click()
 
         # Closed #71: selection checkboxes are opt-in and bulk publication
