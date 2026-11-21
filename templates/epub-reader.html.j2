@@ -12,7 +12,21 @@
 <main><h1>{{ record.profile.title }}</h1>{% if record.profile.author %}<p>{{ record.profile.author }}</p>{% endif %}
 <nav aria-label="Reading controls"><a href="{{ base }}/document.epub" download>Download EPUB</a><span>Text size:</span>{% for option in ('small','medium','large') %}<a href="{{ base }}/chapter/{{ chapter }}?size={{ option }}"{% if size == option %} aria-current="true"{% endif %}>{{ option|capitalize }}</a>{% endfor %}</nav>
 <details><summary>Table of contents</summary><ol>{% for label in labels %}<li><a href="{{ base }}/chapter/{{ loop.index0 }}?size={{ size }}"{% if loop.index0 == chapter %} aria-current="page"{% endif %}>{{ label }}</a></li>{% endfor %}</ol></details>
-<nav aria-label="Chapter navigation">{% if chapter > 0 %}<a href="{{ base }}/chapter/{{ chapter-1 }}?size={{ size }}">← Previous</a>{% endif %}<span>Chapter {{ chapter+1 }} of {{ labels|length }}</span>{% if chapter+1 < labels|length %}<a href="{{ base }}/chapter/{{ chapter+1 }}?size={{ size }}">Next →</a>{% endif %}</nav>
+<nav aria-label="Chapter navigation">{% if chapter > 0 %}<a href="{{ base }}/chapter/{{ chapter-1 }}?size={{ size }}" data-chapter-nav="previous">← Previous</a>{% endif %}<span>Chapter {{ chapter+1 }} of {{ labels|length }}</span>{% if chapter+1 < labels|length %}<a href="{{ base }}/chapter/{{ chapter+1 }}?size={{ size }}" data-chapter-nav="next">Next →</a>{% endif %}</nav>
 <article class="book {{ size }}">{{ content|safe }}</article>
-<nav aria-label="Continue reading">{% if chapter > 0 %}<a href="{{ base }}/chapter/{{ chapter-1 }}?size={{ size }}">← Previous</a>{% endif %}{% if chapter+1 < labels|length %}<a href="{{ base }}/chapter/{{ chapter+1 }}?size={{ size }}">Next →</a>{% endif %}<a href="/">Return to library</a></nav>
-</main></body></html>
+<nav aria-label="Continue reading">{% if chapter > 0 %}<a href="{{ base }}/chapter/{{ chapter-1 }}?size={{ size }}" data-chapter-nav="previous">← Previous</a>{% endif %}{% if chapter+1 < labels|length %}<a href="{{ base }}/chapter/{{ chapter+1 }}?size={{ size }}" data-chapter-nav="next">Next →</a>{% endif %}<a href="/">Return to library</a></nav>
+</main><script>
+// Chapter shortcuts apply only while reading, never while editing or using shortcuts.
+document.addEventListener('keydown', (event) => {
+  if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || event.repeat) return;
+  if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+  const target = event.target;
+  if (target instanceof Element && (target.closest('input, textarea, select, button, [contenteditable], [role="textbox"], [role="combobox"]') || target.isContentEditable)) return;
+  const direction = event.key === 'ArrowLeft' ? 'previous' : 'next';
+  const link = document.querySelector('nav[aria-label="Chapter navigation"] a[data-chapter-nav="' + direction + '"]');
+  if (!link) return;
+  event.preventDefault();
+  window.location.assign(link.href);
+});
+</script>
+</body></html>
