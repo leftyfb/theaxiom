@@ -79,6 +79,21 @@ def verified_books(records, enabled=None):
                 "id": sid, "path": str(Path(root) / "library" / "zim" / filename),
                 "title": title, "language": language,
             })
+    # Wikipedia is the existing trusted acquisition, not a generic ZIM job.
+    # Require the acquisition monitor's current, independent verification
+    # evidence; never hash or modify the 127 GB archive at reader startup.
+    if enabled.get("wikipedia-en", False):
+        from . import acquisition_monitor, source_catalog
+        trusted = source_catalog.WIKIPEDIA_SOURCE
+        evidence = acquisition_monitor.collect(trusted)
+        if (evidence.get("state") == "completed" and
+                evidence.get("verified") is True and evidence.get("active") is False and
+                evidence.get("filename") == trusted["filename"] and
+                evidence.get("sha256") == trusted["sha256"] and
+                evidence.get("expected_bytes") == trusted["bytes"]):
+            result.append({"id": trusted["source_id"],
+                           "path": str(Path(root) / "library" / "zim" / trusted["filename"]),
+                           "title": trusted["title"], "language": trusted["language"]})
     return sorted(result, key=lambda book: book["id"])
 
 
