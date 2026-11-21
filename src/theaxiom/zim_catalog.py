@@ -154,7 +154,7 @@ def active_manifest_matches(records, enabled=None, *, acknowledgement=None):
 
 
 
-CONTENT_ROUTE = re.compile(r"/zim/content/([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.[a-f0-9]{64})(?:/|$)")
+CONTENT_ROUTE = re.compile(r"/zim/content/(" + publication.GENERIC_BOOK_ID_RE.pattern[:-2] + r")(?:/|$)")
 
 
 def content_name(book):
