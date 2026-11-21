@@ -47,6 +47,23 @@ def exercise(browser, base, name, viewport, artifacts):
         expect(page).to_have_url(base + "/admin")
         expect(page.locator("h1")).to_contain_text("Manage offline sources")
 
+        # An authenticated browser context must not authorize a separate
+        # browser context. This catches accidental global auth state and
+        # cookie leakage in the real HTTP handler (no mock responses).
+        isolated = browser.new_context(viewport=viewport)
+        try:
+            outsider = isolated.new_page()
+            for protected in ("/admin", "/admin/sources", "/admin/groupings", "/admin/settings"):
+                outsider.goto(base + protected)
+                expect(outsider).to_have_url(base + "/admin/login")
+            outsider.goto(base + "/")
+            expect(outsider.locator("body")).to_be_visible()
+            # The original authenticated context must remain signed in.
+            page.goto(base + "/admin/sources")
+            expect(page).to_have_url(base + "/admin/sources")
+        finally:
+            isolated.close()
+
         # A real modal and its controls need to be operable at both widths.
         guide_trigger = page.locator("#source-guide-open")
         guide_trigger.focus()
