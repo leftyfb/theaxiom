@@ -19,9 +19,9 @@ ATOM = "{http://www.w3.org/2005/Atom}"
 MAX_RESPONSE = 256 * 1024
 
 
-def listed_book_ids(*, port=8082):
+def listed_book_ids(*, port=None):
     """Return a bounded set of strictly local OPDS content IDs."""
-    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
+    connection = http.client.HTTPConnection("127.0.0.1", port if port is not None else zim_catalog.GENERIC_READER["port"], timeout=2)
     try:
         connection.request("GET", "/zim/catalog/v2/entries?count=101")
         response = connection.getresponse()
