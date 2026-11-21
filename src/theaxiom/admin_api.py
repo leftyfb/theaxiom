@@ -272,7 +272,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 f"{host}:{port}", f"localhost:{port}"
             }))
         hosts = self.headers.get_all("Host", [])
-        if len(hosts) != 1 or hosts[0].lower() not in config.allowed_hosts:
+        if len(hosts) != 1 or not (security.valid_public_host(hosts[0]) if config.proxied else hosts[0].lower() in config.allowed_hosts):
             self._send_json(400, {"error": "invalid host"})
             return False
         public_paths = set(PUBLIC_ICON_PATHS) | {"/", "/index.html", "/health", "/health/",
