@@ -148,7 +148,11 @@ def test_reader_content_auth_requires_specific_published_book(disk):
     publication.save("ready", True)
     name = zim_catalog.content_name({"path": artifact["filename"]})
     assert name == "ready." + artifact["sha256"]
-    with patch.object(zim_catalog, "active_manifest_matches", return_value=True):
+    import hashlib
+    manifest = zim_catalog.write_manifest([rec], {"ready": True})
+    checkpoint = disk / "reader-ack.sha256"
+    checkpoint.write_text(hashlib.sha256(manifest.read_bytes()).hexdigest() + "\n")
+    with patch.object(zim_catalog, "RUNTIME_ACK", checkpoint):
         assert zim_catalog.authorize_reader_uri([rec], "/zim/content/" + name + "/article")
         assert zim_catalog.authorize_reader_uri([rec], "/zim/viewer")
         assert not zim_catalog.authorize_reader_uri([rec], "/zim/content/other/article")
