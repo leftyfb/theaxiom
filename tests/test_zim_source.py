@@ -26,7 +26,7 @@ def test_zim_6_header_accepts_legacy_title_pointer_or_retired_sentinel(title_poi
     zim_source.check_header(bytes(data[:80]), len(data))
 
 
-@pytest.mark.parametrize("title_pointer", [1, 79, 89, 0xfffffffffffffffe])
+@pytest.mark.parametrize("title_pointer", [1, 79, 101, 0xfffffffffffffffe])
 def test_zim_6_header_rejects_invalid_title_pointer(title_pointer):
     data = bytearray(fixture_bytes())
     struct.pack_into("<Q", data, 40, title_pointer)
