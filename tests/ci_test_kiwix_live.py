@@ -105,6 +105,7 @@ def main():
             # Capture complete native error semantics for both identifiers.
             # A fixture without a Xapian full-text index may legitimately
             # return 400; record that distinctly from a server exception.
+            search_failures = []
             for selector, value in (
                 ("books.name", "axiom-smoke"),
                 ("books.name", expected),
@@ -123,8 +124,8 @@ def main():
                     readable = re.sub(r"\\s+", " ", unescape(readable))
                     print(f"SEARCH DIAGNOSTIC {selector}={value[:28]} "
                           f"HTTP {response.status}: {readable[-900:]}", flush=True)
-                    # Capture failures for every selector before evaluating
-                    # which identities are valid and whether indexing exists.
+                    if response.status >= 500 or b"map::at" in body:
+                        search_failures.append((selector, response.status))
                 finally:
                     connection.close()
             # Probe all selectors even when one fails: the fixture may not
@@ -140,6 +141,7 @@ def main():
             print("\n".join(line for line in
                   (help_result.stdout + help_result.stderr).splitlines()
                   if "index" in line.lower() or "search" in line.lower()), flush=True)
+            assert not search_failures, f"native Kiwix search crashes: {search_failures!r}"
             print(f"PASS isolated native Kiwix search diagnostics completed: {expected}")
             print(f"PASS real ZIM OPDS and viewer: {expected}")
             # The live service must pick up a second book without a restart,
