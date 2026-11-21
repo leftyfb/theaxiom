@@ -143,7 +143,11 @@ def exercise(browser, base, name, viewport, artifacts):
         # Closed #3/#76: explicit cancel leaves source intact, confirmed
         # removal deletes ONLY the test catalog entry (no artifact exists).
         card = page.locator(".source-card[data-source-id='" + sid + "']")
-        card.locator("summary.source-header").click()
+        # Edit/save preserves expanded cards across reloads. Do not collapse
+        # an already-open card before interacting with its Remove button.
+        if not card.evaluate("(element) => element.open"):
+            card.locator("summary.source-header").click()
+        expect(card.locator("[data-catalog-remove]")).to_be_visible()
         page.once("dialog", lambda dialog: dialog.dismiss())
         card.locator("[data-catalog-remove]").click()
         expect(card).to_be_visible()
