@@ -268,6 +268,13 @@ def exercise(browser, base, name, viewport, artifacts):
             assert overflow["scroll"] <= overflow["viewport"] + 2, (
                 f"{name} {path} horizontal overflow: {overflow}")
 
+        # Two tabs in the same browser context share one session. Signing
+        # out in either tab must revoke access in the other, not merely
+        # redirect the tab that clicked Sign out.
+        sibling_tab = context.new_page()
+        sibling_tab.goto(base + "/admin")
+        expect(sibling_tab.locator("h1")).to_contain_text("Manage offline sources")
+
         # Logout must revoke the session and redirect back to sign-in.
         logout = page.locator("#admin-logout")
         if logout.count():
@@ -279,6 +286,9 @@ def exercise(browser, base, name, viewport, artifacts):
             expect(logout).to_be_visible()
             logout.click()
             expect(page).to_have_url(base + "/admin/login")
+        sibling_tab.goto(base + "/admin/settings")
+        expect(sibling_tab).to_have_url(base + "/admin/login")
+        sibling_tab.close()
         # Browser history and direct URL navigation must not restore a
         # revoked admin session after logout (closed authentication issues).
         page.goto(base + "/admin/sources")
