@@ -293,10 +293,20 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             local_hosts.update({config.host, "localhost"})
         self._session_csrf = None
         self._session_token = None
-        basic = (len(auth) <= 1 and
+        # Browsers must use revocable sessions, not cached HTTP Basic
+        # credentials that cannot be cleared by the application's Sign out.
+        # Preserve Basic for explicit nonbrowser clients and deploy probes.
+        browser_admin_navigation = (not post and self.path.rstrip("/") in {
+            "/admin", "/admin/sources", "/admin/settings", "/admin/groupings"
+        } and "text/html" in self.headers.get("Accept", "").lower())
+        browser_request = (browser_admin_navigation or
+                           self.headers.get("Sec-Fetch-Mode") in {
+                               "navigate", "cors", "same-origin"
+                           })
+        basic = (not browser_request and len(auth) <= 1 and
                  not (config.store is None and hosts[0].lower() not in local_hosts)
                  and config.authorized(auth[0] if auth else None))
-        if not basic and not auth and config.store is not None:
+        if not basic and (not auth or browser_request) and config.store is not None:
             token = admin_sessions.token_from_headers(self.headers)
             csrf = ADMIN_SESSIONS.authenticate(token, config.store)
             if csrf is not None:
