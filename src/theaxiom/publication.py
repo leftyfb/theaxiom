@@ -82,13 +82,24 @@ def reachable(route):
 GENERIC_BOOK_ID_RE = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.[a-f0-9]{64}\Z")
 
 
+# The pre-existing, separately verified Wikipedia archive predates digest-suffixed
+# generic filenames. Only its exact trusted filename stem is an exception.
+def valid_book_id(book_id):
+    if not isinstance(book_id, str):
+        return False
+    if GENERIC_BOOK_ID_RE.fullmatch(book_id):
+        return True
+    from .source_catalog import WIKIPEDIA_SOURCE
+    return book_id == Path(WIKIPEDIA_SOURCE["filename"]).stem
+
+
 def reader_location(route, book_id=None):
     """Discover the single local book's content link from Kiwix OPDS.
 
     Only accept a local, prefix-scoped book link. Never follow a remote URL
     or return catalog-supplied executable markup.
     """
-    if book_id is not None and not GENERIC_BOOK_ID_RE.fullmatch(book_id):
+    if book_id is not None and not valid_book_id(book_id):
         return None
     connection = http.client.HTTPConnection("127.0.0.1", route["port"], timeout=2)
     try:
