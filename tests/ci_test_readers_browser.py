@@ -150,6 +150,37 @@ def exercise(browser, base, viewport_name, viewport, artifact_dir):
             assert overflow["scroll"] <= overflow["width"] + 2, (viewport_name, reader_page, overflow)
         page.get_by_role("link", name="Back to library").click()
         expect(page).to_have_url(base + "/")
+
+        # Browser-upload real fixture bytes, then verify persisted catalog state.
+        # The server is bound to loopback and every file is under this test's tempdir.
+        page.goto(base + "/admin/sources")
+        expect(page).to_have_url(base + "/admin/login")
+        page.locator("#username").fill("admin")
+        page.locator("#password").fill("fixture-password-not-production")
+        page.locator("#submit").click()
+        expect(page).to_have_url(base + "/admin")
+        for kind, data in (("pdf", pdf_fixture()), ("epub", epub_fixture())):
+            sid = f"browser-upload-{viewport_name}-{kind}"
+            page.locator("#source-add").click()
+            expect(page.locator("#source-dialog")).to_be_visible()
+            page.locator("#source-upload-file").set_input_files({
+                "name": f"Browser_Upload_{viewport_name}_{kind}.{kind}",
+                "mimeType": "application/pdf" if kind == "pdf" else "application/epub+zip",
+                "buffer": data,
+            })
+            expect(page.locator("#catalog-format")).to_have_value(kind)
+            with page.expect_navigation(wait_until="domcontentloaded", timeout=45000):
+                page.locator('#source-form [type="submit"]').click()
+            card = page.locator(f'.source-card[data-source-id="{sid}"]')
+            expect(card).to_be_visible(timeout=15000)
+            page.reload()
+            expect(page.locator(f'.source-card[data-source-id="{sid}"]')).to_be_visible()
+            card = page.locator(f'.source-card[data-source-id="{sid}"]')
+            card.locator("summary.source-header").click()
+            page.once("dialog", lambda dialog: dialog.accept())
+            with page.expect_navigation(wait_until="domcontentloaded"):
+                card.locator("[data-catalog-remove]").click()
+            expect(page.locator(f'.source-card[data-source-id="{sid}"]')).to_have_count(0)
         assert not errors, f"{viewport_name}: reader JS errors {errors}"
         print(f"PASS {viewport_name}: real PDF search/navigation and EPUB chapters/download")
     except Exception:
