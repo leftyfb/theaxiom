@@ -62,3 +62,17 @@ def test_multi_book_rejects_ambiguous_or_external_content_entry():
             response.status = 200
             response.read.return_value = xml.encode()
             assert publication.reader_location(route, READY) is None
+
+
+def test_generic_reader_port_configuration(monkeypatch):
+    from theaxiom import zim_catalog
+    monkeypatch.setenv("THEAXIOM_KIWIX_PORT", "8083")
+    assert zim_catalog.generic_reader() == {"path": "/zim/", "port": 8083}
+    for invalid in ("0", "65536", "-1", "80.5", "abc", " 8082"):
+        monkeypatch.setenv("THEAXIOM_KIWIX_PORT", invalid)
+        try:
+            zim_catalog.generic_reader()
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"accepted invalid port: {invalid!r}")
