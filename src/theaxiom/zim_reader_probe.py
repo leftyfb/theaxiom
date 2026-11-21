@@ -43,7 +43,7 @@ def listed_book_ids(*, port=8082):
                 if u.scheme or u.netloc or u.query or u.fragment or not u.path.startswith(prefix):
                     continue
                 ident = u.path[len(prefix):].rstrip("/")
-                if re.fullmatch(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.[a-f0-9]{64}', ident):
+                if publication.GENERIC_BOOK_ID_RE.fullmatch(ident):
                     names.add(ident)
             if len(names) != 1:
                 raise ValueError("Ambiguous Kiwix book identity")
