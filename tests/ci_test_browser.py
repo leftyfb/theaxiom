@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import tempfile
 import threading
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from playwright.sync_api import sync_playwright, expect
@@ -135,6 +136,10 @@ def main():
                     host, port = server.server_address
                     server.axiom_config = ServerConfig(host, port, frozenset({f"{host}:{port}"}),
                                                        "admin", PasswordStore(credential))
+                    # Catalog mutations deliberately fail closed when monitoring is stale.
+                    # Supply a clean test-only snapshot; do not relax production guards.
+                    server.acquisition_monitor = SimpleNamespace(
+                        snapshot=lambda: {"stale": False, "acquisitions": []})
                     worker = threading.Thread(target=server.serve_forever, daemon=True)
                     worker.start()
                     try:
