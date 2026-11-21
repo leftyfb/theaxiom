@@ -202,7 +202,15 @@ def authorize_reader_uri(records, uri):
         return False
 
 
-GENERIC_READER = {"path": "/zim/", "port": 8082}
+def generic_reader():
+    """Kiwix listens on one configurable local port; default avoids Axiom's 8080."""
+    value = os.environ.get("THEAXIOM_KIWIX_PORT", "8082")
+    if not re.fullmatch(r"[0-9]{1,5}", value) or not 1 <= int(value) <= 65535:
+        raise ValueError("invalid Kiwix listener port")
+    return {"path": "/zim/", "port": int(value)}
+
+
+GENERIC_READER = generic_reader()
 
 
 def status(record, records):
