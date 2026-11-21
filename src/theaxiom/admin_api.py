@@ -304,12 +304,21 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         if not login and not basic and self._session_csrf is None:
             if not post and self.path.rstrip("/") in {
                     "/admin", "/admin/sources", "/admin/settings", "/admin/groupings"}:
-                self.send_response(303)
-                self.send_header("Location", "/admin/login")
-                self.send_header("Cache-Control", "no-store")
-                self.send_header("Content-Length", "0")
-                self.end_headers()
-                return False
+                # Real browser navigation advertises HTML; render the branded
+                # login. Legacy curl/API probes still receive their expected
+                # 401 Basic challenge, preserving fixed deploy preflight checks.
+                accepts = self.headers.get_all("Accept", [])
+                browser_navigation = (len(accepts) == 1 and any(
+                    mime.strip().split(";", 1)[0].strip().lower() == "text/html"
+                    for mime in accepts[0].split(",")
+                ))
+                if browser_navigation:
+                    self.send_response(303)
+                    self.send_header("Location", "/admin/login")
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return False
             # Browser fetches never receive a native Basic challenge; explicit
             # API clients can still discover/challenge the legacy Basic realm.
             if self.headers.get("Sec-Fetch-Mode") in {"cors", "same-origin"}:
