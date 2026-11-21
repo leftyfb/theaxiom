@@ -220,12 +220,24 @@ def exercise(browser, base, name, viewport, artifacts):
         if not card.evaluate("(element) => element.open"):
             card.locator("summary.source-header").click()
         expect(card.locator("[data-catalog-remove]")).to_be_visible()
+        remove_source = card.locator("[data-catalog-remove]")
+        remove_source.focus()
+        expect(remove_source).to_be_focused()
         page.once("dialog", lambda dialog: dialog.dismiss())
-        card.locator("[data-catalog-remove]").click()
+        page.keyboard.press("Enter")
         expect(card).to_be_visible()
+        # Dismissing the native confirmation must preserve the catalog entry
+        # even after a fresh server response, not only in the current DOM.
+        page.reload()
+        card = page.locator(".source-card[data-source-id='" + sid + "']")
+        expect(card).to_be_visible()
+        if not card.evaluate("(element) => element.open"):
+            card.locator("summary.source-header").click()
+        remove_source = card.locator("[data-catalog-remove]")
+        remove_source.focus()
         page.once("dialog", lambda dialog: dialog.accept())
         with page.expect_navigation(wait_until="domcontentloaded"):
-            card.locator("[data-catalog-remove]").click()
+            page.keyboard.press("Enter")
         expect(page.locator(".source-card[data-source-id='" + sid + "']")).to_have_count(0)
         page.reload()
         expect(page.locator(".source-card[data-source-id='" + sid + "']")).to_have_count(0)
