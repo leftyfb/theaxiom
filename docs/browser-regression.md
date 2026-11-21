@@ -9,7 +9,7 @@ start downloads, publish sources, or use production credentials.
 ## Continuous integration
 
 The `Application CI` workflow runs this check after the existing Python,
-Kiwix, and Nginx tests. It installs Playwright and Chromium and exercises
+Kiwix, and Nginx tests. It installs Playwright, Chromium, and the pinned PDF.js distribution and exercises
 both 1366×900 desktop and 390×844 mobile viewports. A failed run uploads
 screenshots and uncaught JavaScript errors as the
 `browser-regression-failures` workflow artifact.
@@ -21,8 +21,12 @@ renderer. It generates a two-page searchable PDF with real PDF cross-reference
 objects and a two-chapter EPUB ZIP package, writes those artifacts only to an
 ephemeral, mounted test-storage directory and publishes them in a disposable
 catalog. Desktop and mobile Chromium navigate the real reader HTTP routes.
-These checks never contact production, download source material, or mutate
-operator publication state.
+These checks also use the real browser upload flow to import and remove
+additional synthetic PDF and EPUB sources, exercise PDF highlights/print
+preparation/download, EPUB keyboard activation, and verify unpublished reader
+URLs return 403. Bulk publish/unpublish/remove uses additional disposable
+catalog records only. These checks never contact production, download source
+material, or mutate operator publication state.
 
 - Public homepage and search navigation
 - Administrator sign-in boundary, incorrect password and valid login
@@ -59,9 +63,10 @@ Chromium browser tests complement (do not replace) the independent real Nginx
 publication/authentication tests, Kiwix fixture smoke test, and application
 unit tests. They currently do not test production-specific Tailscale routing,
 1Password browser integration, accessibility with a screen reader, actual
-network interruptions, large downloads, or full PDF print workflows. The
-synthetic reader fixtures exercise basic actual PDF/EPUB journeys rather than
-comprehensive search accessibility, keyboard or print verification.
+network interruptions, large downloads, or the operating-system print dialog.
+The synthetic reader fixtures verify the print preparation path using a
+browser-intercepted print call, but do not physically print. Screen-reader
+accessibility and all keyboard/focus journeys remain incomplete.
 
 Next browser coverage should use isolated small PDF, EPUB and ZIM fixtures to
 exercise reader navigation and search, source publication controls and role
@@ -86,11 +91,11 @@ matrix must not be mistaken for owner acceptance or a live production test.
 | #16, #44, #90–92, #97 | Shared Kiwix, UUID book identity, reader navigation/back, native search | Real isolated Kiwix CI fixture and unit tests; full native browser article/search coverage still pending |
 | #45 | Public homepage compact mobile layout, no overflow, navigable Getting Started | Partial browser: public home/search; further responsive tests needed |
 | #69 | Discoverable offline content source guide | Browser modal open/dismiss and static template tests |
-| #70, #75, #77 | PDF/EPUB URLs, local upload, metadata and language, reader navigation | Browser: filename-derived title/format; two-chapter EPUB reader/download fixture added; upload/persistence journey pending |
-| #71, #76, #78 | Group management, selection/bulk safety, publication independent filters, sorting, automatic unpublish | Browser: create/rename/delete grouping, filter/reset/ordering, bulk-selection gating and safe catalog removal; actual eligible publish/unpublish with small fixtures pending |
+| #70, #75, #77 | PDF/EPUB URLs, local upload, metadata and language, reader navigation | Browser: real isolated PDF/EPUB fixture uploads, reload persistence and source removal, two-chapter EPUB reader/download |
+| #71, #76, #78 | Group management, selection/bulk safety, publication independent filters, sorting, automatic unpublish | Browser: create/rename/delete grouping, filter/reset/ordering, mixed eligibility, source removal; eligible bulk publish/unpublish/remove with small fixtures (verification pending); group membership bulk operations pending |
 | #73 | Correct Bug-In Guide authorship/source choice | Catalog metadata/source unit validation; no live download |
-| #74, #80, #81, #84 | Embedded PDF.js controls, search/matches, mobile toolbar | Unit/DOM tests; browser with disposable two-page searchable PDF, navigation, zoom and thumbnails (CI verification pending) |
-| #83 | EPUB chapters, TOC, text size, keyboard navigation, return to library | Unit tests; browser with two-chapter disposable EPUB fixture, TOC, text sizing and download (CI verification pending) |
+| #74, #80, #81, #84 | Embedded PDF.js controls, search/matches, mobile toolbar | Unit/DOM tests; browser with two-page searchable PDF, highlights, match counts, navigation, zoom, thumbnails, print preparation and download (CI passed) |
+| #83 | EPUB chapters, TOC, text size, keyboard navigation, return to library | Unit tests; browser with two-chapter EPUB, TOC, text sizing, keyboard activation, download, and library return (CI passed) |
 | #86 | Pause/resume/cancel source-scoped ZIM download | Unit/CI state-machine tests; browser transport simulation with small disposable ZIM pending |
 | #89 | LAN and Tailscale Host syntax, login and publication isolation | Unit/CI Host validation and real Nginx auth smoke; network-path test remains deployment-specific |
 | #96 | User-accepted mobile checklist | Retain historical owner acceptance; never auto-check or alter its completed boxes |
@@ -104,8 +109,9 @@ or rely on the owner's external password manager.
 Highest-impact next phases:
 
 1. Extend the **tiny synthetic PDF and EPUB** browser fixtures with
-   unpublished denial/publication changes, PDF highlights and print,
-   EPUB keyboard and focus behavior, and real browser upload journeys.
+   search edge cases, keyboard focus order, accessible dialogs, and error recovery;
+   publication gates, basic search/highlighting, print preparation, and real
+   uploads are already covered.
 2. Exercise multiple disposable source profiles and grouping memberships in
    Chromium, including bulk add/remove, active/busy controls and permissions.
 3. Add keyboard-only navigation checks, automated accessibility audits, and
