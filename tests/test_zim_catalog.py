@@ -211,7 +211,10 @@ def test_reader_auth_does_not_reverify_archives_per_request(disk):
           patch.object(zim_catalog, "render_xml", side_effect=AssertionError("expensive manifest generation"))):
         assert zim_catalog.authorize_reader_uri([rec], "/zim/content/" + name + "/article")
         publication.save("ready", False)
-        assert not zim_catalog.authorize_reader_uri([rec], "/zim/content/" + name + "/article")def test_reader_status_explains_activation_stage(disk):
+        assert not zim_catalog.authorize_reader_uri([rec], "/zim/content/" + name + "/article")
+
+
+def test_reader_status_explains_activation_stage(disk):
     from unittest.mock import patch
     config = CONFIG | {"license": "CC-BY"}
     rec = record("ready", config=config)
