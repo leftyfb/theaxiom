@@ -36,7 +36,7 @@ def check_header(header, size):
             or not 80 <= urls <= checksum - 8 * articles
             or not 80 <= cluster_pos <= checksum - 8 * clusters
             or not 80 <= mime < checksum
-            or (titles != 0 and not 80 <= titles <= checksum - 4 * articles)):
+            or (titles not in (0, 0xffffffffffffffff) and not 80 <= titles <= checksum - 4 * articles)):
         raise ValueError("Invalid ZIM header or index bounds")
 
 
