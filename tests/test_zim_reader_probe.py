@@ -69,3 +69,22 @@ def test_opds_book_identity_rejects_ambiguous_duplicates_and_external_links():
     ):
         with pytest.raises(ValueError):
             read(xml)
+
+
+def test_opds_accepts_only_exact_trusted_legacy_wikipedia_identity():
+    from pathlib import Path
+    from theaxiom.source_catalog import WIKIPEDIA_SOURCE
+    legacy = Path(WIKIPEDIA_SOURCE["filename"]).stem
+    def read(book_id):
+        xml = (f'<feed xmlns="http://www.w3.org/2005/Atom">'
+               f'<entry><link href="/zim/content/{book_id}"/></entry></feed>')
+        with patch.object(zim_reader_probe.http.client, "HTTPConnection") as factory:
+            response = factory.return_value.getresponse.return_value
+            response.status = 200
+            response.read.return_value = xml.encode()
+            return zim_reader_probe.listed_book_ids()
+    assert read(legacy) == {legacy}
+    for invalid in (legacy.upper(), legacy + ".zim", "wikipedia_en_all_maxi_2026-07",
+                    "wikipedia_en_all_maxi_2026-08%2fother"):
+        with pytest.raises(ValueError, match="Ambiguous"):
+            read(invalid)
