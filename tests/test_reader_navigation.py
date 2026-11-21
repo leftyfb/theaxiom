@@ -76,3 +76,31 @@ def test_generic_reader_port_configuration(monkeypatch):
             pass
         else:
             raise AssertionError(f"accepted invalid port: {invalid!r}")
+
+
+def test_legacy_wikipedia_identity_is_exact_and_does_not_weaken_generic_ids():
+    from theaxiom.source_catalog import WIKIPEDIA_SOURCE
+    from pathlib import Path
+    legacy = Path(WIKIPEDIA_SOURCE["filename"]).stem
+    assert publication.valid_book_id(legacy)
+    assert publication.valid_book_id(READY)
+    for invalid in (legacy + ".zim", legacy + "/article", legacy.upper(),
+                    "wikipedia_en_all_maxi_2026-07", "ready", "../" + legacy,
+                    "other_legacy_book", READY.upper()):
+        assert not publication.valid_book_id(invalid)
+
+
+def test_multi_book_reader_can_resolve_trusted_legacy_wikipedia_id():
+    from pathlib import Path
+    from theaxiom.source_catalog import WIKIPEDIA_SOURCE
+    legacy = Path(WIKIPEDIA_SOURCE["filename"]).stem
+    route = {"path": "/zim/", "port": 8082}
+    xml = ('<feed xmlns="http://www.w3.org/2005/Atom">'
+           f'<entry><link href="/zim/content/{legacy}"/></entry>'
+           f'<entry><link href="/zim/content/{READY}"/></entry></feed>')
+    with patch.object(publication.http.client, "HTTPConnection") as factory:
+        response = factory.return_value.getresponse.return_value
+        response.status = 200
+        response.read.return_value = xml.encode()
+        assert publication.reader_location(route, legacy) == f"/zim/viewer#{legacy}/"
+        assert publication.reader_location(route, READY) == f"/zim/viewer#{READY}/"
