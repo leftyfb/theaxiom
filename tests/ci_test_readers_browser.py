@@ -289,11 +289,36 @@ def exercise_bulk(browser, base, artifacts, catalog):
         select("reader-pdf", "reader-epub")
         with page.expect_navigation(wait_until="domcontentloaded", timeout=30000):
             page.locator("#bulk-unpublish").click()
+        # Bulk unpublish must revoke actual reader routes, not just buttons.
+        public = context.new_page()
+        try:
+            for route in ("/api/library/pdf/reader-pdf",
+                          "/api/library/pdf/reader-pdf/document.pdf",
+                          "/api/library/epub/reader-epub",
+                          "/api/library/epub/reader-epub/document.epub"):
+                response = public.goto(base + route)
+                assert response.status == 403, (route, response.status)
+            public.goto(base + "/")
+            assert public.get_by_text("Fixture PDF").count() == 0
+            assert public.get_by_text("Fixture EPUB").count() == 0
+        finally:
+            public.close()
         select("reader-pdf", "reader-epub")
         expect(page.locator("#bulk-publish")).to_be_enabled()
         expect(page.locator("#bulk-unpublish")).to_be_disabled()
         with page.expect_navigation(wait_until="domcontentloaded", timeout=30000):
             page.locator("#bulk-publish").click()
+        # Re-publishing must restore both readers and download assets.
+        public = context.new_page()
+        try:
+            for route in ("/api/library/pdf/reader-pdf",
+                          "/api/library/pdf/reader-pdf/document.pdf",
+                          "/api/library/epub/reader-epub",
+                          "/api/library/epub/reader-epub/document.epub"):
+                response = public.goto(base + route)
+                assert response.status == 200, (route, response.status)
+        finally:
+            public.close()
 
         select("bulk-ineligible-a", "bulk-ineligible-b")
         expect(page.locator("#bulk-publish")).to_be_disabled()
