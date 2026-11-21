@@ -38,3 +38,16 @@ def test_legacy_wikipedia_urls_redirect_to_shared_publication_gated_reader():
     assert "location ^~ /zim/ {" in config
     assert "auth_request /_publication_zim;" in config
     assert "proxy_pass http://127.0.0.1:8082;" not in config
+
+
+def test_shared_kiwix_viewer_has_library_return_for_all_zim_sources():
+    config = (ROOT / "deploy/nginx/theaxiom.conf").read_text()
+    viewer = config.split("location = /zim/viewer {", 1)[1].split("\n    }", 1)[0]
+    assert "auth_request /_publication_zim;" in viewer
+    assert "proxy_pass http://127.0.0.1:8081;" in viewer
+    assert 'proxy_set_header Accept-Encoding "";' in viewer
+    assert "sub_filter_once on;" in viewer
+    assert 'id="kiwix_serve_taskbar_library_button"' in viewer
+    assert 'href="/"' in viewer
+    assert "Back to library" in viewer
+    assert "location ^~ /zim/ {" in config
