@@ -68,6 +68,15 @@ def verified(snapshot, source_id):
 def reachable(route):
     connection = http.client.HTTPConnection("127.0.0.1", route["port"], timeout=1)
     try:
+        # The legacy Wikipedia route now shares the generic /zim/ reader.
+        # Check its exact book in OPDS rather than probing the retired
+        # /wikipedia/ endpoint (or accepting a different published ZIM).
+        if route is ROUTES["wikipedia-en"]:
+            from .source_catalog import WIKIPEDIA_SOURCE
+            return reader_location(
+                {"path": "/zim/", "port": route["port"]},
+                Path(WIKIPEDIA_SOURCE["filename"]).stem,
+            ) is not None
         connection.request("GET", route["path"])
         response = connection.getresponse()
         return response.status == 200
