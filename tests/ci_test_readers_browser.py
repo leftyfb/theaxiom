@@ -128,7 +128,7 @@ def exercise(browser, base, viewport_name, viewport, artifact_dir):
         expect(page.locator("#matches")).to_contain_text("of 3")
         # A missing term must clear stale highlights and allow a new query.
         page.locator("#find").fill("unfindable-synthetic-term")
-        expect(page.locator("#matches")).to_contain_text("0", timeout=20000)
+        expect(page.locator("#matches")).to_have_text("No matches", timeout=20000)
         expect(page.locator("#highlights .active-match")).to_have_count(0)
         page.locator("#find").fill("alpha")
         expect(page.locator("#matches")).to_contain_text("3", timeout=20000)
