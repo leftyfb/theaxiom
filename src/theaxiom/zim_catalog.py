@@ -10,6 +10,8 @@ import os
 from pathlib import Path
 import re
 import tempfile
+import uuid
+import stat
 import time
 from urllib.parse import urlsplit
 import xml.etree.ElementTree as ET
@@ -24,6 +26,14 @@ LANGUAGES = {
 
 def manifest_path():
     return storage_settings.SETTINGS_PATH.with_name("kiwix-library.xml")
+
+
+def archive_uuid(stream):
+    """Read the 16-byte ZIM header UUID (offset 8) without scanning the archive."""
+    header = stream.read(24)
+    if len(header) != 24 or header[:4] != b"ZIM\\x04":
+        raise ValueError("Invalid ZIM header")
+    return str(uuid.UUID(bytes=header[8:24]))
 
 
 def verified_books(records, enabled=None):
@@ -64,8 +74,8 @@ def verified_books(records, enabled=None):
                 # O_NOFOLLOW and verified mount, ownership, size and installed-file
                 # mode checks live in the existing storage adapter.
                 try:
-                    with pdf_source._file(directory, mount, filename, size):
-                        pass
+                    with pdf_source._file(directory, mount, filename, size) as stream:
+                        book_uuid = archive_uuid(stream)
                 except (OSError, ValueError):
                     continue
                 profile = record["profile"]
@@ -75,7 +85,7 @@ def verified_books(records, enabled=None):
                 language = profile.get("language", "").strip().lower()
                 language = LANGUAGES.get(language, language if re.fullmatch(r"[a-z]{3}", language) else "und")
                 result.append({
-                    "id": sid, "path": str(Path(root) / "library" / "zim" / filename),
+                    "id": book_uuid, "path": str(Path(root) / "library" / "zim" / filename),
                     "title": title, "language": language,
                 })
     # Wikipedia is the existing trusted acquisition, not a generic ZIM job.
@@ -90,9 +100,21 @@ def verified_books(records, enabled=None):
                 evidence.get("filename") == trusted["filename"] and
                 evidence.get("sha256") == trusted["sha256"] and
                 evidence.get("expected_bytes") == trusted["bytes"]):
-            result.append({"id": trusted["source_id"],
-                           "path": str(Path(root) / "library" / "zim" / trusted["filename"]),
-                           "title": trusted["title"], "language": trusted["language"]})
+            # Read only the 24-byte header; never hash or mutate Wikipedia.
+            trusted_path = Path(root) / "library" / "zim" / trusted["filename"]
+            try:
+                fd = os.open(trusted_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+                with os.fdopen(fd, "rb") as stream:
+                    info = os.fstat(stream.fileno())
+                    if not stat.S_ISREG(info.st_mode) or info.st_size != trusted["bytes"]:
+                        raise ValueError("Unexpected Wikipedia archive")
+                    trusted_uuid = archive_uuid(stream)
+            except (OSError, ValueError):
+                pass
+            else:
+                result.append({"id": trusted_uuid,
+                               "path": str(trusted_path),
+                               "title": trusted["title"], "language": trusted["language"]})
     return sorted(result, key=lambda book: book["id"])
 
 
@@ -216,11 +238,15 @@ def acknowledged_reader_books(records):
         for book in root:
             if book.tag != "book" or set(book.attrib) != {"id", "path", "title", "language"}:
                 return {}
-            sid = book.get("id")
+            try:
+                uuid.UUID(book.get("id", ""))
+            except (ValueError, AttributeError):
+                return {}
+            filename = Path(book.get("path", "")).name
+            sid = ("wikipedia-en" if filename == trusted["filename"] else filename.split(".", 1)[0])
             if sid in seen or not enabled.get(sid, False):
                 return {}
             seen.add(sid)
-            filename = Path(book.get("path", "")).name
             name = Path(filename).stem
             if not publication.valid_book_id(name) or not filename.endswith(".zim"):
                 return {}

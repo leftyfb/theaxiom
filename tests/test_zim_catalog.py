@@ -1,5 +1,6 @@
 """Generic ZIM manifest requires publication intent and installed verified bytes."""
 import xml.etree.ElementTree as ET
+import uuid
 
 from theaxiom import publication, storage_settings, zim_catalog, zim_jobs, zim_source
 from test_zim_source import CONFIG, disk, fixture_bytes
@@ -29,7 +30,7 @@ def test_only_matching_completed_job_is_included_and_xml_escaped(disk):
     books = ET.fromstring(xml).findall("book")
     assert len(books) == 1
     assert books[0].attrib == {
-        "id": "ready", "path": str(disk / "library/zim" / artifact["filename"]),
+        "id": str(uuid.UUID(int=0)), "path": str(disk / "library/zim" / artifact["filename"]),
         "title": "Ready & <Prepared>", "language": "eng"}
     assert b"Ready &amp; &lt;Prepared&gt;" in xml
     assert zim_catalog.render_xml(list(reversed(records)), {"ready": True, "missing": True}) == xml
@@ -57,7 +58,7 @@ def test_world_writable_directory_still_supported_without_permission_change(disk
     manifest = zim_catalog.write_manifest([record("ready")], {"ready": True})
     assert manifest.stat().st_mode & 0o777 == 0o600
     assert directory.stat().st_mode & 0o777 == 0o777
-    assert ET.fromstring(manifest.read_bytes()).find("book").get("id") == "ready"
+    assert ET.fromstring(manifest.read_bytes()).find("book").get("id") == str(uuid.UUID(int=0))
 
 
 def test_unpublished_manifest_drops_previous_book_without_removing_archive(disk):

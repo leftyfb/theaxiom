@@ -60,24 +60,10 @@ def main():
         with patch.object(zim_catalog, "verified_books", return_value=[book]):
             content = zim_catalog.render_xml([])
         manifest = base / "library.xml"
-        # Test whether Kiwix's search code requires the optional XML book
-        # 'name' attribute; keep the production manifest unchanged until proven.
-        diagnostic_root = ET.fromstring(content)
-        diagnostic_root.find("book").set("name", "axiom-smoke")
-        # Kiwix library IDs are archive UUIDs, not application source IDs.
-        # Use the archive's own UUID in this isolated experiment.
-        info = subprocess.run(["zimdump", "info", str(archive)],
-                              capture_output=True, text=True, timeout=15)
-        print("ZIMDUMP INFO:", (info.stdout + info.stderr)[-2000:], flush=True)
-        import re
-        uuid_match = re.search(r"(?im)^\s*(?:uuid|id)\s*[:=]\s*([a-f0-9-]{32,36})\s*$", info.stdout)
-        if uuid_match:
-            diagnostic_root.find("book").set("id", uuid_match.group(1))
-        else:
-            raise AssertionError("Could not parse archive UUID; cannot test XML UUID hypothesis")
-        content = ET.tostring(diagnostic_root, encoding="utf-8", xml_declaration=True)
         manifest.write_bytes(content)
         assert ET.fromstring(content).find("book").get("path") == str(archive)
+        with archive.open("rb") as stream:
+            assert ET.fromstring(content).find("book").get("id") == zim_catalog.archive_uuid(stream)
         with socket.socket() as sock:
             sock.bind(("127.0.0.1", 0))
             port = sock.getsockname()[1]
@@ -117,6 +103,7 @@ def main():
             # A fixture without a Xapian full-text index may legitimately
             # return 400; record that distinctly from a server exception.
             search_failures = []
+            selected_search_status = None
             for selector, value in (
                 ("books.name", "axiom-smoke"),
                 ("books.name", expected),
@@ -135,6 +122,8 @@ def main():
                     readable = re.sub(r"\\s+", " ", unescape(readable))
                     print(f"SEARCH DIAGNOSTIC {selector}={value[:28]} "
                           f"HTTP {response.status}: {readable[-900:]}", flush=True)
+                    if selector == "books.name" and value == expected:
+                        selected_search_status = response.status
                     if response.status >= 500 or b"map::at" in body:
                         search_failures.append((selector, response.status))
                 finally:
@@ -191,6 +180,7 @@ def main():
                     direct_process.kill()
                     direct_process.communicate(timeout=5)
             assert not search_failures, f"native Kiwix search crashes: {search_failures!r}"
+            assert selected_search_status == 200, f"native library search HTTP {selected_search_status}"
             print(f"PASS isolated native Kiwix search diagnostics completed: {expected}")
             print(f"PASS real ZIM OPDS and viewer: {expected}")
             # The live service must pick up a second book without a restart,
