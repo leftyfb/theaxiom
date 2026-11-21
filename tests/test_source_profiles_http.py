@@ -21,7 +21,7 @@ def app(tmp_path, monkeypatch):
     monkeypatch.setattr(admin_api, "SOURCE_CATALOG", store)
     monkeypatch.setattr(storage_settings, "SETTINGS_PATH", tmp_path / "storage.json")
     monkeypatch.setattr(publication, "reachable", lambda route: True)
-    monkeypatch.setattr(publication, "reader_location", lambda route: "/wikipedia/viewer#fixture/")
+    monkeypatch.setattr(publication, "reader_location", lambda route, book_id=None: (route["path"] + "viewer#fixture/"))
     snapshot = {"stale": False, "acquisitions": [{
         "source_id": SID, "state": "completed", "active": False, "verified": True,
         "filename": PIN["filename"], "expected_bytes": PIN["bytes"], "sha256": PIN["sha256"],
