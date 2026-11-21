@@ -332,3 +332,15 @@ def test_mobile_download_progress_does_not_crush_title():
     assert ".source-card > summary > div { flex:1 1 calc(100% - 2.5rem); min-width:0; }" in page
     assert ".source-card > summary .summary-progress { flex:1 1 100%; max-width:none;" in page
     assert ".source-card > summary .badge { margin-left:2.4rem;" in page
+
+
+def test_add_source_document_upload_sends_session_csrf_header():
+    """New-source browser uploads need the same CSRF protection as card uploads."""
+    page = render([profile()])
+    add_handler = page.split("form.addEventListener('submit', async event => {", 1)[1].split("document.querySelectorAll('[data-pdf-download]", 1)[0]
+    add_upload = add_handler.split("const headers = {", 1)[1].split("const response = await acquisitionFetch('/api/pdf-upload'", 1)[0]
+    assert "...window.axiomCsrfHeaders()" in add_upload
+    assert "'X-PDF-Add':'1'" in add_upload
+    # Existing source card imports must also retain the CSRF header.
+    card_upload = page.split("? await acquisitionFetch('/api/pdf-upload'", 1)[1]
+    assert "window.axiomCsrfHeaders?.()" in card_upload.split("body:file", 1)[0]
