@@ -103,11 +103,16 @@ def exercise(browser, base, name, viewport, artifacts):
             page.locator('#source-form [type="submit"]').click()
         expect(page.locator(".source-card[data-source-id='" + sid + "']")).to_be_visible(timeout=15000)
 
-        page.locator("#source-filter-search").fill("not-a-match-" + name)
+        search = page.locator("#source-filter-search")
+        search.fill("not-a-match-" + name)
         expect(page.locator(".source-card[data-source-id='" + sid + "']")).to_be_hidden()
-        page.locator("#source-filter-search").fill(title)
+        # Case-insensitive search and whitespace handling are important for
+        # source discovery on narrow/mobile screens.
+        search.fill(title.upper())
         expect(page.locator(".source-card[data-source-id='" + sid + "']")).to_be_visible()
-        page.locator("#source-filter-search").fill("")
+        search.fill(title)
+        expect(page.locator(".source-card[data-source-id='" + sid + "']")).to_be_visible()
+        search.fill("")
 
         # Bulk-selection state and keyboard access: no action is executed.
         selection_toggle = page.locator("#source-select-mode")
