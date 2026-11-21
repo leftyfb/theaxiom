@@ -110,6 +110,24 @@ def main():
                     "native Kiwix search exposed an uncaught map::at exception")
             finally:
                 connection.close()
+            # The viewer routes by filename-derived content ID. Exercise the
+            # search URL that the same identity produces as well as the
+            # metadata-name selector, so a passing search smoke test cannot
+            # conceal the real-world map::at failure.
+            legacy_path = "/zim/search?" + urlencode(
+                {"content": expected, "pattern": "offline"})
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            try:
+                connection.request("GET", legacy_path)
+                legacy_response = connection.getresponse()
+                legacy_body = legacy_response.read(256 * 1024)
+                if legacy_response.status == 500 or b"map::at" in legacy_body:
+                    print("DIAGNOSTIC: filename-derived legacy search selector fails; "
+                          "metadata-name selector succeeds")
+                else:
+                    print("DIAGNOSTIC: filename-derived legacy search selector also succeeds")
+            finally:
+                connection.close()
             print(f"PASS isolated native Kiwix search response: {expected}")
             print(f"PASS real ZIM OPDS and viewer: {expected}")
             # The live service must pick up a second book without a restart,
