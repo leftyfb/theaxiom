@@ -115,3 +115,53 @@ def test_shared_manifest_includes_only_verified_published_wikipedia(disk):
     with patch.object(acquisition_monitor, "collect", return_value={**evidence, "verified": False}):
         publication.save("wikipedia-en", True)
         assert zim_catalog.verified_books([]) == []
+
+
+@pytest.mark.parametrize(("error", "category"), [
+    (OSError("/secret/private/archive.zim missing"), "listener-or-filesystem-unavailable"),
+    (ValueError("Kiwix reader not ready"), "listener-not-ready"),
+    (ValueError("Ambiguous Kiwix book identity"), "opds-invalid"),
+    (ValueError("Kiwix listener is serving an unexpected set of archives"), "opds-book-set-mismatch"),
+    (ValueError("Publication changed during Kiwix startup"), "publication-state-changed"),
+    (ValueError("No verified published ZIMs to serve"), "no-published-archives"),
+    (ValueError("secret-token=do-not-print"), "readiness-validation-failed"),
+])
+def test_readiness_failures_are_bounded_and_redacted(error, category):
+    assert zim_reader_probe._failure_category(error) == category
+    assert "secret" not in category
+
+
+def test_readiness_timeout_logs_only_safe_category(monkeypatch, capsys):
+    from unittest.mock import MagicMock
+    store = MagicMock()
+    store.get.return_value = {"sources": []}
+    monkeypatch.setattr(zim_reader_probe.catalog_store, "CatalogStore", lambda path: store)
+    monkeypatch.setattr(zim_reader_probe, "acknowledge",
+                        lambda records: (_ for _ in ()).throw(OSError("/private/path token=SECRET")))
+    ticks = iter((0, 21))
+    monkeypatch.setattr(zim_reader_probe.time, "monotonic", lambda: next(ticks))
+    assert zim_reader_probe.main() == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "last_failure=listener-or-filesystem-unavailable" in captured.err
+    assert "1 attempts" in captured.err
+    assert "/private/" not in captured.err
+    assert "SECRET" not in captured.err
+
+
+def test_readiness_transient_failures_do_not_log(monkeypatch, capsys):
+    from unittest.mock import MagicMock
+    store = MagicMock()
+    store.get.return_value = {"sources": []}
+    monkeypatch.setattr(zim_reader_probe.catalog_store, "CatalogStore", lambda path: store)
+    attempts = []
+    def handshake(records):
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise ValueError("Kiwix reader not ready")
+    monkeypatch.setattr(zim_reader_probe, "acknowledge", handshake)
+    monkeypatch.setattr(zim_reader_probe.time, "monotonic", lambda: 0)
+    monkeypatch.setattr(zim_reader_probe.time, "sleep", lambda delay: None)
+    assert zim_reader_probe.main() == 0
+    assert len(attempts) == 2
+    assert capsys.readouterr().err == ""
