@@ -60,6 +60,11 @@ def test_page_specific_scripts_and_navigation():
         assert marker in sources and marker not in settings
     for marker in ("storage-settings-script", "admin-password-script", "storage-form"):
         assert marker in settings and marker not in sources
+    groupings = render(admin_page="groupings", password_change_enabled=True)
+    assert "manage-kind" in groupings
+    assert "storage-settings-script" not in groupings
+    assert "admin-password-script" not in groupings
+    assert "source-catalog-script" not in groupings
 
 
 def test_candidate_card_has_no_acquisition_buttons():
