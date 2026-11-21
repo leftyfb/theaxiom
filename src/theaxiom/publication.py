@@ -79,7 +79,7 @@ def reachable(route):
 
 # Generic Kiwix book IDs are derived from verified digest-suffixed filenames.
 # Keep this separate from catalog source IDs, which must never contain dots.
-GENERIC_BOOK_ID_RE = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.[a-f0-9]{64}\\Z")
+GENERIC_BOOK_ID_RE = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.[a-f0-9]{64}\Z")
 
 
 def reader_location(route, book_id=None):
