@@ -354,7 +354,7 @@ class BrandingAssetTests(unittest.TestCase):
             "templates/admin-page.html.j2", "templates/library.html.j2",
             "templates/search.html.j2", "templates/document-page.html.j2",
             "templates/epub-reader.html.j2", "templates/pdf-reader.html.j2",
-            "deploy/www/index.html",
+            "templates/admin-login.html.j2",
         ]
         for page in pages:
             with self.subTest(page=page):
