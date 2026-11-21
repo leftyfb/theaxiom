@@ -88,6 +88,10 @@ def exercise(browser, base, viewport_name, viewport, artifact_dir):
         pdf = base + "/api/library/pdf/reader-pdf"
         # Real document is served only after fixture publication, not merely catalog registration.
         page.goto(epub)
+        page.keyboard.press("Tab")
+        expect(page.locator(".skip-reading")).to_be_focused()
+        page.keyboard.press("Enter")
+        expect(page.locator("#chapter-content")).to_be_focused()
         expect(page.locator("#chapter-content")).to_contain_text("First isolated chapter")
         expect(page.get_by_role("navigation", name="Chapter navigation")).to_contain_text("1 of 2")
         page.locator('nav[aria-label="Chapter navigation"] [data-chapter-nav="next"]').click()
@@ -121,6 +125,7 @@ def exercise(browser, base, viewport_name, viewport, artifact_dir):
         expect(page.locator("#page")).to_have_value("1")
         page.get_by_role("button", name="Search document").click()
         expect(page.locator("#search-tools")).to_be_visible()
+        expect(page.locator("#find")).to_be_focused()
         page.locator("#find").fill("alpha")
         expect(page.locator("#matches")).to_contain_text("3", timeout=20000)
         expect(page.locator("#highlights .active-match").first).to_be_visible(timeout=15000)
@@ -138,6 +143,7 @@ def exercise(browser, base, viewport_name, viewport, artifact_dir):
         expect(close_search).to_be_focused()
         page.keyboard.press("Enter")
         expect(page.locator("#search-tools")).to_be_hidden()
+        expect(page.locator("#search-toggle")).to_be_focused()
         page.get_by_role("button", name="Zoom in").click()
         expect(page.locator("#paper")).to_be_visible()
         page.get_by_role("button", name="Thumbnails").click()
@@ -336,7 +342,9 @@ def main():
                     browser = playwright.chromium.launch(headless=True)
                     try:
                         for name, viewport in (("desktop", {"width": 1366, "height": 900}),
-                                               ("mobile", {"width": 390, "height": 844})):
+                                               ("tablet", {"width": 768, "height": 1024}),
+                                               ("mobile", {"width": 390, "height": 844}),
+                                               ("narrow", {"width": 320, "height": 640})):
                             exercise(browser, f"http://{host}:{port}", name, viewport, artifacts)
                         exercise_bulk(browser, f"http://{host}:{port}", artifacts, catalog)
                         # Publication is independent of browser sessions. Withdraw only the
