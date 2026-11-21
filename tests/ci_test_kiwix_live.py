@@ -104,8 +104,8 @@ def main():
                 connection.request("GET", search_path)
                 search_response = connection.getresponse()
                 search_body = search_response.read(256 * 1024)
-                assert search_response.status != 500, (
-                    f"native Kiwix search returned 500: {search_body[:300]!r}")
+                assert search_response.status == 200, (
+                    f"native Kiwix search returned {search_response.status}: {search_body[:300]!r}")
                 assert b"map::at" not in search_body, (
                     "native Kiwix search exposed an uncaught map::at exception")
             finally:
