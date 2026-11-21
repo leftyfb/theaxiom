@@ -126,7 +126,17 @@ def exercise(browser, base, viewport_name, viewport, artifact_dir):
         expect(page.locator("#highlights .active-match").first).to_be_visible(timeout=15000)
         page.get_by_role("button", name="Next match").click()
         expect(page.locator("#matches")).to_contain_text("of 3")
-        page.get_by_role("button", name="Close search").click()
+        # A missing term must clear stale highlights and allow a new query.
+        page.locator("#find").fill("unfindable-synthetic-term")
+        expect(page.locator("#matches")).to_contain_text("0", timeout=20000)
+        expect(page.locator("#highlights .active-match")).to_have_count(0)
+        page.locator("#find").fill("alpha")
+        expect(page.locator("#matches")).to_contain_text("3", timeout=20000)
+        # A focused native button must remain operable without a pointer.
+        close_search = page.get_by_role("button", name="Close search")
+        close_search.focus()
+        expect(close_search).to_be_focused()
+        page.keyboard.press("Enter")
         expect(page.locator("#search-tools")).to_be_hidden()
         page.get_by_role("button", name="Zoom in").click()
         expect(page.locator("#paper")).to_be_visible()
