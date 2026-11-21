@@ -964,7 +964,7 @@
           if (form.dataset.operation === 'add' && file) {
             if (!file.size || file.size > 16 * 1024 * 1024) throw new Error('Choose a PDF or EPUB up to 16 MiB');
             const metadata = Object.fromEntries(Object.entries(fields).filter(([k]) => ['title','description','author','publisher','edition','language','source_url','license'].includes(k)));
-            const headers = {'Content-Type':format.value === 'epub' ? 'application/epub+zip' : 'application/pdf', 'X-Document-Format':format.value, 'X-Source-ID':source_id,
+            const headers = {...window.axiomCsrfHeaders(), 'Content-Type':format.value === 'epub' ? 'application/epub+zip' : 'application/pdf', 'X-Document-Format':format.value, 'X-Source-ID':source_id,
               'X-Catalog-Revision':String(revision), 'X-PDF-Add':'1',
               'X-PDF-Metadata':encodeURIComponent(JSON.stringify(metadata))};
             if (automaticTitle) headers['X-PDF-Auto-Title'] = '1';
