@@ -17,7 +17,8 @@ def main():
     site = (ROOT / "deploy/nginx/theaxiom.conf").read_text()
     assert "location ^~ /wikipedia/" in site
     assert "auth_request /_publication_zim;" in site
-    site = site.replace("listen 192.168.0.4:80;", "listen 127.0.0.1:18080;")
+    site = site.replace("listen 80;", "listen 127.0.0.1:18080;")
+    site = site.replace("listen [::]:80;", "")
     site = site.replace("include /opt/theaxiom/app/templates/theaxiom-backend.conf;",
                         "proxy_pass http://127.0.0.1:8080;")
     with tempfile.TemporaryDirectory(prefix="axiom-nginx-ci-") as temp:
