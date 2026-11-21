@@ -34,13 +34,9 @@ def test_epub_keyboard_navigation_has_boundary_aware_links():
     assert 'data-chapter-nav="next"' not in nav(last)
 
 
-def test_epub_keyboard_navigation_ignores_editing_and_shortcuts():
+
+def test_epub_reader_has_no_inline_script_under_restrictive_csp():
     html = render(1)
-    assert "event.defaultPrevented" in html
-    for modifier in ("altKey", "ctrlKey", "metaKey", "shiftKey"):
-        assert "event." + modifier in html
-    for control in ("input", "textarea", "select", "button", "[contenteditable]", '[role="textbox"]'):
-        assert control in html
-    assert "target.isContentEditable" in html
-    assert "event.preventDefault()" in html
-    assert "window.location.assign(link.href)" in html
+    assert '<script' not in html.lower()
+    assert 'data-chapter-nav="previous"' in html
+    assert 'data-chapter-nav="next"' in html
