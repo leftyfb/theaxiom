@@ -192,7 +192,7 @@ def exercise(browser, base, viewport_name, viewport, artifact_dir):
         context.close()
 
 
-def exercise_bulk(browser, base, artifacts):
+def exercise_bulk(browser, base, artifacts, catalog):
     """Bulk changes affect only disposable profiles and never installed production files."""
     context = browser.new_context(viewport={"width": 1366, "height": 900})
     page = context.new_page()
@@ -215,6 +215,36 @@ def exercise_bulk(browser, base, artifacts):
                     check.check()
                 elif check.is_checked():
                     check.uncheck()
+
+        select("reader-pdf", "reader-epub")
+        # Bulk-add is additive: preserve existing tag and collection memberships.
+        def members(kind, group_id):
+            return next(set(g["source_ids"]) for g in catalog.get()["groups"]
+                        if (g["kind"], g["group_id"]) == (kind, group_id))
+
+        def apply_group(operation, ids, tag):
+            select(*ids)
+            panel = page.locator("#group-panel")
+            if not panel.evaluate("(element) => element.open"):
+                panel.locator("summary").click()
+            page.locator("#group-kind").select_option("tags")
+            page.locator("#group-existing").select_option(tag)
+            with page.expect_navigation(wait_until="domcontentloaded", timeout=30000):
+                page.locator("#group-" + operation).click()
+
+        apply_group("assign", ("reader-pdf", "reader-epub"), "browser-tag-b")
+        assert members("tags", "browser-tag-a") == {"reader-pdf"}
+        assert members("tags", "browser-tag-b") == {"reader-pdf", "reader-epub"}
+        assert members("collections", "browser-collection") == {"reader-pdf"}
+
+        apply_group("unassign", ("reader-epub",), "browser-tag-b")
+        assert members("tags", "browser-tag-b") == {"reader-pdf"}
+        assert members("tags", "browser-tag-a") == {"reader-pdf"}
+
+        apply_group("replace", ("reader-pdf",), "browser-tag-b")
+        assert not members("tags", "browser-tag-a")
+        assert members("tags", "browser-tag-b") == {"reader-pdf"}
+        assert members("collections", "browser-collection") == {"reader-pdf"}
 
         select("reader-pdf", "reader-epub")
         expect(page.locator("#bulk-unpublish")).to_be_enabled()
@@ -275,6 +305,15 @@ def main():
             for sid in ("bulk-ineligible-a", "bulk-ineligible-b"):
                 catalog.mutate("add", sid, {"title": sid, "format": "unspecified"},
                                catalog.get()["revision"])
+            for kind, gid, label in (
+                ("tags", "browser-tag-a", "Browser Tag A"),
+                ("tags", "browser-tag-b", "Browser Tag B"),
+                ("collections", "browser-collection", "Browser Collection"),
+            ):
+                catalog.mutate_group("create", kind, gid, catalog.get()["revision"], name=label)
+            for kind, gid in (("tags", "browser-tag-a"), ("collections", "browser-collection")):
+                catalog.mutate_group("add-members", kind, gid, catalog.get()["revision"],
+                                     source_ids=["reader-pdf"])
             server = admin_api.ThreadingHTTPServer(("127.0.0.1", 0), admin_api.AdminAPIHandler)
             host, port = server.server_address
             server.axiom_config = ServerConfig(host, port, frozenset({f"{host}:{port}"}),
@@ -289,7 +328,7 @@ def main():
                         for name, viewport in (("desktop", {"width": 1366, "height": 900}),
                                                ("mobile", {"width": 390, "height": 844})):
                             exercise(browser, f"http://{host}:{port}", name, viewport, artifacts)
-                        exercise_bulk(browser, f"http://{host}:{port}", artifacts)
+                        exercise_bulk(browser, f"http://{host}:{port}", artifacts, catalog)
                         # Publication is independent of browser sessions. Withdraw only the
                         # disposable fixtures, then verify every reader entry/asset fails closed.
                         publication.save("reader-pdf", False)
