@@ -60,7 +60,10 @@ def exercise(browser, base, name, viewport, artifacts):
         sid = "browser-regression-" + name
         page.locator("#catalog-title").fill(title)
         page.locator("#catalog-format").select_option("unspecified")
-        page.locator('#source-form [type="submit"]').click()
+        # The application intentionally reloads after a catalog mutation.
+        # Wait for that navigation, not just an already-present DOM element.
+        with page.expect_navigation(wait_until="domcontentloaded"):
+            page.locator('#source-form [type="submit"]').click()
         expect(page.locator(".source-card[data-source-id='" + sid + "']")).to_be_visible(timeout=15000)
 
         page.locator("#source-filter-search").fill("not-a-match-" + name)
@@ -82,7 +85,10 @@ def exercise(browser, base, name, viewport, artifacts):
         expect(page.locator("#source-dialog")).to_be_visible()
         expect(page.locator("#catalog-title")).to_have_value(title)
         page.locator("#catalog-description").fill("Verified through real browser UI")
-        page.locator('#source-form [type="submit"]').click()
+        # The application intentionally reloads after a catalog mutation.
+        # Wait for that navigation, not just an already-present DOM element.
+        with page.expect_navigation(wait_until="domcontentloaded"):
+            page.locator('#source-form [type="submit"]').click()
         expect(page.locator(".source-card[data-source-id='" + sid + "']")).to_be_visible(timeout=15000)
 
         # Mobile usability guard: horizontal viewport overflow breaks controls.
