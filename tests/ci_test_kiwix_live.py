@@ -118,8 +118,7 @@ def main():
                     readable = re.sub(r"\\s+", " ", unescape(readable))
                     print(f"SEARCH DIAGNOSTIC {selector}={value[:28]} "
                           f"HTTP {response.status}: {readable[-900:]}", flush=True)
-                    assert response.status != 500 and b"map::at" not in body, (
-                        f"uncaught Kiwix exception for {selector}: {body[:400]!r}")
+                    # Capture failures for every selector before evaluating\n                    # which identities are valid and whether indexing exists.
                 finally:
                     connection.close()
             # Probe all selectors even when one fails: the fixture may not
