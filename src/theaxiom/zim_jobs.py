@@ -10,6 +10,8 @@ import time
 
 from . import catalog_store, storage_settings, zim_source, pdf_source
 
+HISTORY_LIMIT = 12
+
 ACTIVE = {"queued", "downloading", "verifying", "pausing", "cancelling", "publishing"}
 CONTROLS = {}
 LOCK = threading.RLock()
@@ -39,6 +41,23 @@ def read(sid):
             or not isinstance(job.get("configuration"), dict)):
         raise ValueError("Invalid ZIM job record")
     return job
+
+
+def _record_attempt(job, *, started=False):
+    """Keep bounded, durable acquisition outcomes without copying archive bytes."""
+    history = job.setdefault("attempt_history", [])
+    if started:
+        history.append({"started_at": time.time(), "resume_offset": job.get("downloaded_bytes", 0),
+                        "source_url": job["configuration"]["source_url"]})
+        del history[:-HISTORY_LIMIT]
+    elif history:
+        entry = history[-1]
+        entry.update(finished_at=time.time(), state=job["state"],
+                     downloaded_bytes=job.get("downloaded_bytes", 0),
+                     expected_bytes=job.get("expected_bytes"),
+                     etag=job.get("etag"), last_modified=job.get("last_modified"),
+                     detail=job.get("detail", "")[:240],
+                     retained=job.get("retained", False))
 
 
 def save(job):
@@ -166,6 +185,7 @@ def start(sid, config, *, resume=False):
                 if sm != lm or cap.f_flag & os.ST_RDONLY or cap.f_bavail * cap.f_frsize < reserve + need:
                     raise ValueError("Insufficient writable ZIM storage capacity")
             job.update(state="queued", active=True, detail="", downloaded_bytes=offset, sampled_at=time.time())
+            _record_attempt(job, started=True)
             save(job)
             signal = threading.Event()
             CONTROLS[sid] = (signal, None)
@@ -279,6 +299,8 @@ def _run(job, guard, signal, offset, validator):
                         job["downloaded_bytes"] = staged_size(sid)
                     except (OSError, ValueError):
                         pass
+                job["retained"] = job["state"] in {"failed", "paused"} and job.get("downloaded_bytes", 0) > 0
+                _record_attempt(job)
                 save(job)
             finally:
                 CONTROLS.pop(sid, None)
