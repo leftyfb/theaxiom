@@ -253,63 +253,123 @@ def download_resumable(source_id, config, *, offset=0, validator=None,
                         raise TransferStopped()
                     if total is not None and count != total:
                         raise ValueError("Incomplete ZIM download")
-                    # Verify the full retained file, including bytes from earlier sessions.
-                    check_mount()
-                    progress(count, total, {"verifying": True})
-                    target.flush()
-                    target.seek(0)
-                    sha = hashlib.sha256()
-                    md5 = hashlib.md5(usedforsecurity=False)
-                    remaining = count - 16
-                    if remaining < 80:
-                        raise ValueError("Incomplete staged ZIM")
-                    while block := target.read(CHUNK):
-                        if stopped():
-                            raise TransferStopped()
-                        sha.update(block)
-                    target.seek(0)
-                    check_header(target.read(80), count)
-                    target.seek(0)
-                    while remaining:
-                        if stopped():
-                            raise TransferStopped()
-                        block = target.read(min(CHUNK, remaining))
-                        if not block:
-                            raise ValueError("Incomplete staged ZIM")
-                        md5.update(block)
-                        remaining -= len(block)
-                    if md5.digest() != target.read(16):
-                        raise ValueError("ZIM internal checksum mismatch")
-                    digest = sha.hexdigest()
-                    if expected_digest and digest != expected_digest:
-                        raise ValueError("ZIM SHA-256 differs from expected digest")
-                    if stopped():
-                        raise TransferStopped()
-                    target.flush()
-                    os.fsync(target.fileno())
-                from contextlib import nullcontext
-                with promote_lock if promote_lock is not None else nullcontext():
-                    if stopped():
-                        raise TransferStopped()
-                    check_mount()
-                    if available() < 0:
-                        raise ValueError("ZIM storage reserve would be exceeded")
-                    promoting()  # establishes a non-cancellable atomic promotion phase
-                    filename = source_id + "." + digest + ".zim"
-                    os.link(name, filename, src_dir_fd=staging, dst_dir_fd=library, follow_symlinks=False)
-                    # The staging directory may intentionally be mode 0777. Verify
-                    # that the hard link refers to the exact inode we hashed,
-                    # not a different file swapped into its predictable name.
-                    pinned = os.fstat(fd)
-                    linked = os.stat(filename, dir_fd=library, follow_symlinks=False)
-                    if ((linked.st_dev, linked.st_ino, linked.st_size) !=
-                            (pinned.st_dev, pinned.st_ino, count)):
-                        os.unlink(filename, dir_fd=library)
-                        os.fsync(library)
-                        raise ValueError("Staged ZIM changed during final promotion")
-                    os.fsync(library)
-                    os.unlink(name, dir_fd=staging)
-                    os.fsync(staging)
-                    return {"filename": filename, "source_url": url, "bytes": count, "sha256": digest}
+                    # Share the exact same integrity and atomic promotion path
+                    # with explicit offline revalidation of retained archives.
+                    return _verify_and_promote(
+                        fd, staging, library, name, source_id, url, count,
+                        expected_digest, check_mount, available, stopped,
+                        promote_lock, promoting, progress)
+
+        finally:
+            os.close(fd)
+
+
+def _verify_and_promote(fd, staging, library, name, source_id, url, count,
+                        expected_digest, check_mount, available, stopped,
+                        promote_lock, promoting, progress):
+    """Verify a staged inode and promote it without copying archive bytes."""
+    from contextlib import nullcontext
+    check_mount()
+    progress(count, count, {"verifying": True})
+    with os.fdopen(os.dup(fd), "rb") as target:
+        sha = hashlib.sha256()
+        while block := target.read(CHUNK):
+            if stopped():
+                raise TransferStopped()
+            sha.update(block)
+        target.seek(0)
+        check_header(target.read(80), count)
+        md5 = hashlib.md5(usedforsecurity=False)
+        target.seek(0)
+        remaining = count - 16
+        while remaining:
+            if stopped():
+                raise TransferStopped()
+            block = target.read(min(CHUNK, remaining))
+            if not block:
+                raise ValueError("Incomplete staged ZIM")
+            md5.update(block)
+            remaining -= len(block)
+        if md5.digest() != target.read(16):
+            raise ValueError("ZIM internal checksum mismatch")
+        digest = sha.hexdigest()
+        if expected_digest and digest != expected_digest:
+            raise ValueError("ZIM SHA-256 differs from expected digest")
+    if stopped():
+        raise TransferStopped()
+    # Stage is durable before we publish its inode.
+    os.fsync(fd)
+    with promote_lock if promote_lock is not None else nullcontext():
+        if stopped():
+            raise TransferStopped()
+        check_mount()
+        if available() < 0:
+            raise ValueError("ZIM storage reserve would be exceeded")
+        pinned = os.fstat(fd)
+        if pinned.st_size != count or pinned.st_nlink != 1:
+            raise ValueError("Staged ZIM changed during final verification")
+        promoting()
+        filename = source_id + "." + digest + ".zim"
+        os.link(name, filename, src_dir_fd=staging, dst_dir_fd=library, follow_symlinks=False)
+        linked = os.stat(filename, dir_fd=library, follow_symlinks=False)
+        if ((linked.st_dev, linked.st_ino, linked.st_size) !=
+                (pinned.st_dev, pinned.st_ino, count)):
+            os.unlink(filename, dir_fd=library)
+            os.fsync(library)
+            raise ValueError("Staged ZIM changed during final promotion")
+        os.fsync(library)
+        os.unlink(name, dir_fd=staging)
+        os.fsync(staging)
+        return {"filename": filename, "source_url": url, "bytes": count, "sha256": digest}
+
+
+def revalidate_retained(source_id, config, *, expected_bytes, progress=lambda current, total, metadata: None,
+                        stopped=lambda: False, promote_lock=None, promoting=lambda: None):
+    """Verify an already complete retained staged ZIM, never contacting the network.
+
+    Refuse unknown lengths: a prefix can have a valid header but is not a
+    complete archive. Retain all bytes on any verification failure.
+    """
+    url, configured_size, expected_digest = candidate(config)
+    if (type(expected_bytes) is not int or not 96 <= expected_bytes <= MAX_BYTES
+            or configured_size is not None and expected_bytes != configured_size):
+        raise ValueError("A known complete expected ZIM size is required for local revalidation")
+    settings = storage_settings.load_settings()
+    with (pdf_source._directory("staging", writing=True, format_name="zim") as (staging, mount_id, _),
+          pdf_source._directory("library", writing=True, format_name="zim") as (library, library_mount, reserve)):
+        if mount_id != library_mount or storage_settings.load_settings() != settings:
+            raise ValueError("ZIM storage changed during revalidation")
+
+        def check_mount():
+            mounts = storage.read_mounts()
+            mount = storage._covering(pdf_source.Path(settings["storage_root"]), mounts)
+            if (mount["id"] != mount_id or mount["read_only"]
+                    or (settings["storage_mount"] and
+                        (mount["target"] != settings["storage_mount"] or mount["source"] != settings["storage_source"]))
+                    or any(storage._covering(pdf_source.Path(settings["storage_root"]) / branch / "zim", mounts) != mount
+                           for branch in ("staging", "library"))
+                    or storage_settings.load_settings() != settings):
+                raise ValueError("ZIM storage changed during revalidation")
+
+        def available():
+            capacity = os.fstatvfs(staging)
+            if capacity.f_flag & os.ST_RDONLY:
+                raise ValueError("ZIM storage is read-only")
+            return capacity.f_bavail * capacity.f_frsize - reserve
+
+        check_mount()
+        fd = os.open(partial_name(source_id), os.O_RDONLY | os.O_NOFOLLOW, dir_fd=staging)
+        try:
+            import stat as stat_module
+            info = os.fstat(fd)
+            if (not stat_module.S_ISREG(info.st_mode) or info.st_nlink != 1
+                    or info.st_uid != os.geteuid() or info.st_mode & 0o077):
+                raise ValueError("Unsafe staged ZIM file")
+            if info.st_size != expected_bytes:
+                raise ValueError("Retained ZIM is not the complete expected size")
+            return _verify_and_promote(
+                fd, staging, library, partial_name(source_id), source_id,
+                url, expected_bytes, expected_digest, check_mount, available,
+                stopped, promote_lock, promoting, progress)
         finally:
             os.close(fd)
