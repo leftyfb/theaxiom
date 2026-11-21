@@ -421,7 +421,7 @@ def test_generic_zim_publication_intent_waits_for_verified_reader(app, monkeypat
     updated = request("/api/sources")
     state = next(s for s in updated["sources"] if s["source_id"] == sid)["publication"]
     assert state["enabled"] and state["verified"] and not state["published"]
-    assert "Awaiting" in state["publication_reason"]
+    assert "Waiting for Kiwix to acknowledge" in state["publication_reason"]
     assert request("/read/zim/fema-ready", status=403)["error"] == "ZIM collection unavailable"
     assert sid in request("/api/publication")
     assert not request("/internal/publication/zim", status=403, raw=True)[0]

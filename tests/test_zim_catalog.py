@@ -131,7 +131,7 @@ def test_generic_zim_publication_is_pending_until_acknowledged_reader(disk, tmp_
     status = zim_catalog.status(rec, [rec])
     assert status["enabled"] and status["verified"]
     assert not status["published"] and not status["serving"]
-    assert "Awaiting" in status["publication_reason"]
+    assert "Waiting for Kiwix to acknowledge" in status["publication_reason"]
     with patch.object(zim_catalog, "active_manifest_matches", return_value=True):
         with patch.object(publication, "reader_location", return_value="/zim/viewer#ready/"):
             status = zim_catalog.status(rec, [rec])
