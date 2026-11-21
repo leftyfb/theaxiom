@@ -123,7 +123,7 @@ class HTTPAuthTests(unittest.TestCase):
         for path in ("/admin", "/admin/", "/admin/sources", "/admin/settings",
                      "/admin/sources/", "/admin/settings/", "/admin/groupings", "/admin/groupings/"):
             with self.subTest(path=path):
-                status, headers, _ = self.request(path)
+                status, headers, _ = self.request(path, headers={"Accept": "text/html"})
                 self.assertEqual(status, 303)
                 self.assertEqual(headers["Location"], "/admin/login")
                 self.assertNotIn("WWW-Authenticate", headers)
@@ -155,7 +155,7 @@ class HTTPAuthTests(unittest.TestCase):
                 self.assertTrue(body.startswith(magic))
                 self.assertNotIn("WWW-Authenticate", headers)
                 self.assertEqual(self.request(path, headers={"Host": "attacker.invalid"})[0], 400)
-        status, headers, _ = self.request("/admin")
+        status, headers, _ = self.request("/admin", headers={"Accept": "text/html"})
         self.assertEqual(status, 303)
         self.assertEqual(headers["Location"], "/admin/login")
         self.assertNotIn("WWW-Authenticate", headers)
@@ -202,7 +202,7 @@ class HTTPAuthTests(unittest.TestCase):
             body="{}")
         self.assertEqual(code, 204)
         self.assertIn("Max-Age=0", response_headers["Set-Cookie"])
-        self.assertEqual(self.request("/admin", headers={"Cookie": cookie})[0], 303)
+        self.assertEqual(self.request("/admin", headers={"Cookie": cookie, "Accept": "text/html"})[0], 303)
 
     def test_password_rotation_invalidates_browser_session_and_keeps_basic_clients(self):
         login_headers = {"Origin": "http://" + self.host, "Content-Type": "application/json"}
@@ -217,9 +217,21 @@ class HTTPAuthTests(unittest.TestCase):
         code, _, _ = self.request("/api/admin/password", "POST",
                                   auth=self.auth, headers=login_headers, body=payload)
         self.assertEqual(code, 200)
-        self.assertEqual(self.request("/admin", headers={"Cookie": cookie})[0], 303)
+        self.assertEqual(self.request("/admin", headers={"Cookie": cookie, "Accept": "text/html"})[0], 303)
         new_auth = "Basic " + base64.b64encode(b"admin:newpass888").decode()
         self.assertEqual(self.request("/admin", auth=new_auth)[0], 200)
+
+    def test_deployment_probe_keeps_legacy_basic_challenge(self):
+        for path in ("/admin", "/admin/groupings", "/admin/groupings/"):
+            status, headers, _ = self.request(path)
+            self.assertEqual(status, 401)
+            self.assertEqual(headers["WWW-Authenticate"], 'Basic realm="The Axiom", charset="UTF-8"')
+            status, headers, _ = self.request(path, headers={"Accept": "*/*"})
+            self.assertEqual(status, 401)
+            self.assertNotIn("Location", headers)
+            status, headers, _ = self.request(path, headers={"Accept": "text/html"})
+            self.assertEqual(status, 303)
+            self.assertEqual(headers["Location"], "/admin/login")
 
     def test_browser_api_401_has_no_basic_challenge(self):
         code, headers, body = self.request("/api/sources",
@@ -229,7 +241,7 @@ class HTTPAuthTests(unittest.TestCase):
         self.assertIn(b"sign in required", body)
 
     def test_invalid_credentials_and_host_rejected(self):
-        self.assertEqual(self.request("/admin", auth="Basic bad")[0], 303)
+        self.assertEqual(self.request("/admin", auth="Basic bad", headers={"Accept": "text/html"})[0], 303)
         self.assertEqual(self.request("/admin", auth=self.auth, headers={"Host":"attacker.invalid"})[0], 400)
         self.assertEqual(self.request("/admin", auth=self.auth)[0], 200)
         status, headers, _ = self.request("/", auth=self.auth)
@@ -288,7 +300,7 @@ class HTTPAuthTests(unittest.TestCase):
         payload["confirm_password"] = new
         self.assertEqual(self.request("/api/admin/password", "POST", self.auth,
                                      headers, json.dumps(payload))[0], 200)
-        self.assertEqual(self.request("/admin", auth=self.auth)[0], 303)
+        self.assertEqual(self.request("/admin", auth=self.auth, headers={"Accept": "text/html"})[0], 303)
         new_auth = "Basic " + base64.b64encode(("admin:"+new).encode()).decode()
         self.assertEqual(self.request("/admin", auth=new_auth)[0], 200)
         self.assertTrue(PasswordStore(self.credential_path).verify(new))
