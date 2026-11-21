@@ -60,6 +60,11 @@ def main():
         with patch.object(zim_catalog, "verified_books", return_value=[book]):
             content = zim_catalog.render_xml([])
         manifest = base / "library.xml"
+        # Test whether Kiwix's search code requires the optional XML book
+        # 'name' attribute; keep the production manifest unchanged until proven.
+        diagnostic_root = ET.fromstring(content)
+        diagnostic_root.find("book").set("name", "axiom-smoke")
+        content = ET.tostring(diagnostic_root, encoding="utf-8", xml_declaration=True)
         manifest.write_bytes(content)
         assert ET.fromstring(content).find("book").get("path") == str(archive)
         with socket.socket() as sock:
