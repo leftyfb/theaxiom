@@ -24,8 +24,8 @@ catalog. Desktop and mobile Chromium navigate the real reader HTTP routes.
 These checks also use the real browser upload flow to import and remove
 additional synthetic PDF and EPUB sources, exercise PDF highlights/print
 preparation/download, EPUB keyboard activation, and verify unpublished reader
-URLs return 403. Bulk publish/unpublish/remove uses additional disposable
-catalog records only. These checks never contact production, download source
+URLs return 403. Bulk publish/unpublish/remove and tag/collection membership operations use
+additional disposable catalog records only. These checks never contact production, download source
 material, or mutate operator publication state.
 
 - Public homepage and search navigation
@@ -92,7 +92,7 @@ matrix must not be mistaken for owner acceptance or a live production test.
 | #45 | Public homepage compact mobile layout, no overflow, navigable Getting Started | Partial browser: public home/search; further responsive tests needed |
 | #69 | Discoverable offline content source guide | Browser modal open/dismiss and static template tests |
 | #70, #75, #77 | PDF/EPUB URLs, local upload, metadata and language, reader navigation | Browser: real isolated PDF/EPUB fixture uploads, reload persistence and source removal, two-chapter EPUB reader/download |
-| #71, #76, #78 | Group management, selection/bulk safety, publication independent filters, sorting, automatic unpublish | Browser: create/rename/delete grouping, filter/reset/ordering, mixed eligibility, source removal; eligible bulk publish/unpublish/remove with small fixtures (verification pending); group membership bulk operations pending |
+| #71, #76, #78 | Group management, selection/bulk safety, publication independent filters, sorting, automatic unpublish | Browser: create/rename/delete grouping, filter/reset/ordering, mixed eligibility, source removal; eligible bulk publish/unpublish/remove with small fixtures (CI passed); browser grouping add/remove/replace with preserved collection memberships (verification pending) |
 | #73 | Correct Bug-In Guide authorship/source choice | Catalog metadata/source unit validation; no live download |
 | #74, #80, #81, #84 | Embedded PDF.js controls, search/matches, mobile toolbar | Unit/DOM tests; browser with two-page searchable PDF, highlights, match counts, navigation, zoom, thumbnails, print preparation and download (CI passed) |
 | #83 | EPUB chapters, TOC, text size, keyboard navigation, return to library | Unit tests; browser with two-chapter EPUB, TOC, text sizing, keyboard activation, download, and library return (CI passed) |
@@ -112,8 +112,9 @@ Highest-impact next phases:
    search edge cases, keyboard focus order, accessible dialogs, and error recovery;
    publication gates, basic search/highlighting, print preparation, and real
    uploads are already covered.
-2. Exercise multiple disposable source profiles and grouping memberships in
-   Chromium, including bulk add/remove, active/busy controls and permissions.
+2. Extend grouping/member and bulk actions with accessibility, active/busy
+   controls, permissions and more mixed-eligibility combinations; add/remove/
+   replace group membership and publication changes are exercised by fixtures.
 3. Add keyboard-only navigation checks, automated accessibility audits, and
    additional small/large viewport screenshot comparisons on controlled fixtures.
 4. Extend isolated native Kiwix fixture smoke through Chromium for actual
