@@ -579,7 +579,7 @@ def test_zim_switch_requires_confirmation_and_schedules_reader_reconcile(
 
     monkeypatch.setattr(getattr(admin_api, "zim_jobs"), method, switch)
     monkeypatch.setattr(admin_api.zim_refresh, "schedule",
-                        lambda load_records: refreshes.append(load_records))
+                        lambda load_records, **options: refreshes.append((load_records, options)))
     request_body = dict(source_id="fema-ready", action=action, revision=revision)
     assert request("/api/action", request_body, status=400)["error"]
     assert request("/api/action", dict(request_body, confirm_restart=False),
@@ -591,7 +591,12 @@ def test_zim_switch_requires_confirmation_and_schedules_reader_reconcile(
     assert accepted["accepted"] is True
     assert calls == [("fema-ready", "zim")]
     assert len(refreshes) == 1
-    assert callable(refreshes[0])
+    assert callable(refreshes[0][0])
+    if action == "zim-replacement-activate":
+        assert refreshes[0][1]["activated_source"] == "fema-ready"
+        assert refreshes[0][1]["activated_configuration"]["format"] == "zim"
+    else:
+        assert refreshes[0][1] == {}
 
 
 def test_zim_delete_is_explicit_confirmed_and_unpublished_at_http_boundary(
