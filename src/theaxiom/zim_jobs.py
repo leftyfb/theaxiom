@@ -44,11 +44,20 @@ def read_candidate(sid):
         return None
     if len(raw) > 16384:
         raise ValueError("ZIM candidate record exceeds size limit")
-    candidate = json.loads(raw)
+    try:
+        candidate = json.loads(raw)
+    except (ValueError, TypeError) as exc:
+        raise ValueError("Invalid ZIM candidate record") from exc
     if (not isinstance(candidate, dict) or candidate.get("source_id") != sid
             or candidate.get("state") != "prepared"
-            or not isinstance(candidate.get("configuration"), dict)):
+            or not isinstance(candidate.get("configuration"), dict)
+            or not isinstance(candidate.get("base_artifact"), dict)):
         raise ValueError("Invalid ZIM candidate record")
+    try:
+        if identity(candidate["configuration"]) != candidate["configuration"]:
+            raise ValueError("Invalid ZIM candidate configuration")
+    except (KeyError, TypeError) as exc:
+        raise ValueError("Invalid ZIM candidate configuration") from exc
     return candidate
 
 
