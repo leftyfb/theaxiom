@@ -264,6 +264,23 @@ def exercise(browser, base, viewport_name, viewport, artifact_dir):
         page_number.press("Tab")
         expect(page_number).to_have_value("1")
         expect(previous_page).to_be_disabled()
+        # Direct numeric navigation must clamp out-of-range values, including
+        # keyboard submission, rather than rendering an invalid PDF page.
+        page_number.fill("999")
+        page_number.press("Tab")
+        expect(page_number).to_have_value("2")
+        expect(next_page).to_be_disabled()
+        page_number.fill("0")
+        page_number.press("Tab")
+        expect(page_number).to_have_value("1")
+        expect(previous_page).to_be_disabled()
+        # Document-level keyboard shortcuts must work without a focused input
+        # and must not override normal typing in the numeric page control.
+        page.locator("#paper").focus()
+        page.keyboard.press("End")
+        expect(page_number).to_have_value("2")
+        page.keyboard.press("Home")
+        expect(page_number).to_have_value("1")
         next_page.click()
         expect(page.locator("#page")).to_have_value("2")
         # Verify all pages prepare for printing without opening an OS dialog.
