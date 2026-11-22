@@ -471,6 +471,7 @@
           {% for action in source.actions %}
           <button class="button" type="button" data-action="{{ action }}" disabled>{{ action_labels[action] }}</button>
           {% endfor %}
+          {% if source.zim_download %}<button class="button" type="button" data-zim-update-check{% if not source.installed_verified %} hidden{% endif %}{% if not source.installed_verified %} disabled{% endif %}>Check for updates</button>{% endif %}
           {% if source.zim_download %}<button class="button" type="button" data-zim-download{% if source.installed_verified %} hidden{% endif %}{% if source.mutation_blocked or source.installed_verified %} disabled{% endif %}>Download</button>{% endif %}
           {% if source.zim_download %}
           <button class="button danger-action" type="button" data-zim-delete hidden>Delete installed archive</button>
@@ -1082,6 +1083,33 @@
         } finally {
           delete card.dataset.zimPosting;
           button.disabled = card.dataset.zimAccepted === 'true' || card.dataset.zimBlocked === 'true';
+        }
+      }));
+      document.querySelectorAll('[data-zim-update-check]').forEach(button => button.addEventListener('click', async () => {
+        if (button.disabled) return;
+        const card = button.closest('.source-card');
+        const feedback = card.querySelector('[data-zim-feedback]');
+        button.disabled = true;
+        feedback.textContent = 'Checking publisher metadata…';
+        try {
+          const response = await fetch('/api/update-check', {
+            method: 'POST',
+            headers: {...((typeof window !== 'undefined' && window.axiomCsrfHeaders?.()) || {}), 'Content-Type': 'application/json'},
+            body: JSON.stringify({source_id: card.dataset.sourceId, revision})
+          });
+          const result = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(result.error || 'Update check failed');
+          const badge = card.querySelector('[data-field="update-status"]');
+          if (badge) badge.hidden = result.state !== 'update_available';
+          feedback.textContent = result.state === 'update_available'
+            ? 'Newer publisher edition detected. No download started.'
+            : result.state === 'up_to_date'
+            ? 'Installed edition matches publisher metadata.'
+            : 'Unable to confirm a newer edition from publisher metadata.';
+        } catch (error) {
+          feedback.textContent = error.message || 'Publisher update check unavailable.';
+        } finally {
+          button.disabled = false;
         }
       }));
       document.querySelectorAll('[data-zim-delete]').forEach(button => button.addEventListener('click', async () => {
