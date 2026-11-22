@@ -1535,6 +1535,16 @@
                   ' · No download started; replacement requires separate explicit review.'
                 : '';
             }
+            const review = card.querySelector('[data-review-zim-update]');
+            if (review) {
+              review.hidden = !hasUpdate || !Number.isSafeInteger(update?.candidate_bytes);
+              if (!review.hidden) {
+                review.dataset.updateUrl = update.candidate_url || '';
+                review.dataset.updateSha256 = update.candidate_sha256 || '';
+                review.dataset.updateBytes = String(update.candidate_bytes);
+                review.dataset.updateEdition = update.candidate_edition || '';
+              }
+            }
             controls(card, source);
             card.dataset.filterPublication = source?.publication_filter || "unknown";
             card.dataset.filterDownload = source?.download_filter || "unknown";
