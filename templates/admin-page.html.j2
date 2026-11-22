@@ -451,6 +451,7 @@
 
             {% if pub %}<span class="compact-publication" data-field="publication-summary">{{ "Published" if pub.published else "Kiwix starting" if pub.enabled and pub.ready_for_publication else "Reader unavailable" if pub.enabled else "" }}</span>{% endif %}
           </div>
+          <span class="badge enabled" data-field="update-status" role="status"{% if not source.update_check or source.update_check.state != "update_available" %} hidden{% endif %}>Update available</span>
           <span class="badge{% if source.installed_verified %} enabled{% endif %}" data-field="status" role="status">{% if not source.adapter %}Not yet supported{% elif source.installed_verified and source.artifact %}{{ source.artifact.bytes | filesizeformat(true) }}{% elif source.adapter in ('pdf','epub') %}{{ 'Not installed or invalid' if source.artifact else 'Not downloaded' }}{% elif source.acquisition and not catalog.acquisition_stale %}{{ {'downloading':'Downloading','verifying':'Verifying','publishing':'Installing','failed':'Failed','retrying':'Retrying','interrupted':'Interrupted','not_started':'Not downloaded','unavailable':'Service unavailable'}.get(source.acquisition.state,'Waiting for status') }}{% elif catalog.acquisition_stale %}Status unavailable{% elif not source.artifact and not source.mutation_blocked %}Not downloaded{% else %}Waiting for status…{% endif %}</span>
           <progress class="summary-progress" data-field="summary-progress" max="100" value="0" aria-label="Active download progress" hidden></progress>
         </summary>
@@ -1440,6 +1441,8 @@
             } else if (['pdf','epub'].includes(source?.adapter)) {
               card.querySelector('[data-field="status"]').textContent = source.installed_verified ? size(source.artifact?.bytes) : (source.artifact ? 'Not installed or invalid' : 'Not downloaded');
               card.querySelector('[data-field="status"]').className = 'badge' + (source.installed_verified ? ' enabled' : '');
+              const updateBadge = card.querySelector('[data-field="update-status"]');
+              if (updateBadge) updateBadge.hidden = source.update_check?.state !== "update_available";
             } else if (source?.zim_download) {
               if (source.acquisition) render(card, source.acquisition, false);
               else card.querySelector('[data-field="status"]').textContent = 'Not downloaded';
