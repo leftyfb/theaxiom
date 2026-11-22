@@ -93,7 +93,8 @@ def installed_evidence(snapshot: dict[str, Any] | None, entry: dict[str, Any]) -
         return result
     job = matches[0]
     if (job.get("state") == "completed" and job.get("verified") is True
-            and job.get("active") is False):
+            and job.get("active") is False
+            and job.get("downloaded_bytes") == entry.get("bytes")):
         return {"local_current": True, "installed_state": "verified",
                 "installed_verified": True}
     if job.get("state") == "not_started" and job.get("downloaded_bytes") == 0:
