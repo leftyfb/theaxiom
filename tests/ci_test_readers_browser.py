@@ -278,7 +278,8 @@ def exercise(browser, base, viewport_name, viewport, artifact_dir):
         # and must not override normal typing in the numeric page control.
         # #paper is not focusable; focusing it leaves the numeric input
         # active, where document shortcuts intentionally do not fire.
-        page_number.evaluate("(node) => node.blur()")
+        page.locator("body").evaluate("(node) => { node.tabIndex = -1; node.focus(); }")
+        expect(page.locator("body")).to_be_focused()
         page.keyboard.press("End")
         expect(page_number).to_have_value("2")
         page.keyboard.press("Home")
