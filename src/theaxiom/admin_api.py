@@ -38,6 +38,7 @@ epub_source = importlib.import_module(f"{__package__}.epub_source" if __package_
 pdf_language = importlib.import_module(f"{__package__}.pdf_language" if __package__ else "theaxiom.pdf_language")
 pdf_transport = importlib.import_module(f"{__package__}.pdf_transport" if __package__ else "theaxiom.pdf_transport")
 document_origin_evidence = importlib.import_module(f"{__package__}.document_origin_evidence" if __package__ else "theaxiom.document_origin_evidence")
+document_update_discovery = importlib.import_module(f"{__package__}.document_update_discovery" if __package__ else "theaxiom.document_update_discovery")
 zim_jobs = importlib.import_module(f"{__package__}.zim_jobs" if __package__ else "theaxiom.zim_jobs")
 zim_source = importlib.import_module(f"{__package__}.zim_source" if __package__ else "theaxiom.zim_source")
 zim_catalog = importlib.import_module(f"{__package__}.zim_catalog" if __package__ else "theaxiom.zim_catalog")
@@ -1034,10 +1035,13 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 return
             sid = data["source_id"]
             record = next((item for item in catalog["sources"] if item["source_id"] == sid), None)
-            if not record or not self._zim_record(record):
-                self._send_json(400, {"error": "source does not support Kiwix update checks"})
+            if record and self._zim_record(record):
+                result = kiwix_update_discovery.refresh_checked_source(sid)
+            elif record and (self._pdf_record(record) or self._epub_record(record)):
+                result = document_update_discovery.check_installed_document(record)
+            else:
+                self._send_json(400, {"error": "source does not support update checks"})
                 return
-            result = kiwix_update_discovery.refresh_checked_source(sid)
             self._send_json(200, dict(source_id=sid, **result))
         elif self.path == "/api/groups":
             if not self.headers.get("Origin"):
