@@ -474,3 +474,19 @@ def test_fresh_start_rejects_zero_length_or_unsafe_staged_leftover(disk, kind):
     with pytest.raises(ValueError, match="Partial download exists"):
         zim_jobs.start("ready", CONFIG)
     assert partial.is_symlink() if kind == "symlink" else partial.is_file()
+
+
+@pytest.mark.parametrize("state", ["paused", "failed", "interrupted"])
+def test_cancel_removes_zero_byte_retained_partial_and_allows_restart(disk, state):
+    """Explicit cancellation clears an empty staged file, not just nonempty data."""
+    with zim_source.pdf_source._directory("staging", writing=True, format_name="zim") as (fd, _, _):
+        handle = zim_source.os.open(zim_source.partial_name("ready"),
+                                    zim_source.os.O_CREAT | zim_source.os.O_EXCL | zim_source.os.O_WRONLY,
+                                    0o600, dir_fd=fd)
+        zim_source.os.close(handle)
+    zim_jobs.save(dict(source_id="ready", state=state, active=False,
+                       configuration=zim_jobs.identity(CONFIG), downloaded_bytes=0))
+    assert zim_jobs.staged_present("ready")
+    assert zim_jobs.control("ready", CONFIG, "cancel")["state"] == "cancelled"
+    assert not zim_jobs.staged_present("ready")
+    assert zim_jobs.read("ready")["state"] == "cancelled"
