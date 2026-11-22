@@ -130,7 +130,9 @@ def acquire_candidate(sid, config):
                 raise ValueError("Installed archive changed; replacement requires review")
             replacement_id = sid + "-candidate"
             catalog_store.CatalogStore._validate_id(replacement_id)
-            if staged_size(replacement_id):
+            # Reject zero-length and unsafe leftovers too; the downloader
+            # otherwise opens the existing source-scoped partial for writing.
+            if staged_present(replacement_id):
                 raise ValueError("Replacement staging already exists; manual recovery required")
             artifact = zim_source.download_resumable(
                 replacement_id, configuration, offset=0, promote_lock=LOCK)
