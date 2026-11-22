@@ -230,11 +230,15 @@ def _run_candidate(sid, configuration, guard, signal, offset, validator):
     def progress(current, total, metadata):
         nonlocal last
         now = time.monotonic()
-        if now - last < 0.5 and not metadata.get("verifying") and not metadata.get("etag") and not metadata.get("last_modified"):
-            return
         with LOCK:
             candidate = read_candidate(sid)
             if not candidate or candidate["state"] not in {"downloading", "verifying", "cancelling"}:
+                return
+            validator_changed = (
+                (metadata.get("etag") and metadata["etag"] != candidate.get("etag")) or
+                (metadata.get("last_modified") and metadata["last_modified"] != candidate.get("last_modified"))
+            )
+            if now - last < 0.5 and not metadata.get("verifying") and not validator_changed:
                 return
             candidate["downloaded_bytes"] = current
             if total is not None:
