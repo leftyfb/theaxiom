@@ -207,7 +207,9 @@ def source_content_name(record):
         job = zim_jobs.status(record["source_id"])
         if not job or job.get("verified") is not True or job.get("active") is not False:
             return None
-        artifact = zim_jobs.installed(job, record["configuration"])
+        # A catalog URL change only prepares the next acquisition; the
+        # current serving job remains authoritative until activation.
+        artifact = zim_jobs.installed(job, job["configuration"])
         if not artifact:
             return None
         return Path(artifact["filename"]).stem
