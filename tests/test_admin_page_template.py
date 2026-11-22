@@ -30,7 +30,7 @@ class Parser(HTMLParser):
         self.tags.append((tag, dict(attrs)))
 
 
-def test_source_card_and_disabled_actions():
+def test_pinned_source_card_omits_inert_legacy_actions():
     parser = Parser()
     pin = WIKIPEDIA_SOURCE
     parser.feed(render([profile("wikipedia-en", format="zim", source_url=pin["source_url"],
@@ -38,8 +38,8 @@ def test_source_card_and_disabled_actions():
     assert sum(tag == "details" and attrs.get("data-source-id") == "wikipedia-en"
                for tag, attrs in parser.tags) == 1
     actions = [attrs for tag, attrs in parser.tags if tag == "button" and "data-action" in attrs]
-    assert {a["data-action"] for a in actions} == {"download", "redownload", "update"}
-    assert all("disabled" in a for a in actions)
+    assert actions == []
+    assert any("data-zim-update-check" in attrs for tag, attrs in parser.tags if tag == "button")
     assert all("open" not in attrs for tag, attrs in parser.tags if tag == "details")
     verify = next(attrs for tag, attrs in parser.tags if attrs.get("data-field") == "verification")
     assert "value" not in verify
