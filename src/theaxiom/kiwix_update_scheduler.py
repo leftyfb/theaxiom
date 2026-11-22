@@ -6,6 +6,7 @@ deletion, or service restart is performed by this runner.
 from __future__ import annotations
 
 import argparse
+from datetime import date
 import json
 import os
 from pathlib import Path
@@ -17,10 +18,12 @@ DEFAULT_MAX_CHECKS = 10
 MAX_CHECKS = 20
 
 
-def check_records(records, *, max_checks=DEFAULT_MAX_CHECKS, checker=None):
+def check_records(records, *, max_checks=DEFAULT_MAX_CHECKS, start_index=0, checker=None):
     """Bound a single sweep; only installed ZIMs can yield actionable evidence."""
     if type(max_checks) is not int or not 1 <= max_checks <= MAX_CHECKS:
         raise ValueError("Invalid maximum source check count")
+    if type(start_index) is not int or start_index < 0:
+        raise ValueError("Invalid start index")
     if not isinstance(records, list):
         raise ValueError("Invalid source catalog")
     checker = kiwix_update_discovery.refresh_checked_source if checker is None else checker
@@ -33,7 +36,9 @@ def check_records(records, *, max_checks=DEFAULT_MAX_CHECKS, checker=None):
          and record["configuration"].get("format") == "zim"}
     )
     results = []
-    for sid in eligible[:max_checks]:
+    offset = start_index % len(eligible) if eligible else 0
+    selected = (eligible[offset:] + eligible[:offset])[:max_checks]
+    for sid in selected:
         try:
             outcome = checker(sid)
             state = outcome.get("state") if isinstance(outcome, dict) else None
@@ -61,7 +66,11 @@ def main(argv=None):
         return 2
     try:
         catalog = catalog_store.CatalogStore(path).get()
-        results = check_records(catalog["sources"], max_checks=args.max_checks)
+        # Rotate the bounded daily window so larger libraries are not
+        # permanently starved by the per-run network/time budget.
+        start_index = date.today().toordinal() * args.max_checks
+        results = check_records(catalog["sources"], max_checks=args.max_checks,
+                                start_index=start_index)
     except (ValueError, OSError, catalog_store.CatalogError) as exc:
         print("Source catalog/update check unavailable; no content modified", file=sys.stderr)
         return 2
