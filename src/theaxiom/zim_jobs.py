@@ -249,7 +249,7 @@ def revalidate(sid, config):
 
 
 def control(sid, config, action):
-    if action not in {"pause", "cancel"}:
+    if action not in {"pause", "cancel", "cancel-keep"}:
         raise ValueError("Invalid ZIM control")
     with LOCK:
         job = status(sid)
@@ -273,6 +273,12 @@ def control(sid, config, action):
             save(job)
             signal.set()
             return {"accepted": True, "state": job["state"]}
+        if action == "cancel-keep" and job["state"] in {"paused", "failed", "interrupted"}:
+            job.update(state="paused", active=False, verified=False,
+                       detail="Download cancelled; partial retained for explicit resume or discard.",
+                       retained=staged_size(sid) > 0, sampled_at=time.time())
+            save(job)
+            return {"accepted": True, "state": "paused"}
         if action == "cancel" and job["state"] in {"paused", "failed", "interrupted"}:
             with worker_lock():
                 if staged_present(sid):
@@ -346,6 +352,10 @@ def _run(job, guard, signal, offset, validator, *, local=False):
         with LOCK:
             try:
                 request = CONTROLS.get(sid, (None, None))[1]
+                if request == "cancel-keep" and job["state"] != "completed":
+                    job.update(state="paused", active=False, verified=False,
+                               detail="Download cancelled; partial retained for explicit resume or discard.",
+                               retained=staged_size(sid) > 0, sampled_at=time.time())
                 if request == "cancel" and job["state"] != "completed":
                     try:
                         zim_source.discard_partial(sid)
