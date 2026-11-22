@@ -101,3 +101,32 @@ class FreshnessApiContractTests(unittest.TestCase):
         self.assertFalse(result["local_current"])
         self.assertEqual(result["installed_state"], "unavailable")
         self.assertEqual(result["error"], "timeout")
+
+
+class ZimReplacementPublicResponseTests(unittest.TestCase):
+    def test_only_ui_fields_are_exposed(self):
+        internal = {
+            "state": "activated",
+            "downloaded_bytes": 123,
+            "expected_bytes": 456,
+            "error": "review needed",
+            "previous_job": {"artifact": {"path": "/private/archive.zim"}},
+            "artifact": {"path": "/private/replacement.zim"},
+            "configuration": {"source_url": "https://private.example/archive.zim"},
+            "base_artifact": {"sha256": "secret"},
+            "etag": '"internal"',
+            "last_modified": "yesterday",
+        }
+        self.assertEqual(admin_api._public_zim_replacement(internal), {
+            "state": "activated",
+            "downloaded_bytes": 123,
+            "expected_bytes": 456,
+            "error": "review needed",
+        })
+        self.assertIn("previous_job", internal)
+
+    def test_absent_candidate_and_minimal_state(self):
+        self.assertIsNone(admin_api._public_zim_replacement(None))
+        self.assertEqual(admin_api._public_zim_replacement({"state": "prepared"}), {
+            "state": "prepared",
+        })
