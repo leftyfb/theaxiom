@@ -1,31 +1,32 @@
-# Generic ZIM publication: acceptance and deployment gate
+# Generic ZIM serving and publication acceptance
 
-**Deployment authorization:** The operator lifted the prior blanket deployment hold on 2026-11-21. Deployment is permitted once the relevant changes pass CI and the deployment plan protects existing Wikipedia service and installed ZIM artifacts. This authorization does not waive testing, migration checks, or rollback safeguards.
+## Current implementation (reviewed 2026-11-22)
 
-## Design (single-reader migration in progress)
+The unified Kiwix reader is deployed on Vancouver, with the shared `/zim/` route and default loopback port 8081. The application prepares a private `kiwix-library.xml` manifest containing only explicitly published and independently verified ZIM archives. Wikipedia remains a narrowly scoped trusted legacy acquisition, not a pattern for arbitrary uploaded sources. The reader configuration and deployment examples are in `deploy/` and `templates/`.
 
-The intended deployment uses **one** Kiwix listener on `127.0.0.1:8081`, with the shared `/zim/` URL root and `/var/lib/theaxiom/kiwix-library.xml` manifest. The existing Wikipedia archive and the verified Ready.gov archive are entries in that manifest. There is **no separate 8082 sidecar**. The proposed service template is `templates/kiwix-serve.service`; it is not yet installed on Vancouver. Until migration is accepted, the deployed Wikipedia service continues using its original `/wikipedia/` root.
+There is **no pending 8082 sidecar migration** and no standing, blanket authorization to deploy. The previously documented migration and request-time verification blockers are historical, not current live deployment holds. Confirm the actual deployed application SHA before relying on newer code paths.
 
-Downloads remain source-scoped and verified; completion never publishes an archive. Publication requires explicit operator intent and appropriate rights. Startup prepares a private manifest, probes the reader's exact OPDS book IDs, and writes a generation acknowledgement only when they match. The backend gates `/zim/` requests and checks exact filename-derived IDs for content routes. The trusted Wikipedia filename stem is a narrowly scoped legacy exception to digest-suffixed generic IDs.
+## Publication and reader safety
 
-`/read/wikipedia-en` resolves the trusted Wikipedia ID in the shared OPDS catalog, not whichever book happens to appear first. Legacy `/wikipedia/` bookmarks redirect to `/zim/`. The shared `/zim/viewer` shell adds **Back to library** navigation for every ZIM source, while PDF and future EPUB readers should provide the same homepage navigation.
+- Download completion alone never publishes content. A verified archive, saved source identity, appropriate rights basis, and explicit publication intent are required.
+- A Kiwix publication change writes its private manifest atomically; reader readiness is acknowledged only when its OPDS book set matches the expected set. Missing or stale runtime acknowledgement fails closed.
+- Request-time `/zim/` authorization checks the acknowledged manifest, current publication intent, source identity and filename-derived content IDs. It **does not rehash archives or call the acquisition monitor on each request**. A revoked publication is denied even while a Kiwix reload is pending.
+- The application checks installed ZIMs for verified identity, path and header safety when preparing its manifest. It does not install, start or restart Kiwix itself. Candidate updates must not displace the installed serving version before explicit verified activation.
+- `/zim/viewer` provides library navigation. Deep links, published/unpublished state, search, assets and multi-book loading are covered by isolated regression checks, which do not replace real-server acceptance when changes warrant it.
 
-**Unresolved deployment gate:** HTTP request-time manifest authorization currently recomputes verified books, including Wikipedia acquisition evidence. This can invoke subprocesses and filesystem checks on each request. Refactor to an efficient fail-closed publication/manifest check and test unpublish/reload behavior before deploying. A passing unit suite alone does not clear this gate.
+The manifest currently uses Kiwix legacy library XML. Verify compatibility with the installed Kiwix/libkiwix version before any binary upgrade; do not assume an untested new manifest format is supported.
 
-## Isolated CI
+## CI regression
 
-Application CI generates a small real ZIM with zimwriterfs and launches a real loopback kiwix-serve, checking OPDS and viewer pages. The service is also tested while library entries are added and removed. Independent Nginx tests validate the actual site grammar and exercise a private publication subrequest that blocks an unpublished content request before it reaches the Kiwix upstream. All of this runs on isolated GitHub Actions runners, not Vancouver.
+GitHub Actions runs unit/API/browser tests and isolated real Kiwix and Nginx smoke tests. CI-generated small ZIM fixtures exercise reader integration without touching Vancouver or production archives. Acquisition tests exercise persisted range validators, safe pause/resume/cancel, mismatch and failure behavior, installed archive preservation, and publication checks. Existing operator-selected storage directory modes (including 0777) must remain unchanged.
 
-The ZIM acquisition suite also covers restart/resume using persisted range validators, rejected changed validators, partial retention, cancellation cleanup and completed-archive protection. Existing 0777 managed storage directory modes are an accepted operator policy; code may validate owner, mount and individual-file integrity but must never chmod them to 0700.
+## Conditional live acceptance for relevant reader/acquisition changes
 
-## Live acceptance checklist (deployment hold lifted; safety checks still required)
+1. Verify explicit authorization for the exact CI-passing revision and compare it with the **observed** deployed revision. Preserve all existing archives, partials, catalog, rights flags and publication state.
+2. Confirm current mount/source and running acquisition status; do not interfere with an active transfer. Check installed Kiwix binary compatibility with the existing manifest before migrating binaries or service settings.
+3. If Nginx/systemd changes are in scope, validate the exact approved config diffs, `nginx -t`, backups and rollback. Do not bypass local safety gates.
+4. Exercise Wikipedia navigation, search and deep links plus the other currently published readers. For reader-affecting changes, use a separate small test ZIM to verify publication, revocation, direct links and reload/acknowledgement behavior.
+5. For acquisition-affecting changes, test with a **new small disposable transfer**, not installed large archives. Verify resumed range behavior, safe staging retention, checksum validation, and no implicit deletion.
+6. Capture observed deployment SHA and results; treat unsuccessful live checks as failures rather than assuming CI success proves deployment success.
 
-1. Confirm Ready.gov completed and its recorded verification remains valid; record deployed SHA and preserve all partial and installed files. Do not restart an active acquisition.
-2. Confirm the installed kiwix-serve/libkiwix version reads the generated XML manifest. Note that libkiwix 15 plans to drop legacy library XML in favor of OPDS; a migration must be separately developed and verified before upgrading to an incompatible binary.
-3. Validate the unified reader service and new Nginx configuration, run nginx -t, and verify Wikipedia retains its original search, home navigation and deep links throughout migration.
-4. Use a separate small test ZIM to check acquisition, verified state, Publish/Unpublish, rights acknowledgement, reader redirects, mobile viewing, direct content links, asset delivery and search.
-5. With two published ZIMs, test automatic Kiwix library reload and ensure an unpublished or removed book becomes inaccessible, including after reader or backend restarts.
-6. Test pause, resume and cancel with a NEW small transfer, not the current Ready.gov download. Check that resume starts at the retained byte offset, verifies the entire file and that cancel never touches installed archives.
-7. Check user-configured directory modes remain unchanged, including 0777, and that deployment rollback preserves state and any staged bytes.
-
-#2 and #86 must remain open for final live acceptance. Passing isolated CI is not a production deployment.
+For current operator deployment status see [deployment acceptance register](deployment-acceptance-register.md). Safe replacement and explicit deletion work remains tracked in [#7](https://github.com/leftyfb/theaxiom/issues/7); this page does not declare unfinished remote-update detection complete.
