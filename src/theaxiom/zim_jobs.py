@@ -122,6 +122,8 @@ def acquire_candidate(sid, config):
             live = read(sid)
             if not candidate or candidate["configuration"] != configuration:
                 raise ValueError("No matching replacement candidate")
+            if candidate["state"] != "prepared":
+                raise ValueError("Replacement candidate already verified; activation required")
             if (not live or live.get("state") != "completed"
                     or live.get("artifact") != candidate["base_artifact"]
                     or not installed(live, live["configuration"])):
