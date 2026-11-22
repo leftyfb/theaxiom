@@ -106,3 +106,15 @@ def test_candidate_bytes_must_be_bounded_integer(location, quantity):
     invalid = dict(NEW, candidate_bytes=quantity)
     with pytest.raises(ValueError):
         store.save("wikipedia", SHA, invalid, now=1000)
+
+
+def test_no_newer_edition_listed_is_cached_without_claiming_up_to_date(location):
+    from theaxiom import update_check_store as store
+    result = {
+        "state": "no_newer_edition_listed",
+        "installed_edition": "2026-10",
+        "evidence": "complete filtered catalog listed no later matching edition",
+    }
+    store.save("ready", SHA, result, now=1000)
+    assert store.load("ready", SHA, now=1001)["state"] == "no_newer_edition_listed"
+    assert store.load("ready", "b" * 64, now=1001)["state"] == "unable_to_determine"
