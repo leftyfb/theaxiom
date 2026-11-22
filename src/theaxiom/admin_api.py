@@ -42,6 +42,7 @@ zim_source = importlib.import_module(f"{__package__}.zim_source" if __package__ 
 zim_catalog = importlib.import_module(f"{__package__}.zim_catalog" if __package__ else "theaxiom.zim_catalog")
 zim_refresh = importlib.import_module(f"{__package__}.zim_refresh" if __package__ else "theaxiom.zim_refresh")
 update_check_store = importlib.import_module(f"{__package__}.update_check_store" if __package__ else "theaxiom.update_check_store")
+kiwix_update_discovery = importlib.import_module(f"{__package__}.kiwix_update_discovery" if __package__ else "theaxiom.kiwix_update_discovery")
 library_search = importlib.import_module(f"{__package__}.search" if __package__ else "theaxiom.search")
 BIND_HOST = "127.0.0.1"
 BIND_PORT = 8080
@@ -1009,6 +1010,34 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 return
             ADMIN_SESSIONS.clear()  # revoke browser sessions after credential rotation
             self._send_json(200, {"changed": True})
+        elif self.path == "/api/update-check":
+            # Explicit metadata-only request. No archive transfer, activation,
+            # publication mutation or untrusted caller-provided URL.
+            if not self.headers.get("Origin"):
+                self._send_json(403, {"error": "same-origin request required"})
+                return
+            data = self._read_body()
+            if (set(data) != {"source_id", "revision"}
+                    or not isinstance(data["source_id"], str)
+                    or not catalog_store.ID_RE.fullmatch(data["source_id"])
+                    or not self._valid_revision(data["revision"])):
+                self._send_json(400, {"error": "invalid update-check request"})
+                return
+            try:
+                catalog = SOURCE_CATALOG.get()
+            except (OSError, catalog_store.CatalogError):
+                self._send_json(503, {"error": "source catalog unavailable"})
+                return
+            if data["revision"] != catalog["revision"]:
+                self._send_json(409, {"error": "catalog revision changed"})
+                return
+            sid = data["source_id"]
+            record = next((item for item in catalog["sources"] if item["source_id"] == sid), None)
+            if not record or not self._zim_record(record):
+                self._send_json(400, {"error": "source does not support Kiwix update checks"})
+                return
+            result = kiwix_update_discovery.refresh_checked_source(sid)
+            self._send_json(200, dict(source_id=sid, **result))
         elif self.path == "/api/groups":
             if not self.headers.get("Origin"):
                 self._send_json(403, {"error": "same-origin request required"})
