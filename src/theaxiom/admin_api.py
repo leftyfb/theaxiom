@@ -527,7 +527,6 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 return
             # Resolve Wikipedia by its trusted filename in the shared OPDS catalog.
             # Never choose the first book: it may be a different published ZIM.
-            from .source_catalog import WIKIPEDIA_SOURCE
             location = publication.reader_location(
                 zim_catalog.GENERIC_READER, Path(WIKIPEDIA_SOURCE["filename"]).stem)
             if location is None:
