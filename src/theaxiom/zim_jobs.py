@@ -249,8 +249,11 @@ def control(sid, config, action):
             if not pair:
                 raise ValueError("Transfer is owned by another process")
             signal, previous = pair
-            if previous and previous != action:
-                raise ValueError("Stop request already pending")
+            if previous:
+                if previous != action:
+                    raise ValueError("Stop request already pending")
+                # Repeated HTTP requests must not reset an accepted stop.
+                return {"accepted": True, "state": job["state"]}
             CONTROLS[sid] = (signal, action)
             job.update(state="pausing" if action == "pause" else "cancelling",
                        detail="Stopping transfer…", sampled_at=time.time())
