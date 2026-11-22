@@ -472,6 +472,7 @@
           {% endfor %}
           {% if source.zim_download %}<button class="button" type="button" data-zim-download{% if source.installed_verified %} hidden{% endif %}{% if source.mutation_blocked or source.installed_verified %} disabled{% endif %}>Download</button>{% endif %}
           {% if source.zim_download %}
+          <button class="button danger-action" type="button" data-zim-delete hidden>Delete installed archive</button>
           <button class="button" type="button" data-zim-replacement="prepare" hidden>Prepare replacement</button>
           <button class="button" type="button" data-zim-replacement="download" hidden>Download replacement</button>
           <button class="button" type="button" data-zim-replacement="cancel" hidden>Cancel replacement · keep partial</button>
@@ -1082,6 +1083,27 @@
           button.disabled = card.dataset.zimAccepted === 'true' || card.dataset.zimBlocked === 'true';
         }
       }));
+      document.querySelectorAll('[data-zim-delete]').forEach(button => button.addEventListener('click', async () => {
+        if (button.disabled || !window.confirm('Permanently delete this installed ZIM archive? This cannot be undone. Unpublish and retire any replacement first.')) return;
+        const card = button.closest('.source-card');
+        card.dataset.zimDeletePosting = 'true';
+        button.disabled = true;
+        const feedback = card.querySelector('[data-zim-replacement-status]');
+        try {
+          const response = await acquisitionFetch('/api/action', {method:'POST',
+            headers:{...((typeof window !== 'undefined' && window.axiomCsrfHeaders?.()) || {}),'Content-Type':'application/json'},
+            body:JSON.stringify({source_id:card.dataset.sourceId, action:'zim-delete-installed', revision, confirm_restart:true})});
+          const result = await response.json().catch(() => ({}));
+          if (!response.ok) throw acquisitionError(response, result, 'Archive deletion failed');
+          feedback.textContent = 'Installed archive deleted';
+          await refresh();
+        } catch(error) {
+          feedback.textContent = error.message;
+        } finally {
+          delete card.dataset.zimDeletePosting;
+          button.disabled = false;
+        }
+      }));
       document.querySelectorAll('[data-zim-replacement]').forEach(button => button.addEventListener('click', async () => {
         if (button.disabled) return;
         const card = button.closest('.source-card');
@@ -1353,6 +1375,11 @@
             control.disabled = card.dataset.zimPosting === 'true' || card.dataset.zimAccepted === 'true' ||
               (op === 'pause' && !['queued','downloading','verifying'].includes(state));
           }
+        }
+        const deleteButton = card.querySelector('[data-zim-delete]');
+        if (deleteButton) {
+          deleteButton.hidden = !source?.installed_verified || !!source?.publication?.enabled || !!source?.replacement;
+          deleteButton.disabled = !!source?.mutation_blocked || card.dataset.zimDeletePosting === 'true';
         }
         const replacement = source?.replacement;
         const replacementState = replacement?.state || '';
