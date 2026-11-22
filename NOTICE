@@ -1,0 +1,12 @@
+The Axiom
+Copyright 2026 The Axiom contributors
+
+The Axiom original application code and project documentation are licensed
+under the Apache License, Version 2.0 (see LICENSE).
+
+Third-party dependencies, tools, and content retain their respective licenses.
+Downloaded and imported offline library materials are not covered by this
+project's Apache-2.0 license. See README.md and docs/dependencies.md.
+
+This notice does not supersede existing third-party copyright or attribution
+requirements. Contributors must have rights to license their contributions.
