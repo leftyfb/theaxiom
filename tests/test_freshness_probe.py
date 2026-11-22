@@ -223,5 +223,64 @@ class InstalledEvidenceTests(unittest.TestCase):
         snapshot = {"stale": False, "acquisitions": [self.job(), self.job()]}
         self.assertFalse(freshness_probe.installed_evidence(snapshot, self.ENTRY)["local_current"])
 
+
+class RemoteRevisionEvidenceTests(unittest.TestCase):
+    INSTALLED = {
+        "verified": True,
+        "sha256": "a" * 64,
+        "source_url": "https://example.invalid/archive.zim",
+        "etag": '"edition-one"',
+        "bytes": 100,
+    }
+
+    def classify(self, remote, installed=None):
+        return freshness_probe.classify_remote_revision(
+            self.INSTALLED if installed is None else installed, remote)
+
+    def test_matching_strong_validator_is_same_representation(self):
+        self.assertEqual(self.classify({
+            "source_url": self.INSTALLED["source_url"], "etag": '"edition-one"'
+        })["state"], "representation_unchanged")
+
+    def test_different_strong_validator_does_not_assert_newer_edition(self):
+        result = self.classify({
+            "source_url": self.INSTALLED["source_url"], "etag": '"edition-two"',
+            "content_length": 100,
+        })
+        self.assertEqual(result["state"], "representation_changed")
+        self.assertNotEqual(result["state"], "update_available")
+
+    def test_size_difference_alone_is_never_authoritative(self):
+        for size in (100, 101, 99, "101"):
+            with self.subTest(size=size):
+                self.assertEqual(self.classify({
+                    "source_url": self.INSTALLED["source_url"],
+                    "content_length": size,
+                })["state"], "unable_to_determine")
+
+    def test_weak_etag_timestamp_and_different_url_are_not_authoritative(self):
+        cases = [
+            {"source_url": self.INSTALLED["source_url"], "etag": 'W/"edition-two"'},
+            {"source_url": self.INSTALLED["source_url"], "last_modified": "Tue, 01 Jan 2030 00:00:00 GMT"},
+            {"source_url": "https://example.invalid/new.zim", "etag": '"edition-two"'},
+            {"source_url": self.INSTALLED["source_url"], "etag": "unquoted"},
+        ]
+        for remote in cases:
+            with self.subTest(remote=remote):
+                self.assertEqual(self.classify(remote)["state"], "unable_to_determine")
+
+    def test_unverified_or_unpinned_install_is_not_compared(self):
+        for changes in ({"verified": False}, {"sha256": "bad"}, {"verified": None}):
+            with self.subTest(changes=changes):
+                self.assertEqual(self.classify({
+                    "source_url": self.INSTALLED["source_url"], "etag": '"edition-two"'
+                }, dict(self.INSTALLED, **changes))["state"], "unable_to_determine")
+
+    def test_malformed_metadata_fails_closed(self):
+        for remote in (None, [], "", {"source_url": self.INSTALLED["source_url"], "etag": 4}):
+            with self.subTest(remote=remote):
+                self.assertEqual(self.classify(remote)["state"], "unable_to_determine")
+
+
 if __name__ == "__main__":
     unittest.main()
