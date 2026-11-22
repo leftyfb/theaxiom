@@ -764,5 +764,6 @@ def test_retry_counter_survives_failed_fresh_retry(disk):
     zim_jobs.save(failed)
     with patch.object(zim_source, "download_resumable", side_effect=OSError("offline")):
         assert zim_jobs.start("ready", CONFIG, retry=True)["accepted"]
+        assert zim_jobs.read("ready")["retry_count"] == 2
         join_worker()
     assert zim_jobs.read("ready")["retry_count"] == 2
