@@ -26,7 +26,7 @@ The Axiom is in early development. Its goals include reliable preparation and lo
 
 This repository is the standalone home for the project. The current migration preserves the application and proof-of-concept tooling while intentionally excluding Ansible, host inventory and Projectwright integration; standard nginx/systemd deployment examples now live in `deploy/`. See `docs/architecture.md` and `docs/backlog.md` for boundaries and next work.
 
-**Deployment remains on hold while Ready.gov downloads on Vancouver.** See the [development-to-deployment acceptance register](docs/deployment-acceptance-register.md) for exact CI evidence, pending live checks, and authorization gates. A green GitHub Actions run does not authorize deployment.
+**Deployment is operator-authorized and gated by CI and deployment safety checks.** The latest confirmed Vancouver deployment at the time of this documentation update is `8d1f9b506698275c4849abd6f5a186f19d2cc561` ([AC-166](https://github.com/leftyfb/agent-coordination/issues/706)). A green GitHub Actions run alone does not authorize deployment.
 
 ## License
 
@@ -99,7 +99,7 @@ Unpublish before removing a published source or changing its artifact identity. 
 3. Select **Import local PDF** in that source's card. The app checks the storage reserve, streams and verifies the document framing and pin, and atomically installs the copy under `library/pdf/<source-id>.<sha256>.pdf`. Failure leaves previously installed bytes in place. The original inbox file is not deleted. Older pins are retained, not automatically pruned.
 4. Publish separately from the same card. The library links directly to the integrated offline PDF reader; see [PDF.js installation and reader limits](docs/pdfjs.md). Unpublishing blocks new reader and direct document requests; it cannot revoke previously saved copies. PDF full-text search is not included.
 
-PDF HTTPS acquisition and safe ZIM transport now have separate workers and validation rules. FEMA/Ready.gov production acceptance and generic ZIM live serving remain pending explicit deployment approval. No production metadata is registered from the historical demo fixture.
+PDF HTTPS acquisition and safe ZIM transport have separate workers and validation rules. The shared Kiwix reader and `/zim/viewer` are deployed on Vancouver; source publication still requires verified installed content and explicit operator action. No production metadata is registered from the historical demo fixture.
 
 ### Storage configuration (development)
 
@@ -107,13 +107,11 @@ Open `/admin` and select Storage settings. Enter an existing storage root, selec
 
 GET and POST /api/storage-settings read and save the complete configuration object. The default is unconfigured, with empty storage_root, storage_mount and storage_source, minimum_free_bytes set to zero, and fixed directories ["staging", "library"]. Select an existing absolute non-root storage_root. For mounted storage, specify both its exact mount target and expected source; leave both empty for intentionally local storage. Managed destinations are staging/ and library/zim/ under the root. Configuration is saved atomically under XDG_CONFIG_HOME/theaxiom/storage.json (or THEAXIOM_STORAGE_SETTINGS). Older or corrupt configuration must be explicitly replaced, not automatically activated.
 
-GET /api/storage-status reports advisory readiness, detected mount, capacity and blocking errors. It makes no directories or probe writes. It checks the Linux mount table before inspecting filesystem paths, rejects symlinks and nested mounts, and checks available capacity against the selected source size. Hard NFS mounts can still block filesystem metadata operations. The checks cannot protect a subsequent writer from mount disappearance, replacement, or concurrent changes. Acquisition is therefore disabled, including when readiness passes. Existing staging environment overrides do not authorize acquisition. Persistent jobs, verified-local freshness, safe promotion and recovery remain outstanding.
+GET /api/storage-status reports advisory readiness, detected mount, capacity and blocking errors. It makes no directories or probe writes. It checks the Linux mount table before inspecting filesystem paths, rejects symlinks and nested mounts, and checks available capacity against the selected source size. Hard NFS mounts can still block filesystem metadata operations. The checks cannot protect a subsequent writer from mount disappearance, replacement, or concurrent changes. Storage readiness alone does not authorize acquisition; dedicated acquisition workers apply additional source-specific validation, verification, and recovery safeguards. Existing staging environment overrides do not authorize acquisition.
 
 For generic ZIM serving, published status requires an explicitly verified installed
 archive, any necessary rights acknowledgement, a matching Kiwix manifest and an
-acknowledged running reader. The standalone Kiwix instance on port 8082 is an
-optional deployment component; it is not installed or started by application
-publishing actions. The current Wikipedia reader remains independent on 8081.
+acknowledged running reader. The deployed shared Kiwix reader uses port 8081 and serves verified archives through the `/zim/` routes. Application publishing actions do not install or start the Kiwix service.
 See [generic ZIM acceptance and deployment gate](docs/generic-zim-serving.md).
 
 Node.js is required for the JavaScript tests in the full development suite.
