@@ -241,7 +241,7 @@ def compare_catalog_editions(
     if not old_edition or not new_edition:
         return unknown
     if new_edition > old_edition and candidate["sha256"] != installed["sha256"]:
-        return {
+        result = {
             "state": "update_available",
             "evidence": "newer authenticated publisher catalog edition with distinct SHA-256",
             "installed_edition": installed["edition"],
@@ -249,6 +249,9 @@ def compare_catalog_editions(
             "candidate_url": candidate["source_url"],
             "candidate_sha256": candidate["sha256"],
         }
+        if type(candidate.get("bytes")) is int and 96 <= candidate["bytes"] <= 2**63 - 1:
+            result["candidate_bytes"] = candidate["bytes"]
+        return result
     if new_edition == old_edition and candidate["sha256"] == installed["sha256"]:
         return {"state": "up_to_date", "evidence": "same authenticated catalog edition and SHA-256"}
     if new_edition < old_edition:
