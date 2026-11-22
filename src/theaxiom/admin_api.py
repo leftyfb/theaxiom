@@ -866,13 +866,25 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 elif not snapshot["stale"] and not busy and (not artifacts[sid]
                         or (job and job.get("state") == "not_started")):
                     download_filter = "not-downloaded"
+            replacement_available = False
+            if lifecycles[sid].get("zim_download"):
+                try:
+                    serving_job = zim_jobs.status(sid)
+                    replacement_available = bool(
+                        serving_job and serving_job.get("state") == "completed"
+                        and serving_job.get("verified") is True
+                        and serving_job.get("configuration") != zim_jobs.identity(record["configuration"])
+                        and zim_jobs.installed(serving_job, serving_job["configuration"])
+                    )
+                except (ValueError, OSError, KeyError, TypeError):
+                    replacement_available = False
             replacement = None
             if lifecycles[sid].get("zim_download"):
                 try:
                     replacement = zim_jobs.candidate_status(sid)
                 except (ValueError, OSError):
                     replacement = {"state": "unavailable", "error": "Replacement status unavailable"}
-            sources.append(dict(record, **lifecycles[sid], acquisition=job, replacement=replacement,
+            sources.append(dict(record, **lifecycles[sid], acquisition=job, replacement=replacement, replacement_available=replacement_available,
                                 installed_verified=verified, publication=state, mutation_blocked=busy,
                                 publication_filter=publication_filter, download_filter=download_filter))
         return dict(catalog, sources=sources, acquisition_stale=snapshot["stale"])
