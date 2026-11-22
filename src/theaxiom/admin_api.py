@@ -882,6 +882,14 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             if lifecycles[sid].get("zim_download"):
                 try:
                     replacement = zim_jobs.candidate_status(sid)
+                    if replacement is not None:
+                        # The admin UI needs progress and state, not internal
+                        # rollback snapshots or artifact storage metadata.
+                        replacement = {
+                            key: replacement[key] for key in (
+                                "state", "downloaded_bytes", "expected_bytes", "error"
+                            ) if key in replacement
+                        }
                 except (ValueError, OSError):
                     replacement = {"state": "unavailable", "error": "Replacement status unavailable"}
             sources.append(dict(record, **lifecycles[sid], acquisition=job, replacement=replacement, replacement_available=replacement_available,
