@@ -335,3 +335,27 @@ def test_revalidate_recovered_worker_uses_retained_file(disk, monkeypatch):
     join_worker()
     assert zim_jobs.status("ready")["verified"] is True
     assert not partial.exists()
+
+
+@pytest.mark.parametrize("action", ["pause", "cancel"])
+def test_late_verification_progress_preserves_pending_stop_state(disk, action):
+    """Worker callbacks must not erase an operator's accepted stop request."""
+    entered, release = threading.Event(), threading.Event()
+
+    def download(sid, config, *, progress, stopped, **kwargs):
+        progress(0, len(fixture_bytes()), {"etag": '"stable"'})
+        entered.set()
+        assert release.wait(5)
+        progress(48, len(fixture_bytes()), {"verifying": True})
+        assert zim_jobs.read(sid)["state"] == ("pausing" if action == "pause" else "cancelling")
+        raise zim_source.TransferStopped()
+
+    with patch.object(zim_source, "download_resumable", download):
+        try:
+            zim_jobs.start("ready", CONFIG)
+            assert entered.wait(5)
+            assert zim_jobs.control("ready", CONFIG, action)["accepted"]
+        finally:
+            release.set()
+        join_worker()
+    assert zim_jobs.status("ready")["state"] == ("paused" if action == "pause" else "cancelled")
