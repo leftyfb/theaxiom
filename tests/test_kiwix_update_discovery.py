@@ -36,7 +36,7 @@ def fetcher(catalog, metadata, calls):
         calls.append((kind, url))
         if kind == "catalog":
             assert url == discovery.kiwix_metadata_transport.catalog_page_url(
-                family=FAMILY, language="eng", start=0, count=discovery.CATALOG_PAGE_SIZE
+                family="wikipedia_en_all", language="eng", start=0, count=discovery.CATALOG_PAGE_SIZE
             )
             return catalog
         assert kind == "metalink"
@@ -56,6 +56,19 @@ def test_newer_edition_requires_both_documents_and_sha():
     assert result["candidate_sha256"] == "b" * 64
     assert result["candidate_bytes"] == 123456
     assert [kind for kind, _ in calls] == ["catalog", "metalink"]
+
+
+def test_catalog_filter_uses_book_name_but_candidate_matching_keeps_full_family():
+    calls = []
+    result = discovery.check_kiwix_update(
+        INSTALLED,
+        fetch=fetcher(feed(atom("2026-11"), atom("2026-12", family="wikipedia_en_all_mini")),
+                      metalink("2026-11"), calls),
+    )
+    assert result["state"] == "update_available"
+    assert result["candidate_edition"] == "2026-11"
+    assert "name=wikipedia_en_all&lang=eng" in calls[0][1]
+    assert "name=wikipedia_en_all_maxi" not in calls[0][1]
 
 
 def test_no_newer_entry_does_not_assume_up_to_date():
