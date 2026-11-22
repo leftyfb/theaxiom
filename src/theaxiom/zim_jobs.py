@@ -182,6 +182,9 @@ def start(sid, config, *, resume=False, restart=False, retry=False):
                     raise ValueError("Retry requires a matching failed ZIM job")
                 if old.get("retry_count", sum(entry.get("operation") == "retry" for entry in old.get("attempt_history", []))) >= MAX_RETRIES:
                     raise ValueError("ZIM retry limit reached; explicit restart required")
+            previous_retries = (old.get("retry_count", sum(
+                entry.get("operation") == "retry"
+                for entry in old.get("attempt_history", []))) if old else 0)
             if restart and (not old or old["state"] not in {"paused", "failed", "interrupted", "cancelled"}):
                 raise ValueError("Restart requires an existing stopped ZIM job")
             if resume or (retry and staged_size(sid) > 0):
@@ -219,7 +222,9 @@ def start(sid, config, *, resume=False, restart=False, retry=False):
             _record_attempt(job, started=True)
             if retry:
                 job["attempt_history"][-1]["operation"] = "retry"
-                job["retry_count"] = old.get("retry_count", sum(entry.get("operation") == "retry" for entry in old.get("attempt_history", []))) + 1
+                # Compute from the previous persisted record before mutating
+                # the current attempt. On a retained partial, job is old.
+                job["retry_count"] = previous_retries + 1
             save(job)
             signal = threading.Event()
             CONTROLS[sid] = (signal, None)
