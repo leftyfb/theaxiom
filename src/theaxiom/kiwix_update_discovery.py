@@ -29,8 +29,9 @@ def check_kiwix_update(installed: dict, *, fetch=None) -> dict:
     never built from the catalog or a user-edited source card. Only the
     transport's pinned TLS, checked DNS and allowlisted endpoints are trusted.
     """
+    stage = "installed identity validation"
     if not isinstance(installed, dict) or installed.get("verified") is not True:
-        return dict(UNKNOWN)
+        return dict(UNKNOWN, evidence="installed identity is not independently verified")
     family = installed.get("family")
     edition = installed.get("edition")
     if (not isinstance(family, str) or not re.fullmatch(r"[a-z0-9._-]{3,120}", family)
@@ -41,7 +42,7 @@ def check_kiwix_update(installed: dict, *, fetch=None) -> dict:
             or not installed.get("language")
             or not isinstance(installed.get("source_url"), str)
             or not re.fullmatch(r"[a-f0-9]{64}", str(installed.get("sha256", "")))):
-        return dict(UNKNOWN)
+        return dict(UNKNOWN, evidence="installed identity lacks verified catalog matching fields")
     # Caller-supplied fetch is only intended for deterministic test fixtures.
     fetch = kiwix_metadata_transport.fetch_metadata if fetch is None else fetch
     try:
@@ -53,8 +54,11 @@ def check_kiwix_update(installed: dict, *, fetch=None) -> dict:
                 family=family, language=installed["language"],
                 start=page * CATALOG_PAGE_SIZE, count=CATALOG_PAGE_SIZE,
             )
+            stage = "catalog metadata request"
             raw = fetch(query, kind="catalog")
+            stage = "catalog XML parsing"
             entries = kiwix_opds.parse_acquisition_feed(raw)
+            stage = "catalog family and edition matching"
             # Count all Atom entries, including unsupported acquisition types,
             # so a partial page cannot silently terminate the catalog scan.
             entry_count = len(ET.fromstring(raw).findall(kiwix_opds.ATOM + "entry"))
@@ -74,7 +78,7 @@ def check_kiwix_update(installed: dict, *, fetch=None) -> dict:
         if not completed_scan:
             # The filtered catalog may have more pages: no claim that the
             # selected edition is the latest or unique without full evidence.
-            return dict(UNKNOWN)
+            return dict(UNKNOWN, evidence="filtered catalog scan exceeded the bounded page limit")
         if not candidates:
             # Listing the installed edition on a complete filtered scan is
             # evidence that no later edition was listed, not that the remote
@@ -83,27 +87,31 @@ def check_kiwix_update(installed: dict, *, fetch=None) -> dict:
                 return {"state": "no_newer_edition_listed",
                         "evidence": "complete filtered catalog listed no later matching edition",
                         "installed_edition": edition}
-            return dict(UNKNOWN)
+            return dict(UNKNOWN, evidence="installed edition was absent from the filtered publisher catalog")
         candidates.sort(key=lambda candidate: candidate[0], reverse=True)
         newest = candidates[0][0]
         # Ambiguous duplicate records must not result in an arbitrary choice.
         if sum(version == newest for version, _ in candidates) != 1:
-            return dict(UNKNOWN)
+            return dict(UNKNOWN, evidence="multiple matching newest publisher editions were listed")
         entry = candidates[0][1]
         link = entry["acquisition_url"]
         name = urlsplit(link).path.rsplit("/", 1)[-1][:-6]
+        stage = "Metalink metadata request"
+        raw_metalink = fetch(link, kind="metalink")
+        stage = "Metalink validation"
         metadata = kiwix_opds.parse_metalink(
-            fetch(link, kind="metalink"), expected_filename=name,
+            raw_metalink, expected_filename=name,
             preferred_host=urlsplit(installed["source_url"]).hostname,
         )
+        stage = "publisher candidate identity comparison"
         candidate = kiwix_opds.resolve_catalog_candidate(entry, metadata, installed=installed)
         return freshness_probe.compare_catalog_editions(
             installed, candidate, trusted_catalog=True,
         )
     except (ValueError, TypeError, KeyError, OverflowError, OSError):
-        # Never convert malformed, unavailable or ambiguous publisher
-        # metadata into an update notification or an acquisition action.
-        return dict(UNKNOWN)
+        # Keep fail-closed semantics, but preserve a static, safe diagnostic
+        # stage. Never echo exception text, untrusted URLs or remote payloads.
+        return dict(UNKNOWN, evidence=f"Kiwix metadata check failed during {stage}")
 
 
 def installed_identity_from_job(job: dict, artifact: dict) -> dict | None:
