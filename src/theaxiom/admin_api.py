@@ -895,7 +895,10 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     if replacement and replacement["state"] in {"failed", "cancelled", "interrupted"}:
                         # A failed transfer with retained bytes must be resumed
                         # or cleaned up, not offered a discard that will fail.
-                        replacement["can_discard"] = not zim_jobs.staged_present(sid + "-candidate")
+                        replacement["can_discard"] = (
+                            not zim_jobs.staged_present(sid + "-candidate")
+                            and not zim_jobs.read_candidate(sid).get("artifact")
+                        )
                 except (ValueError, OSError):
                     replacement = {"state": "unavailable", "error": "Replacement status unavailable"}
             sources.append(dict(record, **lifecycles[sid], acquisition=job, replacement=replacement, replacement_available=replacement_available,
