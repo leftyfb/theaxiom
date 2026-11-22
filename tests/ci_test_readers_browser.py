@@ -229,10 +229,10 @@ def exercise(browser, base, viewport_name, viewport, artifact_dir):
         # The page input is a direct navigation affordance in addition to
         # thumbnails and toolbar arrows.
         page.locator("#page").fill("1")
-        page.locator("#page").press("Enter")
+        page.locator("#page").blur()  # Native change handler commits on blur.
         expect(page.locator("#page")).to_have_value("1")
         page.locator("#page").fill("2")
-        page.locator("#page").press("Enter")
+        page.locator("#page").blur()
         expect(page.locator("#page")).to_have_value("2")
         # Verify all pages prepare for printing without opening an OS dialog.
         page.evaluate("window.__printInvoked = 0; window.print = () => { window.__printInvoked += 1; }")
