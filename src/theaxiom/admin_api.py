@@ -1159,7 +1159,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
     def _import_pdf(self, data):
         sid = data.get("source_id")
         if (set(data) != ({"source_id", "action", "revision", "confirm_restart"} if data.get("action") == "zim-restart" else {"source_id", "action", "revision"})
-                or (data.get("action") == "zim-restart" and data.get("confirm_restart") is not True)
+                or (data.get("action") in {"zim-restart", "zim-replacement-activate", "zim-replacement-rollback"} and data.get("confirm_restart") is not True)
                 or not isinstance(sid, str)
                 or not catalog_store.ID_RE.fullmatch(sid) or not self._valid_revision(data["revision"])):
             self._send_json(400, {"error": "import requires a source ID and catalog revision only"})
@@ -1393,7 +1393,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
     def _start_zim(self, data):
         sid = data.get("source_id")
         expected_keys = ({"source_id", "action", "revision", "confirm_restart"}
-                         if data.get("action") == "zim-restart"
+                         if data.get("action") in {"zim-restart", "zim-replacement-activate", "zim-replacement-rollback"}
                          else {"source_id", "action", "revision"})
         if (set(data) != expected_keys
                 or (data.get("action") == "zim-restart" and data.get("confirm_restart") is not True)
