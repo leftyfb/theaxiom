@@ -465,6 +465,17 @@
           <p class="source-note" data-field="rate" hidden></p>
           <p data-field="detail" class="source-note" hidden></p>
         </div>
+        {% if source.zim_download %}
+        <p class="source-note" data-field="update-details"{% if not source.update_check or source.update_check.state != "update_available" %} hidden{% endif %}>
+        {% if source.update_check and source.update_check.state == "update_available" %}
+          Installed edition: {{ source.update_check.installed_edition }} · Publisher edition: {{ source.update_check.candidate_edition }}
+          {% if source.update_check.candidate_bytes %} · Candidate size: {{ source.update_check.candidate_bytes | filesizeformat(true) }}{% endif %}
+          · Check recorded: {{ source.update_check.checked_at }}
+          · Candidate: {{ source.update_check.candidate_url }}
+          · No download started; replacement requires separate explicit review.
+        {% endif %}
+        </p>
+        {% endif %}
         {% set document = source.adapter in ('pdf','epub') %}
         {% set url_managed = source.configuration.source_url|default('', true)|trim %}
         <div class="source-actions" aria-label="Source actions">
@@ -1476,7 +1487,19 @@
             else card.querySelector('[data-field="status"]').textContent = data.acquisition_stale ? 'Status unavailable' :
               source?.mutation_blocked !== false ? 'Acquisition unresolved' : 'Not downloaded';
             const updateBadge = card.querySelector('[data-field="update-status"]');
-            if (updateBadge) updateBadge.hidden = source?.update_check?.state !== "update_available";
+            const updateDetails = card.querySelector('[data-field="update-details"]');
+            const update = source?.update_check;
+            const hasUpdate = update?.state === "update_available";
+            if (updateBadge) updateBadge.hidden = !hasUpdate;
+            if (updateDetails) {
+              updateDetails.hidden = !hasUpdate;
+              updateDetails.textContent = hasUpdate
+                ? 'Installed edition: ' + (update.installed_edition || 'unknown') +
+                  ' · Publisher edition: ' + (update.candidate_edition || 'unknown') +
+                  ' · Candidate: ' + (update.candidate_url || 'unavailable') +
+                  ' · No download started; replacement requires separate explicit review.'
+                : '';
+            }
             controls(card, source);
             card.dataset.filterPublication = source?.publication_filter || "unknown";
             card.dataset.filterDownload = source?.download_filter || "unknown";
