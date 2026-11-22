@@ -248,7 +248,7 @@ def test_pdf_download_metadata_and_explicit_publication(pdf_app, disk, monkeypat
     def download(sid, url, **kwargs):
         assert url == "https://publisher.example.org/guide.pdf"
         assert kwargs.pop("capture_validator") is True
-        return pdf_source.install_stream(sid, BytesIO(data), **kwargs), None
+        return pdf_source.install_stream(sid, BytesIO(data), **kwargs), '"etag-from-get"'
     monkeypatch.setattr(admin_api.pdf_transport, "download", download)
     catalog = mutate(request, request("/api/sources"), "add",
                      dict(title="Remote guide", format="pdf", source_url="https://publisher.example.org/guide.pdf"), sid=SID)
@@ -263,6 +263,8 @@ def test_pdf_download_metadata_and_explicit_publication(pdf_app, disk, monkeypat
     config = source(catalog, SID)["configuration"]
     assert config["sha256"] == hashlib.sha256(data).hexdigest()
     assert config["expected_size_bytes"] == str(len(data))
+    from theaxiom import document_origin_evidence
+    assert document_origin_evidence.load(SID, "pdf", config["source_url"], config["sha256"]) == '"etag-from-get"'
     assert "calculated locally" in config["provenance"]
     pub = dict(source_id=SID, enabled=True, revision=catalog["revision"])
     request("/api/publication", pub, status=409)
