@@ -86,6 +86,7 @@ def check_kiwix_update(installed: dict, *, fetch=None) -> dict:
         name = urlsplit(link).path.rsplit("/", 1)[-1][:-6]
         metadata = kiwix_opds.parse_metalink(
             fetch(link, kind="metalink"), expected_filename=name,
+            preferred_host=urlsplit(installed["source_url"]).hostname,
         )
         candidate = kiwix_opds.resolve_catalog_candidate(entry, metadata, installed=installed)
         return freshness_probe.compare_catalog_editions(
