@@ -104,5 +104,73 @@ class FreshnessProbeTests(unittest.TestCase):
         self.assertFalse(result["local_current"])
 
 
+
+class InstalledEvidenceTests(unittest.TestCase):
+    ENTRY = {"source_id": "wikipedia-en", "filename": "wikipedia.zim",
+             "bytes": 754723, "sha256": "a" * 64}
+
+    def job(self, **overrides):
+        job = {"source_id": self.ENTRY["source_id"], "filename": self.ENTRY["filename"],
+               "expected_bytes": self.ENTRY["bytes"], "sha256": self.ENTRY["sha256"],
+               "state": "completed", "verified": True, "active": False,
+               "downloaded_bytes": self.ENTRY["bytes"]}
+        job.update(overrides)
+        return job
+
+    def classify(self, job, *, stale=False):
+        return freshness_probe.installed_evidence(
+            {"stale": stale, "acquisitions": [job]}, self.ENTRY)
+
+    def test_verified_exact_manifest_and_fresh_snapshot(self):
+        result = self.classify(self.job())
+        self.assertTrue(result["local_current"])
+        self.assertTrue(result["installed_verified"])
+        self.assertEqual(result["installed_state"], "verified")
+
+    def test_absent_file(self):
+        result = self.classify(self.job(state="not_started", verified=False,
+                                        downloaded_bytes=0))
+        self.assertEqual(result["installed_state"], "absent")
+        self.assertFalse(result["local_current"])
+
+    def test_partial_download(self):
+        result = self.classify(self.job(state="interrupted", verified=False,
+                                        downloaded_bytes=100))
+        self.assertEqual(result["installed_state"], "partial_or_unverified")
+        self.assertFalse(result["local_current"])
+
+    def test_same_size_failed_checksum_is_not_verified(self):
+        result = self.classify(self.job(state="failed", verified=False))
+        self.assertEqual(result["installed_state"], "failed_or_corrupt")
+        self.assertFalse(result["local_current"])
+
+    def test_same_size_without_verification_is_unknown(self):
+        result = self.classify(self.job(verified=False))
+        self.assertEqual(result["installed_state"], "unknown")
+        self.assertFalse(result["local_current"])
+
+    def test_unavailable_storage(self):
+        result = self.classify(self.job(state="unavailable", verified=False))
+        self.assertEqual(result["installed_state"], "unavailable")
+        self.assertFalse(result["local_current"])
+
+    def test_stale_snapshot_never_claims_verified(self):
+        result = self.classify(self.job(), stale=True)
+        self.assertEqual(result["installed_state"], "unknown")
+        self.assertFalse(result["local_current"])
+
+    def test_manifest_identity_mismatch_never_claims_verified(self):
+        for field, value in (("filename", "other.zim"), ("expected_bytes", 5),
+                             ("sha256", "b" * 64), ("source_id", "other")):
+            with self.subTest(field=field):
+                result = self.classify(self.job(**{field: value}))
+                self.assertFalse(result["local_current"])
+                self.assertEqual(result["installed_state"], "unknown")
+
+    def test_active_or_duplicate_jobs_never_claim_verified(self):
+        self.assertFalse(self.classify(self.job(active=True))["local_current"])
+        snapshot = {"stale": False, "acquisitions": [self.job(), self.job()]}
+        self.assertFalse(freshness_probe.installed_evidence(snapshot, self.ENTRY)["local_current"])
+
 if __name__ == "__main__":
     unittest.main()
