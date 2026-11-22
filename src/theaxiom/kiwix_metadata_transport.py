@@ -9,13 +9,28 @@ from __future__ import annotations
 import http.client
 import re
 import time
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlencode, parse_qsl
 
 from . import kiwix_opds, pdf_transport
 
 CATALOG_HOST = "opds.library.kiwix.org"
 CATALOG_PATH = "/catalog/v2/entries"
 MAX_SECONDS = 15
+CATALOG_PAGE_LIMIT = 50
+MAX_CATALOG_START = 1000
+
+
+def catalog_page_url(*, family: str, language: str, start: int = 0, count: int = 25) -> str:
+    """Construct a restricted publisher-side catalog query, not a generic URL."""
+    if (not isinstance(family, str) or not re.fullmatch(r"[a-z0-9][a-z0-9._-]{2,119}", family)
+            or ".." in family or not isinstance(language, str)
+            or not re.fullmatch(r"[a-z]{3}", language)
+            or type(start) is not int or not 0 <= start <= MAX_CATALOG_START
+            or type(count) is not int or not 1 <= count <= CATALOG_PAGE_LIMIT):
+        raise ValueError("Invalid bounded Kiwix catalog query")
+    return ("https://" + CATALOG_HOST + CATALOG_PATH + "?" + urlencode({
+        "name": family, "lang": language, "start": start, "count": count,
+    }))
 
 
 def _validated_endpoint(url: str, kind: str) -> tuple[str, str, int]:
@@ -33,9 +48,22 @@ def _validated_endpoint(url: str, kind: str) -> tuple[str, str, int]:
     if kind == "catalog":
         # Filtering and pagination will be handled by the resolver, not
         # arbitrary user query parameters supplied here.
-        if host != CATALOG_HOST or parsed.path != CATALOG_PATH or parsed.query:
+        if host != CATALOG_HOST or parsed.path != CATALOG_PATH:
             raise ValueError("Unapproved Kiwix catalog endpoint")
-        return host, parsed.path, kiwix_opds.MAX_BYTES
+        if parsed.query:
+            try:
+                parts = parse_qsl(parsed.query, keep_blank_values=True, strict_parsing=True)
+                fields = dict(parts)
+                if (len(parts) != 4 or set(fields) != {"name", "lang", "start", "count"}
+                        or len(fields) != len(parts)
+                        or catalog_page_url(
+                            family=fields["name"], language=fields["lang"],
+                            start=int(fields["start"]), count=int(fields["count"]),
+                        ).split("?", 1)[1] != parsed.query):
+                    raise ValueError("Unapproved Kiwix catalog filters")
+            except (ValueError, OverflowError) as exc:
+                raise ValueError("Unapproved Kiwix catalog filters") from exc
+        return host, parsed.path + ("?" + parsed.query if parsed.query else ""), kiwix_opds.MAX_BYTES
     if (host not in kiwix_opds.DOWNLOAD_HOSTS or parsed.query
             or not re.fullmatch(r"/zim/[a-zA-Z0-9._/-]+\.zim\.meta4", parsed.path)
             or "/../" in parsed.path or "/./" in parsed.path or "//" in parsed.path):
