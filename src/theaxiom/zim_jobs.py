@@ -112,51 +112,50 @@ def prepare_candidate(sid, config):
 
 
 def acquire_candidate(sid, config):
-    """Synchronously download and verify replacement bytes without switching the live archive.
+    """Download and verify replacement bytes without switching the live archive.
 
     Uses a separate staging identity; callers must explicitly activate later.
     On failure, candidate metadata and the installed job remain intact.
     """
     configuration = identity(config)
-    with LOCK:
-        with worker_lock():
-            candidate = read_candidate(sid)
-            live = read(sid)
-            if not candidate or candidate["configuration"] != configuration:
-                raise ValueError("No matching replacement candidate")
-            if candidate["state"] != "prepared":
-                raise ValueError("Replacement candidate already verified; activation required")
-            if (not live or live.get("state") != "completed"
-                    or live.get("artifact") != candidate["base_artifact"]
-                    or not installed(live, live["configuration"])):
-                raise ValueError("Installed archive changed; replacement requires review")
-            replacement_id = sid + "-candidate"
-            catalog_store.CatalogStore._validate_id(replacement_id)
-            # Reject zero-length and unsafe leftovers too; the downloader
-            # otherwise opens the existing source-scoped partial for writing.
-            if staged_present(replacement_id):
-                raise ValueError("Replacement staging already exists; manual recovery required")
-            artifact = zim_source.download_resumable(
-                sid, configuration, offset=0, promote_lock=LOCK,
-                staging_id=replacement_id)
-            candidate["state"] = "verified"
-            candidate["artifact"] = artifact
-            target = candidate_path_for(sid)
-            fd, name = tempfile.mkstemp(prefix=".candidate-", dir=target.parent)
+    with worker_lock():
+        candidate = read_candidate(sid)
+        live = read(sid)
+        if not candidate or candidate["configuration"] != configuration:
+            raise ValueError("No matching replacement candidate")
+        if candidate["state"] != "prepared":
+            raise ValueError("Replacement candidate already verified; activation required")
+        if (not live or live.get("state") != "completed"
+                or live.get("artifact") != candidate["base_artifact"]
+                or not installed(live, live["configuration"])):
+            raise ValueError("Installed archive changed; replacement requires review")
+        replacement_id = sid + "-candidate"
+        catalog_store.CatalogStore._validate_id(replacement_id)
+        # Reject zero-length and unsafe leftovers too; the downloader
+        # otherwise opens the existing source-scoped partial for writing.
+        if staged_present(replacement_id):
+            raise ValueError("Replacement staging already exists; manual recovery required")
+        artifact = zim_source.download_resumable(
+            sid, configuration, offset=0, promote_lock=LOCK,
+            staging_id=replacement_id)
+        candidate["state"] = "verified"
+        candidate["artifact"] = artifact
+        target = candidate_path_for(sid)
+        fd, name = tempfile.mkstemp(prefix=".candidate-", dir=target.parent)
+        try:
+            with os.fdopen(fd, "w") as stream:
+                json.dump(candidate, stream, separators=(",", ":"))
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(name, target)
+            dfd = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY)
             try:
-                with os.fdopen(fd, "w") as stream:
-                    json.dump(candidate, stream, separators=(",", ":"))
-                    stream.flush()
-                    os.fsync(stream.fileno())
-                os.replace(name, target)
-                dfd = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY)
-                try:
-                    os.fsync(dfd)
-                finally:
-                    os.close(dfd)
+                os.fsync(dfd)
             finally:
-                Path(name).unlink(missing_ok=True)
-            return candidate
+                os.close(dfd)
+        finally:
+            Path(name).unlink(missing_ok=True)
+        return candidate
 
 
 def activate_candidate(sid, config):
