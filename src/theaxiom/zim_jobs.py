@@ -11,6 +11,7 @@ import time
 from . import catalog_store, storage_settings, zim_source, pdf_source
 
 HISTORY_LIMIT = 12
+MAX_RETRIES = 3
 
 ACTIVE = {"queued", "downloading", "verifying", "pausing", "cancelling", "publishing"}
 CONTROLS = {}
@@ -163,7 +164,9 @@ def staged_present(sid):
         return True
 
 
-def start(sid, config, *, resume=False, restart=False):
+def start(sid, config, *, resume=False, restart=False, retry=False):
+    if retry and (resume or restart):
+        raise ValueError("Retry cannot be combined with resume or restart")
     if restart and resume:
         raise ValueError("Restart and resume are mutually exclusive")
     configuration = identity(config)
@@ -174,9 +177,14 @@ def start(sid, config, *, resume=False, restart=False):
             old = read(sid)
             if old and installed(old, config):
                 raise ValueError("Archive already installed; replacement is not yet supported.")
+            if retry:
+                if not old or old["state"] != "failed" or not matches(old, config):
+                    raise ValueError("Retry requires a matching failed ZIM job")
+                if sum(entry.get("operation") == "retry" for entry in old.get("attempt_history", [])) >= MAX_RETRIES:
+                    raise ValueError("ZIM retry limit reached; explicit restart required")
             if restart and (not old or old["state"] not in {"paused", "failed", "interrupted", "cancelled"}):
                 raise ValueError("Restart requires an existing stopped ZIM job")
-            if resume:
+            if resume or (retry and staged_size(sid) > 0):
                 if not old or old["state"] not in {"paused", "failed", "interrupted"} or not matches(old, config):
                     raise ValueError("No matching paused ZIM download")
                 offset = staged_size(sid)
@@ -192,7 +200,7 @@ def start(sid, config, *, resume=False, restart=False):
                 # between the record and filesystem operations).
                 if staged_present(sid):
                     raise ValueError("Partial download exists; resume or cancel it first")
-                if old and old["state"] in {"paused", "failed", "interrupted"} and not restart:
+                if old and old["state"] in {"paused", "failed", "interrupted"} and not (restart or retry):
                     raise ValueError("Restart requires explicit confirmation")
                 offset, validator = 0, None
                 job = dict(source_id=sid, configuration=configuration, verified=False, downloaded_bytes=0,
@@ -205,6 +213,8 @@ def start(sid, config, *, resume=False, restart=False):
                     raise ValueError("Insufficient writable ZIM storage capacity")
             job.update(state="queued", active=True, detail="", downloaded_bytes=offset, sampled_at=time.time())
             _record_attempt(job, started=True)
+            if retry:
+                job["attempt_history"][-1]["operation"] = "retry"
             save(job)
             signal = threading.Event()
             CONTROLS[sid] = (signal, None)
