@@ -389,3 +389,32 @@ def test_stop_before_worker_start_remains_durable(disk, monkeypatch, action):
                 release.set()
             join_worker()
     assert zim_jobs.read("ready")["state"] == ("paused" if action == "pause" else "cancelled")
+
+
+@pytest.mark.parametrize(("first", "conflict"), [
+    ("pause", "cancel"),
+    ("cancel", "pause"),
+])
+def test_conflicting_stop_requests_rejected_without_changing_first_request(disk, first, conflict):
+    """A second operator cannot silently reverse a pending stop decision."""
+    entered, release = threading.Event(), threading.Event()
+
+    def download(sid, config, *, stopped, **kwargs):
+        entered.set()
+        assert release.wait(5)
+        assert stopped()
+        raise zim_source.TransferStopped()
+
+    with patch.object(zim_source, "download_resumable", download):
+        try:
+            zim_jobs.start("ready", CONFIG)
+            assert entered.wait(5)
+            accepted = zim_jobs.control("ready", CONFIG, first)
+            assert accepted["state"] == ("pausing" if first == "pause" else "cancelling")
+            with pytest.raises(ValueError, match="Stop request already pending"):
+                zim_jobs.control("ready", CONFIG, conflict)
+            assert zim_jobs.read("ready")["state"] == accepted["state"]
+        finally:
+            release.set()
+        join_worker()
+    assert zim_jobs.read("ready")["state"] == ("paused" if first == "pause" else "cancelled")
