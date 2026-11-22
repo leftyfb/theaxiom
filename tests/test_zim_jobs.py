@@ -1387,3 +1387,33 @@ def test_verification_progress_does_not_clear_candidate_cancel_request(disk):
     candidate = zim_jobs.read_candidate("ready")
     assert candidate["state"] == "cancelled"
     assert zim_jobs.read("ready") == live
+
+
+def test_candidate_retry_without_partial_clears_stale_validators(disk):
+    artifact = zim_source.install_stream("ready", CONFIG, BytesIO(fixture_bytes()))
+    live = dict(source_id="ready", state="completed", active=False, verified=True,
+                configuration=zim_jobs.identity(CONFIG), artifact=artifact)
+    zim_jobs.save(live)
+    changed = CONFIG | {"source_url": "https://example.org/replacement.zim"}
+    zim_jobs.prepare_candidate("ready", changed)
+    candidate = zim_jobs.read_candidate("ready")
+    candidate.update(state="failed", etag='"obsolete"', last_modified="yesterday")
+    zim_jobs._save_candidate(candidate)
+    observed = {}
+
+    def download(sid, config, *, offset, validator, **kwargs):
+        observed.update(offset=offset, validator=validator,
+                        candidate=zim_jobs.read_candidate(sid))
+        return artifact
+
+    with patch.object(zim_source, "download_resumable", download):
+        zim_jobs.start_candidate_acquisition("ready", changed)
+        for thread in threading.enumerate():
+            if thread.name == "zim-replacement":
+                thread.join(5)
+                assert not thread.is_alive()
+    assert observed["offset"] == 0
+    assert observed["validator"] is None
+    assert "etag" not in observed["candidate"]
+    assert "last_modified" not in observed["candidate"]
+    assert zim_jobs.read("ready") == live
