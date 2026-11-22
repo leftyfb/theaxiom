@@ -88,6 +88,35 @@ def prepare_candidate(sid, config):
             return candidate
 
 
+
+def discard_candidate(sid, config):
+    """Explicitly discard preparation metadata, never archive bytes or the live job.
+
+    Candidate acquisition is not enabled yet; refuse to discard any record
+    outside the prepared state rather than accidentally erasing recovery data.
+    """
+    configuration = identity(config)
+    with LOCK:
+        with worker_lock():
+            candidate = read_candidate(sid)
+            if not candidate or candidate["configuration"] != configuration:
+                raise ValueError("No matching replacement candidate")
+            live = read(sid)
+            if (not live or live.get("state") != "completed"
+                    or live.get("artifact") != candidate.get("base_artifact")):
+                raise ValueError("Installed archive changed; candidate requires review")
+            target = candidate_path_for(sid)
+            if target.is_symlink():
+                raise ValueError("Unsafe replacement candidate record")
+            target.unlink()
+            dfd = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(dfd)
+            finally:
+                os.close(dfd)
+            return {"accepted": True, "source_id": sid, "state": "discarded"}
+
+
 def read(sid):
     target = path_for(sid)
     try:
