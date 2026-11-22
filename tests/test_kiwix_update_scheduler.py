@@ -70,3 +70,29 @@ def test_rotating_bound_prevents_starving_later_sources():
 def test_invalid_rotation_index_is_rejected(offset):
     with pytest.raises(ValueError):
         scheduler.check_records([], start_index=offset)
+
+
+def test_url_based_documents_are_checked_but_local_uploads_are_not(monkeypatch):
+    from theaxiom import document_update_discovery, kiwix_update_discovery
+    calls = []
+    monkeypatch.setattr(document_update_discovery, "check_installed_document",
+                        lambda record: (calls.append(("document", record["source_id"])) or
+                                        {"state": "representation_changed"}))
+    monkeypatch.setattr(kiwix_update_discovery, "refresh_checked_source",
+                        lambda sid: (calls.append(("zim", sid)) or
+                                     {"state": "unable_to_determine"}))
+    records = [
+        {"source_id": "upload-only", "configuration": {"format": "pdf", "source_url": ""}},
+        {"source_id": "guide-pdf", "configuration": {
+            "format": "pdf", "source_url": "https://publisher.org/guide.pdf"}},
+        {"source_id": "book-epub", "configuration": {
+            "format": "epub", "source_url": "https://publisher.org/book.epub"}},
+        {"source_id": "zim", "configuration": {"format": "zim", "source_url": "https://download.kiwix.org/book.zim"}},
+    ]
+    result = scheduler.check_records(records, max_checks=10)
+    assert set(calls) == {("document", "book-epub"), ("document", "guide-pdf"), ("zim", "zim")}
+    states = {item["source_id"]: item["state"] for item in result}
+    assert states["book-epub"] == "representation_changed"
+    assert states["guide-pdf"] == "representation_changed"
+    assert states["zim"] == "unable_to_determine"
+    assert "upload-only" not in states
