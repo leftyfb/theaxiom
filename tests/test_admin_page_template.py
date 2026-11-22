@@ -402,3 +402,11 @@ def test_pdf_card_has_no_zim_replacement_controls():
     parser.feed(render([profile("document", format="pdf")]))
     assert not [attrs for tag, attrs in parser.tags
                 if tag == "button" and "data-zim-replacement" in attrs]
+
+
+def test_zim_replacement_preparation_uses_server_eligibility():
+    page = render([profile("replacement", format="zim",
+                           source_url="https://example.org/new.zim")])
+    assert "!source?.replacement_available || !!replacement" in page
+    assert "Replacement: " in page
+    assert "data-zim-replacement-status" in page
