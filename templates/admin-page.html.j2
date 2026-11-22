@@ -1364,7 +1364,7 @@
             ' · ' + (100 * bytes / total).toFixed(1) + '%' : '';
           replacementStatus.textContent = replacementState ?
             'Replacement: ' + replacementState + percent + (replacement.error ? ' · ' + replacement.error : '') : '';
-          for (const button of card.querySelectorAll('[data-zim-replacement]')) {
+          for (const button of (card.querySelectorAll?.('[data-zim-replacement]') || [])) {
             const op = button.dataset.zimReplacement;
             button.hidden = op === 'prepare' ? !source?.zim_download || !source?.installed_verified || !!replacement :
               op === 'download' ? !['prepared','failed','interrupted','cancelled'].includes(replacementState) :
