@@ -123,3 +123,44 @@ def installed_evidence(snapshot: dict[str, Any] | None, entry: dict[str, Any]) -
     elif state == "failed":
         result["installed_state"] = "failed_or_corrupt"
     return result
+
+
+def classify_remote_revision(
+    installed: dict[str, Any] | None,
+    remote: dict[str, Any] | None,
+) -> dict[str, str]:
+    """Compare a verified installed artifact with authoritative revision evidence.
+
+    A changed Content-Length, Last-Modified, weak ETag, or candidate URL is not
+    proof of a newer edition. Strong HTTP entity tags can identify a changed
+    *representation* only when the URL is unchanged; this is not itself an
+    "update available" assertion. A publisher catalog can assert a newer
+    edition only with an explicit, comparable monotonic version and a pinned
+    candidate digest. No I/O, downloads, or mutation occurs here.
+    """
+    unknown = {"state": "unable_to_determine", "evidence": "insufficient trusted revision evidence"}
+    if not isinstance(installed, dict) or not isinstance(remote, dict):
+        return unknown
+    if installed.get("verified") is not True:
+        return unknown
+    digest = installed.get("sha256")
+    if (not isinstance(digest, str) or len(digest) != 64
+            or any(c not in "0123456789abcdef" for c in digest)):
+        return unknown
+
+    def strong_etag(value):
+        return (isinstance(value, str) and len(value) >= 3
+                and len(value) <= 256 and value.startswith('"')
+                and value.endswith('"') and not value.startswith('W/')
+                and all(ord(char) >= 32 and ord(char) != 127 for char in value))
+
+    source_url = installed.get("source_url")
+    if (isinstance(source_url, str) and source_url.startswith("https://")
+            and remote.get("source_url") == source_url
+            and strong_etag(installed.get("etag"))
+            and strong_etag(remote.get("etag"))):
+        if installed["etag"] == remote["etag"]:
+            return {"state": "representation_unchanged", "evidence": "matching strong ETag"}
+        return {"state": "representation_changed", "evidence": "different strong ETag; newer edition unproven"}
+
+    return unknown
