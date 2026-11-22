@@ -68,3 +68,40 @@ def probe_documents(
         probe.update(id=doc.get("id", ""), title=doc.get("title", ""))
         results.append(probe)
     return results
+
+
+def installed_evidence(snapshot: dict[str, Any] | None, entry: dict[str, Any]) -> dict[str, Any]:
+    """Classify trusted local acquisition evidence without reading archive bytes.
+
+    A same-sized file is *not* verified by size. Only a fresh acquisition
+    snapshot tied to the exact manifest identity and a completed verification
+    can establish installed/current. Unknown storage remains unknown.
+    """
+    result: dict[str, Any] = {"local_current": False, "installed_state": "unknown",
+                              "installed_verified": False}
+    if not isinstance(snapshot, dict) or snapshot.get("stale") is not False:
+        return result
+    jobs = snapshot.get("acquisitions")
+    if not isinstance(jobs, list):
+        return result
+    matches = [job for job in jobs if isinstance(job, dict)
+               and job.get("source_id") == entry.get("source_id")
+               and job.get("filename") == entry.get("filename")
+               and job.get("expected_bytes") == entry.get("bytes")
+               and job.get("sha256") == entry.get("sha256")]
+    if len(matches) != 1:
+        return result
+    job = matches[0]
+    if (job.get("state") == "completed" and job.get("verified") is True
+            and job.get("active") is False):
+        return {"local_current": True, "installed_state": "verified",
+                "installed_verified": True}
+    if job.get("state") == "not_started" and job.get("downloaded_bytes") == 0:
+        result["installed_state"] = "absent"
+    elif job.get("state") in {"downloading", "interrupted", "verifying"}:
+        result["installed_state"] = "partial_or_unverified"
+    elif job.get("state") == "unavailable":
+        result["installed_state"] = "unavailable"
+    elif job.get("state") == "failed":
+        result["installed_state"] = "failed_or_corrupt"
+    return result
