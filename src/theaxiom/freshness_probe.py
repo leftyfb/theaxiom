@@ -257,3 +257,33 @@ def compare_catalog_editions(
     if new_edition < old_edition:
         return {"state": "older_candidate", "evidence": "publisher catalog edition predates installed edition"}
     return unknown
+
+
+def classify_document_origin(
+    installed: dict[str, Any] | None,
+    response: dict[str, Any] | None,
+) -> dict[str, str]:
+    """Interpret a guarded HEAD result against installed *capture-time* evidence.
+
+    Only the strong ETag recorded with the already verified installed
+    artifact is comparable. A changed ETag means representation changed,
+    not that a newer licensed/verified edition exists. Size and timestamps
+    are intentionally ignored for update availability.
+    """
+    unknown = {"state": "unable_to_determine",
+               "evidence": "no comparable installed document validator"}
+    if (not isinstance(installed, dict) or not isinstance(response, dict)
+            or response.get("reachable") is not True
+            or installed.get("verified") is not True
+            or response.get("source_url") != installed.get("source_url")):
+        return unknown
+    old_tag = installed.get("etag")
+    if (not isinstance(old_tag, str) or
+            __import__("re").fullmatch(r'"[\x21\x23-\x7e]{1,200}"', old_tag) is None):
+        return unknown
+    if response.get("status") == 304:
+        return {"state": "representation_unchanged",
+                "evidence": "publisher returned HTTP 304 for installed strong ETag"}
+    if response.get("status") != 200:
+        return unknown
+    return classify_remote_revision(installed, response)
