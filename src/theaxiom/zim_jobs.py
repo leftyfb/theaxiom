@@ -15,6 +15,7 @@ MAX_RETRIES = 3
 
 ACTIVE = {"queued", "downloading", "verifying", "pausing", "cancelling", "publishing"}
 CONTROLS = {}
+CANDIDATE_CONTROLS = {}
 LOCK = threading.RLock()
 
 
@@ -57,7 +58,7 @@ def read_candidate(sid):
     except (ValueError, TypeError) as exc:
         raise ValueError("Invalid ZIM candidate record") from exc
     if (not isinstance(candidate, dict) or candidate.get("source_id") != sid
-            or candidate.get("state") not in {"prepared", "downloading", "verifying", "interrupted", "failed", "verified", "activated", "rolled_back"}
+            or candidate.get("state") not in {"prepared", "downloading", "verifying", "interrupted", "cancelled", "failed", "verified, "activated", "rolled_back"}
             or not isinstance(candidate.get("configuration"), dict)
             or not isinstance(candidate.get("base_artifact"), dict)):
         raise ValueError("Invalid ZIM candidate record")
@@ -80,7 +81,7 @@ def candidate_status(sid):
     acquisition may still be running, so do not mark it interrupted.
     """
     candidate = read_candidate(sid)
-    if not candidate or candidate["state"] not in {"downloading", "verifying"}:
+    if not candidate or candidate["state"] not in {"downloading", "verifying", "cancelling"}:
         return candidate
     with LOCK:
         try:
@@ -203,14 +204,17 @@ def start_candidate_acquisition(sid, config):
                 raise ValueError("Replacement staging already exists; manual recovery required")
             candidate["state"] = "downloading"
             candidate["downloaded_bytes"] = 0
+            signal = threading.Event()
+            CANDIDATE_CONTROLS[sid] = signal
             _save_candidate(candidate)
             try:
-                threading.Thread(target=_run_candidate, args=(sid, configuration, guard),
+                threading.Thread(target=_run_candidate, args=(sid, configuration, guard, signal),
                                  daemon=True, name="zim-replacement").start()
             except BaseException:
                 candidate["state"] = "prepared"
                 candidate.pop("downloaded_bytes", None)
                 _save_candidate(candidate)
+                CANDIDATE_CONTROLS.pop(sid, None)
                 raise
         except BaseException:
             guard.__exit__(None, None, None)
@@ -218,7 +222,7 @@ def start_candidate_acquisition(sid, config):
     return {"accepted": True, "source_id": sid, "state": "downloading"}
 
 
-def _run_candidate(sid, configuration, guard):
+def _run_candidate(sid, configuration, guard, signal):
     last = 0.0
 
     def progress(current, total, metadata):
@@ -241,7 +245,7 @@ def _run_candidate(sid, configuration, guard):
     try:
         artifact = zim_source.download_resumable(
             sid, configuration, offset=0, promote_lock=LOCK,
-            staging_id=sid + "-candidate", progress=progress)
+            staging_id=sid + "-candidate", progress=progress, stopped=signal.is_set)
         with LOCK:
             candidate = read_candidate(sid)
             if not candidate or candidate["configuration"] != configuration:
@@ -249,6 +253,13 @@ def _run_candidate(sid, configuration, guard):
             candidate.update(state="verified", artifact=artifact)
             candidate.pop("error", None)
             _save_candidate(candidate)
+    except zim_source.TransferStopped:
+        with LOCK:
+            candidate = read_candidate(sid)
+            if candidate and candidate["configuration"] == configuration:
+                candidate["state"] = "cancelled"
+                candidate["error"] = "Replacement download cancelled; staged bytes retained"
+                _save_candidate(candidate)
     except Exception as exc:
         with LOCK:
             candidate = read_candidate(sid)
@@ -257,7 +268,27 @@ def _run_candidate(sid, configuration, guard):
                 candidate["error"] = str(exc)[:512]
                 _save_candidate(candidate)
     finally:
+        with LOCK:
+            CANDIDATE_CONTROLS.pop(sid, None)
         guard.__exit__(None, None, None)
+
+
+def cancel_candidate_acquisition(sid, config):
+    """Request a cooperative stop; retain staged bytes for safe recovery."""
+    configuration = identity(config)
+    with LOCK:
+        candidate = read_candidate(sid)
+        if not candidate or candidate["configuration"] != configuration:
+            raise ValueError("No matching replacement candidate")
+        if candidate["state"] not in {"downloading", "verifying", "cancelling"}:
+            raise ValueError("Replacement download is not running")
+        signal = CANDIDATE_CONTROLS.get(sid)
+        if signal is None:
+            raise ValueError("Replacement worker belongs to another process")
+        candidate["state"] = "cancelling"
+        _save_candidate(candidate)
+        signal.set()
+        return {"accepted": True, "source_id": sid, "state": "cancelling"}
 
 
 def activate_candidate(sid, config):
