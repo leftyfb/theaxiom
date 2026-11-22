@@ -587,3 +587,62 @@ def test_retry_refuses_unsafe_partial_even_with_failed_job(disk):
 def test_retry_and_resume_cannot_be_combined(disk):
     with pytest.raises(ValueError, match="cannot be combined"):
         zim_jobs.start("ready", CONFIG, retry=True, resume=True)
+
+
+def test_failed_download_retry_resumes_real_bytes_and_verifies_archive(disk, monkeypatch):
+    """Exercise actual HTTP-range transport and promotion, not a mocked worker."""
+    from contextlib import contextmanager
+
+    data = fixture_bytes()
+    offset = 48
+    stage = disk / "staging/zim"
+    stage.mkdir(exist_ok=True)
+    partial = stage / ".download-ready.partial"
+    partial.write_bytes(data[:offset])
+    partial.chmod(0o600)
+    zim_jobs.save(dict(source_id="ready", state="failed", active=False,
+                       configuration=zim_jobs.identity(CONFIG), downloaded_bytes=offset,
+                       expected_bytes=len(data), etag='"stable"', attempt_history=[]))
+
+    class Body(BytesIO):
+        total_size = len(data)
+        etag = '"stable"'
+        last_modified = None
+
+    calls = []
+
+    @contextmanager
+    def transport(url, *, offset, validator, **kwargs):
+        calls.append((offset, validator))
+        yield Body(data[offset:])
+
+    monkeypatch.setattr(zim_source.pdf_transport, "open_pdf", transport)
+    assert zim_jobs.start("ready", CONFIG, retry=True)["accepted"]
+    join_worker()
+    job = zim_jobs.status("ready")
+    assert job["state"] == "completed" and job["verified"]
+    assert calls == [(offset, '"stable"')]
+    assert job["attempt_history"][-1]["operation"] == "retry"
+    assert zim_jobs.installed(job, CONFIG)["bytes"] == len(data)
+    assert not partial.exists()
+
+
+def test_retry_budget_survives_successive_failed_attempts_without_staged_data(disk):
+    attempts = []
+
+    def failing(sid, config, **kwargs):
+        attempts.append(1)
+        raise OSError("offline")
+
+    with patch.object(zim_source, "download_resumable", failing):
+        zim_jobs.start("ready", CONFIG)
+        join_worker()
+        for _ in range(zim_jobs.MAX_RETRIES):
+            assert zim_jobs.start("ready", CONFIG, retry=True)["accepted"]
+            join_worker()
+        with pytest.raises(ValueError, match="retry limit"):
+            zim_jobs.start("ready", CONFIG, retry=True)
+    job = zim_jobs.read("ready")
+    assert job["state"] == "failed"
+    assert len(attempts) == zim_jobs.MAX_RETRIES + 1
+    assert sum(a.get("operation") == "retry" for a in job["attempt_history"]) == zim_jobs.MAX_RETRIES
