@@ -226,8 +226,19 @@ def exercise(browser, base, viewport_name, viewport, artifact_dir):
         page.get_by_role("button", name="Thumbnails").click()
         expect(page.locator("#thumbs button")).to_have_count(2)
         expect(page.locator("#page")).to_have_value("2")
+        # Explicitly wait for the active thumbnail render to finish before
+        # exercising the native page input (which fires change on blur).
+        expect(page.get_by_role("button", name="Previous page")).to_be_enabled()
         # Finish thumbnail rendering before any further page navigation.
         expect(page.locator("#paper")).to_be_visible()
+        # Keyboard focus must stay within an accessible document control.
+        page.locator("#page").focus()
+        expect(page.locator("#page")).to_be_focused()
+        # Reader navigation remains available after reopening thumbnails.
+        previous_page.click()
+        expect(page.locator("#page")).to_have_value("1")
+        next_page.click()
+        expect(page.locator("#page")).to_have_value("2")
         # Verify all pages prepare for printing without opening an OS dialog.
         page.evaluate("window.__printInvoked = 0; window.print = () => { window.__printInvoked += 1; }")
         page.get_by_role("button", name="Print").click()
