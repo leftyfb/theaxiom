@@ -1164,6 +1164,7 @@
         const card = button.closest('.source-card');
         const feedback = card.querySelector('[data-zim-feedback]');
         button.disabled = true;
+        card.dataset.zimCheckPosting = 'true';
         feedback.textContent = 'Checking publisher metadata…';
         try {
           const response = await fetch('/api/update-check', {
@@ -1185,6 +1186,7 @@
         } catch (error) {
           feedback.textContent = error.message || 'Publisher update check unavailable.';
         } finally {
+          delete card.dataset.zimCheckPosting;
           button.disabled = false;
         }
       }));
@@ -1447,7 +1449,7 @@
         const updateCheckButton = card.querySelector('[data-zim-update-check]');
         if (updateCheckButton) {
           updateCheckButton.hidden = !source?.installed_verified;
-          updateCheckButton.disabled = !source?.installed_verified;
+          updateCheckButton.disabled = !source?.installed_verified || card.dataset.zimCheckPosting === 'true';
         }
         const zim = card.querySelector('[data-zim-download]');
         if (zim && card.dataset.filterFormat === 'zim') {
