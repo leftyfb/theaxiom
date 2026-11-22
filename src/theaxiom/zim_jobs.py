@@ -163,7 +163,9 @@ def staged_present(sid):
         return True
 
 
-def start(sid, config, *, resume=False):
+def start(sid, config, *, resume=False, restart=False):
+    if restart and resume:
+        raise ValueError("Restart and resume are mutually exclusive")
     configuration = identity(config)
     with LOCK:
         guard = worker_lock()
@@ -172,6 +174,8 @@ def start(sid, config, *, resume=False):
             old = read(sid)
             if old and installed(old, config):
                 raise ValueError("Archive already installed; replacement is not yet supported.")
+            if restart and (not old or old["state"] not in {"paused", "failed", "interrupted", "cancelled"}):
+                raise ValueError("Restart requires an existing stopped ZIM job")
             if resume:
                 if not old or old["state"] not in {"paused", "failed", "interrupted"} or not matches(old, config):
                     raise ValueError("No matching paused ZIM download")
@@ -188,6 +192,8 @@ def start(sid, config, *, resume=False):
                 # between the record and filesystem operations).
                 if staged_present(sid):
                     raise ValueError("Partial download exists; resume or cancel it first")
+                if old and old["state"] in {"paused", "failed", "interrupted"} and not restart:
+                    raise ValueError("Restart requires explicit confirmation")
                 offset, validator = 0, None
                 job = dict(source_id=sid, configuration=configuration, verified=False, downloaded_bytes=0,
                            expected_bytes=int(configuration["expected_size_bytes"]) if configuration["expected_size_bytes"] else None)
