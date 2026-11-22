@@ -1557,7 +1557,7 @@ def test_failed_reader_activation_auto_restores_previous_verified_archive(disk):
     assert (disk / "library/zim" / artifact["filename"]).read_bytes() == content
 
 
-@pytest.mark.parametrize("reason", ["", "bad\\nheader", "x" * 241, 123, True])
+@pytest.mark.parametrize("reason", ["", "bad\nheader", "x" * 241, 123, True])
 def test_invalid_rollback_reason_never_changes_serving_archive(disk, reason):
     artifact = zim_source.install_stream("ready", CONFIG, BytesIO(fixture_bytes()))
     live = dict(source_id="ready", state="completed", active=False,
