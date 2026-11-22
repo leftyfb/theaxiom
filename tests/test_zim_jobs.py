@@ -1317,3 +1317,41 @@ def test_candidate_progress_throttles_repeated_validator_writes(disk):
     assert zim_jobs.read_candidate("ready")["etag"] == '"unchanged"'
     assert zim_jobs.read_candidate("ready")["state"] == "verified"
     assert len(writes) < 10
+
+
+def test_rolled_back_candidate_can_be_retired_for_next_replacement(disk):
+    data = fixture_bytes()
+    artifact = zim_source.install_stream("ready", CONFIG, BytesIO(data))
+    live = dict(source_id="ready", state="completed", active=False, verified=True,
+                configuration=zim_jobs.identity(CONFIG), artifact=artifact)
+    zim_jobs.save(live)
+    changed = CONFIG | {"source_url": "https://example.org/next.zim"}
+    zim_jobs.prepare_candidate("ready", changed)
+    candidate = zim_jobs.read_candidate("ready")
+    candidate.update(state="verified", artifact=artifact)
+    zim_jobs._save_candidate(candidate)
+    zim_jobs.activate_candidate("ready", changed)
+    with pytest.raises(ValueError, match="cannot be discarded"):
+        zim_jobs.discard_candidate("ready", changed)
+    zim_jobs.rollback_candidate("ready", changed)
+    assert zim_jobs.discard_candidate("ready", changed)["state"] == "discarded"
+    assert zim_jobs.read_candidate("ready") is None
+    assert zim_jobs.read("ready") == live
+    assert (disk / "library/zim" / artifact["filename"]).read_bytes() == data
+    assert zim_jobs.prepare_candidate("ready", changed)["state"] == "prepared"
+
+
+def test_rolled_back_candidate_refuses_retirement_if_live_diverged(disk):
+    artifact = zim_source.install_stream("ready", CONFIG, BytesIO(fixture_bytes()))
+    live = dict(source_id="ready", state="completed", active=False, verified=True,
+                configuration=zim_jobs.identity(CONFIG), artifact=artifact)
+    zim_jobs.save(live)
+    changed = CONFIG | {"source_url": "https://example.org/next.zim"}
+    zim_jobs.prepare_candidate("ready", changed)
+    candidate = zim_jobs.read_candidate("ready")
+    candidate.update(state="rolled_back", artifact=artifact, previous_job=live)
+    zim_jobs._save_candidate(candidate)
+    zim_jobs.save(dict(live, detail="unexpected mutation"))
+    with pytest.raises(ValueError, match="not safely restored"):
+        zim_jobs.discard_candidate("ready", changed)
+    assert zim_jobs.read_candidate("ready")["state"] == "rolled_back"
