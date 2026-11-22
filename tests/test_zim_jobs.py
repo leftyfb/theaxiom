@@ -671,3 +671,20 @@ def test_cancelled_job_never_accepts_retry_even_with_old_retry_history(disk):
     with pytest.raises(ValueError, match="matching failed"):
         zim_jobs.start("ready", CONFIG, retry=True)
     assert zim_jobs.read("ready")["state"] == "cancelled"
+
+
+def test_explicit_restart_resets_exhausted_retry_budget(disk):
+    failed = dict(source_id="ready", state="failed", active=False,
+                  configuration=zim_jobs.identity(CONFIG), downloaded_bytes=0,
+                  attempt_history=[{"operation": "retry"}] * zim_jobs.MAX_RETRIES)
+    zim_jobs.save(failed)
+    with patch.object(zim_source, "download_resumable", side_effect=OSError("offline")):
+        assert zim_jobs.start("ready", CONFIG, restart=True)["accepted"]
+        join_worker()
+    job = zim_jobs.read("ready")
+    assert job["state"] == "failed"
+    assert not any(a.get("operation") == "retry" for a in job["attempt_history"])
+    with patch.object(zim_source, "download_resumable", side_effect=OSError("offline")):
+        assert zim_jobs.start("ready", CONFIG, retry=True)["accepted"]
+        join_worker()
+    assert sum(a.get("operation") == "retry" for a in zim_jobs.read("ready")["attempt_history"]) == 1
