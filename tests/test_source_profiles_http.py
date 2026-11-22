@@ -647,3 +647,47 @@ def test_all_non_destructive_zim_replacement_actions_reach_guarded_http_handler(
         source_id="fema-ready", action=action, revision=revision,
         extra=True), status=400)["error"]
     assert calls == [("fema-ready", "zim")]
+
+
+def test_pinned_wikipedia_shows_metadata_check_without_inert_download_actions(app):
+    request, _ = app
+    html = card(request("/admin/sources"), "wikipedia-en")
+    assert html is not None
+    assert "Check for updates" in html
+    assert "data-zim-update-check" in html
+    assert 'data-action="download"' not in html
+    assert 'data-action="redownload"' not in html
+    assert 'data-action="update"' not in html
+    assert "data-zim-download" not in html
+
+
+def test_verified_pinned_wikipedia_update_check_dispatches_read_only(app, monkeypatch):
+    request, snapshot = app
+    catalog = request("/api/sources")
+    calls = []
+
+    def fake_check(record, artifact, *, verified):
+        calls.append((record["source_id"], artifact["sha256"], verified))
+        return {"state": "no_newer_edition_listed", "installed_edition": "2026-08"}
+
+    monkeypatch.setattr(admin_api.kiwix_update_discovery,
+                        "refresh_pinned_wikipedia", fake_check)
+    payload = dict(source_id="wikipedia-en", revision=catalog["revision"])
+    assert request("/api/update-check", payload)["state"] == "no_newer_edition_listed"
+    assert calls == [("wikipedia-en", PIN["sha256"], True)]
+    snapshot["acquisitions"] = []
+    result = request("/api/update-check", payload)
+    assert result["state"] == "no_newer_edition_listed"
+    assert calls[-1] == ("wikipedia-en", PIN["sha256"], False)
+    # Verified gating belongs in the real checker, not in HTTP's trust of
+    # mutable client-provided metadata.
+
+
+def test_fema_and_wikipedia_have_consistent_update_check_controls(app):
+    request, _ = app
+    page = request("/admin/sources")
+    for sid in ("fema-ready", "wikipedia-en"):
+        element = card(page, sid)
+        assert element is not None
+        assert "Check for updates" in element
+        assert 'data-zim-update-check' in element
