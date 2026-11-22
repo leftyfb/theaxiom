@@ -418,3 +418,28 @@ def test_conflicting_stop_requests_rejected_without_changing_first_request(disk,
             release.set()
         join_worker()
     assert zim_jobs.read("ready")["state"] == ("paused" if first == "pause" else "cancelled")
+
+
+@pytest.mark.parametrize("action", ["pause", "cancel"])
+def test_repeated_stop_is_idempotent_without_rewriting_pending_state(disk, action):
+    entered, release = threading.Event(), threading.Event()
+
+    def download(sid, config, *, stopped, **kwargs):
+        entered.set()
+        assert release.wait(5)
+        assert stopped()
+        raise zim_source.TransferStopped()
+
+    with patch.object(zim_source, "download_resumable", download):
+        try:
+            zim_jobs.start("ready", CONFIG)
+            assert entered.wait(5)
+            first = zim_jobs.control("ready", CONFIG, action)
+            before = zim_jobs.read("ready")
+            second = zim_jobs.control("ready", CONFIG, action)
+            assert second == first
+            assert zim_jobs.read("ready") == before
+        finally:
+            release.set()
+        join_worker()
+    assert zim_jobs.read("ready")["state"] == ("paused" if action == "pause" else "cancelled")
