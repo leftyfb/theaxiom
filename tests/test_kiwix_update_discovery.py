@@ -223,3 +223,30 @@ def test_unverified_installed_source_never_writes_update_cache(monkeypatch, tmp_
     assert discovery.refresh_checked_source(
         "wikipedia", fetch=forbidden)["state"] == "unable_to_determine"
     assert not (tmp_path / "checks").exists()
+
+
+def test_recent_manual_check_is_reused_without_recontacting_publisher(monkeypatch, tmp_path):
+    from theaxiom import zim_jobs, update_check_store
+    monkeypatch.setattr(update_check_store, "root_path", lambda: tmp_path / "checks")
+    job = installed_job_for_fixture()
+    monkeypatch.setattr(zim_jobs, "status", lambda sid: job)
+    monkeypatch.setattr(zim_jobs, "installed", lambda live, config: live["artifact"])
+    calls = []
+    fetch = fetcher(feed(atom("2026-11")), metalink("2026-11"), calls)
+    first = discovery.refresh_checked_source("wikipedia", fetch=fetch)
+    assert first["state"] == "update_available"
+    second = discovery.refresh_checked_source("wikipedia",
+        fetch=lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("Recent result must avoid a network request")))
+    assert second["state"] == "update_available"
+    assert len(calls) == 2
+
+
+def test_concurrent_check_does_not_start_another_remote_lookup(monkeypatch):
+    assert discovery.CHECK_LOCK.acquire(blocking=False)
+    try:
+        def forbidden(*args, **kwargs):
+            raise AssertionError("Concurrent fetch forbidden")
+        assert discovery.refresh_checked_source("wikipedia", fetch=forbidden)["state"] == "unable_to_determine"
+    finally:
+        discovery.CHECK_LOCK.release()
