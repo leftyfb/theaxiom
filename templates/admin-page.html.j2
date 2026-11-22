@@ -1441,14 +1441,14 @@
             } else if (['pdf','epub'].includes(source?.adapter)) {
               card.querySelector('[data-field="status"]').textContent = source.installed_verified ? size(source.artifact?.bytes) : (source.artifact ? 'Not installed or invalid' : 'Not downloaded');
               card.querySelector('[data-field="status"]').className = 'badge' + (source.installed_verified ? ' enabled' : '');
-              const updateBadge = card.querySelector('[data-field="update-status"]');
-              if (updateBadge) updateBadge.hidden = source.update_check?.state !== "update_available";
             } else if (source?.zim_download) {
               if (source.acquisition) render(card, source.acquisition, false);
               else card.querySelector('[data-field="status"]').textContent = 'Not downloaded';
             } else if (source?.artifact) render(card, source.acquisition, data.acquisition_stale !== false);
             else card.querySelector('[data-field="status"]').textContent = data.acquisition_stale ? 'Status unavailable' :
               source?.mutation_blocked !== false ? 'Acquisition unresolved' : 'Not downloaded';
+            const updateBadge = card.querySelector('[data-field="update-status"]');
+            if (updateBadge) updateBadge.hidden = source?.update_check?.state !== "update_available";
             controls(card, source);
             card.dataset.filterPublication = source?.publication_filter || "unknown";
             card.dataset.filterDownload = source?.download_filter || "unknown";
