@@ -18,7 +18,7 @@ from . import storage_settings
 MAX_RECORD = 4096
 MAX_AGE = 48 * 60 * 60
 STATES = frozenset({"update_available", "up_to_date", "older_candidate",
-                    "unable_to_determine", "representation_changed",
+                    "unable_to_determine", "no_newer_edition_listed", "representation_changed",
                     "representation_unchanged"})
 
 
