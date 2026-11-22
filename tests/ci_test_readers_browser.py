@@ -201,6 +201,14 @@ def exercise(browser, base, viewport_name, viewport, artifact_dir):
         page.keyboard.press("Enter")
         expect(page.locator("#search-tools")).to_be_visible()
         expect(page.locator("#find")).to_be_focused()
+        # Escape is an independent keyboard dismissal path. Focus must
+        # return to the toggle, and Enter must reopen the same search input.
+        page.keyboard.press("Escape")
+        expect(page.locator("#search-tools")).to_be_hidden()
+        expect(page.locator("#search-toggle")).to_be_focused()
+        page.keyboard.press("Enter")
+        expect(page.locator("#search-tools")).to_be_visible()
+        expect(page.locator("#find")).to_be_focused()
         page.locator("#find").fill("unfindable-synthetic-term")
         expect(page.locator("#matches")).to_have_text("No matches", timeout=20000)
         expect(page.locator("#highlights .active-match")).to_have_count(0)
