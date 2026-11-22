@@ -37,6 +37,7 @@ pdf_source = importlib.import_module(f"{__package__}.pdf_source" if __package__ 
 epub_source = importlib.import_module(f"{__package__}.epub_source" if __package__ else "theaxiom.epub_source")
 pdf_language = importlib.import_module(f"{__package__}.pdf_language" if __package__ else "theaxiom.pdf_language")
 pdf_transport = importlib.import_module(f"{__package__}.pdf_transport" if __package__ else "theaxiom.pdf_transport")
+document_origin_evidence = importlib.import_module(f"{__package__}.document_origin_evidence" if __package__ else "theaxiom.document_origin_evidence")
 zim_jobs = importlib.import_module(f"{__package__}.zim_jobs" if __package__ else "theaxiom.zim_jobs")
 zim_source = importlib.import_module(f"{__package__}.zim_source" if __package__ else "theaxiom.zim_source")
 zim_catalog = importlib.import_module(f"{__package__}.zim_catalog" if __package__ else "theaxiom.zim_catalog")
@@ -1364,6 +1365,17 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             except OSError:
                 self._send_json(503, {"error": "PDF storage or catalog I/O failed"})
                 return
+        # Preserve only a strong ETag captured from the actual successful GET,
+        # and only after the verified artifact and source catalog both commit.
+        # This auxiliary evidence is advisory; failures must never convert an
+        # already installed archive into a failed acquisition.
+        if installed_etag:
+            try:
+                document_origin_evidence.save(
+                    sid, "epub" if is_epub else "pdf", url,
+                    observed["sha256"], installed_etag)
+            except (OSError, ValueError):
+                pass
         self._send_json(200, {"accepted": True, "installed_verified": True, "revision": updated["revision"]})
 
     def _download_pdf(self, data):
@@ -1412,13 +1424,16 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 size = config.get("expected_size_bytes") or None
                 digest = config.get("sha256") or None
                 extracted = {}
+                installed_etag = None
                 if is_epub:
                     with pdf_transport.open_pdf(url, format_name="epub") as stream:
                         observed, extracted = epub_source.install_stream(sid, stream,
                             expected_size=int(size) if size else None, expected_sha256=digest)
+                        installed_etag = stream.etag
                 else:
-                    observed = pdf_transport.download(sid, url, expected_size=int(size) if size else None,
-                                                      expected_sha256=digest)
+                    observed, installed_etag = pdf_transport.download(
+                        sid, url, expected_size=int(size) if size else None,
+                        expected_sha256=digest, capture_validator=True)
                     if not record["profile"].get("language"):
                         language = pdf_language.installed_language(observed)
                         if language:
