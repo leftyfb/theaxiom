@@ -45,10 +45,14 @@ def _validated(source_id: str, installed_sha256: str, checked_at: float, result:
     if type(checked_at) not in (int, float) or not 0 < checked_at < 4102444800:
         raise ValueError("Invalid update-check timestamp")
     allowed = {"state", "evidence", "installed_edition", "candidate_edition",
-               "candidate_url", "candidate_sha256"}
+               "candidate_url", "candidate_sha256", "candidate_bytes"}
     if set(result) - allowed:
         raise ValueError("Unexpected update-check fields")
-    for value in result.values():
+    for field, value in result.items():
+        if field == "candidate_bytes":
+            if type(value) is not int or not 96 <= value <= 2**63 - 1:
+                raise ValueError("Invalid candidate size")
+            continue
         if not isinstance(value, str) or len(value) > 2048 or any(ord(c) < 32 for c in value):
             raise ValueError("Invalid update-check value")
     if result["state"] == "update_available":
