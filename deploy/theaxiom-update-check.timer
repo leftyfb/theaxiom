@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily The Axiom publisher metadata checks (no acquisition)
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+RandomizedDelaySec=1h
+AccuracySec=15min
+Persistent=true
+Unit=theaxiom-update-check.service
+
+[Install]
+WantedBy=timers.target
