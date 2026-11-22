@@ -69,8 +69,8 @@ archives. The test harness starts and closes its own loopback-only server.
 
 The isolated Kiwix smoke test also starts actual kiwix-serve with a synthetic
 two-article ZIM. Desktop and mobile Chromium navigate the generated article
-link and return using browser history; its native search endpoint is probed
-independently for server failures. The test also verifies Kiwix library reload
+link, open a native search result page and return using browser history; its
+native search endpoint is also probed independently for server failures. The test also verifies Kiwix library reload
 after synthetic publication changes. No installed production ZIM is inspected.
 
 Chromium browser tests complement (do not replace) the independent real Nginx
