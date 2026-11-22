@@ -957,3 +957,44 @@ def test_acquire_candidate_rejects_staging_leftover_without_transfer(disk, monke
     assert zim_jobs.read("ready") == live
     assert zim_jobs.read_candidate("ready")["state"] == "prepared"
     assert (disk / "library/zim" / artifact["filename"]).read_bytes() == data
+
+
+def test_activate_candidate_requires_real_installed_verified_artifact(disk):
+    data = fixture_bytes()
+    artifact = zim_source.install_stream("ready", CONFIG, BytesIO(data))
+    live = dict(source_id="ready", state="completed", active=False, verified=True,
+                configuration=zim_jobs.identity(CONFIG), artifact=artifact)
+    zim_jobs.save(live)
+    changed = CONFIG | {"source_url": "https://example.org/next.zim"}
+    zim_jobs.prepare_candidate("ready", changed)
+    with pytest.raises(ValueError, match="verified before activation"):
+        zim_jobs.activate_candidate("ready", changed)
+    assert zim_jobs.read("ready") == live
+    candidate = zim_jobs.read_candidate("ready")
+    candidate["state"] = "verified"
+    candidate["artifact"] = {"filename": "ready." + "a" * 64 + ".zim",
+                             "sha256": "a" * 64, "bytes": len(data)}
+    zim_jobs._save_candidate(candidate)
+    with pytest.raises(ValueError, match="missing or invalid"):
+        zim_jobs.activate_candidate("ready", changed)
+    assert zim_jobs.read("ready") == live
+    assert (disk / "library/zim" / artifact["filename"]).read_bytes() == data
+
+
+def test_activate_candidate_retains_previous_job_and_archive(disk):
+    data = fixture_bytes()
+    artifact = zim_source.install_stream("ready", CONFIG, BytesIO(data))
+    live = dict(source_id="ready", state="completed", active=False, verified=True,
+                configuration=zim_jobs.identity(CONFIG), artifact=artifact)
+    zim_jobs.save(live)
+    changed = CONFIG | {"source_url": "https://example.org/next.zim"}
+    zim_jobs.prepare_candidate("ready", changed)
+    candidate = zim_jobs.read_candidate("ready")
+    candidate["state"] = "verified"
+    candidate["artifact"] = artifact
+    zim_jobs._save_candidate(candidate)
+    activated = zim_jobs.activate_candidate("ready", changed)
+    assert activated["configuration"] == zim_jobs.identity(changed)
+    assert zim_jobs.read_candidate("ready")["previous_job"] == live
+    assert zim_jobs.read_candidate("ready")["state"] == "activated"
+    assert (disk / "library/zim" / artifact["filename"]).read_bytes() == data
