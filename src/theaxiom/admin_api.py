@@ -1414,10 +1414,12 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     result = zim_jobs.control(sid, record["configuration"], operation.removeprefix("zim-"))
                 elif operation == "zim-revalidate":
                     result = zim_jobs.revalidate(sid, record["configuration"])
+                elif operation == "zim-resume":
+                    result = zim_jobs.start(sid, record["configuration"], resume=True)
+                elif operation == "zim-restart":
+                    result = zim_jobs.start(sid, record["configuration"], restart=True)
                 else:
-                    result = zim_jobs.start(sid, record["configuration"],
-                                            resume=operation == "zim-resume",
-                                            restart=operation == "zim-restart")
+                    result = zim_jobs.start(sid, record["configuration"])
             except BlockingIOError:
                 self._send_json(409, {"error": "Another ZIM acquisition is active"})
                 return
