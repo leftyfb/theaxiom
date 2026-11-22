@@ -743,3 +743,26 @@ def test_cancel_keep_from_failed_state_retains_bytes_and_allows_safe_resume(disk
     assert calls == [(48, '"stable"')]
     assert not partial.exists()
     assert zim_jobs.installed(zim_jobs.status("ready"), CONFIG)["bytes"] == len(data)
+
+
+def test_retry_budget_is_not_reset_by_truncated_attempt_history(disk):
+    """A bounded display history cannot erase the durable retry counter."""
+    failed = dict(source_id="ready", state="failed", active=False,
+                  configuration=zim_jobs.identity(CONFIG), downloaded_bytes=0,
+                  retry_count=zim_jobs.MAX_RETRIES,
+                  attempt_history=[{"operation": "resume"}] * zim_jobs.HISTORY_LIMIT)
+    zim_jobs.save(failed)
+    with pytest.raises(ValueError, match="retry limit"):
+        zim_jobs.start("ready", CONFIG, retry=True)
+    assert zim_jobs.read("ready")["retry_count"] == zim_jobs.MAX_RETRIES
+
+
+def test_retry_counter_survives_failed_fresh_retry(disk):
+    failed = dict(source_id="ready", state="failed", active=False,
+                  configuration=zim_jobs.identity(CONFIG), downloaded_bytes=0,
+                  retry_count=1, attempt_history=[])
+    zim_jobs.save(failed)
+    with patch.object(zim_source, "download_resumable", side_effect=OSError("offline")):
+        assert zim_jobs.start("ready", CONFIG, retry=True)["accepted"]
+        join_worker()
+    assert zim_jobs.read("ready")["retry_count"] == 2
