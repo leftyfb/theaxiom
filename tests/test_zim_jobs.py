@@ -998,3 +998,41 @@ def test_activate_candidate_retains_previous_job_and_archive(disk):
     assert zim_jobs.read_candidate("ready")["previous_job"] == live
     assert zim_jobs.read_candidate("ready")["state"] == "activated"
     assert (disk / "library/zim" / artifact["filename"]).read_bytes() == data
+
+
+def test_rollback_candidate_restores_previous_serving_record(disk):
+    data = fixture_bytes()
+    artifact = zim_source.install_stream("ready", CONFIG, BytesIO(data))
+    live = dict(source_id="ready", state="completed", active=False, verified=True,
+                configuration=zim_jobs.identity(CONFIG), artifact=artifact)
+    zim_jobs.save(live)
+    changed = CONFIG | {"source_url": "https://example.org/next.zim"}
+    zim_jobs.prepare_candidate("ready", changed)
+    candidate = zim_jobs.read_candidate("ready")
+    candidate.update(state="verified", artifact=artifact)
+    zim_jobs._save_candidate(candidate)
+    zim_jobs.activate_candidate("ready", changed)
+    assert zim_jobs.rollback_candidate("ready", changed) == live
+    assert zim_jobs.read("ready") == live
+    assert zim_jobs.read_candidate("ready")["state"] == "rolled_back"
+    assert (disk / "library/zim" / artifact["filename"]).read_bytes() == data
+    with pytest.raises(ValueError, match="not been activated"):
+        zim_jobs.rollback_candidate("ready", changed)
+
+
+def test_rollback_refuses_changed_serving_record(disk):
+    data = fixture_bytes()
+    artifact = zim_source.install_stream("ready", CONFIG, BytesIO(data))
+    live = dict(source_id="ready", state="completed", active=False, verified=True,
+                configuration=zim_jobs.identity(CONFIG), artifact=artifact)
+    zim_jobs.save(live)
+    changed = CONFIG | {"source_url": "https://example.org/next.zim"}
+    zim_jobs.prepare_candidate("ready", changed)
+    candidate = zim_jobs.read_candidate("ready")
+    candidate.update(state="verified", artifact=artifact)
+    zim_jobs._save_candidate(candidate)
+    zim_jobs.activate_candidate("ready", changed)
+    zim_jobs.save(live | {"artifact": {"filename": "unrelated.zim"}})
+    with pytest.raises(ValueError, match="Serving archive changed"):
+        zim_jobs.rollback_candidate("ready", changed)
+    assert zim_jobs.read_candidate("ready")["state"] == "activated"
