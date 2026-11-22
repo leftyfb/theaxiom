@@ -204,11 +204,17 @@ def main():
             assert not list((storage_root / "library" / "zim").glob("exhausted.*.zim"))
             assert zim_jobs.control("exhausted", config, "cancel")["accepted"]
             assert not exhausted.exists()
-            assert zim_jobs.start("exhausted", config, restart=True)["accepted"]
-            for worker in threading.enumerate():
-                if worker.name == "zim-acquisition":
-                    worker.join(10)
-                    assert not worker.is_alive()
+            with patch.object(zim_source.pdf_transport, "open_pdf", transport):
+                assert zim_jobs.start("exhausted", config, restart=True)["accepted"]
+                for worker in threading.enumerate():
+                    if worker.name == "zim-acquisition":
+                        worker.join(10)
+                        assert not worker.is_alive()
+            restarted = zim_jobs.status("exhausted")
+            assert restarted["state"] == "completed" and restarted["verified"], restarted
+            assert calls[-1] == (0, None)
+            assert (storage_root / "library" / "zim" /
+                    restarted["artifact"]["filename"]).read_bytes() == payload
         output.unlink()
         with archive.open("rb") as stream:
             book_id = zim_catalog.archive_uuid(stream)
