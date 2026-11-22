@@ -1,5 +1,7 @@
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
+
+from theaxiom import admin_api
 
 from theaxiom.freshness_probe import probe_source
 
@@ -31,3 +33,43 @@ class FreshnessProbeTests(unittest.TestCase):
         self.assertTrue(result["reachable"])
         self.assertFalse(result["local_current"])
         self.assertEqual(result["content_length"], "999999")
+
+
+class FreshnessApiContractTests(unittest.TestCase):
+    def test_verified_installation_is_independent_of_remote_length(self):
+        entry = admin_api.WIKIPEDIA_SOURCE
+        job = {"source_id": entry["source_id"], "filename": entry["filename"],
+               "expected_bytes": entry["bytes"], "sha256": entry["sha256"],
+               "downloaded_bytes": entry["bytes"], "state": "completed",
+               "verified": True, "active": False}
+        with patch.object(admin_api, "probe_source", return_value={
+            "reachable": True, "origin_length_matches_manifest": False,
+            "local_current": False, "error": ""}):
+            result = admin_api.freshness_response({"stale": False, "acquisitions": [job]})
+        self.assertTrue(result["installed_verified"])
+        self.assertTrue(result["local_current"])
+        self.assertFalse(result["origin_length_matches_manifest"])
+        self.assertEqual(result["installed_state"], "verified")
+
+    def test_remote_length_match_does_not_verify_missing_archive(self):
+        entry = admin_api.WIKIPEDIA_SOURCE
+        job = {"source_id": entry["source_id"], "filename": entry["filename"],
+               "expected_bytes": entry["bytes"], "sha256": entry["sha256"],
+               "downloaded_bytes": 0, "state": "not_started",
+               "verified": False, "active": False}
+        with patch.object(admin_api, "probe_source", return_value={
+            "reachable": True, "origin_length_matches_manifest": True,
+            "local_current": False, "error": ""}):
+            result = admin_api.freshness_response({"stale": False, "acquisitions": [job]})
+        self.assertFalse(result["installed_verified"])
+        self.assertFalse(result["local_current"])
+        self.assertTrue(result["origin_length_matches_manifest"])
+        self.assertEqual(result["installed_state"], "absent")
+
+    def test_stale_monitor_never_reports_local_current(self):
+        with patch.object(admin_api, "probe_source", return_value={
+            "reachable": True, "origin_length_matches_manifest": True,
+            "local_current": False, "error": ""}):
+            result = admin_api.freshness_response({"stale": True, "acquisitions": []})
+        self.assertFalse(result["local_current"])
+        self.assertEqual(result["installed_state"], "unknown")
