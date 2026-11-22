@@ -418,3 +418,10 @@ def test_replacement_controls_are_independent_of_old_acquisition_status():
     assert "op !== 'cancel' && blocked && source?.acquisition?.state !== 'completed'" not in page
     assert "op === 'prepare' && !source?.replacement_available" in page
     assert "op === 'download' && !['prepared','failed','interrupted','cancelled'].includes(replacementState)" in page
+
+
+def test_failed_replacement_discard_requires_safe_retirement_flag():
+    page = render([profile("replacement", format="zim",
+                           source_url="https://example.org/new.zim")])
+    assert "replacement?.can_discard !== true" in page
+    assert "['failed','cancelled','interrupted'].includes(replacementState)" in page
