@@ -180,7 +180,7 @@ def start(sid, config, *, resume=False, restart=False, retry=False):
             if retry:
                 if not old or old["state"] != "failed" or not matches(old, config):
                     raise ValueError("Retry requires a matching failed ZIM job")
-                if sum(entry.get("operation") == "retry" for entry in old.get("attempt_history", [])) >= MAX_RETRIES:
+                if old.get("retry_count", sum(entry.get("operation") == "retry" for entry in old.get("attempt_history", []))) >= MAX_RETRIES:
                     raise ValueError("ZIM retry limit reached; explicit restart required")
             if restart and (not old or old["state"] not in {"paused", "failed", "interrupted", "cancelled"}):
                 raise ValueError("Restart requires an existing stopped ZIM job")
@@ -219,6 +219,7 @@ def start(sid, config, *, resume=False, restart=False, retry=False):
             _record_attempt(job, started=True)
             if retry:
                 job["attempt_history"][-1]["operation"] = "retry"
+                job["retry_count"] = job.get("retry_count", sum(entry.get("operation") == "retry" for entry in job["attempt_history"][:-1])) + 1
             save(job)
             signal = threading.Event()
             CONTROLS[sid] = (signal, None)
