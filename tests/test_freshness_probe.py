@@ -14,7 +14,7 @@ import freshness_probe  # noqa: E402
 
 class Response:
     status = 200
-    headers = {"Content-Length": "754723", "Last-Modified": "Wed, 21 Oct 2015 07:28:00 GMT"}
+    headers = {"Content-Length": "754723", "Last-Modified": "Wed, 21 Oct 2015 07:28:00 GMT", "ETag": '"release-1"'}
 
     def __enter__(self):
         return self
@@ -38,6 +38,7 @@ class FreshnessProbeTests(unittest.TestCase):
         self.assertTrue(result["origin_length_matches_manifest"])
         self.assertEqual(result["content_length"], "754723")
         self.assertEqual(result["last_modified"], Response.headers["Last-Modified"])
+        self.assertEqual(result["etag"], '"release-1"')
         opener.assert_called_once()
 
     def test_mismatched_length_is_stale_and_trusted_metadata_is_passed(self):
@@ -82,6 +83,7 @@ class FreshnessProbeTests(unittest.TestCase):
         self.assertFalse(result["local_current"])
         self.assertIsNone(result["origin_length_matches_manifest"])
         self.assertEqual(result["error"], "no source_url in manifest")
+        self.assertEqual(result["etag"], "")
         opener.assert_not_called()
 
     def test_missing_length_does_not_claim_origin_match_or_local_installation(self):
