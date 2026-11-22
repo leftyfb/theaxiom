@@ -173,7 +173,10 @@ def start(sid, config, *, resume=False):
                     raise ValueError("Invalid resumable offset")
                 job = old
             else:
-                if old and old["state"] in ACTIVE | {"paused", "failed", "interrupted"} and staged_size(sid):
+                # A stale partial is never safe to truncate, even if its job
+                # record says cancelled/completed (for example after a crash
+                # between the record and filesystem operations).
+                if staged_size(sid):
                     raise ValueError("Partial download exists; resume or cancel it first")
                 offset, validator = 0, None
                 job = dict(source_id=sid, configuration=configuration, verified=False, downloaded_bytes=0,
