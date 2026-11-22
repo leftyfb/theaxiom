@@ -19,9 +19,9 @@ from typing import Any
 from jinja2 import Environment, FileSystemLoader
 
 if __package__:
-    from .freshness_probe import probe_source
+    from .freshness_probe import probe_source, installed_evidence
 else:
-    from freshness_probe import probe_source
+    from freshness_probe import probe_source, installed_evidence
 storage_settings = importlib.import_module(
     f"{__package__}.storage_settings" if __package__ else "storage_settings"
 )
@@ -169,11 +169,12 @@ def health_response() -> dict[str, Any]:
     }
 
 
-def freshness_response() -> dict[str, Any]:
-    """Return origin freshness metadata for the trusted source manifest."""
+def freshness_response(snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Return separate origin metadata and trusted installed verification."""
     entry = WIKIPEDIA_SOURCE
     result = probe_source(entry["source_url"], entry["sha256"], entry["bytes"])
     result.update(source_id=entry["source_id"], title=entry["title"])
+    result.update(installed_evidence(snapshot, entry))
     return result
 
 
@@ -552,7 +553,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             page = {"/admin/settings": "settings", "/admin/groupings": "groupings"}.get(self.path.rstrip("/"), "sources")
             self._send_admin_page(page)
         elif self.path.rstrip("/") == "/api/freshness":
-            self._send_json(200, freshness_response())
+            self._send_json(200, freshness_response(self._snapshot()))
         elif self.path.rstrip("/") == "/api/acquisitions":
             monitor = getattr(self.server, "acquisition_monitor", None)
             self._send_json(200, monitor.snapshot() if monitor else {"acquisitions": [], "stale": True})
