@@ -513,6 +513,9 @@
           <button class="button" type="button" data-zim-control="cancel-keep" hidden>Cancel · keep partial</button>
           <button class="button danger-action" type="button" data-zim-control="cancel" hidden>Cancel · discard partial</button>
           {% endif %}
+          {% if document and url_managed and source.installed_verified %}
+          <button class="button" type="button" data-document-update-check>Check publisher metadata</button>
+          {% endif %}
           {% if document %}
           {% if source.pdf_download %}
           <button class="button" type="button" data-pdf-download{% if pub.enabled %} hidden{% endif %}{% if pub.enabled or source.mutation_blocked or pub.error %} disabled{% endif %}>{{ 'Re-download' if source.installed_verified else 'Download from URL' }}</button>
@@ -532,6 +535,7 @@
         {% if document %}
         <div class="busy-indicator" data-pdf-busy hidden><span class="busy-spinner" aria-hidden="true"></span><span role="status" data-pdf-busy-text></span></div>
         <p class="source-note" data-pdf-feedback role="status"></p>
+        <p class="source-note" data-field="document-origin-status">{% if source.update_check and source.update_check.state == "representation_changed" %}Publisher representation changed; a newer verified edition is not established.{% endif %}</p>
         {% if url_managed and not source.pdf_download %}<p class="source-note">Configured download URL is unsupported. Edit the source URL.</p>{% endif %}
         {% elif source.acquisition_reason and source.acquisition_reason != 'acquisition disabled pending storage safety integration' %}<p class="source-note" data-field="acquisition-reason">{{ source.acquisition_reason }}</p>{% endif %}
         {% if pub %}<p class="source-note" data-field="publication-status" role="status"{% if pub.published %} hidden{% endif %}>{{ publication_label }}</p>{% endif %}
@@ -1131,6 +1135,31 @@
           button.disabled = card.dataset.zimAccepted === 'true' || card.dataset.zimBlocked === 'true';
         }
       }));
+      document.querySelectorAll('[data-document-update-check]').forEach(button => button.addEventListener('click', async () => {
+        if (button.disabled) return;
+        const card = button.closest('.source-card');
+        const feedback = card.querySelector('[data-pdf-feedback]');
+        button.disabled = true;
+        feedback.textContent = 'Checking publisher headers…';
+        try {
+          const response = await fetch('/api/update-check', {
+            method: 'POST',
+            headers: {...((typeof window !== 'undefined' && window.axiomCsrfHeaders?.()) || {}), 'Content-Type': 'application/json'},
+            body: JSON.stringify({source_id: card.dataset.sourceId, revision})
+          });
+          const result = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(result.error || 'Document metadata check failed');
+          feedback.textContent = result.state === 'representation_changed'
+            ? 'Publisher representation changed. A newer verified document edition is not established.'
+            : result.state === 'representation_unchanged'
+            ? 'Publisher representation matches the captured installed validator.'
+            : 'Unable to determine whether the publisher document changed.';
+        } catch (error) {
+          feedback.textContent = error.message || 'Publisher metadata unavailable.';
+        } finally {
+          button.disabled = false;
+        }
+      }));
       document.querySelectorAll('[data-zim-update-check]').forEach(button => button.addEventListener('click', async () => {
         if (button.disabled) return;
         const card = button.closest('.source-card');
@@ -1521,6 +1550,10 @@
             } else if (source?.artifact) render(card, source.acquisition, data.acquisition_stale !== false);
             else card.querySelector('[data-field="status"]').textContent = data.acquisition_stale ? 'Status unavailable' :
               source?.mutation_blocked !== false ? 'Acquisition unresolved' : 'Not downloaded';
+            const documentStatus = card.querySelector('[data-field="document-origin-status"]');
+            if (documentStatus) documentStatus.textContent =
+              source?.update_check?.state === 'representation_changed'
+                ? 'Publisher representation changed; a newer verified edition is not established.' : '';
             const updateBadge = card.querySelector('[data-field="update-status"]');
             const updateDetails = card.querySelector('[data-field="update-details"]');
             const update = source?.update_check;
