@@ -1036,3 +1036,37 @@ def test_rollback_refuses_changed_serving_record(disk):
     with pytest.raises(ValueError, match="Serving archive changed"):
         zim_jobs.rollback_candidate("ready", changed)
     assert zim_jobs.read_candidate("ready")["state"] == "activated"
+
+
+def test_recover_interrupted_activation_replays_verified_switch(disk):
+    data = fixture_bytes()
+    artifact = zim_source.install_stream("ready", CONFIG, BytesIO(data))
+    live = dict(source_id="ready", state="completed", active=False, verified=True,
+                configuration=zim_jobs.identity(CONFIG), artifact=artifact)
+    zim_jobs.save(live)
+    changed = CONFIG | {"source_url": "https://example.org/next.zim"}
+    zim_jobs.prepare_candidate("ready", changed)
+    candidate = zim_jobs.read_candidate("ready")
+    candidate.update(state="activated", artifact=artifact, previous_job=live)
+    zim_jobs._save_candidate(candidate)
+    assert zim_jobs.recover_candidate_transition("ready") is True
+    assert zim_jobs.read("ready")["configuration"] == zim_jobs.identity(changed)
+    assert zim_jobs.recover_candidate_transition("ready") is False
+    assert (disk / "library/zim" / artifact["filename"]).read_bytes() == data
+
+
+def test_recover_interrupted_rollback_does_not_overwrite_divergent_job(disk):
+    data = fixture_bytes()
+    artifact = zim_source.install_stream("ready", CONFIG, BytesIO(data))
+    live = dict(source_id="ready", state="completed", active=False, verified=True,
+                configuration=zim_jobs.identity(CONFIG), artifact=artifact)
+    zim_jobs.save(live)
+    changed = CONFIG | {"source_url": "https://example.org/next.zim"}
+    zim_jobs.prepare_candidate("ready", changed)
+    candidate = zim_jobs.read_candidate("ready")
+    candidate.update(state="rolled_back", artifact=artifact, previous_job=live)
+    zim_jobs._save_candidate(candidate)
+    zim_jobs.save(live | {"artifact": {"filename": "unrelated.zim"}})
+    with pytest.raises(ValueError, match="diverged"):
+        zim_jobs.recover_candidate_transition("ready")
+    assert zim_jobs.read(sid="ready")["artifact"]["filename"] == "unrelated.zim"
