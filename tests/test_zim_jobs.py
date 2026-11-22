@@ -1417,3 +1417,36 @@ def test_candidate_retry_without_partial_clears_stale_validators(disk):
     assert "etag" not in observed["candidate"]
     assert "last_modified" not in observed["candidate"]
     assert zim_jobs.read("ready") == live
+
+
+@pytest.mark.parametrize("state", ["failed", "cancelled", "interrupted"])
+def test_inactive_failed_candidate_can_be_retired_without_staging(disk, state):
+    artifact = zim_source.install_stream("ready", CONFIG, BytesIO(fixture_bytes()))
+    live = dict(source_id="ready", state="completed", active=False, verified=True,
+                configuration=zim_jobs.identity(CONFIG), artifact=artifact)
+    zim_jobs.save(live)
+    changed = CONFIG | {"source_url": "https://example.org/replacement.zim"}
+    zim_jobs.prepare_candidate("ready", changed)
+    candidate = zim_jobs.read_candidate("ready")
+    candidate["state"] = state
+    zim_jobs._save_candidate(candidate)
+    assert zim_jobs.discard_candidate("ready", changed)["state"] == "discarded"
+    assert zim_jobs.read("ready") == live
+    assert zim_jobs.prepare_candidate("ready", changed)["state"] == "prepared"
+
+
+def test_failed_candidate_with_staging_cannot_be_silently_discarded(disk):
+    artifact = zim_source.install_stream("ready", CONFIG, BytesIO(fixture_bytes()))
+    live = dict(source_id="ready", state="completed", active=False, verified=True,
+                configuration=zim_jobs.identity(CONFIG), artifact=artifact)
+    zim_jobs.save(live)
+    changed = CONFIG | {"source_url": "https://example.org/replacement.zim"}
+    zim_jobs.prepare_candidate("ready", changed)
+    candidate = zim_jobs.read_candidate("ready")
+    candidate["state"] = "failed"
+    zim_jobs._save_candidate(candidate)
+    with patch.object(zim_jobs, "staged_present", return_value=True):
+        with pytest.raises(ValueError, match="staging remains"):
+            zim_jobs.discard_candidate("ready", changed)
+    assert zim_jobs.read_candidate("ready")["state"] == "failed"
+    assert zim_jobs.read("ready") == live
