@@ -221,6 +221,16 @@ def main():
                             expect(page.get_by_role("heading", name="Second offline article")).to_be_visible()
                             page.go_back()
                             expect(page.get_by_role("heading", name="Ready for offline use")).to_be_visible()
+                            # Exercise the actual native search response in Chromium,
+                            # not solely through an HTTP client. The fixture is
+                            # indexed by its metadata name, not the OPDS slug.
+                            search_url = origin + "/zim/search?" + urlencode({
+                                "books.name": expected, "pattern": "offline"})
+                            search_response = page.goto(search_url)
+                            assert search_response.status == 200, (label, search_response.status)
+                            assert "map::at" not in page.locator("body").inner_text(), label
+                            page.go_back()
+                            expect(page.get_by_role("heading", name="Ready for offline use")).to_be_visible()
                             viewport_width = page.evaluate("document.documentElement.clientWidth")
                             content_width = page.evaluate("document.documentElement.scrollWidth")
                             assert content_width <= viewport_width + 2, (label, content_width, viewport_width)
