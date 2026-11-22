@@ -237,6 +237,10 @@ def _run_candidate(sid, configuration, guard, signal):
             candidate["downloaded_bytes"] = current
             if total is not None:
                 candidate["expected_bytes"] = total
+            if metadata.get("etag"):
+                candidate["etag"] = metadata["etag"]
+            if metadata.get("last_modified"):
+                candidate["last_modified"] = metadata["last_modified"]
             if metadata.get("verifying"):
                 candidate["state"] = "verifying"
             _save_candidate(candidate)
