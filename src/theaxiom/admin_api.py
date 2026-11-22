@@ -867,6 +867,10 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             if self._zim_record(record):
                 state = zim_catalog.status(record, catalog["sources"])
                 verified = bool(state["verified"])
+            if sid in publication.ROUTES and verified and isinstance(artifacts.get(sid), dict):
+                if kiwix_update_discovery.pinned_wikipedia_identity(
+                        record, artifacts[sid], verified=verified) is not None:
+                    update_check = update_check_store.load(sid, artifacts[sid]["sha256"])
             publication_filter = ("unknown" if state and state.get("error") else
                                   "published" if state and state["published"] else "unpublished")
             download_filter = "unknown"
@@ -1039,7 +1043,15 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 return
             sid = data["source_id"]
             record = next((item for item in catalog["sources"] if item["source_id"] == sid), None)
-            if record and self._zim_record(record):
+            if record and sid in publication.ROUTES:
+                lifecycle = select_lifecycle(sid, record["configuration"])
+                artifact = lifecycle.get("artifact")
+                matched = self._matched_snapshot(self._snapshot(), {sid: artifact})
+                verified = publication.verified(matched, sid)
+                result = kiwix_update_discovery.refresh_pinned_wikipedia(
+                    record, artifact, verified=verified,
+                )
+            elif record and self._zim_record(record):
                 result = kiwix_update_discovery.refresh_checked_source(sid)
             elif record and (self._pdf_record(record) or self._epub_record(record)):
                 result = document_update_discovery.check_installed_document(record)
