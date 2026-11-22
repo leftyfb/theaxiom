@@ -115,6 +115,10 @@ def exercise(browser, base, viewport_name, viewport, artifact_dir):
         page.goto(epub + "/chapter/1?size=small")
         expect(page.locator("#chapter-content")).to_have_class("book small")
         expect(page.locator("#chapter-content")).to_contain_text("Second isolated chapter")
+        # Direct chapter links must be reloadable and retain reader text sizing.
+        page.reload()
+        expect(page.locator("#chapter-content")).to_have_class("book small")
+        expect(page.locator("#chapter-content")).to_contain_text("Second isolated chapter")
         return_link = page.get_by_role("link", name="Return to library")
         expect(return_link).to_have_attribute("href", "/")
         return_link.focus()
@@ -142,6 +146,10 @@ def exercise(browser, base, viewport_name, viewport, artifact_dir):
         previous_page.focus()
         expect(previous_page).to_be_focused()
         page.keyboard.press("Space")
+        expect(page.locator("#page")).to_have_value("1")
+        # Navigation at document boundaries must not escape the valid page range.
+        previous_page.focus()
+        page.keyboard.press("Enter")
         expect(page.locator("#page")).to_have_value("1")
         search_toggle = page.get_by_role("button", name="Search document")
         search_toggle.focus()
@@ -179,6 +187,8 @@ def exercise(browser, base, viewport_name, viewport, artifact_dir):
         expect(page.locator("#page")).to_have_value("1", timeout=20000)
         page.locator("#find").fill("alpha")
         expect(page.locator("#matches")).to_contain_text("3", timeout=20000)
+        # Reopening the search UI after closing must not retain a stale
+        # active match or an inaccessible keyboard focus target.
         # A focused native button must remain operable without a pointer.
         close_search = page.get_by_role("button", name="Close search")
         close_search.focus()
@@ -196,6 +206,9 @@ def exercise(browser, base, viewport_name, viewport, artifact_dir):
         second_thumbnail = page.locator("#thumbs button").nth(1)
         second_thumbnail.focus()
         expect(second_thumbnail).to_be_focused()
+        page.keyboard.press("Enter")
+        expect(page.locator("#page")).to_have_value("2")
+        next_page.focus()
         page.keyboard.press("Enter")
         expect(page.locator("#page")).to_have_value("2")
         page.get_by_role("button", name="Thumbnails").click()
