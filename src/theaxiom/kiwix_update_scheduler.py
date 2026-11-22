@@ -35,7 +35,8 @@ def check_records(records, *, max_checks=DEFAULT_MAX_CHECKS, start_index=0, chec
         and record["source_id"] not in publication.ROUTES
         and isinstance(record.get("configuration"), dict)
         and record["configuration"].get("format") in supported
-        and record["configuration"].get("source_url")
+        and (record["configuration"].get("format") == "zim"
+             or record["configuration"].get("source_url"))
     }
     eligible = sorted(by_id)
     results = []
