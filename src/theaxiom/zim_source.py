@@ -159,7 +159,8 @@ def discard_partial(source_id):
 
 def download_resumable(source_id, config, *, offset=0, validator=None,
                        progress=lambda current, total, metadata: None,
-                       stopped=lambda: False, promote_lock=None, promoting=lambda: None):
+                       stopped=lambda: False, promote_lock=None, promoting=lambda: None,
+                       staging_id=None):
     """Persist source-scoped staged bytes and validate any resumed response before appending.
 
     Only the caller may delete a partial, on an explicit cancellation. A failed
@@ -170,7 +171,8 @@ def download_resumable(source_id, config, *, offset=0, validator=None,
         raise ValueError("Invalid saved ZIM offset")
     if offset and not validator:
         raise ValueError("Publisher supplied no stable ETag or Last-Modified; cannot safely resume")
-    name = partial_name(source_id)
+    # A replacement shares the published source ID but never its staging inode.
+    name = partial_name(staging_id if staging_id is not None else source_id)
     settings = storage_settings.load_settings()
     with (pdf_source._directory("staging", writing=True, format_name="zim") as (staging, mount_id, _),
           pdf_source._directory("library", writing=True, format_name="zim") as (library, library_mount, reserve)):
