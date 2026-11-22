@@ -892,6 +892,10 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 try:
                     replacement = zim_jobs.candidate_status(sid)
                     replacement = _public_zim_replacement(replacement)
+                    if replacement and replacement["state"] in {"failed", "cancelled", "interrupted"}:
+                        # A failed transfer with retained bytes must be resumed
+                        # or cleaned up, not offered a discard that will fail.
+                        replacement["can_discard"] = not zim_jobs.staged_present(sid + "-candidate")
                 except (ValueError, OSError):
                     replacement = {"state": "unavailable", "error": "Replacement status unavailable"}
             sources.append(dict(record, **lifecycles[sid], acquisition=job, replacement=replacement, replacement_available=replacement_available,
