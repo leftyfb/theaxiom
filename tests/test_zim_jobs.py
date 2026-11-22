@@ -1526,3 +1526,51 @@ def test_installed_job_reader_refuses_hardlinks_before_explicit_deletion(disk):
         zim_jobs.delete_installed("ready")
     assert shared.exists() and target.exists()
     assert (disk / "library/zim" / archive["filename"]).exists()
+
+
+def test_failed_reader_activation_auto_restores_previous_verified_archive(disk):
+    from theaxiom import zim_refresh
+    content = fixture_bytes()
+    artifact = zim_source.install_stream("ready", CONFIG, BytesIO(content))
+    live = dict(source_id="ready", state="completed", active=False,
+                verified=True, configuration=zim_jobs.identity(CONFIG),
+                artifact=artifact)
+    zim_jobs.save(live)
+    changed = CONFIG | {"source_url": "https://example.org/next.zim"}
+    zim_jobs.prepare_candidate("ready", changed)
+    candidate = zim_jobs.read_candidate("ready")
+    candidate.update(state="verified", artifact=artifact)
+    zim_jobs._save_candidate(candidate)
+    assert zim_jobs.activate_candidate("ready", changed)["configuration"] == zim_jobs.identity(changed)
+
+    # The replacement was successfully stored, but Kiwix never acknowledged
+    # it. Restore the precise previous serving record; no bytes are removed.
+    with patch.object(zim_refresh, "reconcile", side_effect=[False, True]) as ack:
+        assert zim_refresh.reconcile_activation(
+            lambda: ["ready"], source_id="ready",
+            configuration=changed, attempts=1, interval=0) is False
+    assert ack.call_count == 2
+    assert zim_jobs.read("ready") == live
+    rolled = zim_jobs.read_candidate("ready")
+    assert rolled["state"] == "rolled_back"
+    assert "previous verified archive restored" in rolled["error"]
+    assert (disk / "library/zim" / artifact["filename"]).read_bytes() == content
+
+
+@pytest.mark.parametrize("reason", ["", "bad\\nheader", "x" * 241, 123, True])
+def test_invalid_rollback_reason_never_changes_serving_archive(disk, reason):
+    artifact = zim_source.install_stream("ready", CONFIG, BytesIO(fixture_bytes()))
+    live = dict(source_id="ready", state="completed", active=False,
+                verified=True, configuration=zim_jobs.identity(CONFIG),
+                artifact=artifact)
+    zim_jobs.save(live)
+    changed = CONFIG | {"source_url": "https://example.org/next.zim"}
+    zim_jobs.prepare_candidate("ready", changed)
+    candidate = zim_jobs.read_candidate("ready")
+    candidate.update(state="verified", artifact=artifact)
+    zim_jobs._save_candidate(candidate)
+    activated = zim_jobs.activate_candidate("ready", changed)
+    with pytest.raises(ValueError, match="Invalid replacement rollback reason"):
+        zim_jobs.rollback_candidate("ready", changed, reason=reason)
+    assert zim_jobs.read("ready") == activated
+    assert zim_jobs.read_candidate("ready")["state"] == "activated"
