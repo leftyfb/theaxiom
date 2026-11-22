@@ -130,3 +130,12 @@ class ZimReplacementPublicResponseTests(unittest.TestCase):
         self.assertEqual(admin_api._public_zim_replacement({"state": "prepared"}), {
             "state": "prepared",
         })
+
+
+class ZimReplacementManifestRefreshContractTests(unittest.TestCase):
+    def test_activation_and_rollback_schedule_reader_reconciliation(self):
+        import inspect
+        handler = inspect.getsource(admin_api.AdminAPIHandler._start_zim)
+        self.assertIn('{"zim-replacement-activate", "zim-replacement-rollback"}', handler)
+        self.assertIn('zim_refresh.schedule(lambda: SOURCE_CATALOG.get()["sources"])', handler)
+        self.assertLess(handler.index('zim_refresh.schedule('), handler.index('self._send_json(202, result)'))
