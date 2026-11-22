@@ -430,7 +430,7 @@ def _save_candidate(candidate):
 
 
 def discard_candidate(sid, config):
-    """Retire unused preparation or completed rollback metadata, never archive bytes.
+    """Retire safe inactive candidate metadata without deleting archive bytes.
 
     An activated candidate is recovery-critical and cannot be discarded.
     A rolled-back candidate may be retired only after verifying the original
@@ -442,8 +442,15 @@ def discard_candidate(sid, config):
             candidate = read_candidate(sid)
             if not candidate or candidate["configuration"] != configuration:
                 raise ValueError("No matching replacement candidate")
-            if candidate["state"] not in {"prepared", "rolled_back"}:
+            if candidate["state"] not in {"prepared", "rolled_back", "failed", "cancelled", "interrupted"}:
                 raise ValueError("Active or verified replacement cannot be discarded without artifact cleanup")
+            if candidate["state"] in {"failed", "cancelled", "interrupted"}:
+                # Never silently abandon partial bytes. Once staging is absent,
+                # failed attempts may be retired and a new candidate prepared.
+                if staged_present(sid + "-candidate"):
+                    raise ValueError("Replacement staging remains; remove or recover staged bytes before discarding")
+                if candidate.get("artifact"):
+                    raise ValueError("Replacement artifact remains; manual cleanup required")
             live = read(sid)
             if (not live or live.get("state") != "completed"
                     or live.get("artifact") != candidate.get("base_artifact")):
