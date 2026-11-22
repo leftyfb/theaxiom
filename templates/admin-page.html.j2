@@ -1305,7 +1305,8 @@
           const canCancel = running || recoverable;
           const canRestart = ['paused','interrupted','failed','cancelled'].includes(state) && !hasPartial;
           const retries = (source?.acquisition?.attempt_history || []).filter(a => a.operation === 'retry').length;
-          const canRetry = state === 'failed' && retries < 3;
+          const canRetry = state === 'failed' && retries < 3 &&
+            (!hasPartial || !!(source?.acquisition?.etag || source?.acquisition?.last_modified));
           zim.hidden = !!source?.installed_verified || recoverable || running;
           zim.disabled = card.dataset.zimBlocked === 'true' || card.dataset.zimPosting === 'true' || card.dataset.zimAccepted === 'true';
           for (const control of card.querySelectorAll('[data-zim-control]')) {
