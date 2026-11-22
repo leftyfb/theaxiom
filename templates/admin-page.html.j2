@@ -475,7 +475,10 @@
           <button class="button" type="button" data-zim-control="pause" hidden>Pause</button>
           <button class="button" type="button" data-zim-control="resume" hidden>Resume</button>
           <button class="button" type="button" data-zim-control="revalidate" hidden>Recheck saved file (offline)</button>
-          <button class="button danger-action" type="button" data-zim-control="cancel" hidden>Cancel</button>
+          <button class="button" type="button" data-zim-control="retry" hidden>Retry (max 3)</button>
+          <button class="button danger-action" type="button" data-zim-control="restart" hidden>Restart from beginning</button>
+          <button class="button" type="button" data-zim-control="cancel-keep" hidden>Cancel · keep partial</button>
+          <button class="button danger-action" type="button" data-zim-control="cancel" hidden>Cancel · discard partial</button>
           {% endif %}
           {% if document %}
           {% if source.pdf_download %}
@@ -1074,18 +1077,24 @@
         if (button.disabled) return;
         const card = button.closest('.source-card');
         const operation = button.dataset.zimControl;
-        if (operation === 'cancel' && !window.confirm('Cancel this download and delete its partial archive? Installed versions will be kept.')) return;
+        if (operation === 'cancel' && !window.confirm('Cancel and permanently discard the partial download? Installed versions will be kept.')) return;
+        if (operation === 'cancel-keep' && !window.confirm('Cancel this download but retain partial bytes for a possible resume?')) return;
+        if (operation === 'restart' && !window.confirm('Restart this download from the beginning? Any retained partial must first be discarded explicitly.')) return;
         if (operation === 'revalidate' && !window.confirm('Recheck the complete retained ZIM using only saved local bytes? No network download will occur.')) return;
         const feedback = card.querySelector('[data-zim-feedback]');
         card.dataset.zimPosting = 'true';
         card.querySelectorAll('[data-zim-control],[data-zim-download]').forEach(b => b.disabled = true);
         try {
           const response = await acquisitionFetch('/api/action', {method:'POST', headers:{...((typeof window !== 'undefined' && window.axiomCsrfHeaders?.()) || {}),'Content-Type':'application/json'},
-            body:JSON.stringify({source_id:card.dataset.sourceId, action:'zim-' + operation, revision})});
+            body:JSON.stringify({source_id:card.dataset.sourceId, action:'zim-' + operation, revision,
+              ...(operation === 'restart' ? {confirm_restart:true} : {})})});
           const result = await response.json().catch(() => ({}));
           if (!response.ok || !result.accepted) throw acquisitionError(response, result, 'ZIM control failed');
           feedback.textContent = operation === 'pause' ? 'Pausing download…' :
-            operation === 'cancel' ? 'Cancelling download…' :
+            operation === 'cancel' ? 'Cancelling and discarding partial…' :
+            operation === 'cancel-keep' ? 'Cancelling and retaining partial…' :
+            operation === 'restart' ? 'Restart requested…' :
+            operation === 'retry' ? 'Retry requested…' :
             operation === 'revalidate' ? 'Rechecking retained file offline…' : 'Resuming from saved bytes…';
           card.dataset.zimAccepted = 'true';
         } catch(error) {
@@ -1294,13 +1303,19 @@
           const canRevalidate = recoverable && complete && source?.acquisition?.retained === true;
           const canResume = recoverable && !complete;
           const canCancel = running || recoverable;
+          const canRestart = ['paused','interrupted','failed','cancelled'].includes(state) && !hasPartial;
+          const retries = (source?.acquisition?.attempt_history || []).filter(a => a.operation === 'retry').length;
+          const canRetry = state === 'failed' && retries < 3;
           zim.hidden = !!source?.installed_verified || recoverable || running;
           zim.disabled = card.dataset.zimBlocked === 'true' || card.dataset.zimPosting === 'true' || card.dataset.zimAccepted === 'true';
           for (const control of card.querySelectorAll('[data-zim-control]')) {
             const op = control.dataset.zimControl;
             control.hidden = op === 'pause' ? !['queued','downloading','verifying'].includes(state) :
               op === 'resume' ? !canResume :
-              op === 'revalidate' ? !canRevalidate : !canCancel;
+              op === 'revalidate' ? !canRevalidate :
+              op === 'restart' ? !canRestart :
+              op === 'retry' ? !canRetry :
+              op === 'cancel-keep' ? !canCancel : !canCancel;
             control.disabled = card.dataset.zimPosting === 'true' || card.dataset.zimAccepted === 'true' ||
               (op === 'pause' && !['queued','downloading','verifying'].includes(state));
           }
