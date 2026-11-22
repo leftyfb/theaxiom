@@ -1366,7 +1366,7 @@
             'Replacement: ' + replacementState + percent + (replacement.error ? ' · ' + replacement.error : '') : '';
           for (const button of (card.querySelectorAll?.('[data-zim-replacement]') || [])) {
             const op = button.dataset.zimReplacement;
-            button.hidden = op === 'prepare' ? !source?.zim_download || source?.acquisition?.state !== 'completed' || source?.acquisition?.verified !== true || !!replacement :
+            button.hidden = op === 'prepare' ? !source?.replacement_available || !!replacement :
               op === 'download' ? !['prepared','failed','interrupted','cancelled'].includes(replacementState) :
               op === 'cancel' ? !['downloading','verifying'].includes(replacementState) :
               op === 'activate' ? replacementState !== 'verified' :
