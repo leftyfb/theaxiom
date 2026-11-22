@@ -26,7 +26,7 @@ def check_kiwix_update(installed: dict, *, fetch=None) -> dict:
         return dict(UNKNOWN)
     family = installed.get("family")
     edition = installed.get("edition")
-    if (not isinstance(family, str) or not re.fullmatch(r"[a-z0-9_]{3,120}", family)
+    if (not isinstance(family, str) or not re.fullmatch(r"[a-z0-9._-]{3,120}", family)
             or not isinstance(edition, str)
             or not re.fullmatch(r"20[0-9]{2}-(0[1-9]|1[0-2])", edition)
             or installed.get("publisher") != "kiwix"
@@ -70,4 +70,75 @@ def check_kiwix_update(installed: dict, *, fetch=None) -> dict:
     except (ValueError, TypeError, KeyError, OverflowError, OSError):
         # Never convert malformed, unavailable or ambiguous publisher
         # metadata into an update notification or an acquisition action.
+        return dict(UNKNOWN)
+
+
+def installed_identity_from_job(job: dict, artifact: dict) -> dict | None:
+    """Derive edition identity from an independently validated installed ZIM.
+
+    The caller must first obtain the job from the durable ledger and verify
+    the archive with zim_jobs.installed(job, job["configuration"]). This
+    function never turns the mutable source profile into installed evidence.
+    """
+    if (not isinstance(job, dict) or not isinstance(artifact, dict)
+            or job.get("state") != "completed" or job.get("verified") is not True
+            or job.get("active") is not False or job.get("artifact") != artifact):
+        return None
+    config = job.get("configuration")
+    if not isinstance(config, dict) or config.get("format") != "zim":
+        return None
+    digest = artifact.get("sha256")
+    source_id = job.get("source_id")
+    if (not isinstance(source_id, str) or not re.fullmatch(r"[a-z][a-z0-9-]{0,63}", source_id)
+            or not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest)
+            or artifact.get("filename") != f"{source_id}.{digest}.zim"
+            or config.get("sha256") != digest):
+        return None
+    url = config.get("source_url")
+    if not isinstance(url, str):
+        return None
+    try:
+        parts = urlsplit(url)
+        if (parts.scheme != "https" or parts.hostname not in kiwix_opds.DOWNLOAD_HOSTS
+                or parts.username or parts.password or parts.query or parts.fragment
+                or parts.port not in (None, 443)):
+            return None
+    except ValueError:
+        return None
+    filename = parts.path.rsplit("/", 1)[-1]
+    match = re.fullmatch(r"([a-z0-9._-]{3,120})_(20[0-9]{2}-(?:0[1-9]|1[0-2]))\.zim", filename)
+    if not match or ".." in match.group(1):
+        return None
+    family, edition = match.groups()
+    language_code = family.split("_")
+    if len(language_code) < 3:
+        return None
+    # Only explicitly understood language tokens are supported; do not
+    # guess arbitrary publisher naming conventions.
+    language = {"en": "eng", "es": "spa", "fr": "fra", "de": "deu"}.get(language_code[1])
+    if language is None:
+        return None
+    variant = language_code[-1]
+    return {
+        "verified": True, "sha256": digest, "family": family,
+        "edition": edition, "source_url": url,
+        "language": language, "variant": variant, "publisher": "kiwix",
+    }
+
+
+def check_installed_kiwix_job(source_id: str, *, fetch=None) -> dict:
+    """Discover updates only for a real, inactive, verified installed job."""
+    from . import zim_jobs
+    try:
+        job = zim_jobs.status(source_id)
+        if not job:
+            return dict(UNKNOWN)
+        artifact = zim_jobs.installed(job, job["configuration"])
+        if not artifact:
+            return dict(UNKNOWN)
+        installed = installed_identity_from_job(job, artifact)
+        if installed is None:
+            return dict(UNKNOWN)
+        return check_kiwix_update(installed, fetch=fetch)
+    except (OSError, ValueError, TypeError, KeyError):
         return dict(UNKNOWN)
