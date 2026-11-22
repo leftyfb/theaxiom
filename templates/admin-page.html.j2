@@ -472,6 +472,15 @@
           {% endfor %}
           {% if source.zim_download %}<button class="button" type="button" data-zim-download{% if source.installed_verified %} hidden{% endif %}{% if source.mutation_blocked or source.installed_verified %} disabled{% endif %}>Download</button>{% endif %}
           {% if source.zim_download %}
+          <button class="button" type="button" data-zim-replacement="prepare" hidden>Prepare replacement</button>
+          <button class="button" type="button" data-zim-replacement="download" hidden>Download replacement</button>
+          <button class="button" type="button" data-zim-replacement="cancel" hidden>Cancel replacement · keep partial</button>
+          <button class="button" type="button" data-zim-replacement="activate" hidden>Activate verified replacement</button>
+          <button class="button" type="button" data-zim-replacement="rollback" hidden>Roll back replacement</button>
+          <button class="button" type="button" data-zim-replacement="discard" hidden>Discard preparation</button>
+          <p class="source-note" data-zim-replacement-status role="status" aria-live="polite"></p>
+          {% endif %}
+          {% if source.zim_download %}
           <button class="button" type="button" data-zim-control="pause" hidden>Pause</button>
           <button class="button" type="button" data-zim-control="resume" hidden>Resume</button>
           <button class="button" type="button" data-zim-control="revalidate" hidden>Recheck saved file (offline)</button>
@@ -1073,6 +1082,30 @@
           button.disabled = card.dataset.zimAccepted === 'true' || card.dataset.zimBlocked === 'true';
         }
       }));
+      document.querySelectorAll('[data-zim-replacement]').forEach(button => button.addEventListener('click', async () => {
+        if (button.disabled) return;
+        const card = button.closest('.source-card');
+        const operation = button.dataset.zimReplacement;
+        if (['activate','rollback'].includes(operation) &&
+            !window.confirm(operation === 'activate' ? 'Activate the verified replacement archive?' : 'Restore the previous verified archive?')) return;
+        const feedback = card.querySelector('[data-zim-replacement-status]');
+        card.dataset.zimReplacementPosting = 'true';
+        card.querySelectorAll('[data-zim-replacement]').forEach(b => b.disabled = true);
+        try {
+          const response = await acquisitionFetch('/api/action', {method:'POST',
+            headers:{...((typeof window !== 'undefined' && window.axiomCsrfHeaders?.()) || {}),'Content-Type':'application/json'},
+            body:JSON.stringify({source_id:card.dataset.sourceId, action:'zim-replacement-' + operation, revision,
+              ...(['activate','rollback'].includes(operation) ? {confirm_restart:true} : {})})});
+          const result = await response.json().catch(() => ({}));
+          if (!response.ok) throw acquisitionError(response, result, 'Replacement operation failed');
+          feedback.textContent = 'Replacement ' + operation + ' accepted; refreshing status…';
+          await refresh();
+        } catch(error) {
+          feedback.textContent = error.message;
+        } finally {
+          delete card.dataset.zimReplacementPosting;
+        }
+      }));
       document.querySelectorAll('[data-zim-control]').forEach(button => button.addEventListener('click', async () => {
         if (button.disabled) return;
         const card = button.closest('.source-card');
@@ -1319,6 +1352,28 @@
               op === 'cancel-keep' ? !canCancel : !canCancel;
             control.disabled = card.dataset.zimPosting === 'true' || card.dataset.zimAccepted === 'true' ||
               (op === 'pause' && !['queued','downloading','verifying'].includes(state));
+          }
+        }
+        const replacement = source?.replacement;
+        const replacementState = replacement?.state || '';
+        const replacementStatus = card.querySelector('[data-zim-replacement-status]');
+        if (replacementStatus) {
+          const bytes = Number(replacement?.downloaded_bytes);
+          const total = Number(replacement?.expected_bytes);
+          const percent = Number.isFinite(bytes) && Number.isFinite(total) && total > 0 ?
+            ' · ' + (100 * bytes / total).toFixed(1) + '%' : '';
+          replacementStatus.textContent = replacementState ?
+            'Replacement: ' + replacementState + percent + (replacement.error ? ' · ' + replacement.error : '') : '';
+          for (const button of card.querySelectorAll('[data-zim-replacement]')) {
+            const op = button.dataset.zimReplacement;
+            button.hidden = op === 'prepare' ? !source?.zim_download || !source?.installed_verified || !!replacement :
+              op === 'download' ? !['prepared','failed','interrupted','cancelled'].includes(replacementState) :
+              op === 'cancel' ? !['downloading','verifying'].includes(replacementState) :
+              op === 'activate' ? replacementState !== 'verified' :
+              op === 'rollback' ? replacementState !== 'activated' :
+              replacementState !== 'prepared';
+            button.disabled = card.dataset.zimReplacementPosting === 'true' ||
+              (op !== 'cancel' && blocked && !source?.installed_verified);
           }
         }
         const toggle = field('publication-toggle');
