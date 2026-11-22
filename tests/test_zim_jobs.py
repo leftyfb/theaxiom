@@ -490,3 +490,34 @@ def test_cancel_removes_zero_byte_retained_partial_and_allows_restart(disk, stat
     assert zim_jobs.control("ready", CONFIG, "cancel")["state"] == "cancelled"
     assert not zim_jobs.staged_present("ready")
     assert zim_jobs.read("ready")["state"] == "cancelled"
+
+
+def test_cancel_keep_retains_partial_and_allows_explicit_resume(disk):
+    entered, release = threading.Event(), threading.Event()
+
+    def download(sid, config, *, stopped, **kwargs):
+        entered.set()
+        assert release.wait(5)
+        assert stopped()
+        raise zim_source.TransferStopped()
+
+    with patch.object(zim_source, "download_resumable", download):
+        try:
+            zim_jobs.start("ready", CONFIG)
+            assert entered.wait(5)
+            assert zim_jobs.control("ready", CONFIG, "cancel-keep")["state"] == "cancelling"
+        finally:
+            release.set()
+        join_worker()
+    job = zim_jobs.read("ready")
+    assert job["state"] == "paused"
+    assert "retained" in job["detail"]
+    assert zim_jobs.control("ready", CONFIG, "cancel")["state"] == "cancelled"
+
+
+def test_cancel_keep_on_failed_job_preserves_staging(disk):
+    zim_jobs.save(dict(source_id="ready", state="failed", active=False,
+                       configuration=zim_jobs.identity(CONFIG), downloaded_bytes=0))
+    result = zim_jobs.control("ready", CONFIG, "cancel-keep")
+    assert result["state"] == "paused"
+    assert zim_jobs.read("ready")["state"] == "paused"
