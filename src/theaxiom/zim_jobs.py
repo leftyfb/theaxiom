@@ -211,9 +211,11 @@ def rollback_candidate(sid, config):
                     previous.get("artifact") != candidate["base_artifact"] or
                     not installed(previous, previous["configuration"])):
                 raise ValueError("Previous archive missing or invalid; rollback refused")
-            save(previous)
+            # Persist rollback intent before changing the serving record.
+            # A crash between writes must never reactivate the replacement.
             candidate["state"] = "rolled_back"
             _save_candidate(candidate)
+            save(previous)
             return previous
 
 
