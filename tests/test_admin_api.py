@@ -73,3 +73,31 @@ class FreshnessApiContractTests(unittest.TestCase):
             result = admin_api.freshness_response({"stale": True, "acquisitions": []})
         self.assertFalse(result["local_current"])
         self.assertEqual(result["installed_state"], "unknown")
+
+
+    def test_same_size_corrupt_archive_does_not_appear_current(self):
+        entry = admin_api.WIKIPEDIA_SOURCE
+        job = {"source_id": entry["source_id"], "filename": entry["filename"],
+               "expected_bytes": entry["bytes"], "sha256": entry["sha256"],
+               "downloaded_bytes": entry["bytes"], "state": "failed",
+               "verified": False, "active": False}
+        with patch.object(admin_api, "probe_source", return_value={
+            "reachable": True, "origin_length_matches_manifest": True,
+            "local_current": False, "error": ""}):
+            result = admin_api.freshness_response({"stale": False, "acquisitions": [job]})
+        self.assertFalse(result["local_current"])
+        self.assertEqual(result["installed_state"], "failed_or_corrupt")
+
+    def test_unavailable_storage_is_not_reported_as_absent_or_verified(self):
+        entry = admin_api.WIKIPEDIA_SOURCE
+        job = {"source_id": entry["source_id"], "filename": entry["filename"],
+               "expected_bytes": entry["bytes"], "sha256": entry["sha256"],
+               "downloaded_bytes": None, "state": "unavailable",
+               "verified": False, "active": False}
+        with patch.object(admin_api, "probe_source", return_value={
+            "reachable": False, "origin_length_matches_manifest": None,
+            "local_current": False, "error": "timeout"}):
+            result = admin_api.freshness_response({"stale": False, "acquisitions": [job]})
+        self.assertFalse(result["local_current"])
+        self.assertEqual(result["installed_state"], "unavailable")
+        self.assertEqual(result["error"], "timeout")
