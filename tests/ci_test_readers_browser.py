@@ -185,10 +185,17 @@ def exercise(browser, base, viewport_name, viewport, artifact_dir):
         page.get_by_role("button", name="Thumbnails").click()
         expect(page.locator("#thumbs")).to_be_visible()
         expect(page.locator("#thumbs button")).to_have_count(2)
+        # Thumbnail count must match the loaded synthetic PDF, including
+        # when the panel is reopened after a page change.
         second_thumbnail = page.locator("#thumbs button").nth(1)
         second_thumbnail.focus()
         expect(second_thumbnail).to_be_focused()
         page.keyboard.press("Enter")
+        expect(page.locator("#page")).to_have_value("2")
+        page.get_by_role("button", name="Thumbnails").click()
+        expect(page.locator("#thumbs")).to_be_hidden()
+        page.get_by_role("button", name="Thumbnails").click()
+        expect(page.locator("#thumbs button")).to_have_count(2)
         expect(page.locator("#page")).to_have_value("2")
         # Verify all pages prepare for printing without opening an OS dialog.
         page.evaluate("window.__printInvoked = 0; window.print = () => { window.__printInvoked += 1; }")
