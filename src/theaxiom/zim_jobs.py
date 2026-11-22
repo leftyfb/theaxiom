@@ -219,7 +219,7 @@ def start(sid, config, *, resume=False, restart=False, retry=False):
             _record_attempt(job, started=True)
             if retry:
                 job["attempt_history"][-1]["operation"] = "retry"
-                job["retry_count"] = job.get("retry_count", sum(entry.get("operation") == "retry" for entry in job["attempt_history"][:-1])) + 1
+                job["retry_count"] = old.get("retry_count", sum(entry.get("operation") == "retry" for entry in old.get("attempt_history", []))) + 1
             save(job)
             signal = threading.Event()
             CONTROLS[sid] = (signal, None)
