@@ -240,3 +240,31 @@ def test_reader_status_explains_activation_stage(disk):
         ready = zim_catalog.status(rec, [rec])
     assert ready["published"] is True
     assert ready["publication_reason"] == ""
+
+
+def test_replacement_lifecycle_updates_manifest_only_on_activation(disk):
+    old = zim_source.install_stream("ready", CONFIG, BytesIO(fixture_bytes()))
+    zim_jobs.save(dict(source_id="ready", state="completed", active=False,
+                       verified=True, configuration=zim_jobs.identity(CONFIG),
+                       artifact=old))
+    updated = CONFIG | {"source_url": "https://example.org/new-release.zim"}
+    rec = record("ready", config=updated)
+    publication.save("ready", True)
+    old_path = str(disk / "library/zim" / old["filename"])
+    assert zim_catalog.verified_books([rec], {"ready": True})[0]["path"] == old_path
+    assert zim_catalog.source_content_name(rec) == old["filename"][:-4]
+    zim_jobs.prepare_candidate("ready", updated)
+    assert zim_catalog.verified_books([rec], {"ready": True})[0]["path"] == old_path
+    # A different verified archive is installed without changing the serving job.
+    new = zim_source.install_stream("ready", updated, BytesIO(fixture_bytes() + b"new"))
+    candidate = zim_jobs.read_candidate("ready")
+    candidate.update(state="verified", artifact=new)
+    zim_jobs._save_candidate(candidate)
+    assert zim_catalog.verified_books([rec], {"ready": True})[0]["path"] == old_path
+    zim_jobs.activate_candidate("ready", updated)
+    new_path = str(disk / "library/zim" / new["filename"])
+    assert zim_catalog.verified_books([rec], {"ready": True})[0]["path"] == new_path
+    assert zim_catalog.source_content_name(rec) == new["filename"][:-4]
+    zim_jobs.rollback_candidate("ready", updated)
+    assert zim_catalog.verified_books([rec], {"ready": True})[0]["path"] == old_path
+    assert zim_catalog.source_content_name(rec) == old["filename"][:-4]
