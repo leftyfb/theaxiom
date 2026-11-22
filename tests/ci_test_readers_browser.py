@@ -245,6 +245,17 @@ def exercise(browser, base, viewport_name, viewport, artifact_dir):
         expect(page.locator("#page")).to_have_value("1")
         expect(page.locator("#search-tools")).to_be_hidden()
         expect(page.locator("#thumbs")).to_be_hidden()
+        # Direct numeric navigation is a separate control from arrows and
+        # thumbnails. Test it on a clean reader without competing renders.
+        page_number = page.get_by_role("spinbutton", name="Page number")
+        page_number.fill("2")
+        page_number.press("Tab")
+        expect(page_number).to_have_value("2")
+        expect(previous_page).to_be_enabled()
+        page_number.fill("1")
+        page_number.press("Tab")
+        expect(page_number).to_have_value("1")
+        expect(previous_page).to_be_disabled()
         next_page.click()
         expect(page.locator("#page")).to_have_value("2")
         # Verify all pages prepare for printing without opening an OS dialog.
