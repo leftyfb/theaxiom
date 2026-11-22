@@ -1371,7 +1371,7 @@
               op === 'cancel' ? !['downloading','verifying'].includes(replacementState) :
               op === 'activate' ? replacementState !== 'verified' :
               op === 'rollback' ? replacementState !== 'activated' :
-              replacementState !== 'prepared';
+              !['prepared','rolled_back'].includes(replacementState);
             button.disabled = card.dataset.zimReplacementPosting === 'true' ||
               (op !== 'cancel' && blocked && source?.acquisition?.state !== 'completed');
           }
