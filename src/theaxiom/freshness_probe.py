@@ -277,9 +277,10 @@ def classify_document_origin(
             or installed.get("verified") is not True
             or response.get("source_url") != installed.get("source_url")):
         return unknown
+    import re
     old_tag = installed.get("etag")
     if (not isinstance(old_tag, str) or
-            __import__("re").fullmatch(r'"[\x21\x23-\x7e]{1,200}"', old_tag) is None):
+            re.fullmatch(r'"[\x21\x23-\x7e]{1,200}"', old_tag) is None):
         return unknown
     if response.get("status") == 304:
         return {"state": "representation_unchanged",
