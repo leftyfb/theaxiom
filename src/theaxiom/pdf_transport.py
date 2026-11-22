@@ -215,7 +215,7 @@ def probe_document_metadata(url, *, if_none_match=None, total_seconds=15):
         raise ValueError("Metadata check requires a plain HTTPS source URL")
     if (if_none_match is not None and
             (not isinstance(if_none_match, str)
-             or re.fullmatch(r'"[\\x21\\x23-\\x7e]{1,200}"', if_none_match) is None)):
+             or re.fullmatch(r'"[\x21\x23-\x7e]{1,200}"', if_none_match) is None)):
         raise ValueError("Conditional HEAD requires a strong, safe ETag")
     if (type(total_seconds) not in (float, int)
             or not 0 < total_seconds <= TOTAL_SECONDS):
@@ -251,10 +251,10 @@ def probe_document_metadata(url, *, if_none_match=None, total_seconds=15):
             if max(len(etags), len(modified), len(lengths)) > 1:
                 raise ValueError("Ambiguous metadata response headers")
             etag = (etags[0] if etags and
-                    re.fullmatch(r'"[\\x21\\x23-\\x7e]{1,200}"', etags[0])
+                    re.fullmatch(r'"[\x21\x23-\x7e]{1,200}"', etags[0])
                     else "")
             last_modified = (modified[0] if modified and
-                             re.fullmatch(r"[\\x20-\\x7e]{1,200}", modified[0])
+                             re.fullmatch(r"[\x20-\x7e]{1,200}", modified[0])
                              else "")
             size = ""
             if lengths:
