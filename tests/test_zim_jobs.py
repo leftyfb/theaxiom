@@ -1162,3 +1162,80 @@ def test_background_candidate_acquisition_failure_is_durable(disk):
     assert candidate["state"] == "failed"
     assert "network unavailable" in candidate["error"]
     assert zim_jobs.read("ready") == live
+
+
+def test_candidate_cancel_retains_serving_and_staged_metadata(disk):
+    artifact = zim_source.install_stream("ready", CONFIG, BytesIO(fixture_bytes()))
+    live = dict(source_id="ready", state="completed", active=False, verified=True,
+                configuration=zim_jobs.identity(CONFIG), artifact=artifact)
+    zim_jobs.save(live)
+    changed = CONFIG | {"source_url": "https://example.org/replacement.zim"}
+    zim_jobs.prepare_candidate("ready", changed)
+    entered = threading.Event()
+
+    def download(sid, config, *, progress, stopped, **kwargs):
+        progress(25, 100, {"etag": '"stable-etag"'})
+        entered.set()
+        for _ in range(500):
+            if stopped():
+                raise zim_source.TransferStopped()
+            threading.Event().wait(0.01)
+        raise AssertionError("Cancellation signal was not delivered")
+
+    with patch.object(zim_source, "download_resumable", download):
+        zim_jobs.start_candidate_acquisition("ready", changed)
+        assert entered.wait(5)
+        assert zim_jobs.cancel_candidate_acquisition("ready", changed)["state"] == "cancelling"
+        for thread in threading.enumerate():
+            if thread.name == "zim-replacement":
+                thread.join(5)
+                assert not thread.is_alive()
+    candidate = zim_jobs.read_candidate("ready")
+    assert candidate["state"] == "cancelled"
+    assert candidate["etag"] == '"stable-etag"'
+    assert zim_jobs.read("ready") == live
+
+
+def test_candidate_retry_uses_staged_offset_and_validator(disk):
+    artifact = zim_source.install_stream("ready", CONFIG, BytesIO(fixture_bytes()))
+    live = dict(source_id="ready", state="completed", active=False, verified=True,
+                configuration=zim_jobs.identity(CONFIG), artifact=artifact)
+    zim_jobs.save(live)
+    changed = CONFIG | {"source_url": "https://example.org/replacement.zim"}
+    zim_jobs.prepare_candidate("ready", changed)
+    candidate = zim_jobs.read_candidate("ready")
+    candidate.update(state="interrupted", etag='"stable-etag"', downloaded_bytes=7)
+    zim_jobs._save_candidate(candidate)
+    seen = []
+
+    def download(sid, config, *, offset, validator, **kwargs):
+        seen.append((offset, validator))
+        return artifact
+
+    with (patch.object(zim_jobs, "staged_size", return_value=7),
+          patch.object(zim_source, "download_resumable", download)):
+        zim_jobs.start_candidate_acquisition("ready", changed)
+        for thread in threading.enumerate():
+            if thread.name == "zim-replacement":
+                thread.join(5)
+                assert not thread.is_alive()
+    assert seen == [(7, '"stable-etag"')]
+    assert zim_jobs.read_candidate("ready")["state"] == "verified"
+    assert zim_jobs.read("ready") == live
+
+
+def test_candidate_retry_refuses_unvalidated_partial(disk):
+    artifact = zim_source.install_stream("ready", CONFIG, BytesIO(fixture_bytes()))
+    live = dict(source_id="ready", state="completed", active=False, verified=True,
+                configuration=zim_jobs.identity(CONFIG), artifact=artifact)
+    zim_jobs.save(live)
+    changed = CONFIG | {"source_url": "https://example.org/replacement.zim"}
+    zim_jobs.prepare_candidate("ready", changed)
+    candidate = zim_jobs.read_candidate("ready")
+    candidate["state"] = "failed"
+    zim_jobs._save_candidate(candidate)
+    with patch.object(zim_jobs, "staged_size", return_value=7):
+        with pytest.raises(ValueError, match="publisher validator"):
+            zim_jobs.start_candidate_acquisition("ready", changed)
+    assert zim_jobs.read("ready") == live
+    assert zim_jobs.read_candidate("ready")["state"] == "failed"
