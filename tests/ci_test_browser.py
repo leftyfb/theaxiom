@@ -88,6 +88,12 @@ def exercise(browser, base, name, viewport, artifacts):
         expect(page.locator("#source-guide")).to_be_visible()
         page.keyboard.press("Escape")
         expect(page.locator("#source-guide")).to_be_hidden()
+        # Opening the guide a second time must work after an Escape dismissal.
+        guide_trigger.focus()
+        page.keyboard.press("Enter")
+        expect(page.locator("#source-guide")).to_be_visible()
+        page.keyboard.press("Escape")
+        expect(page.locator("#source-guide")).to_be_hidden()
         # Dismissed guidance must not trap subsequent keyboard navigation.
         guide_trigger.focus()
         expect(guide_trigger).to_be_focused()
@@ -98,6 +104,7 @@ def exercise(browser, base, name, viewport, artifacts):
         page.keyboard.press("Enter")
         expect(page.locator("#source-filters-panel")).to_be_visible()
         expect(page.locator("#source-filter-toggle")).to_have_attribute("aria-expanded", "true")
+        expect(page.locator("#source-filter-search")).to_be_visible()
         filter_toggle.focus()
         page.keyboard.press("Enter")
         expect(page.locator("#source-filters-panel")).to_be_hidden()
