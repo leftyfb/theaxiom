@@ -1140,7 +1140,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             self._send_json(200, settings)
         elif self.path.rstrip("/") == "/api/action":
             data = self._read_body()
-            if data.get("action") in {"zim-download", "zim-resume", "zim-pause", "zim-cancel", "zim-revalidate"}:
+            if data.get("action") in {"zim-download", "zim-resume", "zim-pause", "zim-cancel", "zim-cancel-keep", "zim-revalidate"}:
                 self._start_zim(data)
             elif data.get("action") == "import":
                 self._import_pdf(data)
@@ -1390,7 +1390,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
     def _start_zim(self, data):
         sid = data.get("source_id")
         if (set(data) != {"source_id", "action", "revision"} or not isinstance(sid, str)
-                or data.get("action") not in {"zim-download", "zim-resume", "zim-pause", "zim-cancel", "zim-revalidate"}
+                or data.get("action") not in {"zim-download", "zim-resume", "zim-pause", "zim-cancel", "zim-cancel-keep", "zim-revalidate"}
                 or not catalog_store.ID_RE.fullmatch(sid) or not self._valid_revision(data["revision"])):
             self._send_json(400, {"error": "ZIM control requires a source ID and current revision only"})
             return
@@ -1408,7 +1408,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 if publication.load().get(sid):
                     raise ValueError("Unpublish before downloading")
                 operation = data["action"]
-                if operation in {"zim-pause", "zim-cancel"}:
+                if operation in {"zim-pause", "zim-cancel", "zim-cancel-keep"}:
                     result = zim_jobs.control(sid, record["configuration"], operation.removeprefix("zim-"))
                 elif operation == "zim-revalidate":
                     result = zim_jobs.revalidate(sid, record["configuration"])
