@@ -253,6 +253,15 @@ def build_acquisition_args(source_id: str) -> list[str] | None:
     ]
 
 
+def _public_zim_replacement(candidate):
+    """Expose only replacement UI fields, never internal rollback records."""
+    if candidate is None:
+        return None
+    return {key: candidate[key] for key in (
+        "state", "downloaded_bytes", "expected_bytes", "error"
+    ) if key in candidate}
+
+
 class AdminAPIHandler(BaseHTTPRequestHandler):
     """Minimal HTTP handler for the admin API."""
 
@@ -882,14 +891,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             if lifecycles[sid].get("zim_download"):
                 try:
                     replacement = zim_jobs.candidate_status(sid)
-                    if replacement is not None:
-                        # The admin UI needs progress and state, not internal
-                        # rollback snapshots or artifact storage metadata.
-                        replacement = {
-                            key: replacement[key] for key in (
-                                "state", "downloaded_bytes", "expected_bytes", "error"
-                            ) if key in replacement
-                        }
+                    replacement = _public_zim_replacement(replacement)
                 except (ValueError, OSError):
                     replacement = {"state": "unavailable", "error": "Replacement status unavailable"}
             sources.append(dict(record, **lifecycles[sid], acquisition=job, replacement=replacement, replacement_available=replacement_available,
