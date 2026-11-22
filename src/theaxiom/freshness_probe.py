@@ -18,6 +18,7 @@ def probe_source(
         "source_url": source_url,
         "reachable": False,
         "last_modified": "",
+        "etag": "",
         "content_length": "",
         "local_current": False,  # compatibility: never infer installed state from HEAD
         "origin_length_matches_manifest": None,
@@ -32,6 +33,7 @@ def probe_source(
                 return result
             result["reachable"] = True
             result["last_modified"] = response.headers.get("Last-Modified", "")
+            result["etag"] = response.headers.get("ETag", "")
             result["content_length"] = response.headers.get("Content-Length", "")
     except (OSError, urllib.error.URLError, TimeoutError) as exc:
         result["error"] = f"{type(exc).__name__}: {exc}"
@@ -59,7 +61,7 @@ def probe_documents(
             results.append({
                 "source_url": "", "id": doc.get("id", ""),
                 "title": doc.get("title", ""), "reachable": False,
-                "last_modified": "", "content_length": "",
+                "last_modified": "", "etag": "", "content_length": "",
                 "local_current": False, "origin_length_matches_manifest": None,
                 "error": "no source_url in manifest",
             })
