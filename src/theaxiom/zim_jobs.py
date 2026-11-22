@@ -347,8 +347,11 @@ def activate_candidate(sid, config):
             return replacement
 
 
-def rollback_candidate(sid, config):
+def rollback_candidate(sid, config, *, reason=None):
     """Restore the previous verified serving record without removing either archive."""
+    if reason is not None and (not isinstance(reason, str) or not reason
+                               or len(reason) > 240 or any(ord(ch) < 32 for ch in reason)):
+        raise ValueError("Invalid replacement rollback reason")
     configuration = identity(config)
     with LOCK:
         with worker_lock():
@@ -370,6 +373,8 @@ def rollback_candidate(sid, config):
             # Persist rollback intent before changing the serving record.
             # A crash between writes must never reactivate the replacement.
             candidate["state"] = "rolled_back"
+            if reason is not None:
+                candidate["error"] = reason
             _save_candidate(candidate)
             save(previous)
             return previous
