@@ -1391,7 +1391,12 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
 
     def _start_zim(self, data):
         sid = data.get("source_id")
-        if (set(data) != {"source_id", "action", "revision"} or not isinstance(sid, str)
+        expected_keys = ({"source_id", "action", "revision", "confirm_restart"}
+                         if data.get("action") == "zim-restart"
+                         else {"source_id", "action", "revision"})
+        if (set(data) != expected_keys
+                or (data.get("action") == "zim-restart" and data.get("confirm_restart") is not True)
+                or not isinstance(sid, str)
                 or data.get("action") not in {"zim-download", "zim-resume", "zim-pause", "zim-cancel", "zim-cancel-keep", "zim-restart", "zim-retry", "zim-revalidate"}
                 or not catalog_store.ID_RE.fullmatch(sid) or not self._valid_revision(data["revision"])):
             self._send_json(400, {"error": "ZIM control requires a source ID and current revision only"})
