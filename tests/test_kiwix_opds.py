@@ -186,3 +186,41 @@ def test_candidate_binding_refuses_cross_host_and_mismatched_metalink():
         with pytest.raises(ValueError):
             kiwix_opds.resolve_catalog_candidate(
                 feed, dict(base, **change), installed=installed)
+
+
+def test_metalink_mirrors_are_selected_only_for_explicit_installed_host():
+    xml = (METALINK_HEADER + META_FILE.replace(
+        b"</file>",
+        b'<url>https://lb.download.kiwix.org/zim/wikipedia/wikipedia_en_all_maxi_2026-11.zim</url></file>',
+    ) + METALINK_FOOTER)
+    # Unpinned callers continue to reject ambiguous mirror choices.
+    with pytest.raises(ValueError, match="unique"):
+        kiwix_opds.parse_metalink(xml, expected_filename=META_FILENAME)
+    chosen = kiwix_opds.parse_metalink(
+        xml, expected_filename=META_FILENAME, preferred_host="download.kiwix.org")
+    assert chosen["source_url"] == (
+        "https://download.kiwix.org/zim/wikipedia/" + META_FILENAME)
+    alternate = kiwix_opds.parse_metalink(
+        xml, expected_filename=META_FILENAME, preferred_host="lb.download.kiwix.org")
+    assert alternate["source_url"] == (
+        "https://lb.download.kiwix.org/zim/wikipedia/" + META_FILENAME)
+
+
+def test_metalink_mirror_selection_refuses_untrusted_or_ambiguous_hosts():
+    xml = METALINK_HEADER + META_FILE + METALINK_FOOTER
+    for host in ("evil.invalid", "download.kiwix.org.evil.invalid", "", "DOWNLOAD.KIWIX.ORG"):
+        with pytest.raises(ValueError, match="Unapproved preferred"):
+            kiwix_opds.parse_metalink(
+                xml, expected_filename=META_FILENAME, preferred_host=host)
+    with pytest.raises(ValueError, match="unique"):
+        kiwix_opds.parse_metalink(
+            xml, expected_filename=META_FILENAME,
+            preferred_host="lb.download.kiwix.org")
+    doubled = xml.replace(b"</file>", (
+        b'<url>https://download.kiwix.org/zim/other/' +
+        META_FILENAME.encode() + b'</url></file>'
+    ))
+    with pytest.raises(ValueError, match="unique"):
+        kiwix_opds.parse_metalink(
+            doubled, expected_filename=META_FILENAME,
+            preferred_host="download.kiwix.org")
