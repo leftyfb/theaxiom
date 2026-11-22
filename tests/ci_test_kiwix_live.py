@@ -8,6 +8,8 @@ import zlib
 import hashlib
 import http.client
 from io import BytesIO
+from contextlib import contextmanager
+import threading
 from pathlib import Path
 import shutil
 import socket
@@ -17,7 +19,7 @@ import time
 from unittest.mock import patch
 import xml.etree.ElementTree as ET
 
-from theaxiom import zim_catalog, zim_reader_probe, zim_source, storage_settings
+from theaxiom import zim_catalog, zim_reader_probe, zim_source, zim_jobs, storage_settings
 
 
 def serve(port, manifest):
@@ -75,6 +77,44 @@ def main():
             archive = storage_root / "library" / "zim" / artifact["filename"]
             assert archive.read_bytes() == payload
             assert artifact["sha256"] == digest
+
+            # Real-archive lifecycle: start with retained bytes, require an
+            # explicit resume and stable publisher validator, then run the
+            # actual resumable worker and atomic promotion.
+            offset = min(1024, len(payload) // 2)
+            stage = storage_root / "staging" / "zim"
+            partial = stage / ".download-resumed.partial"
+            partial.write_bytes(payload[:offset])
+            partial.chmod(0o600)
+            zim_jobs.save(dict(source_id="resumed", state="paused", active=False,
+                               configuration=zim_jobs.identity(config),
+                               downloaded_bytes=offset, expected_bytes=len(payload),
+                               etag='"real-zim-v1"'))
+
+            class Body(BytesIO):
+                total_size = len(payload)
+                etag = '"real-zim-v1"'
+                last_modified = None
+
+            calls = []
+
+            @contextmanager
+            def transport(url, *, offset, validator, **kwargs):
+                calls.append((offset, validator))
+                yield Body(payload[offset:])
+
+            with patch.object(zim_source.pdf_transport, "open_pdf", transport):
+                assert zim_jobs.start("resumed", config, resume=True)["accepted"]
+                for worker in threading.enumerate():
+                    if worker.name == "zim-acquisition":
+                        worker.join(10)
+                        assert not worker.is_alive()
+            resumed = zim_jobs.status("resumed")
+            assert resumed["state"] == "completed" and resumed["verified"], resumed
+            assert calls == [(offset, '"real-zim-v1"')]
+            assert not partial.exists()
+            assert (storage_root / "library" / "zim" /
+                    resumed["artifact"]["filename"]).read_bytes() == payload
         output.unlink()
         with archive.open("rb") as stream:
             book_id = zim_catalog.archive_uuid(stream)
