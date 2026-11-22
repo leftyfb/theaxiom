@@ -84,25 +84,34 @@ def installed_evidence(snapshot: dict[str, Any] | None, entry: dict[str, Any]) -
     jobs = snapshot.get("acquisitions")
     if not isinstance(jobs, list):
         return result
+    expected_bytes = entry.get("bytes")
+    expected_digest = entry.get("sha256")
+    if (type(expected_bytes) is not int or expected_bytes <= 0
+            or not isinstance(expected_digest, str) or len(expected_digest) != 64
+            or any(c not in "0123456789abcdef" for c in expected_digest)):
+        return result
     matches = [job for job in jobs if isinstance(job, dict)
                and job.get("source_id") == entry.get("source_id")
                and job.get("filename") == entry.get("filename")
-               and job.get("expected_bytes") == entry.get("bytes")
-               and job.get("sha256") == entry.get("sha256")]
+               and type(job.get("expected_bytes")) is int
+               and job["expected_bytes"] == expected_bytes
+               and job.get("sha256") == expected_digest]
     if len(matches) != 1:
         return result
     job = matches[0]
     if (job.get("state") == "completed" and job.get("verified") is True
             and job.get("active") is False
-            and job.get("downloaded_bytes") == entry.get("bytes")):
+            and type(job.get("downloaded_bytes")) is int
+            and job["downloaded_bytes"] == expected_bytes):
         return {"local_current": True, "installed_state": "verified",
                 "installed_verified": True}
-    if job.get("state") == "not_started" and job.get("downloaded_bytes") == 0:
+    state = job.get("state")
+    if state == "not_started" and type(job.get("downloaded_bytes")) is int and job["downloaded_bytes"] == 0:
         result["installed_state"] = "absent"
-    elif job.get("state") in {"downloading", "interrupted", "verifying"}:
+    elif isinstance(state, str) and state in {"downloading", "interrupted", "verifying"}:
         result["installed_state"] = "partial_or_unverified"
-    elif job.get("state") == "unavailable":
+    elif state == "unavailable":
         result["installed_state"] = "unavailable"
-    elif job.get("state") == "failed":
+    elif state == "failed":
         result["installed_state"] = "failed_or_corrupt"
     return result
