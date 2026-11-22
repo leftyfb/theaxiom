@@ -855,3 +855,17 @@ def test_candidate_discard_refuses_changed_live_archive(disk):
         zim_jobs.discard_candidate("ready", changed)
     assert zim_jobs.read_candidate("ready") is not None
     assert (disk / "library/zim" / artifact["filename"]).read_bytes() == data
+
+
+@pytest.mark.parametrize("payload", [
+    "{not-json",
+    "[]",
+    '{"source_id":"ready","state":"prepared","configuration":{},"base_artifact":{}}',
+    '{"source_id":"ready","state":"prepared","configuration":{"format":"zim","source_url":"file:///tmp/a.zim","expected_size_bytes":"","sha256":""},"base_artifact":{}}',
+])
+def test_invalid_replacement_candidate_metadata_is_rejected(disk, payload):
+    path = zim_jobs.candidate_path_for("ready")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(payload)
+    with pytest.raises(ValueError, match="Invalid ZIM candidate"):
+        zim_jobs.read_candidate("ready")
