@@ -120,19 +120,27 @@ integrity and acquisition state machines. No regression run should manufacture a
 failed production download, recheck the installed Wikipedia/Ready.gov archives,
 or rely on the owner's external password manager.
 
-Highest-impact next phases:
+## Baseline regression suite: completion criteria
 
-1. Extend the **tiny synthetic PDF and EPUB** browser fixtures with
-   search edge cases, keyboard focus order, accessible dialogs, and error recovery;
-   publication gates, basic search/highlighting, print preparation, and real
-   uploads are already covered.
-2. Extend grouping/member and bulk actions with accessibility, active/busy
-   controls, permissions and more mixed-eligibility combinations; add/remove/
-   replace group membership and publication changes are exercised by fixtures.
-3. Add keyboard-only navigation checks, automated accessibility audits, and
-   additional small/large viewport screenshot comparisons on controlled fixtures.
-4. Extend isolated native Kiwix fixture smoke through Chromium for actual
-   search and article navigation (no full Wikipedia/FEMA).
+The initial browser-regression expansion is **feature-complete as a baseline**.
+It is not a promise that every edge case, external password-manager behavior,
+real deployment network path, or production-scale archive has been tested.
+The full pytest, browser, Kiwix, and deployment configuration checks remain
+mandatory on each push. Tests for newly fixed bugs and newly implemented
+features should be added with their product changes, rather than launching
+another open-ended test-only campaign.
+
+Known exclusions are tracked explicitly: production-only download recovery,
+external 1Password integration, real OS print dialogs, full screen-reader
+audits, and production-scale Wikipedia/Ready.gov archives. Those must not
+be simulated by mutating production. The isolated fixture suite already
+covers core source CRUD, upload, grouping, publication and bulk actions,
+responsive navigation, PDF/EPUB readers, and native Kiwix integration.
+
+**Exit gate:** the final baseline commit must pass the complete GitHub Actions
+suite. If it fails, fix that regression before declaring the baseline verified.
+Once green, return to the open P0/P1 product backlog; further test-only work
+requires a specific bug, feature, or demonstrated coverage gap.
 
 ## Additional verified regression batches (2026-11-21)
 
@@ -140,4 +148,4 @@ Highest-impact next phases:
 - Real PDF/EPUB readers exercise first/last page boundaries, direct chapter reload and text-size persistence, search reopening after clearing stale highlights, toolbar recovery following thumbnail toggles, and keyboard focus on the page input. Full CI passed through `bfc7fad` (run 44970372764).
 - The admin browser checks storage-status JSON rather than tolerating an uncaught server exception; a Python import-shadowing bug in that endpoint was corrected and covered by the full suite.
 - Repeated keyboard open/Escape dismissal of the source guide and visible filter controls are tested at the existing desktop/tablet/mobile/narrow viewports.
-- Direct PDF page-number editing remains **unverified**: the first attempt raced with thumbnail rendering and was removed. Add a separately synchronized test rather than interpreting the passing toolbar navigation checks as proof of page-number editing.
+- Direct PDF page-number editing was subsequently exercised after a clean reader reload in commit `3c96abb` (CI run 44971692331 passed).
