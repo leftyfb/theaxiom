@@ -523,12 +523,25 @@ def delete_installed(sid):
 
 
 def read(sid):
+    """Read a single managed job record without following filesystem aliases.
+
+    An untrusted symlink or hardlink must not be used as authority for archive
+    replacement, publication, or explicit deletion.
+    """
+    import stat
     target = path_for(sid)
     try:
-        with target.open("rb") as stream:
-            raw = stream.read(16385)
+        fd = os.open(target, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
     except FileNotFoundError:
         return None
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise ValueError("Unsafe ZIM job record")
+        with os.fdopen(fd, "rb", closefd=False) as stream:
+            raw = stream.read(16385)
+    finally:
+        os.close(fd)
     if len(raw) > 16384:
         raise ValueError("ZIM job record exceeds size limit")
     job = json.loads(raw)
