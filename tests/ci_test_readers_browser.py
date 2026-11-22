@@ -174,6 +174,9 @@ def exercise(browser, base, viewport_name, viewport, artifact_dir):
         page.locator("#find").fill("beta")
         expect(page.locator("#matches")).to_contain_text("1", timeout=20000)
         expect(page.locator("#page")).to_have_value("2", timeout=20000)
+        page.locator("#find").fill("repeated")
+        expect(page.locator("#matches")).to_contain_text("1", timeout=20000)
+        expect(page.locator("#page")).to_have_value("1", timeout=20000)
         page.locator("#find").fill("alpha")
         expect(page.locator("#matches")).to_contain_text("3", timeout=20000)
         # A focused native button must remain operable without a pointer.
