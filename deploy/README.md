@@ -75,3 +75,35 @@ a dedicated server-side identity with appropriate share permissions and
 match its numeric UID on the application host; check group requirements
 and test access as the service account. Do not recursively chmod/chown
 the share or map all clients to an administrator.
+
+
+## Optional publisher update-check timer (not enabled automatically)
+
+The checked-in `theaxiom-update-check.service` and `theaxiom-update-check.timer`
+are **examples only**; deploying or enabling them requires a separately
+authorized, exact-revision deployment and systemd configuration review. The
+service runs `python -m theaxiom.kiwix_update_scheduler` as the existing
+unprivileged application user, using the same private configuration as the
+administration backend. It attempts at most 10 source-scoped metadata checks
+per invocation. A daily 03:00 local-time timer has up to one hour of
+randomized delay and is persistent across downtime.
+
+This path performs only bounded publisher metadata requests and writes
+private check-status JSON under application state. It **never downloads a ZIM
+archive, activates a replacement, changes rights or publication, restarts
+Kiwix, deletes content, or modifies NFS storage**. Old results are bound to
+the exact installed SHA-256 and expire after 48 hours. Unavailable or
+ambiguous metadata is reported as unknown rather than as an update. A manual
+`Check for updates` button is available for verified generic ZIM sources.
+
+The first iteration supports only versioned generic ZIMs in recognized
+Kiwix naming families whose trusted installed-job identity and official
+catalog metadata can be matched. It does not establish universal coverage
+for Wikipedia's legacy acquisition, arbitrary PDF/EPUB sources, feeds
+requiring pagination, or alternative Metalink publisher formats. Do not
+enable automatic archive updates on the strength of these checks.
+
+Before enabling the timer, review the deployed source-catalog location,
+service account privileges, proxy restrictions, NFS availability, rate
+limits, exact systemd unit content and existing acquisition state. No
+existing running service or download must be interrupted.
