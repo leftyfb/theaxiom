@@ -36,13 +36,15 @@ def test_only_matching_completed_job_is_included_and_xml_escaped(disk):
     assert zim_catalog.render_xml(list(reversed(records)), {"ready": True, "missing": True}) == xml
 
 
-def test_different_source_configuration_or_invalid_file_not_served(disk):
+def test_edited_source_configuration_keeps_verified_installed_book_until_activation(disk):
     artifact = zim_source.install_stream("ready", CONFIG, BytesIO(fixture_bytes()))
     zim_jobs.save({"source_id": "ready", "state": "completed", "active": False,
                    "verified": True, "configuration": zim_jobs.identity(CONFIG),
                    "artifact": artifact})
     wrong = record("ready", config=CONFIG | {"source_url": "https://download.kiwix.org/other.zim"})
-    assert zim_catalog.verified_books([wrong], {"ready": True}) == []
+    assert zim_catalog.verified_books([wrong], {"ready": True})[0]["path"] == str(
+        disk / "library/zim" / artifact["filename"]
+    )
     path = disk / "library/zim" / artifact["filename"]
     path.chmod(0o666)
     assert zim_catalog.verified_books([record("ready")], {"ready": True}) == []
