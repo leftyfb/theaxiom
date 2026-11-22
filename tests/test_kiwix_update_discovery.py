@@ -184,3 +184,42 @@ def test_ready_gov_dotted_archive_family_is_recognized():
     parsed = discovery.installed_identity_from_job(job, job["artifact"])
     assert parsed["family"] == "ready.gov_en_all"
     assert parsed["edition"] == "2026-10"
+
+
+def test_explicit_check_persists_only_for_current_verified_install(monkeypatch, tmp_path):
+    from theaxiom import zim_jobs, update_check_store
+    monkeypatch.setattr(update_check_store, "root_path", lambda: tmp_path / "checks")
+    job = installed_job_for_fixture()
+    monkeypatch.setattr(zim_jobs, "status", lambda sid: job)
+    monkeypatch.setattr(zim_jobs, "installed", lambda live, config: live["artifact"])
+    calls = []
+    result = discovery.refresh_checked_source(
+        "wikipedia", fetch=fetcher(feed(atom("2026-11")), metalink("2026-11"), calls))
+    assert result["state"] == "update_available"
+    assert len(calls) == 2
+    cached = discovery.cached_checked_source("wikipedia")
+    assert cached["state"] == "update_available"
+    assert cached["candidate_edition"] == "2026-11"
+
+    # A different installed revision must not inherit the older check.
+    changed = dict(job)
+    digest = "c" * 64
+    changed["configuration"] = dict(job["configuration"], sha256=digest)
+    changed["artifact"] = dict(job["artifact"], sha256=digest,
+                               filename="wikipedia." + digest + ".zim")
+    monkeypatch.setattr(zim_jobs, "status", lambda sid: changed)
+    assert discovery.cached_checked_source("wikipedia")["state"] == "unable_to_determine"
+
+
+def test_unverified_installed_source_never_writes_update_cache(monkeypatch, tmp_path):
+    from theaxiom import zim_jobs, update_check_store
+    monkeypatch.setattr(update_check_store, "root_path", lambda: tmp_path / "checks")
+    job = installed_job_for_fixture()
+    job["verified"] = False
+    monkeypatch.setattr(zim_jobs, "status", lambda sid: job)
+    monkeypatch.setattr(zim_jobs, "installed", lambda live, config: None)
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Network must not be contacted for unverified content")
+    assert discovery.refresh_checked_source(
+        "wikipedia", fetch=forbidden)["state"] == "unable_to_determine"
+    assert not (tmp_path / "checks").exists()
