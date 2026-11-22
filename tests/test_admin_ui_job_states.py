@@ -141,3 +141,16 @@ def test_update_available_badge_only_when_cached_evidence_confirms_it():
     assert states[1]["update-details"]["hidden"] is True
     assert states[1]["update-details"]["textContent"] == ""
     assert states[2]["update-status"]["hidden"] is True
+
+
+def test_document_origin_status_is_informational_not_an_update_badge():
+    changed = job("completed")
+    changed["sources"][0].update(
+        adapter="pdf", update_check={"state": "representation_changed"})
+    unchanged = job("completed")
+    unchanged["sources"][0].update(
+        adapter="pdf", update_check={"state": "representation_unchanged"})
+    states = run_ui([changed, unchanged])["states"]
+    assert "newer verified edition is not established" in states[0]["document-origin-status"]["textContent"]
+    assert states[0]["update-status"]["hidden"] is True
+    assert states[1]["document-origin-status"]["textContent"] == ""
