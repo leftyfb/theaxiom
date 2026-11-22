@@ -482,6 +482,16 @@
           {% for action in source.actions %}
           <button class="button" type="button" data-action="{{ action }}" disabled>{{ action_labels[action] }}</button>
           {% endfor %}
+          {% if source.zim_download %}
+          <button class="button" type="button" data-review-zim-update
+                  {% if not source.update_check or source.update_check.state != "update_available" %} hidden{% endif %}
+                  data-update-url="{{ source.update_check.candidate_url if source.update_check else '' }}"
+                  data-update-sha256="{{ source.update_check.candidate_sha256 if source.update_check else '' }}"
+                  data-update-bytes="{{ source.update_check.candidate_bytes if source.update_check else '' }}"
+                  data-update-edition="{{ source.update_check.candidate_edition if source.update_check else '' }}">
+            Review newer edition
+          </button>
+          {% endif %}
           {% if source.zim_download %}<button class="button" type="button" data-zim-update-check{% if not source.installed_verified %} hidden{% endif %}{% if not source.installed_verified %} disabled{% endif %}>Check for updates</button>{% endif %}
           {% if source.zim_download %}<button class="button" type="button" data-zim-download{% if source.installed_verified %} hidden{% endif %}{% if source.mutation_blocked or source.installed_verified %} disabled{% endif %}>Download</button>{% endif %}
           {% if source.zim_download %}
@@ -922,6 +932,31 @@
         dialog.showModal();
         input('title').focus();
       }
+      document.querySelectorAll('[data-review-zim-update]').forEach(button => {
+        button.addEventListener('click', () => {
+          if (button.hidden || button.disabled) return;
+          const card = button.closest('.source-card');
+          const expected = card?.getAttribute('data-catalog-sha256') || '';
+          const candidateUrl = button.dataset.updateUrl || '';
+          const candidateDigest = button.dataset.updateSha256 || '';
+          const candidateBytes = Number(button.dataset.updateBytes);
+          if (!/^https:\/\/[^\s]+\.zim$/.test(candidateUrl) ||
+              !/^[a-f0-9]{64}$/.test(candidateDigest) ||
+              !Number.isSafeInteger(candidateBytes) || candidateBytes < 96 ||
+              candidateDigest === expected) return;
+          // This only opens a normal edit dialog: no catalog mutation or
+          // archive acquisition is performed without a separate user submit.
+          openForm('edit', card);
+          input('source_url').value = candidateUrl;
+          input('sha256').value = candidateDigest;
+          input('expected_size_bytes').value = String(candidateBytes);
+          advanced.open = true;
+          formFeedback.textContent = 'Review publisher candidate ' +
+            (button.dataset.updateEdition || '') +
+            '. Saving metadata does not download or activate an archive. ' +
+            'The existing installed version remains in service until separate verified replacement.';
+        });
+      });
       async function updateEditorGroups(source_id, currentRevision) {
         for (const control of editorGroupControls) {
           const kind = control.dataset.editorGroup;
