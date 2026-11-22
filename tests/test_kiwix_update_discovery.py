@@ -119,3 +119,68 @@ def test_different_family_is_not_a_candidate():
     )
     assert result["state"] == "unable_to_determine"
     assert len(calls) == 1
+
+
+def installed_job_for_fixture():
+    digest = "a" * 64
+    return {
+        "source_id": "wikipedia", "state": "completed",
+        "verified": True, "active": False,
+        "configuration": {
+            "format": "zim",
+            "source_url": ROOT + FAMILY + "_2026-08.zim",
+            "sha256": digest,
+        },
+        "artifact": {
+            "filename": "wikipedia." + digest + ".zim",
+            "sha256": digest, "bytes": 123456,
+        },
+    }
+
+
+def test_verified_job_yields_installed_edition_without_catalog_profile():
+    job = installed_job_for_fixture()
+    result = discovery.installed_identity_from_job(job, job["artifact"])
+    assert result == INSTALLED
+
+
+def test_verified_job_refuses_mismatched_identity_or_unverified_state():
+    job = installed_job_for_fixture()
+    modifications = [
+        {"verified": False}, {"active": True}, {"state": "failed"},
+        {"configuration": dict(job["configuration"], source_url="https://evil.invalid/test.zim")},
+        {"configuration": dict(job["configuration"], sha256="b" * 64)},
+        {"artifact": dict(job["artifact"], filename="wrong.zim")},
+    ]
+    for changes in modifications:
+        corrupted = dict(job, **changes)
+        assert discovery.installed_identity_from_job(
+            corrupted, corrupted["artifact"]) is None
+
+
+def test_job_wrapper_only_checks_network_after_real_install_validation(monkeypatch):
+    from theaxiom import zim_jobs
+    job = installed_job_for_fixture()
+    monkeypatch.setattr(zim_jobs, "status", lambda source_id: job)
+    monkeypatch.setattr(zim_jobs, "installed", lambda j, c: j["artifact"])
+    calls = []
+    result = discovery.check_installed_kiwix_job(
+        "wikipedia", fetch=fetcher(feed(atom("2026-11")),
+                                   metalink("2026-11"), calls))
+    assert result["state"] == "update_available"
+    assert len(calls) == 2
+
+    monkeypatch.setattr(zim_jobs, "installed", lambda j, c: None)
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Network must not run when installed bytes are unverified")
+    assert discovery.check_installed_kiwix_job(
+        "wikipedia", fetch=forbidden)["state"] == "unable_to_determine"
+
+
+def test_ready_gov_dotted_archive_family_is_recognized():
+    job = installed_job_for_fixture()
+    url = "https://download.kiwix.org/zim/zimit/ready.gov_en_all_2026-10.zim"
+    job["configuration"] = dict(job["configuration"], source_url=url)
+    parsed = discovery.installed_identity_from_job(job, job["artifact"])
+    assert parsed["family"] == "ready.gov_en_all"
+    assert parsed["edition"] == "2026-10"
