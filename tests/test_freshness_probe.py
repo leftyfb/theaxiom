@@ -127,6 +127,13 @@ class InstalledEvidenceTests(unittest.TestCase):
         self.assertTrue(result["installed_verified"])
         self.assertEqual(result["installed_state"], "verified")
 
+    def test_completed_job_with_short_or_unknown_byte_count_is_not_verified(self):
+        for count in (None, 0, 754722, 754724, "754723"):
+            with self.subTest(count=count):
+                result = self.classify(self.job(downloaded_bytes=count))
+                self.assertFalse(result["local_current"])
+                self.assertFalse(result["installed_verified"])
+
     def test_absent_file(self):
         result = self.classify(self.job(state="not_started", verified=False,
                                         downloaded_bytes=0))
