@@ -93,13 +93,28 @@ def test_invalid_endpoint_fails_before_dns(monkeypatch, url, kind):
     Response(status=200, headers=[("Content-Length", "3"), ("Content-Length", "4")]),
     Response(status=200, headers=[("Content-Length", "5")], body=b"abc"),
     Response(status=200, headers=[("Content-Encoding", "gzip")]),
-    Response(status=200, headers=[("Transfer-Encoding", "chunked")]),
+    Response(status=200, headers=[("Transfer-Encoding", "gzip")]),
+    Response(status=200, headers=[("Transfer-Encoding", "chunked"), ("Content-Length", "7")]),
+    Response(status=200, headers=[("Transfer-Encoding", "chunked"), ("Transfer-Encoding", "gzip")]),
 ])
 def test_invalid_response_fails_closed(monkeypatch, response):
     fake_transport(monkeypatch, [response], expected_host="opds.library.kiwix.org")
     with pytest.raises(ValueError):
         transport.fetch_metadata(CATALOG, kind="catalog")
     assert response.body.closed
+
+
+def test_standard_chunked_metadata_is_decoded_and_bounded(monkeypatch):
+    response = Response(headers=[("Transfer-Encoding", "chunked")], body=b"<feed/>")
+    fake_transport(monkeypatch, [response], expected_host="opds.library.kiwix.org")
+    assert transport.fetch_metadata(CATALOG, kind="catalog") == b"<feed/>"
+    assert response.body.closed
+
+    oversized = Response(headers=[("Transfer-Encoding", "chunked")],
+                         body=b"x" * (transport.kiwix_opds.MAX_BYTES + 1))
+    fake_transport(monkeypatch, [oversized], expected_host="opds.library.kiwix.org")
+    with pytest.raises(ValueError, match="byte cap"):
+        transport.fetch_metadata(CATALOG, kind="catalog")
 
 
 def test_streamed_body_limit_without_content_length(monkeypatch):
