@@ -296,8 +296,12 @@ def _run(job, guard, signal, offset, validator, *, local=False):
                 last = now
 
     try:
-        job.update(state="verifying" if local else "downloading", sampled_at=time.time())
-        save(job)
+        # A stop can be accepted while the newly spawned worker is still
+        # queued. Never replace that durable request with "downloading".
+        with LOCK:
+            if job["state"] not in {"pausing", "cancelling"}:
+                job.update(state="verifying" if local else "downloading", sampled_at=time.time())
+                save(job)
         def promoting():
             job.update(state="publishing", sampled_at=time.time())
             save(job)
