@@ -99,7 +99,13 @@ def fetch_metadata(url: str, *, kind: str) -> bytes:
                 raise ValueError("Encoded Kiwix metadata response refused")
             lengths = response.headers.get_all("Content-Length", [])
             transfers = response.headers.get_all("Transfer-Encoding", [])
-            if transfers or len(lengths) > 1:
+            # http.client decodes standard HTTP/1.1 chunked framing during
+            # read1(). Allow exactly one sole 'chunked' transfer coding, while
+            # rejecting any Content-Length/Transfer-Encoding conflict, multiple
+            # header instances, or nonstandard encodings (request smuggling).
+            if (len(lengths) > 1 or len(transfers) > 1
+                    or (transfers and lengths)
+                    or (transfers and transfers[0].strip().lower() != "chunked")):
                 raise ValueError("Ambiguous Kiwix metadata framing")
             expected = None
             if lengths:
