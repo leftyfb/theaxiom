@@ -173,7 +173,10 @@ def installed_identity_from_job(job: dict, artifact: dict) -> dict | None:
     if (not isinstance(source_id, str) or not re.fullmatch(r"[a-z][a-z0-9-]{0,63}", source_id)
             or not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest)
             or artifact.get("filename") != f"{source_id}.{digest}.zim"
-            or config.get("sha256") != digest):
+            # A checksum is optional at acquisition time. The completed,
+            # independently verified artifact contains its measured SHA-256;
+            # if the operator supplied an expected digest, it must match.
+            or config.get("sha256") not in ("", digest)):
         return None
     url = config.get("source_url")
     if not isinstance(url, str):
