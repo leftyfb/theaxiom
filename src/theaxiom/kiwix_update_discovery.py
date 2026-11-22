@@ -221,3 +221,60 @@ def cached_checked_source(source_id: str) -> dict:
         return update_check_store.load(source_id, installed["sha256"])
     except (OSError, ValueError, TypeError, KeyError):
         return dict(UNKNOWN)
+
+
+def pinned_wikipedia_identity(record: dict, artifact: dict, *, verified: bool) -> dict | None:
+    """Resolve the legacy immutable Wikipedia ZIM only with verified evidence.
+
+    A mutable source card or a public archive filename must never create an
+    installed identity; the caller supplies independently matched monitoring
+    evidence and the immutable shipped acquisition artifact.
+    """
+    from .source_catalog import WIKIPEDIA_SOURCE
+    if (verified is not True or not isinstance(record, dict)
+            or record.get("source_id") != WIKIPEDIA_SOURCE["source_id"]
+            or not isinstance(record.get("configuration"), dict)
+            or not isinstance(artifact, dict)
+            or any(artifact.get(key) != WIKIPEDIA_SOURCE[key]
+                   for key in ("filename", "source_url", "bytes", "sha256"))):
+        return None
+    config = record["configuration"]
+    if (config.get("format") != "zim"
+            or config.get("source_url") != WIKIPEDIA_SOURCE["source_url"]
+            or config.get("sha256") != WIKIPEDIA_SOURCE["sha256"]
+            or config.get("expected_size_bytes") != str(WIKIPEDIA_SOURCE["bytes"])):
+        return None
+    name = WIKIPEDIA_SOURCE["filename"]
+    match = re.fullmatch(
+        r"([a-z0-9._-]{3,120})_(20[0-9]{2}-(?:0[1-9]|1[0-2]))\.zim", name)
+    if not match or ".." in match.group(1):
+        return None
+    family, edition = match.groups()
+    return dict(verified=True, sha256=WIKIPEDIA_SOURCE["sha256"],
+                family=family, edition=edition,
+                source_url=WIKIPEDIA_SOURCE["source_url"], language="eng",
+                variant="maxi", publisher="kiwix")
+
+
+def refresh_pinned_wikipedia(record: dict, artifact: dict, *, verified: bool,
+                             fetch=None) -> dict:
+    """Check trusted pinned Wikipedia with no download or live archive access."""
+    from . import update_check_store
+    installed = pinned_wikipedia_identity(record, artifact, verified=verified)
+    if installed is None:
+        return dict(UNKNOWN)
+    if not CHECK_LOCK.acquire(blocking=False):
+        return dict(UNKNOWN)
+    try:
+        sid = record["source_id"]
+        cached = update_check_store.load(sid, installed["sha256"])
+        if ("checked_at" in cached
+                and 0 <= time.time() - cached["checked_at"] < MIN_RECHECK_SECONDS):
+            return cached
+        result = check_kiwix_update(installed, fetch=fetch)
+        update_check_store.save(sid, installed["sha256"], result)
+        return result
+    except (OSError, ValueError, TypeError, KeyError):
+        return dict(UNKNOWN)
+    finally:
+        CHECK_LOCK.release()
