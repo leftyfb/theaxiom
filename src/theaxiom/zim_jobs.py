@@ -369,6 +369,9 @@ def worker_lock():
 
 
 def status(sid):
+    # Resolve an interrupted, durable replacement transition before exposing
+    # the serving job to the catalog or admin API.
+    recover_candidate_transition(sid)
     with LOCK:
         job = read(sid)
         if job and job["state"] in ACTIVE:
