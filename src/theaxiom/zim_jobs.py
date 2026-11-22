@@ -182,8 +182,14 @@ def start_candidate_acquisition(sid, config):
             candidate["state"] = "downloading"
             candidate["downloaded_bytes"] = 0
             _save_candidate(candidate)
-            threading.Thread(target=_run_candidate, args=(sid, configuration, guard),
-                             daemon=True, name="zim-replacement").start()
+            try:
+                threading.Thread(target=_run_candidate, args=(sid, configuration, guard),
+                                 daemon=True, name="zim-replacement").start()
+            except BaseException:
+                candidate["state"] = "prepared"
+                candidate.pop("downloaded_bytes", None)
+                _save_candidate(candidate)
+                raise
         except BaseException:
             guard.__exit__(None, None, None)
             raise
