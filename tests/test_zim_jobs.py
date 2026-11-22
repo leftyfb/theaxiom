@@ -705,3 +705,41 @@ def test_orphaned_active_state_reconciles_without_worker_or_duplicate_download(d
     with pytest.raises(ValueError, match="retained bytes"):
         zim_jobs.start("ready", CONFIG, resume=True)
     assert zim_jobs.read("ready") == recovered
+
+
+def test_cancel_keep_from_failed_state_retains_bytes_and_allows_safe_resume(disk, monkeypatch):
+    """An operator may preserve a failed transfer and later resume it explicitly."""
+    from contextlib import contextmanager
+
+    data = fixture_bytes()
+    stage = disk / "staging/zim"
+    stage.mkdir(exist_ok=True)
+    partial = stage / ".download-ready.partial"
+    partial.write_bytes(data[:48])
+    partial.chmod(0o600)
+    zim_jobs.save(dict(source_id="ready", state="failed", active=False,
+                       configuration=zim_jobs.identity(CONFIG), downloaded_bytes=48,
+                       expected_bytes=len(data), etag='"stable"'))
+    assert zim_jobs.control("ready", CONFIG, "cancel-keep")["accepted"]
+    assert partial.read_bytes() == data[:48]
+    assert zim_jobs.status("ready")["state"] == "paused"
+
+    class Body(BytesIO):
+        total_size = len(data)
+        etag = '"stable"'
+        last_modified = None
+
+    calls = []
+
+    @contextmanager
+    def transport(url, *, offset, validator, **kwargs):
+        calls.append((offset, validator))
+        yield Body(data[offset:])
+
+    monkeypatch.setattr(zim_source.pdf_transport, "open_pdf", transport)
+    assert zim_jobs.start("ready", CONFIG, resume=True)["accepted"]
+    join_worker()
+    assert zim_jobs.status("ready")["state"] == "completed"
+    assert calls == [(48, '"stable"')]
+    assert not partial.exists()
+    assert zim_jobs.installed(zim_jobs.status("ready"), CONFIG)["bytes"] == len(data)
