@@ -21,7 +21,8 @@ class FreshnessProbeTests(unittest.TestCase):
     def test_current_probe_result_is_read_correctly(self):
         result = self.probe_with_length(754723)
         self.assertTrue(result["reachable"])
-        self.assertTrue(result["local_current"])
+        self.assertFalse(result["local_current"])
+        self.assertTrue(result["origin_length_matches_manifest"])
         self.assertEqual(result["content_length"], "754723")
         self.assertEqual(result["last_modified"], "Tue, 15 Sep 2026 12:00:00 GMT")
 
