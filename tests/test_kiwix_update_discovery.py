@@ -315,3 +315,39 @@ def test_discovery_never_uses_untrusted_alternate_mirror_when_origin_missing():
     result = discovery.check_kiwix_update(
         INSTALLED, fetch=fetcher(feed(atom("2026-11")), doc, calls))
     assert result["state"] == "unable_to_determine"
+
+
+def test_ready_gov_dotted_family_can_discover_newer_verified_catalog_edition():
+    family = "ready.gov_en_all"
+    root = "https://download.kiwix.org/zim/zimit/"
+    installed = dict(
+        INSTALLED,
+        family=family,
+        edition="2026-10",
+        source_url=root + family + "_2026-10.zim",
+        language="eng",
+        variant="all",
+    )
+    candidate_name = family + "_2026-11.zim"
+    xml = (f'<feed xmlns="http://www.w3.org/2005/Atom">'
+           f'<entry><id>urn:uuid:ready-gov-2026-11</id><title>Ready.gov</title>'
+           f'<link rel="http://opds-spec.org/acquisition/open-access" '
+           f'type="application/x-zim" href="{root}{candidate_name}.meta4"/>'
+           f'</entry></feed>').encode()
+    metalink_xml = (f'<metalink xmlns="urn:ietf:params:xml:ns:metalink">'
+                    f'<file name="{candidate_name}"><size>123456</size>'
+                    f'<hash type="sha-256">{"b" * 64}</hash>'
+                    f'<url>{root}{candidate_name}</url></file></metalink>').encode()
+    calls = []
+    def fetch(url, *, kind):
+        calls.append((kind, url))
+        if kind == "catalog":
+            assert "name=ready.gov_en_all" in url
+            assert "lang=eng" in url
+            return xml
+        assert kind == "metalink"
+        return metalink_xml
+    result = discovery.check_kiwix_update(installed, fetch=fetch)
+    assert result["state"] == "update_available"
+    assert result["candidate_url"] == root + candidate_name
+    assert [kind for kind, _ in calls] == ["catalog", "metalink"]
