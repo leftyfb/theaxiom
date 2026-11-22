@@ -56,7 +56,7 @@ def read_candidate(sid):
     try:
         if identity(candidate["configuration"]) != candidate["configuration"]:
             raise ValueError("Invalid ZIM candidate configuration")
-    except (KeyError, TypeError) as exc:
+    except (KeyError, TypeError, ValueError) as exc:
         raise ValueError("Invalid ZIM candidate configuration") from exc
     return candidate
 
