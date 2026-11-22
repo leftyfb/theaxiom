@@ -890,14 +890,14 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             replacement = None
             if lifecycles[sid].get("zim_download"):
                 try:
-                    replacement = zim_jobs.candidate_status(sid)
-                    replacement = _public_zim_replacement(replacement)
+                    candidate = zim_jobs.candidate_status(sid)
+                    replacement = _public_zim_replacement(candidate)
                     if replacement and replacement["state"] in {"failed", "cancelled", "interrupted"}:
-                        # A failed transfer with retained bytes must be resumed
-                        # or cleaned up, not offered a discard that will fail.
+                        # Never offer discard while partial or promoted bytes
+                        # remain. Use the same candidate snapshot as the UI.
                         replacement["can_discard"] = (
                             not zim_jobs.staged_present(sid + "-candidate")
-                            and not zim_jobs.read_candidate(sid).get("artifact")
+                            and not candidate.get("artifact")
                         )
                 except (ValueError, OSError):
                     replacement = {"state": "unavailable", "error": "Replacement status unavailable"}
