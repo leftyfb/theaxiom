@@ -113,6 +113,37 @@ def test_fetch_failure_keeps_status_unknown():
     assert discovery.check_kiwix_update(INSTALLED, fetch=offline)["state"] == "unable_to_determine"
 
 
+def test_unknown_update_results_explain_the_failing_stage_safely():
+    def blocked_catalog(url, *, kind):
+        raise OSError("secret network exception https://internal.invalid/token")
+
+    outcome = discovery.check_kiwix_update(INSTALLED, fetch=blocked_catalog)
+    assert outcome["state"] == "unable_to_determine"
+    assert outcome["evidence"] == "Kiwix metadata check failed during catalog metadata request"
+    assert "internal.invalid" not in str(outcome)
+
+    absent = discovery.check_kiwix_update(INSTALLED, fetch=lambda url, *, kind: feed())
+    assert absent["state"] == "unable_to_determine"
+    assert "absent from the filtered" in absent["evidence"]
+
+    bad_xml = discovery.check_kiwix_update(INSTALLED, fetch=lambda url, *, kind: b"invalid")
+    assert bad_xml["state"] == "unable_to_determine"
+    assert "catalog XML parsing" in bad_xml["evidence"]
+
+    calls = []
+    def bad_metalink(url, *, kind):
+        calls.append(kind)
+        if kind == "catalog":
+            return feed(atom("2026-11"))
+        raise ValueError("secret metadata error")
+
+    metalink_error = discovery.check_kiwix_update(INSTALLED, fetch=bad_metalink)
+    assert metalink_error["state"] == "unable_to_determine"
+    assert "Metalink metadata request" in metalink_error["evidence"]
+    assert "secret" not in str(metalink_error)
+    assert calls == ["catalog", "metalink"]
+
+
 def test_different_family_is_not_a_candidate():
     calls = []
     result = discovery.check_kiwix_update(
