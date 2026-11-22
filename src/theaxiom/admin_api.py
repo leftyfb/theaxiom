@@ -1218,7 +1218,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             self._send_json(200, settings)
         elif self.path.rstrip("/") == "/api/action":
             data = self._read_body()
-            if data.get("action") in {"zim-download", "zim-resume", "zim-pause", "zim-cancel", "zim-cancel-keep", "zim-restart", "zim-retry", "zim-revalidate"}:
+            if data.get("action") in {"zim-download", "zim-resume", "zim-pause", "zim-cancel", "zim-cancel-keep", "zim-restart", "zim-retry", "zim-revalidate", "zim-replacement-prepare", "zim-replacement-discard", "zim-replacement-activate", "zim-replacement-rollback", "zim-replacement-download", "zim-replacement-cancel", "zim-delete-installed"}:
                 self._start_zim(data)
             elif data.get("action") == "import":
                 self._import_pdf(data)
