@@ -359,3 +359,33 @@ def test_late_verification_progress_preserves_pending_stop_state(disk, action):
             release.set()
         join_worker()
     assert zim_jobs.status("ready")["state"] == ("paused" if action == "pause" else "cancelled")
+
+
+@pytest.mark.parametrize("action", ["pause", "cancel"])
+def test_stop_before_worker_start_remains_durable(disk, monkeypatch, action):
+    """An accepted request must survive a worker that has not started yet."""
+    entered, release = threading.Event(), threading.Event()
+
+    def download(sid, config, *, stopped, **kwargs):
+        assert stopped()
+        raise zim_source.TransferStopped()
+
+    with patch.object(zim_source, "download_resumable", download):
+        # The real worker can be scheduled after start() returns. Hold its
+        # initial lock acquisition while leaving control() free to proceed.
+        original_run = zim_jobs._run
+
+        def gated_run(*args, **kwargs):
+            entered.set()
+            assert release.wait(5)
+            return original_run(*args, **kwargs)
+
+        with patch.object(zim_jobs, "_run", gated_run):
+            try:
+                zim_jobs.start("ready", CONFIG)
+                assert entered.wait(5)
+                assert zim_jobs.control("ready", CONFIG, action)["accepted"]
+            finally:
+                release.set()
+            join_worker()
+    assert zim_jobs.read("ready")["state"] == ("paused" if action == "pause" else "cancelled")
