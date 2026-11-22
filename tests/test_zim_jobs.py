@@ -1100,3 +1100,65 @@ def test_status_reconciles_interrupted_candidate_rollback(disk):
     zim_jobs._save_candidate(candidate)
     zim_jobs.save(live | {"configuration": zim_jobs.identity(changed)})
     assert zim_jobs.status("ready") == live
+
+
+def test_background_candidate_acquisition_preserves_serving_archive(disk):
+    data = fixture_bytes()
+    artifact = zim_source.install_stream("ready", CONFIG, BytesIO(data))
+    live = dict(source_id="ready", state="completed", active=False, verified=True,
+                configuration=zim_jobs.identity(CONFIG), artifact=artifact)
+    zim_jobs.save(live)
+    changed = CONFIG | {"source_url": "https://example.org/replacement.zim"}
+    zim_jobs.prepare_candidate("ready", changed)
+    entered, release = threading.Event(), threading.Event()
+
+    def download(sid, config, *, progress, staging_id, **kwargs):
+        assert sid == "ready"
+        assert staging_id == "ready-candidate"
+        progress(25, 100, {})
+        entered.set()
+        assert release.wait(5)
+        return artifact
+
+    with patch.object(zim_source, "download_resumable", download):
+        try:
+            result = zim_jobs.start_candidate_acquisition("ready", changed)
+            assert result["state"] == "downloading"
+            assert entered.wait(5)
+            candidate = zim_jobs.read_candidate("ready")
+            assert candidate["downloaded_bytes"] == 25
+            assert candidate["state"] == "downloading"
+            assert zim_jobs.read("ready") == live
+            with pytest.raises(BlockingIOError):
+                zim_jobs.start_candidate_acquisition("ready", changed)
+        finally:
+            release.set()
+        for thread in threading.enumerate():
+            if thread.name == "zim-replacement":
+                thread.join(5)
+                assert not thread.is_alive()
+    assert zim_jobs.read_candidate("ready")["state"] == "verified"
+    assert zim_jobs.read("ready") == live
+
+
+def test_background_candidate_acquisition_failure_is_durable(disk):
+    artifact = zim_source.install_stream("ready", CONFIG, BytesIO(fixture_bytes()))
+    live = dict(source_id="ready", state="completed", active=False, verified=True,
+                configuration=zim_jobs.identity(CONFIG), artifact=artifact)
+    zim_jobs.save(live)
+    changed = CONFIG | {"source_url": "https://example.org/replacement.zim"}
+    zim_jobs.prepare_candidate("ready", changed)
+
+    def fail(*args, **kwargs):
+        raise OSError("network unavailable")
+
+    with patch.object(zim_source, "download_resumable", fail):
+        zim_jobs.start_candidate_acquisition("ready", changed)
+        for thread in threading.enumerate():
+            if thread.name == "zim-replacement":
+                thread.join(5)
+                assert not thread.is_alive()
+    candidate = zim_jobs.read_candidate("ready")
+    assert candidate["state"] == "failed"
+    assert "network unavailable" in candidate["error"]
+    assert zim_jobs.read("ready") == live
