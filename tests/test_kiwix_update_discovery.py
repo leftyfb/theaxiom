@@ -62,7 +62,7 @@ def test_no_newer_entry_does_not_assume_up_to_date():
     calls = []
     result = discovery.check_kiwix_update(
         INSTALLED, fetch=fetcher(feed(atom("2026-08")), b"", calls))
-    assert result["state"] == "unable_to_determine"
+    assert result["state"] == "no_newer_edition_listed"
     assert len(calls) == 1
 
 
@@ -351,3 +351,57 @@ def test_ready_gov_dotted_family_can_discover_newer_verified_catalog_edition():
     assert result["state"] == "update_available"
     assert result["candidate_url"] == root + candidate_name
     assert [kind for kind, _ in calls] == ["catalog", "metalink"]
+
+
+def test_no_newer_catalog_status_needs_complete_scan_and_matching_installed_entry():
+    complete = discovery.check_kiwix_update(
+        INSTALLED, fetch=fetcher(feed(atom("2026-08"), atom("2026-07")), b"", []))
+    assert complete["state"] == "no_newer_edition_listed"
+    assert complete["installed_edition"] == "2026-08"
+    for raw in (feed(), feed(atom("2026-07")), b"invalid"):
+        assert discovery.check_kiwix_update(
+            INSTALLED, fetch=fetcher(raw, b"", []))["state"] == "unable_to_determine"
+
+
+def test_pinned_wikipedia_requires_verified_immutable_installed_record(monkeypatch, tmp_path):
+    from theaxiom import update_check_store
+    from theaxiom.source_catalog import WIKIPEDIA_SOURCE
+    from theaxiom.admin_api import select_lifecycle
+    sid = WIKIPEDIA_SOURCE["source_id"]
+    config = {
+        "format": "zim",
+        "source_url": WIKIPEDIA_SOURCE["source_url"],
+        "sha256": WIKIPEDIA_SOURCE["sha256"],
+        "expected_size_bytes": str(WIKIPEDIA_SOURCE["bytes"]),
+    }
+    record = {"source_id": sid, "configuration": config}
+    artifact = select_lifecycle(sid, config)["artifact"]
+    assert discovery.pinned_wikipedia_identity(record, artifact, verified=True) == {
+        "verified": True, "sha256": WIKIPEDIA_SOURCE["sha256"],
+        "family": "wikipedia_en_all_maxi", "edition": "2026-08",
+        "source_url": WIKIPEDIA_SOURCE["source_url"],
+        "language": "eng", "variant": "maxi", "publisher": "kiwix",
+    }
+    monkeypatch.setattr(update_check_store, "root_path", lambda: tmp_path / "checks")
+    calls = []
+    checked = discovery.refresh_pinned_wikipedia(
+        record, artifact, verified=True,
+        fetch=fetcher(feed(atom("2026-08")), b"", calls))
+    assert checked["state"] == "no_newer_edition_listed"
+    assert [kind for kind, _ in calls] == ["catalog"]
+    cached = discovery.refresh_pinned_wikipedia(
+        record, artifact, verified=True,
+        fetch=lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("recent check must be cached")))
+    assert cached["state"] == "no_newer_edition_listed"
+    forbidden = lambda *args, **kwargs: (_ for _ in ()).throw(
+        AssertionError("unverified source must never access network"))
+    for bad_record, bad_artifact, verified in (
+        (record, artifact, False),
+        (dict(record, source_id="other"), artifact, True),
+        (record, dict(artifact, sha256="b" * 64), True),
+        (dict(record, configuration=dict(config, source_url="https://evil.invalid/x.zim")), artifact, True),
+    ):
+        assert discovery.refresh_pinned_wikipedia(
+            bad_record, bad_artifact, verified=verified, fetch=forbidden
+        )["state"] == "unable_to_determine"
