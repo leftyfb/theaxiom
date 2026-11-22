@@ -196,6 +196,16 @@ def exercise(browser, base, viewport_name, viewport, artifact_dir):
         page.keyboard.press("Enter")
         expect(page.locator("#search-tools")).to_be_hidden()
         expect(page.locator("#search-toggle")).to_be_focused()
+        # Reopening search must restore a usable input without a stale
+        # active highlight from the previous query.
+        page.keyboard.press("Enter")
+        expect(page.locator("#search-tools")).to_be_visible()
+        expect(page.locator("#find")).to_be_focused()
+        page.locator("#find").fill("unfindable-synthetic-term")
+        expect(page.locator("#matches")).to_have_text("No matches", timeout=20000)
+        expect(page.locator("#highlights .active-match")).to_have_count(0)
+        page.get_by_role("button", name="Close search").click()
+        expect(page.locator("#search-tools")).to_be_hidden()
         page.get_by_role("button", name="Zoom in").click()
         expect(page.locator("#paper")).to_be_visible()
         page.get_by_role("button", name="Thumbnails").click()
@@ -215,6 +225,14 @@ def exercise(browser, base, viewport_name, viewport, artifact_dir):
         expect(page.locator("#thumbs")).to_be_hidden()
         page.get_by_role("button", name="Thumbnails").click()
         expect(page.locator("#thumbs button")).to_have_count(2)
+        expect(page.locator("#page")).to_have_value("2")
+        # The page input is a direct navigation affordance in addition to
+        # thumbnails and toolbar arrows.
+        page.locator("#page").fill("1")
+        page.locator("#page").press("Enter")
+        expect(page.locator("#page")).to_have_value("1")
+        page.locator("#page").fill("2")
+        page.locator("#page").press("Enter")
         expect(page.locator("#page")).to_have_value("2")
         # Verify all pages prepare for printing without opening an OS dialog.
         page.evaluate("window.__printInvoked = 0; window.print = () => { window.__printInvoked += 1; }")
