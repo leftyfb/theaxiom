@@ -212,3 +212,20 @@ def test_resume_sends_range_and_if_range_and_checks_continuation(monkeypatch):
         assert stream.read(1024) == b""
     assert headers_seen[0]["Range"] == "bytes=3-"
     assert headers_seen[0]["If-Range"] == '"v1"'
+
+
+def test_download_can_return_capture_time_validator_without_changing_default(monkeypatch):
+    from contextlib import contextmanager
+    @contextmanager
+    def offline(url, **kwargs):
+        class Body:
+            etag = '"exact-get-etag"'
+        yield Body()
+    artifact = {"filename": "test." + "a" * 64 + ".pdf",
+                "bytes": 123, "sha256": "a" * 64}
+    monkeypatch.setattr(pdf_transport, "open_pdf", offline)
+    monkeypatch.setattr(pdf_transport.pdf_source, "install_stream",
+                        lambda source_id, stream, **kwargs: artifact)
+    assert pdf_transport.download("test", "https://publisher.org/guide.pdf") == artifact
+    assert pdf_transport.download("test", "https://publisher.org/guide.pdf",
+                                  capture_validator=True) == (artifact, '"exact-get-etag"')
