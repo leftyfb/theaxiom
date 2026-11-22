@@ -484,3 +484,27 @@ def test_zim_restart_requires_explicit_confirmation_at_http_boundary(app, monkey
     result = request("/api/action", dict(base, confirm_restart=True), status=202)
     assert result["accepted"]
     assert calls == [("fema-ready", True)]
+
+
+@pytest.mark.parametrize("action,method,keyword", [
+    ("zim-retry", "start", "retry"),
+    ("zim-cancel-keep", "control", "cancel-keep"),
+])
+def test_zim_recovery_actions_dispatch_through_http(app, monkeypatch, action, method, keyword):
+    request, _ = app
+    revision = request("/api/sources")["revision"]
+    calls = []
+    if method == "start":
+        def start(sid, config, *, retry=False):
+            calls.append((sid, retry))
+            return {"accepted": True, "state": "queued"}
+        monkeypatch.setattr(admin_api.zim_jobs, "start", start)
+    else:
+        def control(sid, config, operation):
+            calls.append((sid, operation))
+            return {"accepted": True, "state": "paused"}
+        monkeypatch.setattr(admin_api.zim_jobs, "control", control)
+    result = request("/api/action", dict(source_id="fema-ready", action=action,
+                                         revision=revision), status=202)
+    assert result["accepted"]
+    assert calls == [("fema-ready", True if method == "start" else keyword)]
