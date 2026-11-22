@@ -51,7 +51,10 @@ def test_failed_replacement_reader_ack_rolls_back_then_reconciles_old_manifest()
             attempts=2, interval=0,
         )
     assert result is False
-    rollback.assert_called_once_with("ready", configuration)
+    rollback.assert_called_once_with(
+        "ready", configuration,
+        reason="Replacement reader verification failed; previous verified archive restored",
+    )
     assert checks.call_count == 2
     assert checks.call_args_list[0].args == (loader,)
     assert checks.call_args_list[1].args == (loader,)
