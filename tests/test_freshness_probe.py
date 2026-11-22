@@ -134,6 +134,38 @@ class InstalledEvidenceTests(unittest.TestCase):
                 self.assertFalse(result["local_current"])
                 self.assertFalse(result["installed_verified"])
 
+    def test_boolean_byte_counts_are_not_verified(self):
+        for field in ("downloaded_bytes", "expected_bytes"):
+            with self.subTest(field=field):
+                entry = dict(self.ENTRY, bytes=1)
+                job = self.job(expected_bytes=1, downloaded_bytes=1)
+                job[field] = True
+                result = freshness_probe.installed_evidence(
+                    {"stale": False, "acquisitions": [job]}, entry)
+                self.assertFalse(result["installed_verified"])
+                self.assertEqual(result["installed_state"], "unknown")
+
+    def test_invalid_manifest_identity_never_verifies(self):
+        for invalid in (None, True, 0, -1, "754723"):
+            with self.subTest(bytes=invalid):
+                entry = dict(self.ENTRY, bytes=invalid)
+                result = freshness_probe.installed_evidence(
+                    {"stale": False, "acquisitions": [self.job()]}, entry)
+                self.assertFalse(result["installed_verified"])
+        for digest in ("", "g" * 64, "A" * 64, None):
+            with self.subTest(digest=digest):
+                entry = dict(self.ENTRY, sha256=digest)
+                result = freshness_probe.installed_evidence(
+                    {"stale": False, "acquisitions": [self.job(sha256=digest)]}, entry)
+                self.assertFalse(result["installed_verified"])
+
+    def test_malformed_state_is_unknown_not_server_error(self):
+        for state in ([], {}, 123, None):
+            with self.subTest(state=state):
+                result = self.classify(self.job(state=state, verified=False))
+                self.assertEqual(result["installed_state"], "unknown")
+                self.assertFalse(result["installed_verified"])
+
     def test_absent_file(self):
         result = self.classify(self.job(state="not_started", verified=False,
                                         downloaded_bytes=0))
