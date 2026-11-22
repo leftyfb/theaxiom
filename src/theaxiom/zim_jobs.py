@@ -87,7 +87,7 @@ def candidate_status(sid):
         try:
             with worker_lock():
                 candidate = read_candidate(sid)
-                if candidate and candidate["state"] in {"downloading", "verifying"}:
+                if candidate and candidate["state"] in {"downloading", "verifying", "cancelling"}:
                     candidate["state"] = "interrupted"
                     candidate["error"] = "Replacement worker stopped; staged bytes retained for review"
                     _save_candidate(candidate)
@@ -232,7 +232,7 @@ def _run_candidate(sid, configuration, guard, signal):
             return
         with LOCK:
             candidate = read_candidate(sid)
-            if not candidate or candidate["state"] not in {"downloading", "verifying"}:
+            if not candidate or candidate["state"] not in {"downloading", "verifying", "cancelling"}:
                 return
             candidate["downloaded_bytes"] = current
             if total is not None:
