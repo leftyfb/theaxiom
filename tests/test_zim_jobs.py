@@ -1285,3 +1285,34 @@ def test_candidate_status_recovers_orphaned_worker_without_touching_live(disk):
     zim_jobs._save_candidate(candidate)
     assert zim_jobs.candidate_status("ready")["state"] == "interrupted"
     assert zim_jobs.read("ready") == live
+
+
+def test_candidate_progress_throttles_repeated_validator_writes(disk):
+    artifact = zim_source.install_stream("ready", CONFIG, BytesIO(fixture_bytes()))
+    live = dict(source_id="ready", state="completed", active=False, verified=True,
+                configuration=zim_jobs.identity(CONFIG), artifact=artifact)
+    zim_jobs.save(live)
+    changed = CONFIG | {"source_url": "https://example.org/replacement.zim"}
+    zim_jobs.prepare_candidate("ready", changed)
+    writes = []
+    original_save = zim_jobs._save_candidate
+
+    def recording_save(candidate):
+        writes.append((candidate["state"], candidate.get("downloaded_bytes")))
+        return original_save(candidate)
+
+    def download(sid, config, *, progress, **kwargs):
+        for i in range(1, 21):
+            progress(i, 100, {"etag": '"unchanged"'})
+        return artifact
+
+    with (patch.object(zim_source, "download_resumable", download),
+          patch.object(zim_jobs, "_save_candidate", recording_save)):
+        zim_jobs.start_candidate_acquisition("ready", changed)
+        for thread in threading.enumerate():
+            if thread.name == "zim-replacement":
+                thread.join(5)
+                assert not thread.is_alive()
+    assert zim_jobs.read_candidate("ready")["etag"] == '"unchanged"'
+    assert zim_jobs.read_candidate("ready")["state"] == "verified"
+    assert len(writes) < 10
