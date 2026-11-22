@@ -133,3 +133,56 @@ def test_metalink_refuses_mismatch_dtd_and_oversized():
     with pytest.raises(ValueError):
         kiwix_opds.parse_metalink(b'x' * (kiwix_opds.MAX_METALINK_BYTES + 1),
                                  expected_filename=META_FILENAME)
+
+
+def test_candidate_binding_requires_same_opds_metalink_and_installed_family():
+    installed = {
+        "family": "wikipedia_en_all_maxi", "edition": "2026-08",
+        "source_url": "https://download.kiwix.org/zim/wikipedia/wikipedia_en_all_maxi_2026-08.zim",
+        "language": "eng", "variant": "maxi", "publisher": "kiwix",
+    }
+    feed = kiwix_opds.parse_acquisition_feed(HEADER + ENTRY + FOOTER)[0]
+    meta = kiwix_opds.parse_metalink(
+        METALINK_HEADER + META_FILE + METALINK_FOOTER, expected_filename=META_FILENAME)
+    candidate = kiwix_opds.resolve_catalog_candidate(feed, meta, installed=installed)
+    assert candidate["family"] == installed["family"]
+    assert candidate["edition"] == "2026-11"
+    assert candidate["sha256"] == "a" * 64
+    assert candidate["verification"] == "metadata_only"
+    assert candidate["source_url"].endswith(META_FILENAME)
+
+
+@pytest.mark.parametrize("change", [
+    {"acquisition_kind": "direct"},
+    {"verification": "verified"},
+    {"acquisition_url": "https://evil.invalid/zim/wikipedia_en_all_maxi_2026-11.zim.meta4"},
+    {"acquisition_url": "https://download.kiwix.org/zim/wikipedia/wikipedia_en_all_mini_2026-11.zim.meta4"},
+])
+def test_candidate_binding_refuses_untrusted_or_wrong_feed_identity(change):
+    installed = {
+        "family": "wikipedia_en_all_maxi", "edition": "2026-08",
+        "source_url": "https://download.kiwix.org/zim/wikipedia/wikipedia_en_all_maxi_2026-08.zim",
+    }
+    feed = dict(kiwix_opds.parse_acquisition_feed(HEADER + ENTRY + FOOTER)[0], **change)
+    meta = {"filename": META_FILENAME, "sha256": "a" * 64, "bytes": 123456,
+            "source_url": "https://download.kiwix.org/zim/wikipedia/" + META_FILENAME,
+            "verification": "metadata_only"}
+    with pytest.raises(ValueError):
+        kiwix_opds.resolve_catalog_candidate(feed, meta, installed=installed)
+
+
+def test_candidate_binding_refuses_cross_host_and_mismatched_metalink():
+    installed = {
+        "family": "wikipedia_en_all_maxi", "edition": "2026-08",
+        "source_url": "https://download.kiwix.org/zim/wikipedia/wikipedia_en_all_maxi_2026-08.zim",
+    }
+    feed = kiwix_opds.parse_acquisition_feed(HEADER + ENTRY + FOOTER)[0]
+    base = {"filename": META_FILENAME, "sha256": "a" * 64, "bytes": 123456,
+            "source_url": "https://download.kiwix.org/zim/wikipedia/" + META_FILENAME,
+            "verification": "metadata_only"}
+    for change in ({"filename": "different.zim"},
+                   {"source_url": "https://lb.download.kiwix.org/zim/wikipedia/" + META_FILENAME},
+                   {"sha256": "bad"}, {"bytes": True}):
+        with pytest.raises(ValueError):
+            kiwix_opds.resolve_catalog_candidate(
+                feed, dict(base, **change), installed=installed)
