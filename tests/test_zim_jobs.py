@@ -688,3 +688,20 @@ def test_explicit_restart_resets_exhausted_retry_budget(disk):
         assert zim_jobs.start("ready", CONFIG, retry=True)["accepted"]
         join_worker()
     assert sum(a.get("operation") == "retry" for a in zim_jobs.read("ready")["attempt_history"]) == 1
+
+
+@pytest.mark.parametrize("state", ["queued", "downloading", "verifying", "pausing", "cancelling", "publishing"])
+def test_orphaned_active_state_reconciles_without_worker_or_duplicate_download(disk, state):
+    """A restart must not leave a phantom active job or spawn another writer."""
+    job = dict(source_id="ready", state=state, active=True,
+               configuration=zim_jobs.identity(CONFIG), downloaded_bytes=42)
+    zim_jobs.save(job)
+    recovered = zim_jobs.status("ready")
+    assert recovered["state"] == "paused"
+    assert recovered["active"] is False
+    assert recovered["downloaded_bytes"] == 0
+    assert "Backend restarted" in recovered["detail"]
+    assert zim_jobs.status("ready") == recovered
+    with pytest.raises(ValueError, match="retained bytes"):
+        zim_jobs.start("ready", CONFIG, resume=True)
+    assert zim_jobs.read("ready") == recovered
