@@ -1165,7 +1165,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
     def _import_pdf(self, data):
         sid = data.get("source_id")
         if (set(data) != ({"source_id", "action", "revision", "confirm_restart"} if data.get("action") == "zim-restart" else {"source_id", "action", "revision"})
-                or (data.get("action") in {"zim-restart", "zim-replacement-activate", "zim-replacement-rollback", "zim-replacement-download", "zim-replacement-cancel"} and data.get("confirm_restart") is not True)
+                or (data.get("action") == "zim-restart" and data.get("confirm_restart") is not True)
                 or not isinstance(sid, str)
                 or not catalog_store.ID_RE.fullmatch(sid) or not self._valid_revision(data["revision"])):
             self._send_json(400, {"error": "import requires a source ID and catalog revision only"})
@@ -1402,9 +1402,9 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                          if data.get("action") in {"zim-restart", "zim-replacement-activate", "zim-replacement-rollback"}
                          else {"source_id", "action", "revision"})
         if (set(data) != expected_keys
-                or (data.get("action") == "zim-restart" and data.get("confirm_restart") is not True)
+                or (data.get("action") in {"zim-restart", "zim-replacement-activate", "zim-replacement-rollback"} and data.get("confirm_restart") is not True)
                 or not isinstance(sid, str)
-                or data.get("action") not in {"zim-download", "zim-resume", "zim-pause", "zim-cancel", "zim-cancel-keep", "zim-restart", "zim-retry", "zim-revalidate", "zim-replacement-prepare", "zim-replacement-discard", "zim-replacement-activate", "zim-replacement-rollback"}
+                or data.get("action") not in {"zim-download", "zim-resume", "zim-pause", "zim-cancel", "zim-cancel-keep", "zim-restart", "zim-retry", "zim-revalidate", "zim-replacement-prepare", "zim-replacement-discard", "zim-replacement-activate", "zim-replacement-rollback", "zim-replacement-download", "zim-replacement-cancel"}
                 or not catalog_store.ID_RE.fullmatch(sid) or not self._valid_revision(data["revision"])):
             self._send_json(400, {"error": "ZIM control requires a source ID and current revision only"})
             return
@@ -1419,9 +1419,9 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 record = next((r for r in catalog["sources"] if r["source_id"] == sid), None)
                 if not record or sid in publication.ROUTES or not select_lifecycle(sid, record["configuration"]).get("zim_download"):
                     raise ValueError("Source has no supported ZIM download URL")
-                if publication.load().get(sid):
-                    raise ValueError("Unpublish before downloading")
                 operation = data["action"]
+                if publication.load().get(sid) and not operation.startswith("zim-replacement-"):
+                    raise ValueError("Unpublish before downloading")
                 if operation == "zim-replacement-cancel":
                     result = zim_jobs.cancel_candidate_acquisition(sid, record["configuration"])
                 elif operation == "zim-replacement-download":
