@@ -159,6 +159,18 @@ class InstalledEvidenceTests(unittest.TestCase):
                     {"stale": False, "acquisitions": [self.job(sha256=digest)]}, entry)
                 self.assertFalse(result["installed_verified"])
 
+    def test_missing_manifest_identity_cannot_match_missing_job_identity(self):
+        for field in ("source_id", "filename"):
+            for value in (None, "", "   ", False, 123):
+                with self.subTest(field=field, value=value):
+                    entry = dict(self.ENTRY, **{field: value})
+                    job = self.job(**{field: value})
+                    result = freshness_probe.installed_evidence(
+                        {"stale": False, "acquisitions": [job]}, entry)
+                    self.assertFalse(result["local_current"])
+                    self.assertFalse(result["installed_verified"])
+                    self.assertEqual(result["installed_state"], "unknown")
+
     def test_malformed_state_is_unknown_not_server_error(self):
         for state in ([], {}, 123, None):
             with self.subTest(state=state):
