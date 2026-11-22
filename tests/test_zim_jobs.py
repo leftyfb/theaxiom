@@ -931,3 +931,28 @@ def test_acquire_candidate_records_verified_artifact_without_activation(disk, mo
     assert zim_jobs.read("ready") == live
     with pytest.raises(ValueError, match="cannot be discarded"):
         zim_jobs.discard_candidate("ready", changed)
+
+
+@pytest.mark.parametrize("kind", ["empty", "symlink"])
+def test_acquire_candidate_rejects_staging_leftover_without_transfer(disk, monkeypatch, kind):
+    data = fixture_bytes()
+    artifact = zim_source.install_stream("ready", CONFIG, BytesIO(data))
+    live = dict(source_id="ready", state="completed", active=False, verified=True,
+                configuration=zim_jobs.identity(CONFIG), artifact=artifact)
+    zim_jobs.save(live)
+    changed = CONFIG | {"source_url": "https://example.org/next.zim"}
+    zim_jobs.prepare_candidate("ready", changed)
+    partial = disk / "staging/zim/.download-ready-candidate.partial"
+    partial.parent.mkdir(parents=True, exist_ok=True)
+    if kind == "empty":
+        partial.write_bytes(b"")
+    else:
+        partial.symlink_to(disk / "library/zim" / artifact["filename"])
+    def forbidden(*args, **kwargs):
+        pytest.fail("Existing candidate staging must not be opened by downloader")
+    monkeypatch.setattr(zim_source, "download_resumable", forbidden)
+    with pytest.raises(ValueError, match="Replacement staging already exists"):
+        zim_jobs.acquire_candidate("ready", changed)
+    assert zim_jobs.read("ready") == live
+    assert zim_jobs.read_candidate("ready")["state"] == "prepared"
+    assert (disk / "library/zim" / artifact["filename"]).read_bytes() == data
