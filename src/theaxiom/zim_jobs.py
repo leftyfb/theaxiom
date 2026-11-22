@@ -424,10 +424,11 @@ def _save_candidate(candidate):
 
 
 def discard_candidate(sid, config):
-    """Explicitly discard preparation metadata, never archive bytes or the live job.
+    """Retire unused preparation or completed rollback metadata, never archive bytes.
 
-    Candidate acquisition is not enabled yet; refuse to discard any record
-    outside the prepared state rather than accidentally erasing recovery data.
+    An activated candidate is recovery-critical and cannot be discarded.
+    A rolled-back candidate may be retired only after verifying the original
+    serving record is restored, enabling a future replacement attempt.
     """
     configuration = identity(config)
     with LOCK:
@@ -435,12 +436,16 @@ def discard_candidate(sid, config):
             candidate = read_candidate(sid)
             if not candidate or candidate["configuration"] != configuration:
                 raise ValueError("No matching replacement candidate")
-            if candidate["state"] != "prepared":
-                raise ValueError("Verified replacement cannot be discarded without artifact cleanup")
+            if candidate["state"] not in {"prepared", "rolled_back"}:
+                raise ValueError("Active or verified replacement cannot be discarded without artifact cleanup")
             live = read(sid)
             if (not live or live.get("state") != "completed"
                     or live.get("artifact") != candidate.get("base_artifact")):
                 raise ValueError("Installed archive changed; candidate requires review")
+            if candidate["state"] == "rolled_back" and (
+                    live != candidate.get("previous_job")
+                    or not installed(live, live["configuration"])):
+                raise ValueError("Rollback serving record is not safely restored")
             target = candidate_path_for(sid)
             if target.is_symlink():
                 raise ValueError("Unsafe replacement candidate record")
