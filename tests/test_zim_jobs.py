@@ -822,3 +822,36 @@ def test_replacement_candidate_requires_verified_installed_archive(disk):
     with pytest.raises(ValueError, match="verified installed archive"):
         zim_jobs.prepare_candidate("ready", CONFIG)
     assert zim_jobs.read_candidate("ready") is None
+
+
+def test_discard_prepared_candidate_never_deletes_live_archive(disk):
+    data = fixture_bytes()
+    artifact = zim_source.install_stream("ready", CONFIG, BytesIO(data))
+    live = dict(source_id="ready", state="completed", active=False, verified=True,
+                configuration=zim_jobs.identity(CONFIG), artifact=artifact)
+    zim_jobs.save(live)
+    changed = CONFIG | {"source_url": "https://example.org/next.zim"}
+    zim_jobs.prepare_candidate("ready", changed)
+    with pytest.raises(ValueError, match="No matching replacement candidate"):
+        zim_jobs.discard_candidate("ready", CONFIG)
+    assert zim_jobs.read_candidate("ready") is not None
+    assert zim_jobs.discard_candidate("ready", changed)["state"] == "discarded"
+    assert zim_jobs.read_candidate("ready") is None
+    assert zim_jobs.read("ready") == live
+    assert (disk / "library/zim" / artifact["filename"]).read_bytes() == data
+    zim_jobs.prepare_candidate("ready", changed)
+
+
+def test_candidate_discard_refuses_changed_live_archive(disk):
+    data = fixture_bytes()
+    artifact = zim_source.install_stream("ready", CONFIG, BytesIO(data))
+    live = dict(source_id="ready", state="completed", active=False, verified=True,
+                configuration=zim_jobs.identity(CONFIG), artifact=artifact)
+    zim_jobs.save(live)
+    changed = CONFIG | {"source_url": "https://example.org/next.zim"}
+    zim_jobs.prepare_candidate("ready", changed)
+    zim_jobs.save(live | {"artifact": {"filename": "other.zim"}})
+    with pytest.raises(ValueError, match="Installed archive changed"):
+        zim_jobs.discard_candidate("ready", changed)
+    assert zim_jobs.read_candidate("ready") is not None
+    assert (disk / "library/zim" / artifact["filename"]).read_bytes() == data
