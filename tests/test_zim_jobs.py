@@ -560,3 +560,30 @@ def test_restart_requires_stopped_job_and_discarded_partial(disk):
 def test_restart_and_resume_are_mutually_exclusive(disk):
     with pytest.raises(ValueError, match="mutually exclusive"):
         zim_jobs.start("ready", CONFIG, restart=True, resume=True)
+
+
+def test_retry_requires_matching_failed_job_and_has_hard_limit(disk):
+    with pytest.raises(ValueError, match="matching failed"):
+        zim_jobs.start("ready", CONFIG, retry=True)
+    zim_jobs.save(dict(source_id="ready", state="failed", active=False,
+                       configuration=zim_jobs.identity(CONFIG), downloaded_bytes=0,
+                       attempt_history=[{"operation": "retry"}] * zim_jobs.MAX_RETRIES))
+    with pytest.raises(ValueError, match="retry limit"):
+        zim_jobs.start("ready", CONFIG, retry=True)
+    assert zim_jobs.read("ready")["state"] == "failed"
+
+
+def test_retry_refuses_unsafe_partial_even_with_failed_job(disk):
+    zim_jobs.save(dict(source_id="ready", state="failed", active=False,
+                       configuration=zim_jobs.identity(CONFIG), downloaded_bytes=0))
+    partial = disk / "staging/zim/.download-ready.partial"
+    partial.parent.mkdir(parents=True, exist_ok=True)
+    partial.touch(mode=0o600)
+    with pytest.raises(ValueError, match="Partial download exists"):
+        zim_jobs.start("ready", CONFIG, retry=True)
+    assert partial.exists()
+
+
+def test_retry_and_resume_cannot_be_combined(disk):
+    with pytest.raises(ValueError, match="cannot be combined"):
+        zim_jobs.start("ready", CONFIG, retry=True, resume=True)
