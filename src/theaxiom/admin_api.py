@@ -1365,17 +1365,6 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             except OSError:
                 self._send_json(503, {"error": "PDF storage or catalog I/O failed"})
                 return
-        # Preserve only a strong ETag captured from the actual successful GET,
-        # and only after the verified artifact and source catalog both commit.
-        # This auxiliary evidence is advisory; failures must never convert an
-        # already installed archive into a failed acquisition.
-        if installed_etag:
-            try:
-                document_origin_evidence.save(
-                    sid, "epub" if is_epub else "pdf", url,
-                    observed["sha256"], installed_etag)
-            except (OSError, ValueError):
-                pass
         self._send_json(200, {"accepted": True, "installed_verified": True, "revision": updated["revision"]})
 
     def _download_pdf(self, data):
@@ -1429,7 +1418,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     with pdf_transport.open_pdf(url, format_name="epub") as stream:
                         observed, extracted = epub_source.install_stream(sid, stream,
                             expected_size=int(size) if size else None, expected_sha256=digest)
-                        installed_etag = stream.etag
+                        installed_etag = getattr(stream, "etag", None)
                 else:
                     observed, installed_etag = pdf_transport.download(
                         sid, url, expected_size=int(size) if size else None,
@@ -1471,6 +1460,17 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             except OSError:
                 self._send_json(503, {"error": "PDF storage or catalog I/O failed"})
                 return
+        # Preserve only a strong ETag captured from the actual successful GET,
+        # and only after the verified artifact and source catalog both commit.
+        # This auxiliary evidence is advisory; failures must never convert an
+        # already installed archive into a failed acquisition.
+        if installed_etag:
+            try:
+                document_origin_evidence.save(
+                    sid, "epub" if is_epub else "pdf", url,
+                    observed["sha256"], installed_etag)
+            except (OSError, ValueError):
+                pass
         self._send_json(200, {"accepted": True, "installed_verified": True, "revision": updated["revision"]})
 
     def _start_zim(self, data):
