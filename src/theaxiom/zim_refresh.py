@@ -41,9 +41,39 @@ def reconcile(load_records, *, attempts=RETRIES, interval=INTERVAL):
     return False
 
 
-def schedule(load_records):
-    """One daemon thread per explicit publication change; never block HTTP."""
-    worker = threading.Thread(target=reconcile, args=(load_records,),
+def reconcile_activation(load_records, *, source_id, configuration,
+                         attempts=RETRIES, interval=INTERVAL):
+    """Fail safe after a verified replacement cannot become reader-ready.
+
+    Roll back only the exact activated candidate, using the same durable
+    compare-and-swap safety checks as an explicit rollback. Do not delete
+    either installed archive. Refresh the restored reader manifest afterward.
+    """
+    if reconcile(load_records, attempts=attempts, interval=interval):
+        return True
+    from . import zim_jobs
+    try:
+        zim_jobs.rollback_candidate(source_id, configuration)
+    except (BlockingIOError, OSError, ValueError, TypeError, KeyError):
+        # The serving identity may have changed while reconciliation ran.
+        # Never overwrite a divergent job or manufacture a rollback.
+        return False
+    reconcile(load_records, attempts=attempts, interval=interval)
+    return False
+
+
+def schedule(load_records, *, activated_source=None, activated_configuration=None):
+    """One daemon thread per change; never block HTTP or delete old archives."""
+    if activated_source is None:
+        target = reconcile
+        kwargs = {}
+    else:
+        if not isinstance(activated_source, str) or not isinstance(activated_configuration, dict):
+            raise ValueError("Activation recovery requires the exact source configuration")
+        target = reconcile_activation
+        kwargs = {"source_id": activated_source,
+                  "configuration": dict(activated_configuration)}
+    worker = threading.Thread(target=target, args=(load_records,), kwargs=kwargs,
                               name="kiwix-publication-sync", daemon=True)
     worker.start()
     return worker
