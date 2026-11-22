@@ -217,6 +217,42 @@ def rollback_candidate(sid, config):
             return previous
 
 
+def recover_candidate_transition(sid):
+    """Recover interrupted activation/rollback without guessing which archive to serve.
+
+    Activation writes its durable intent before changing the live job. Rollback
+    writes the live job first. Reconcile only when the observed job matches
+    exactly one of those two expected records.
+    """
+    with LOCK:
+        with worker_lock():
+            candidate = read_candidate(sid)
+            if not candidate or candidate["state"] not in {"activated", "rolled_back"}:
+                return False
+            previous = candidate["previous_job"]
+            replacement = dict(source_id=sid, state="completed", active=False,
+                               verified=True, configuration=candidate["configuration"],
+                               artifact=candidate["artifact"])
+            current = read(sid)
+            if candidate["state"] == "activated":
+                if current == replacement:
+                    return False
+                if current != previous:
+                    raise ValueError("Serving record diverged; recovery refused")
+                if not installed(replacement, candidate["configuration"]):
+                    raise ValueError("Replacement archive missing; recovery refused")
+                save(replacement)
+                return True
+            if current == previous:
+                return False
+            if current != replacement:
+                raise ValueError("Serving record diverged; recovery refused")
+            if not installed(previous, previous["configuration"]):
+                raise ValueError("Previous archive missing; recovery refused")
+            save(previous)
+            return True
+
+
 def _save_candidate(candidate):
     target = candidate_path_for(candidate["source_id"])
     fd, name = tempfile.mkstemp(prefix=".candidate-", dir=target.parent)
