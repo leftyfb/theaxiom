@@ -7,6 +7,7 @@ import struct
 import zlib
 import hashlib
 import http.client
+from io import BytesIO
 from pathlib import Path
 import shutil
 import socket
@@ -16,7 +17,7 @@ import time
 from unittest.mock import patch
 import xml.etree.ElementTree as ET
 
-from theaxiom import zim_catalog, zim_reader_probe
+from theaxiom import zim_catalog, zim_reader_probe, zim_source, storage_settings
 
 
 def serve(port, manifest):
@@ -55,10 +56,26 @@ def main():
              "--publisher=Axiom", str(pages), str(output)],
             check=True, timeout=60,
         )
-        digest = hashlib.sha256(output.read_bytes()).hexdigest()
-        filename = "ready." + digest + ".zim"
-        archive = base / filename
-        shutil.move(output, archive)
+        # Feed a genuine zimwriterfs archive through Axiom's verification and
+        # atomic publication path before asking kiwix-serve to read it.
+        payload = output.read_bytes()
+        digest = hashlib.sha256(payload).hexdigest()
+        storage_root = base / "storage"
+        storage_root.mkdir()
+        (storage_root / "staging").mkdir()
+        (storage_root / "library").mkdir()
+        config = {"format": "zim", "source_url": "https://example.org/fixture.zim",
+                  "expected_size_bytes": str(len(payload)), "sha256": digest}
+        with (patch.object(storage_settings, "SETTINGS_PATH", base / "settings.json"),
+              patch.object(zim_source.pdf_source, "LOCAL_FILESYSTEMS",
+                           zim_source.pdf_source.LOCAL_FILESYSTEMS | {"overlay"})):
+            storage_settings.save_settings(dict(storage_settings.DEFAULT_SETTINGS,
+                                                storage_root=str(storage_root)))
+            artifact = zim_source.install_stream("ready", config, BytesIO(payload))
+            archive = storage_root / "library" / "zim" / artifact["filename"]
+            assert archive.read_bytes() == payload
+            assert artifact["sha256"] == digest
+        output.unlink()
         with archive.open("rb") as stream:
             book_id = zim_catalog.archive_uuid(stream)
         book = {"id": book_id, "path": str(archive),
