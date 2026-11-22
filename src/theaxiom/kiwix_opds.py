@@ -182,7 +182,7 @@ def resolve_catalog_candidate(
         raise ValueError("OPDS and Metalink file identities disagree")
     family = installed.get("family")
     edition = installed.get("edition")
-    if (not isinstance(family, str) or not re.fullmatch(r"[a-z0-9_]{3,120}", family)
+    if (not isinstance(family, str) or not re.fullmatch(r"[a-z0-9._-]{3,120}", family)
             or not isinstance(edition, str) or not re.fullmatch(r"20[0-9]{2}-(0[1-9]|1[0-2])", edition)
             or not re.fullmatch(re.escape(family) + r"_(20[0-9]{2}-(?:0[1-9]|1[0-2]))\.zim", filename)):
         raise ValueError("Candidate is outside the installed archive family")
