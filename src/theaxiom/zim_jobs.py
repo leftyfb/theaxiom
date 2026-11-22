@@ -27,6 +27,67 @@ def path_for(sid):
     return directory() / (sid + ".json")
 
 
+
+def candidate_path_for(sid):
+    """Replacement metadata is separate from the installed serving record."""
+    catalog_store.CatalogStore._validate_id(sid)
+    return directory() / (sid + ".candidate.json")
+
+
+def read_candidate(sid):
+    """Read candidate metadata without modifying the installed archive."""
+    target = candidate_path_for(sid)
+    try:
+        with target.open("rb") as stream:
+            raw = stream.read(16385)
+    except FileNotFoundError:
+        return None
+    if len(raw) > 16384:
+        raise ValueError("ZIM candidate record exceeds size limit")
+    candidate = json.loads(raw)
+    if (not isinstance(candidate, dict) or candidate.get("source_id") != sid
+            or candidate.get("state") != "prepared"
+            or not isinstance(candidate.get("configuration"), dict)):
+        raise ValueError("Invalid ZIM candidate record")
+    return candidate
+
+
+def prepare_candidate(sid, config):
+    """Persist replacement intent only; do not download or activate it."""
+    configuration = identity(config)
+    with LOCK:
+        with worker_lock():
+            live = read(sid)
+            if (not live or live.get("state") != "completed"
+                    or live.get("verified") is not True
+                    or not installed(live, live["configuration"])):
+                raise ValueError("A verified installed archive is required for replacement")
+            if configuration == live["configuration"]:
+                raise ValueError("Replacement candidate must differ from installed archive")
+            target = candidate_path_for(sid)
+            if target.exists() or target.is_symlink():
+                raise ValueError("Replacement candidate already exists")
+            candidate = {"source_id": sid, "state": "prepared",
+                         "configuration": configuration, "base_artifact": live["artifact"],
+                         "created_at": time.time()}
+            target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            fd, name = tempfile.mkstemp(prefix=".candidate-", dir=target.parent)
+            try:
+                with os.fdopen(fd, "w") as stream:
+                    json.dump(candidate, stream, separators=(",", ":"))
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.link(name, target, follow_symlinks=False)
+                dfd = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY)
+                try:
+                    os.fsync(dfd)
+                finally:
+                    os.close(dfd)
+            finally:
+                Path(name).unlink(missing_ok=True)
+            return candidate
+
+
 def read(sid):
     target = path_for(sid)
     try:
