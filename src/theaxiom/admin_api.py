@@ -1398,7 +1398,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         if (set(data) != expected_keys
                 or (data.get("action") == "zim-restart" and data.get("confirm_restart") is not True)
                 or not isinstance(sid, str)
-                or data.get("action") not in {"zim-download", "zim-resume", "zim-pause", "zim-cancel", "zim-cancel-keep", "zim-restart", "zim-retry", "zim-revalidate"}
+                or data.get("action") not in {"zim-download", "zim-resume", "zim-pause", "zim-cancel", "zim-cancel-keep", "zim-restart", "zim-retry", "zim-revalidate", "zim-replacement-prepare", "zim-replacement-discard"}
                 or not catalog_store.ID_RE.fullmatch(sid) or not self._valid_revision(data["revision"])):
             self._send_json(400, {"error": "ZIM control requires a source ID and current revision only"})
             return
@@ -1416,7 +1416,11 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 if publication.load().get(sid):
                     raise ValueError("Unpublish before downloading")
                 operation = data["action"]
-                if operation in {"zim-pause", "zim-cancel", "zim-cancel-keep"}:
+                if operation == "zim-replacement-prepare":
+                    result = zim_jobs.prepare_candidate(sid, record["configuration"])
+                elif operation == "zim-replacement-discard":
+                    result = zim_jobs.discard_candidate(sid, record["configuration"])
+                elif operation in {"zim-pause", "zim-cancel", "zim-cancel-keep"}:
                     result = zim_jobs.control(sid, record["configuration"], operation.removeprefix("zim-"))
                 elif operation == "zim-revalidate":
                     result = zim_jobs.revalidate(sid, record["configuration"])
