@@ -123,6 +123,8 @@ def test_update_available_badge_only_when_cached_evidence_confirms_it():
     confirmed["sources"][0]["update_check"] = {
         "state": "update_available", "candidate_edition": "2026-11",
         "candidate_sha256": "b" * 64,
+        "candidate_bytes": 123456,
+        "candidate_url": "https://download.kiwix.org/zim/wikipedia_2026-11.zim",
     }
     unconfirmed = job("completed")
     unconfirmed["sources"][0]["update_check"] = {
@@ -130,9 +132,12 @@ def test_update_available_badge_only_when_cached_evidence_confirms_it():
     }
     states = run_ui([confirmed, unconfirmed, job("completed")])["states"]
     assert states[0]["update-status"]["hidden"] is False
+    assert states[0]["[data-review-zim-update]"]["hidden"] is False
+    assert states[0]["[data-review-zim-update]"]["dataset"]["updateBytes"] == "123456"
     assert not states[0]["update-details"]["hidden"]
     assert "2026-11" in states[0]["update-details"]["textContent"]
     assert states[1]["update-status"]["hidden"] is True
+    assert states[1]["[data-review-zim-update]"]["hidden"] is True
     assert states[1]["update-details"]["hidden"] is True
     assert states[1]["update-details"]["textContent"] == ""
     assert states[2]["update-status"]["hidden"] is True
