@@ -443,3 +443,20 @@ def test_repeated_stop_is_idempotent_without_rewriting_pending_state(disk, actio
             release.set()
         join_worker()
     assert zim_jobs.read("ready")["state"] == ("paused" if action == "pause" else "cancelled")
+
+
+@pytest.mark.parametrize("state", ["cancelled", "completed", "failed", "paused"])
+def test_stale_partial_is_never_overwritten_by_fresh_start(disk, state):
+    """Recovery must not silently truncate bytes after an inconsistent record."""
+    payload = fixture_bytes()[:48]
+    partial = disk / "staging/zim/.download-ready.partial"
+    partial.parent.mkdir(parents=True, exist_ok=True)
+    partial.write_bytes(payload)
+    partial.chmod(0o600)
+    zim_jobs.save(dict(source_id="ready", state=state, active=False,
+                       configuration=zim_jobs.identity(CONFIG),
+                       downloaded_bytes=len(payload)))
+    with pytest.raises(ValueError, match="Partial download exists"):
+        zim_jobs.start("ready", CONFIG)
+    assert partial.read_bytes() == payload
+    assert zim_jobs.read("ready")["state"] == state
