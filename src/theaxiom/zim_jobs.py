@@ -192,23 +192,25 @@ def start_candidate_acquisition(sid, config):
             live = read(sid)
             if not candidate or candidate["configuration"] != configuration:
                 raise ValueError("No matching replacement candidate")
-            if candidate["state"] != "prepared":
-                raise ValueError("Replacement candidate is not prepared")
+            if candidate["state"] not in {"prepared", "failed", "interrupted", "cancelled"}:
+                raise ValueError("Replacement candidate is not ready for acquisition")
             if (not live or live.get("state") != "completed"
                     or live.get("artifact") != candidate["base_artifact"]
                     or not installed(live, live["configuration"])):
                 raise ValueError("Installed archive changed; replacement requires review")
             staging_id = sid + "-candidate"
             catalog_store.CatalogStore._validate_id(staging_id)
-            if staged_present(staging_id):
-                raise ValueError("Replacement staging already exists; manual recovery required")
+            offset = staged_size(staging_id)
+            if offset and not (candidate.get("etag") or candidate.get("last_modified")):
+                raise ValueError("Cannot safely resume without publisher validator; cancel and discard staging first")
+            validator = candidate.get("etag") or candidate.get("last_modified") if offset else None
             candidate["state"] = "downloading"
-            candidate["downloaded_bytes"] = 0
+            candidate["downloaded_bytes"] = offset
             signal = threading.Event()
             CANDIDATE_CONTROLS[sid] = signal
             _save_candidate(candidate)
             try:
-                threading.Thread(target=_run_candidate, args=(sid, configuration, guard, signal),
+                threading.Thread(target=_run_candidate, args=(sid, configuration, guard, signal, offset, validator),
                                  daemon=True, name="zim-replacement").start()
             except BaseException:
                 candidate["state"] = "prepared"
@@ -222,7 +224,7 @@ def start_candidate_acquisition(sid, config):
     return {"accepted": True, "source_id": sid, "state": "downloading"}
 
 
-def _run_candidate(sid, configuration, guard, signal):
+def _run_candidate(sid, configuration, guard, signal, offset, validator):
     last = 0.0
 
     def progress(current, total, metadata):
@@ -248,7 +250,7 @@ def _run_candidate(sid, configuration, guard, signal):
 
     try:
         artifact = zim_source.download_resumable(
-            sid, configuration, offset=0, promote_lock=LOCK,
+            sid, configuration, offset=offset, validator=validator, promote_lock=LOCK,
             staging_id=sid + "-candidate", progress=progress, stopped=signal.is_set)
         with LOCK:
             candidate = read_candidate(sid)
