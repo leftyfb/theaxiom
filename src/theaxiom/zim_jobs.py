@@ -275,7 +275,7 @@ def control(sid, config, action):
             return {"accepted": True, "state": job["state"]}
         if action == "cancel" and job["state"] in {"paused", "failed", "interrupted"}:
             with worker_lock():
-                if staged_size(sid):
+                if staged_present(sid):
                     zim_source.discard_partial(sid)
                 job.update(state="cancelled", active=False, verified=False, downloaded_bytes=0,
                            detail="Download cancelled; partial removed.", sampled_at=time.time())
