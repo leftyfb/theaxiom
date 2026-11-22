@@ -116,3 +116,19 @@ def test_planned_source_keeps_unsupported_label_during_polling():
     sample["sources"][0].update(adapter=None, artifact=None, acquisition=None)
     state = run_ui([sample])["states"][0]
     assert state["status"]["textContent"] == "Not yet supported"
+
+
+def test_update_available_badge_only_when_cached_evidence_confirms_it():
+    confirmed = job("completed")
+    confirmed["sources"][0]["update_check"] = {
+        "state": "update_available", "candidate_edition": "2026-11",
+        "candidate_sha256": "b" * 64,
+    }
+    unconfirmed = job("completed")
+    unconfirmed["sources"][0]["update_check"] = {
+        "state": "unable_to_determine",
+    }
+    states = run_ui([confirmed, unconfirmed, job("completed")])["states"]
+    assert states[0]["update-status"]["hidden"] is False
+    assert states[1]["update-status"]["hidden"] is True
+    assert states[2]["update-status"]["hidden"] is True
