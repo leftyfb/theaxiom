@@ -276,7 +276,9 @@ def exercise(browser, base, viewport_name, viewport, artifact_dir):
         expect(previous_page).to_be_disabled()
         # Document-level keyboard shortcuts must work without a focused input
         # and must not override normal typing in the numeric page control.
-        page.locator("#paper").focus()
+        # #paper is not focusable; focusing it leaves the numeric input
+        # active, where document shortcuts intentionally do not fire.
+        page_number.evaluate("(node) => node.blur()")
         page.keyboard.press("End")
         expect(page_number).to_have_value("2")
         page.keyboard.press("Home")
