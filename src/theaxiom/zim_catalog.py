@@ -61,7 +61,10 @@ def verified_books(records, enabled=None):
                 job = zim_jobs.status(sid)
                 if not job or job.get("verified") is not True or job.get("active") is not False:
                     continue
-                artifact = zim_jobs.installed(job, config)
+                # Catalog URL edits are replacement intent, not a serving
+                # switch. Keep the last verified installed book in the reader
+                # until an explicit activation changes the serving job.
+                artifact = zim_jobs.installed(job, job["configuration"])
                 if not artifact:
                     continue
                 digest = artifact["sha256"]
