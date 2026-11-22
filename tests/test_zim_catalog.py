@@ -256,7 +256,11 @@ def test_replacement_lifecycle_updates_manifest_only_on_activation(disk):
     zim_jobs.prepare_candidate("ready", updated)
     assert zim_catalog.verified_books([rec], {"ready": True})[0]["path"] == old_path
     # A different verified archive is installed without changing the serving job.
-    new = zim_source.install_stream("ready", updated, BytesIO(fixture_bytes() + b"new"))
+    import hashlib
+    changed = bytearray(fixture_bytes())
+    changed[85] = 1  # Change payload without invalidating the ZIM header/index.
+    changed[-16:] = hashlib.md5(changed[:-16], usedforsecurity=False).digest()
+    new = zim_source.install_stream("ready", updated, BytesIO(changed))
     candidate = zim_jobs.read_candidate("ready")
     candidate.update(state="verified", artifact=new)
     zim_jobs._save_candidate(candidate)
