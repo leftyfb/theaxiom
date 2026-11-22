@@ -117,7 +117,3 @@ publishing actions. The current Wikipedia reader remains independent on 8081.
 See [generic ZIM acceptance and deployment gate](docs/generic-zim-serving.md).
 
 Node.js is required for the JavaScript tests in the full development suite.
-
-## License
-
-A project license has not yet been selected. Until a license is added, do not assume that the project may be redistributed or reused under open-source terms. Third-party library content may have separate rights and license terms.
