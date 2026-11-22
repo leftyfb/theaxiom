@@ -355,5 +355,40 @@ class PublisherCatalogEditionTests(unittest.TestCase):
                          "unable_to_determine")
 
 
+
+class DocumentOriginEvidenceTests(unittest.TestCase):
+    INSTALLED = {"verified": True, "sha256": "a" * 64,
+                 "source_url": "https://publisher.org/manual.pdf",
+                 "etag": '"version-one"'}
+
+    def classify(self, response=None, **installed):
+        value = {"source_url": self.INSTALLED["source_url"], "status": 200,
+                 "reachable": True, "etag": '"version-two"', "content_length": "123"}
+        if response:
+            value.update(response)
+        return freshness_probe.classify_document_origin(
+            dict(self.INSTALLED, **installed), value)
+
+    def test_304_with_original_strong_etag_is_unchanged_representation(self):
+        result = self.classify({"status": 304, "etag": ""})
+        self.assertEqual(result["state"], "representation_unchanged")
+
+    def test_changed_etag_is_not_a_proven_newer_edition(self):
+        self.assertEqual(self.classify()["state"], "representation_changed")
+
+    def test_weak_missing_validator_and_unverified_install_are_unknown(self):
+        for changed in ({"etag": ""}, {"etag": 'W/"weak"'},
+                        {"verified": False}, {"sha256": "bad"}):
+            with self.subTest(changed=changed):
+                self.assertEqual(self.classify(**changed)["state"], "unable_to_determine")
+
+    def test_size_timestamp_and_host_change_do_not_prove_an_update(self):
+        self.assertEqual(self.classify({"etag": "", "content_length": "999",
+            "last_modified": "Wed, 01 Jan 2040 00:00:00 GMT"})["state"],
+            "unable_to_determine")
+        self.assertEqual(self.classify({"source_url": "https://evil.invalid/manual.pdf"})["state"],
+                         "unable_to_determine")
+        self.assertEqual(self.classify({"status": 403})["state"], "unable_to_determine")
+
 if __name__ == "__main__":
     unittest.main()
