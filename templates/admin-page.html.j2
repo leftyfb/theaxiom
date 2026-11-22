@@ -1371,7 +1371,7 @@
               op === 'cancel' ? !['downloading','verifying'].includes(replacementState) :
               op === 'activate' ? replacementState !== 'verified' :
               op === 'rollback' ? replacementState !== 'activated' :
-              !['prepared','rolled_back'].includes(replacementState);
+              !['prepared','rolled_back','failed','cancelled','interrupted'].includes(replacementState);
             // Replacement controls use their own durable state and backend
             // preconditions. A changed catalog URL makes the old acquisition
             // appear unmatched; it must not disable a safe replacement action.
