@@ -270,6 +270,21 @@ def main():
                 time.sleep(0.5)
             else:
                 raise RuntimeError("Kiwix failed to automatically load the newly published second book")
+            # OPDS publication must expose a usable article in Chromium.
+            with sync_playwright() as playwright:
+                browser = playwright.chromium.launch(headless=True)
+                try:
+                    page = browser.new_page()
+                    response = page.goto(
+                        f"http://127.0.0.1:{port}/zim/content/{second_name}/index.html")
+                    assert response.status == 200, ("new book article", response.status)
+                    expect(page.get_by_role(
+                        "heading", name="Ready for offline use")).to_be_visible()
+                    page.get_by_role("link", name="Next offline topic").click()
+                    expect(page.get_by_role(
+                        "heading", name="Second offline article")).to_be_visible()
+                finally:
+                    browser.close()
             with patch.object(zim_catalog, "verified_books", return_value=[second]):
                 updated = zim_catalog.render_xml([])
             with (patch.object(zim_catalog, "verified_books", return_value=[second]),
@@ -282,6 +297,16 @@ def main():
                 time.sleep(0.5)
             else:
                 raise RuntimeError("Kiwix failed to automatically remove the unpublished first book")
+            # The old article URL must no longer expose unpublished content.
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            try:
+                connection.request("GET", f"/zim/content/{expected}/index.html")
+                retired = connection.getresponse()
+                retired.read()
+                assert retired.status in (404, 410), (
+                    "unpublished ZIM article remains accessible", retired.status)
+            finally:
+                connection.close()
             print("PASS real Kiwix dynamic two-book publish and unpublish reload")
 
         finally:
