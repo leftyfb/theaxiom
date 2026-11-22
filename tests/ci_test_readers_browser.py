@@ -206,7 +206,9 @@ def exercise(browser, base, viewport_name, viewport, artifact_dir):
         # Verify all pages prepare for printing without opening an OS dialog.
         page.evaluate("window.__printInvoked = 0; window.print = () => { window.__printInvoked += 1; }")
         page.get_by_role("button", name="Print").click()
-        page.wait_for_function("window.__printInvoked === 1")
+        # Playwright wait_for_function uses eval, which our strict CSP blocks.
+        # The print handler is synchronous; evaluate directly without eval polling.
+        assert page.evaluate("window.__printInvoked") == 1, "Print control did not invoke window.print"
         with page.expect_download() as download:
             page.get_by_role("link", name="Download PDF").click()
         assert download.value.suggested_filename.endswith(".pdf")
