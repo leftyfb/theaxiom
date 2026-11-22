@@ -328,7 +328,7 @@ def activate_candidate(sid, config):
                     or live.get("artifact") != candidate["base_artifact"]
                     or not installed(live, live["configuration"])):
                 raise ValueError("Installed archive changed; activation refused")
-            replacement = dict(source_id=sid, state="completed", active=live.get("active", False),
+            replacement = dict(source_id=sid, state="completed", active=False,
                                verified=True, configuration=configuration,
                                artifact=candidate["artifact"])
             if not installed(replacement, configuration):
@@ -382,7 +382,7 @@ def recover_candidate_transition(sid):
             if not candidate or candidate["state"] not in {"activated", "rolled_back"}:
                 return False
             previous = candidate["previous_job"]
-            replacement = dict(source_id=sid, state="completed", active=previous.get("active", False),
+            replacement = dict(source_id=sid, state="completed", active=False,
                                verified=True, configuration=candidate["configuration"],
                                artifact=candidate["artifact"])
             current = read(sid)
