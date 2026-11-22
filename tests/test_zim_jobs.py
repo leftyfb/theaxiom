@@ -1355,3 +1355,35 @@ def test_rolled_back_candidate_refuses_retirement_if_live_diverged(disk):
     with pytest.raises(ValueError, match="not safely restored"):
         zim_jobs.discard_candidate("ready", changed)
     assert zim_jobs.read_candidate("ready")["state"] == "rolled_back"
+
+
+def test_verification_progress_does_not_clear_candidate_cancel_request(disk):
+    artifact = zim_source.install_stream("ready", CONFIG, BytesIO(fixture_bytes()))
+    live = dict(source_id="ready", state="completed", active=False, verified=True,
+                configuration=zim_jobs.identity(CONFIG), artifact=artifact)
+    zim_jobs.save(live)
+    changed = CONFIG | {"source_url": "https://example.org/replacement.zim"}
+    zim_jobs.prepare_candidate("ready", changed)
+    entered, release = threading.Event(), threading.Event()
+
+    def download(sid, config, *, progress, stopped, **kwargs):
+        entered.set()
+        assert release.wait(5)
+        progress(7, 10, {"verifying": True})
+        assert stopped()
+        raise zim_source.TransferStopped()
+
+    with patch.object(zim_source, "download_resumable", download):
+        try:
+            zim_jobs.start_candidate_acquisition("ready", changed)
+            assert entered.wait(5)
+            zim_jobs.cancel_candidate_acquisition("ready", changed)
+        finally:
+            release.set()
+        for thread in threading.enumerate():
+            if thread.name == "zim-replacement":
+                thread.join(5)
+                assert not thread.is_alive()
+    candidate = zim_jobs.read_candidate("ready")
+    assert candidate["state"] == "cancelled"
+    assert zim_jobs.read("ready") == live
