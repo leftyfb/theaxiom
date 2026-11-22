@@ -7,6 +7,11 @@ name = "the-axiom"
 version = "0.1.0"
 description = "Curated offline reference library tooling"
 readme = "README.md"
+license = "Apache-2.0"
+classifiers = [
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+]
 requires-python = ">=3.10"
 dependencies = [
   "Jinja2>=3.1",
