@@ -203,7 +203,12 @@ def start_candidate_acquisition(sid, config):
             offset = staged_size(staging_id)
             if offset and not (candidate.get("etag") or candidate.get("last_modified")):
                 raise ValueError("Cannot safely resume without publisher validator; cancel and discard staging first")
-            validator = candidate.get("etag") or candidate.get("last_modified") if offset else None
+            validator = (candidate.get("etag") or candidate.get("last_modified")) if offset else None
+            if not offset:
+                # A fresh transfer must not inherit validators from an earlier
+                # failed attempt; those headers describe a different response.
+                candidate.pop("etag", None)
+                candidate.pop("last_modified", None)
             candidate["state"] = "downloading"
             candidate["downloaded_bytes"] = offset
             signal = threading.Event()
