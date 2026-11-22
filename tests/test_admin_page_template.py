@@ -410,3 +410,11 @@ def test_zim_replacement_preparation_uses_server_eligibility():
     assert "!source?.replacement_available || !!replacement" in page
     assert "Replacement: " in page
     assert "data-zim-replacement-status" in page
+
+
+def test_replacement_controls_are_independent_of_old_acquisition_status():
+    page = render([profile("replacement", format="zim",
+                           source_url="https://example.org/new.zim")])
+    assert "op !== 'cancel' && blocked && source?.acquisition?.state !== 'completed'" not in page
+    assert "op === 'prepare' && !source?.replacement_available" in page
+    assert "op === 'download' && !['prepared','failed','interrupted','cancelled'].includes(replacementState)" in page
