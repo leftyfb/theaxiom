@@ -460,3 +460,17 @@ def test_stale_partial_is_never_overwritten_by_fresh_start(disk, state):
         zim_jobs.start("ready", CONFIG)
     assert partial.read_bytes() == payload
     assert zim_jobs.read("ready")["state"] == state
+
+
+@pytest.mark.parametrize("kind", ["empty", "symlink"])
+def test_fresh_start_rejects_zero_length_or_unsafe_staged_leftover(disk, kind):
+    partial = disk / "staging/zim/.download-ready.partial"
+    partial.parent.mkdir(parents=True, exist_ok=True)
+    if kind == "empty":
+        partial.touch(mode=0o600)
+    else:
+        partial.symlink_to(disk / "outside")
+    assert zim_jobs.staged_present("ready")
+    with pytest.raises(ValueError, match="Partial download exists"):
+        zim_jobs.start("ready", CONFIG)
+    assert partial.is_symlink() if kind == "symlink" else partial.is_file()
