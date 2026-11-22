@@ -32,7 +32,7 @@ This repository is the standalone home for the project. The current migration pr
 
 The Axiom application source code and original project documentation are licensed under the **Apache License, Version 2.0**. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
-This license **does not apply** to downloaded, imported, or served ZIM, PDF, EPUB, Wikipedia, Ready.gov, or other third-party content. Each resource retains its own copyright and license; operators are responsible for permission, attribution, and redistribution terms. External dependencies (including Kiwix, PDF.js, Python packages, and system tools) retain their respective licenses. No third-party material is relicensed by this repository's LICENSE. See [dependency documentation](docs/dependencies.md).
+This license **does not apply** to downloaded, imported, or served ZIM, PDF, EPUB, Wikipedia, Ready.gov, or other third-party content. Each resource retains its own copyright and license; operators are responsible for permission, attribution, and redistribution terms. External dependencies (including Kiwix, PDF.js, Python packages, and system tools) retain their respective licenses. No third-party material is relicensed by this repository's LICENSE. See the [licensing and provenance audit](docs/licensing.md) and [dependency documentation](docs/dependencies.md).
 
 ## Development
 
