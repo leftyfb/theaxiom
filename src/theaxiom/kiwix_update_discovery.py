@@ -7,11 +7,15 @@ downloaded, or authorized for automatic replacement.
 from __future__ import annotations
 
 import re
+import threading
+import time
 from urllib.parse import urlsplit
 
 from . import freshness_probe, kiwix_metadata_transport, kiwix_opds
 
 CATALOG_URL = "https://opds.library.kiwix.org/catalog/v2/entries"
+CHECK_LOCK = threading.Lock()
+MIN_RECHECK_SECONDS = 300
 UNKNOWN = {"state": "unable_to_determine", "evidence": "publisher candidate could not be verified"}
 
 
@@ -145,11 +149,14 @@ def check_installed_kiwix_job(source_id: str, *, fetch=None) -> dict:
 
 
 def refresh_checked_source(source_id: str, *, fetch=None) -> dict:
-    """Explicit metadata check; save evidence only for the verified installed job.
+    """Check a trusted installed ZIM with bounded, deduplicated metadata calls.
 
-    This is not scheduled, and cannot download a candidate or change serving.
+    A concurrent check fails closed, and even unsuccessful persisted checks are
+    cached briefly to avoid creating a publisher retry storm.
     """
     from . import update_check_store, zim_jobs
+    if not CHECK_LOCK.acquire(blocking=False):
+        return dict(UNKNOWN)
     try:
         job = zim_jobs.status(source_id)
         if not job:
@@ -158,11 +165,17 @@ def refresh_checked_source(source_id: str, *, fetch=None) -> dict:
         installed = installed_identity_from_job(job, artifact) if artifact else None
         if installed is None:
             return dict(UNKNOWN)
+        cached = update_check_store.load(source_id, installed["sha256"])
+        if ("checked_at" in cached and
+                0 <= time.time() - cached["checked_at"] < MIN_RECHECK_SECONDS):
+            return cached
         result = check_kiwix_update(installed, fetch=fetch)
         update_check_store.save(source_id, installed["sha256"], result)
         return result
     except (OSError, ValueError, TypeError, KeyError):
         return dict(UNKNOWN)
+    finally:
+        CHECK_LOCK.release()
 
 
 def cached_checked_source(source_id: str) -> dict:
