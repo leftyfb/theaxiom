@@ -102,11 +102,11 @@ matrix must not be mistaken for owner acceptance or a live production test.
 | #6 | Public library displays only eligible verified and published content | Unit/CI: publication gate; partial browser: public navigation |
 | #13, #67 | Eight-character password policy, branded login/favicon, session logout | Unit/CI for password policy and icons; browser for login, incorrect password, logout; external 1Password remains owner-only |
 | #15 | Separate Sources, Groupings and Settings routes with correct scripts | Browser navigation and page errors; template assertions prohibit Settings script on Groupings |
-| #16, #44, #90–92, #97 | Shared Kiwix, UUID book identity, reader navigation/back, native search | Real isolated Kiwix CI fixture and native search/OPDS tests; desktop/mobile Chromium article links and browser-back verified; full search UI still pending |
+| #16, #44, #90–92, #97 | Shared Kiwix, UUID book identity, reader navigation/back, native search | Real isolated Kiwix CI fixture and native search/OPDS tests; desktop/mobile Chromium article links and browser-back verified; native search UI and article/back navigation covered by Chromium |
 | #45 | Public homepage compact mobile layout, no overflow, navigable Getting Started | Partial browser: public home/search; further responsive tests needed |
 | #69 | Discoverable offline content source guide | Browser modal open/dismiss and static template tests |
 | #70, #75, #77 | PDF/EPUB URLs, local upload, metadata and language, reader navigation | Browser: real isolated PDF/EPUB fixture uploads, reload persistence and source removal, two-chapter EPUB reader/download |
-| #71, #76, #78 | Group management, selection/bulk safety, publication independent filters, sorting, automatic unpublish | Browser: create/rename/delete grouping, filter/reset/ordering, mixed eligibility, source removal; eligible bulk publish/unpublish/remove with small fixtures (CI passed); browser grouping add/remove/replace with preserved collection memberships (verification pending) |
+| #71, #76, #78 | Group management, selection/bulk safety, publication independent filters, sorting, automatic unpublish | Browser: create/rename/delete grouping, filter/reset/ordering, mixed eligibility, source removal; eligible bulk publish/unpublish/remove with small fixtures (CI passed); browser grouping add/remove/replace with preserved collection memberships (CI verified) |
 | #73 | Correct Bug-In Guide authorship/source choice | Catalog metadata/source unit validation; no live download |
 | #74, #80, #81, #84 | Embedded PDF.js controls, search/matches, mobile toolbar | Unit/DOM tests; browser with two-page searchable PDF, highlights, match counts, navigation, zoom, thumbnails, print preparation and download (CI passed) |
 | #83 | EPUB chapters, TOC, text size, keyboard navigation, return to library | Unit tests; browser with two-chapter EPUB, TOC, text sizing, keyboard activation, download, and library return (CI passed) |
@@ -133,3 +133,11 @@ Highest-impact next phases:
    additional small/large viewport screenshot comparisons on controlled fixtures.
 4. Extend isolated native Kiwix fixture smoke through Chromium for actual
    search and article navigation (no full Wikipedia/FEMA).
+
+## Additional verified regression batches (2026-11-21)
+
+- Real synthetic ZIM publication checks verify that a newly published book's article opens in Chromium and a retired article URL is denied. Full CI passed for `e7558bd`.
+- Real PDF/EPUB readers exercise first/last page boundaries, direct chapter reload and text-size persistence, search reopening after clearing stale highlights, toolbar recovery following thumbnail toggles, and keyboard focus on the page input. Full CI passed through `bfc7fad` (run 44970372764).
+- The admin browser checks storage-status JSON rather than tolerating an uncaught server exception; a Python import-shadowing bug in that endpoint was corrected and covered by the full suite.
+- Repeated keyboard open/Escape dismissal of the source guide and visible filter controls are tested at the existing desktop/tablet/mobile/narrow viewports.
+- Direct PDF page-number editing remains **unverified**: the first attempt raced with thumbnail rendering and was removed. Add a separately synchronized test rather than interpreting the passing toolbar navigation checks as proof of page-number editing.
