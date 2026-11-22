@@ -796,3 +796,29 @@ def test_completed_job_with_inconsistent_verified_flag_still_blocks_replacement(
         zim_jobs.start("ready", CONFIG | {"source_url": "https://example.org/new.zim"})
     assert zim_jobs.read("ready") == job
     assert (disk / "library/zim" / artifact["filename"]).read_bytes() == data
+
+
+def test_replacement_candidate_isolated_from_live_installed_record(disk):
+    data = fixture_bytes()
+    artifact = zim_source.install_stream("ready", CONFIG, BytesIO(data))
+    live = dict(source_id="ready", state="completed", active=False, verified=True,
+                configuration=zim_jobs.identity(CONFIG), artifact=artifact)
+    zim_jobs.save(live)
+    updated = CONFIG | {"source_url": "https://example.org/edition-2.zim"}
+    candidate = zim_jobs.prepare_candidate("ready", updated)
+    assert candidate["state"] == "prepared"
+    assert candidate["base_artifact"] == artifact
+    assert zim_jobs.read_candidate("ready") == candidate
+    assert zim_jobs.read("ready") == live
+    assert (disk / "library/zim" / artifact["filename"]).read_bytes() == data
+    with pytest.raises(ValueError, match="already exists"):
+        zim_jobs.prepare_candidate("ready", updated)
+    with pytest.raises(ValueError, match="replacement is not yet supported"):
+        zim_jobs.start("ready", updated)
+    assert zim_jobs.read("ready") == live
+
+
+def test_replacement_candidate_requires_verified_installed_archive(disk):
+    with pytest.raises(ValueError, match="verified installed archive"):
+        zim_jobs.prepare_candidate("ready", CONFIG)
+    assert zim_jobs.read_candidate("ready") is None
