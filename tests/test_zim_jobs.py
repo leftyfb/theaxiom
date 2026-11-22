@@ -530,3 +530,33 @@ def test_cancel_keep_requires_exclusive_worker_lock(disk):
         with pytest.raises(BlockingIOError):
             zim_jobs.control("ready", CONFIG, "cancel-keep")
     assert zim_jobs.read("ready")["state"] == "failed"
+
+
+@pytest.mark.parametrize("state", ["paused", "failed", "interrupted"])
+def test_stopped_job_requires_explicit_restart_without_partial(disk, state):
+    zim_jobs.save(dict(source_id="ready", state=state, active=False,
+                       configuration=zim_jobs.identity(CONFIG), downloaded_bytes=0))
+    with pytest.raises(ValueError, match="explicit confirmation"):
+        zim_jobs.start("ready", CONFIG)
+    assert zim_jobs.read("ready")["state"] == state
+
+
+def test_restart_requires_stopped_job_and_discarded_partial(disk):
+    with pytest.raises(ValueError, match="existing stopped"):
+        zim_jobs.start("ready", CONFIG, restart=True)
+    zim_jobs.save(dict(source_id="ready", state="paused", active=False,
+                       configuration=zim_jobs.identity(CONFIG), downloaded_bytes=0))
+    with zim_source.pdf_source._directory("staging", writing=True, format_name="zim") as (fd, _, _):
+        handle = zim_source.os.open(zim_source.partial_name("ready"),
+                                    zim_source.os.O_CREAT | zim_source.os.O_EXCL | zim_source.os.O_WRONLY,
+                                    0o600, dir_fd=fd)
+        zim_source.os.close(handle)
+    with pytest.raises(ValueError, match="Partial download exists"):
+        zim_jobs.start("ready", CONFIG, restart=True)
+    assert zim_jobs.staged_present("ready")
+    assert zim_jobs.read("ready")["state"] == "paused"
+
+
+def test_restart_and_resume_are_mutually_exclusive(disk):
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        zim_jobs.start("ready", CONFIG, restart=True, resume=True)
