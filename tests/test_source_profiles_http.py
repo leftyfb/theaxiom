@@ -620,3 +620,30 @@ def test_zim_delete_is_explicit_confirmed_and_unpublished_at_http_boundary(
     result = request("/api/action", dict(payload, confirm_restart=True), status=202)
     assert result["state"] == "deleted"
     assert deletes == ["fema-ready"]
+
+
+@pytest.mark.parametrize("action,method", [
+    ("zim-replacement-prepare", "prepare_candidate"),
+    ("zim-replacement-download", "start_candidate_acquisition"),
+    ("zim-replacement-cancel", "cancel_candidate_acquisition"),
+    ("zim-replacement-discard", "discard_candidate"),
+])
+def test_all_non_destructive_zim_replacement_actions_reach_guarded_http_handler(
+        app, monkeypatch, action, method):
+    request, _ = app
+    revision = request("/api/sources")["revision"]
+    calls = []
+
+    def guarded_operation(sid, config):
+        calls.append((sid, config["format"]))
+        return {"accepted": True, "state": "prepared"}
+
+    monkeypatch.setattr(admin_api.zim_jobs, method, guarded_operation)
+    result = request("/api/action", dict(
+        source_id="fema-ready", action=action, revision=revision), status=202)
+    assert result["accepted"] is True
+    assert calls == [("fema-ready", "zim")]
+    assert request("/api/action", dict(
+        source_id="fema-ready", action=action, revision=revision,
+        extra=True), status=400)["error"]
+    assert calls == [("fema-ready", "zim")]
