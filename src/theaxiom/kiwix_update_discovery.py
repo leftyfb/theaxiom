@@ -46,6 +46,7 @@ def check_kiwix_update(installed: dict, *, fetch=None) -> dict:
     fetch = kiwix_metadata_transport.fetch_metadata if fetch is None else fetch
     try:
         candidates = []
+        installed_edition_listed = False
         completed_scan = False
         for page in range(MAX_CATALOG_PAGES):
             query = kiwix_metadata_transport.catalog_page_url(
@@ -63,6 +64,8 @@ def check_kiwix_update(installed: dict, *, fetch=None) -> dict:
                 path = urlsplit(entry["acquisition_url"]).path
                 name = path.rsplit("/", 1)[-1]
                 match = re.fullmatch(re.escape(family) + r"_(20[0-9]{2}-(?:0[1-9]|1[0-2]))\.zim\.meta4", name)
+                if match and match.group(1) == edition:
+                    installed_edition_listed = True
                 if match and match.group(1) > edition:
                     candidates.append((match.group(1), entry))
             if entry_count < CATALOG_PAGE_SIZE:
@@ -73,8 +76,13 @@ def check_kiwix_update(installed: dict, *, fetch=None) -> dict:
             # selected edition is the latest or unique without full evidence.
             return dict(UNKNOWN)
         if not candidates:
-            # A bounded feed can be partial or paginated. Absence isn't proof
-            # that the installed archive is the latest edition.
+            # Listing the installed edition on a complete filtered scan is
+            # evidence that no later edition was listed, not that the remote
+            # artifact matches the installed digest.
+            if installed_edition_listed:
+                return {"state": "no_newer_edition_listed",
+                        "evidence": "complete filtered catalog listed no later matching edition",
+                        "installed_edition": edition}
             return dict(UNKNOWN)
         candidates.sort(key=lambda candidate: candidate[0], reverse=True)
         newest = candidates[0][0]
