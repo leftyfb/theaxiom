@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 import threading
 import time
+import xml.etree.ElementTree as ET
 from urllib.parse import urlsplit
 
 from . import freshness_probe, kiwix_metadata_transport, kiwix_opds
@@ -16,6 +17,8 @@ from . import freshness_probe, kiwix_metadata_transport, kiwix_opds
 CATALOG_URL = "https://opds.library.kiwix.org/catalog/v2/entries"
 CHECK_LOCK = threading.Lock()
 MIN_RECHECK_SECONDS = 300
+CATALOG_PAGE_SIZE = 25
+MAX_CATALOG_PAGES = 4
 UNKNOWN = {"state": "unable_to_determine", "evidence": "publisher candidate could not be verified"}
 
 
@@ -42,16 +45,33 @@ def check_kiwix_update(installed: dict, *, fetch=None) -> dict:
     # Caller-supplied fetch is only intended for deterministic test fixtures.
     fetch = kiwix_metadata_transport.fetch_metadata if fetch is None else fetch
     try:
-        raw = fetch(CATALOG_URL, kind="catalog")
         candidates = []
-        for entry in kiwix_opds.parse_acquisition_feed(raw):
-            if entry["acquisition_kind"] != "metalink":
-                continue
-            path = urlsplit(entry["acquisition_url"]).path
-            name = path.rsplit("/", 1)[-1]
-            match = re.fullmatch(re.escape(family) + r"_(20[0-9]{2}-(?:0[1-9]|1[0-2]))\.zim\.meta4", name)
-            if match and match.group(1) > edition:
-                candidates.append((match.group(1), entry))
+        completed_scan = False
+        for page in range(MAX_CATALOG_PAGES):
+            query = kiwix_metadata_transport.catalog_page_url(
+                family=family, language=installed["language"],
+                start=page * CATALOG_PAGE_SIZE, count=CATALOG_PAGE_SIZE,
+            )
+            raw = fetch(query, kind="catalog")
+            entries = kiwix_opds.parse_acquisition_feed(raw)
+            # Count all Atom entries, including unsupported acquisition types,
+            # so a partial page cannot silently terminate the catalog scan.
+            entry_count = len(ET.fromstring(raw).findall(kiwix_opds.ATOM + "entry"))
+            for entry in entries:
+                if entry["acquisition_kind"] != "metalink":
+                    continue
+                path = urlsplit(entry["acquisition_url"]).path
+                name = path.rsplit("/", 1)[-1]
+                match = re.fullmatch(re.escape(family) + r"_(20[0-9]{2}-(?:0[1-9]|1[0-2]))\.zim\.meta4", name)
+                if match and match.group(1) > edition:
+                    candidates.append((match.group(1), entry))
+            if entry_count < CATALOG_PAGE_SIZE:
+                completed_scan = True
+                break
+        if not completed_scan:
+            # The filtered catalog may have more pages: no claim that the
+            # selected edition is the latest or unique without full evidence.
+            return dict(UNKNOWN)
         if not candidates:
             # A bounded feed can be partial or paginated. Absence isn't proof
             # that the installed archive is the latest edition.
