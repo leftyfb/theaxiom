@@ -247,7 +247,8 @@ def test_pdf_download_metadata_and_explicit_publication(pdf_app, disk, monkeypat
     data = document()
     def download(sid, url, **kwargs):
         assert url == "https://publisher.example.org/guide.pdf"
-        return pdf_source.install_stream(sid, BytesIO(data), **kwargs)
+        assert kwargs.pop("capture_validator") is True
+        return pdf_source.install_stream(sid, BytesIO(data), **kwargs), None
     monkeypatch.setattr(admin_api.pdf_transport, "download", download)
     catalog = mutate(request, request("/api/sources"), "add",
                      dict(title="Remote guide", format="pdf", source_url="https://publisher.example.org/guide.pdf"), sid=SID)
@@ -279,7 +280,8 @@ def test_pdf_download_creates_missing_pdf_leaf_directories(pdf_app, disk, monkey
     library.rmdir()
     data = document()
     monkeypatch.setattr(admin_api.pdf_transport, "download",
-                        lambda sid, url, **kwargs: pdf_source.install_stream(sid, BytesIO(data), **kwargs))
+                        lambda sid, url, **kwargs: (pdf_source.install_stream(sid, BytesIO(data),
+                            **{k: v for k, v in kwargs.items() if k != "capture_validator"}), None))
     catalog = mutate(request, request("/api/sources"), "add", fields(data), sid=SID)
     result = request("/api/action", dict(source_id=SID, action="pdf-download", revision=catalog["revision"]))
     assert result["installed_verified"]
