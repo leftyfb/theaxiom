@@ -51,3 +51,22 @@ def test_missing_catalog_does_not_initialize_or_write(tmp_path, monkeypatch):
     monkeypatch.setattr(storage_settings, "SETTINGS_PATH", tmp_path / "storage.json")
     assert scheduler.main([]) == 2
     assert list(tmp_path.iterdir()) == []
+
+
+def test_rotating_bound_prevents_starving_later_sources():
+    records = [{"source_id": f"source-{i:02}", "configuration": {"format": "zim"}}
+               for i in range(12)]
+    first = scheduler.check_records(records, max_checks=5, start_index=0,
+                                    checker=lambda sid: {"state": "unable_to_determine"})
+    second = scheduler.check_records(records, max_checks=5, start_index=5,
+                                     checker=lambda sid: {"state": "unable_to_determine"})
+    third = scheduler.check_records(records, max_checks=5, start_index=10,
+                                    checker=lambda sid: {"state": "unable_to_determine"})
+    seen = {row["source_id"] for row in first + second + third}
+    assert len(seen) == 12
+
+
+@pytest.mark.parametrize("offset", [-1, True, None, "2"])
+def test_invalid_rotation_index_is_rejected(offset):
+    with pytest.raises(ValueError):
+        scheduler.check_records([], start_index=offset)
