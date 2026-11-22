@@ -14,6 +14,7 @@ NEW = {
     "candidate_edition": "2026-11",
     "candidate_url": "https://download.kiwix.org/zim/wikipedia/test_2026-11.zim",
     "candidate_sha256": "b" * 64,
+    "candidate_bytes": 123456,
 }
 
 
@@ -31,6 +32,7 @@ def test_update_evidence_is_persisted_atomically_and_scoped(location):
     result = store.load("wikipedia", SHA, now=1001)
     assert result["state"] == "update_available"
     assert result["candidate_sha256"] == "b" * 64
+    assert result["candidate_bytes"] == 123456
     assert result["checked_at"] == 1000
     assert sorted(p.name for p in location.iterdir()) == ["wikipedia.json"]
 
@@ -97,3 +99,10 @@ def test_ambiguous_local_state_can_be_persisted_without_false_badge(location):
         "state": "unable_to_determine", "evidence": "catalog unavailable",
     }, now=1000)
     assert store.load("wikipedia", SHA, now=1001)["state"] == "unable_to_determine"
+
+
+@pytest.mark.parametrize("quantity", [None, True, -5, 0, 2**63, "123456"])
+def test_candidate_bytes_must_be_bounded_integer(location, quantity):
+    invalid = dict(NEW, candidate_bytes=quantity)
+    with pytest.raises(ValueError):
+        store.save("wikipedia", SHA, invalid, now=1000)
