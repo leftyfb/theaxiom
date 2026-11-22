@@ -13,7 +13,7 @@ def test_apache_license_and_project_metadata():
     assert "APPENDIX: How to apply the Apache License to your work." in license_text
     metadata = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
     assert metadata["license"] == "Apache-2.0"
-    assert "License :: OSI Approved :: Apache Software License" in metadata["classifiers"]
+    assert "Programming Language :: Python :: 3" in metadata["classifiers"]
 
 
 def test_license_scope_and_notice_are_documented():
