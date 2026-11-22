@@ -112,6 +112,22 @@ def exercise(browser, base, viewport_name, viewport, artifact_dir):
         page.reload()
         expect(page.locator("#chapter-content")).to_contain_text("Second isolated chapter")
         expect(page.get_by_role("navigation", name="Chapter navigation")).to_contain_text("2 of 2")
+        # Regression: the previous-chapter control must remain keyboard operable
+        # after a full page reload, including at narrow/mobile breakpoints.
+        previous_chapter = page.locator(
+            'nav[aria-label="Chapter navigation"] [data-chapter-nav="previous"]'
+        )
+        previous_chapter.focus()
+        expect(previous_chapter).to_be_focused()
+        page.keyboard.press("Enter")
+        expect(page.locator("#chapter-content")).to_contain_text("First isolated chapter")
+        expect(page.get_by_role("navigation", name="Chapter navigation")).to_contain_text("1 of 2")
+        # Forward and backward chapter navigation must survive a browser-history
+        # round trip, not just mutate the current page in memory.
+        page.go_back(wait_until="domcontentloaded")
+        expect(page.locator("#chapter-content")).to_contain_text("Second isolated chapter")
+        page.go_forward(wait_until="domcontentloaded")
+        expect(page.locator("#chapter-content")).to_contain_text("First isolated chapter")
         page.goto(epub + "/chapter/1?size=small")
         expect(page.locator("#chapter-content")).to_have_class("book small")
         expect(page.locator("#chapter-content")).to_contain_text("Second isolated chapter")
