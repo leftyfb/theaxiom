@@ -2,7 +2,7 @@
 """Focused test for scripts/source_probe.py with synthetic fixtures.
 
 Covers three states:
-  - reachable + matching content-length → local_current True
+  - reachable + matching content-length → origin length matches, not locally verified
   - unreachable (connection refused) → local_current False, error recorded
   - reachable but mismatched content-length → local_current False
 """
@@ -42,7 +42,7 @@ def main() -> int:
     thread.start()
     port = server.server_address[1]
     try:
-        # 1. Reachable + matching content-length → current
+        # 1. Reachable + matching content-length → origin match only
         current = source_probe.probe_source(
             f"http://127.0.0.1:{port}/current",
             "f404083d00decedc267bf4265eda776bb250ccfe18c1f7b19152aa006ff727c5",
@@ -51,7 +51,8 @@ def main() -> int:
             opener=urlopen,
         )
         assert current["reachable"] is True, current
-        assert current["local_current"] is True, current
+        assert current["local_current"] is False, current
+        assert current["origin_length_matches_manifest"] is True, current
         assert current["last_modified"] == "Wed, 21 Oct 2015 07:28:00 GMT", current
         assert current["content_length"] == "754723", current
 
@@ -65,6 +66,7 @@ def main() -> int:
         )
         assert stale["reachable"] is True, stale
         assert stale["local_current"] is False, stale
+        assert stale["origin_length_matches_manifest"] is False, stale
 
         # 3. Unreachable (connection refused) → not reachable
         unreachable = source_probe.probe_source(
