@@ -165,3 +165,34 @@ def test_readiness_transient_failures_do_not_log(monkeypatch, capsys):
     assert zim_reader_probe.main() == 0
     assert len(attempts) == 2
     assert capsys.readouterr().err == ""
+
+
+@pytest.mark.parametrize(("status", "body", "expected"), [
+    (503, b"temporary outage", "Kiwix reader not ready"),
+    (200, b"<!DOCTYPE feed><feed/>", "Invalid Kiwix catalog response"),
+    (200, b"<!ENTITY leaked SYSTEM 'file:///private/key'><feed/>", "Invalid Kiwix catalog response"),
+    (200, b"x" * (zim_reader_probe.MAX_RESPONSE + 1), "Invalid Kiwix catalog response"),
+    (200, b"<feed", "Could not validate Kiwix OPDS catalog"),
+    (200, b'<feed xmlns="http://www.w3.org/2005/Atom"/>', "Kiwix catalog size is unexpected"),
+])
+def test_opds_readiness_rejects_untrusted_or_unavailable_responses(status, body, expected):
+    """An unhealthy sidecar must never be mistaken for a ready reader."""
+    with patch.object(zim_reader_probe.http.client, "HTTPConnection") as factory:
+        connection = factory.return_value
+        response = connection.getresponse.return_value
+        response.status = status
+        response.read.return_value = body
+        with pytest.raises(ValueError, match=expected):
+            zim_reader_probe.listed_book_ids()
+        connection.close.assert_called_once()
+
+
+def test_opds_readiness_rejects_network_failure_and_closes_connection():
+    with patch.object(zim_reader_probe.http.client, "HTTPConnection") as factory:
+        connection = factory.return_value
+        connection.request.side_effect = TimeoutError("private-network-target")
+        with pytest.raises(TimeoutError):
+            zim_reader_probe.listed_book_ids()
+        connection.close.assert_called_once()
+        assert zim_reader_probe._failure_category(
+            TimeoutError("private-network-target")) == "listener-or-filesystem-unavailable"
