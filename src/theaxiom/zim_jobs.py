@@ -178,7 +178,7 @@ def start(sid, config, *, resume=False, restart=False, retry=False):
             # A changed source URL/checksum must not bypass the installed-content
             # guard: overwriting the completed job would orphan the published
             # archive before a replacement had been verified and activated.
-            if old and old.get("state") == "completed" and old.get("verified") is True:
+            if old and old.get("state") == "completed":
                 raise ValueError("Archive already installed; replacement is not yet supported.")
             if retry:
                 if not old or old["state"] != "failed" or not matches(old, config):
