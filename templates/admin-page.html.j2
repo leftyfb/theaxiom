@@ -1304,7 +1304,7 @@
           const canResume = recoverable && !complete;
           const canCancel = running || recoverable;
           const canRestart = ['paused','interrupted','failed','cancelled'].includes(state) && !hasPartial;
-          const retries = (source?.acquisition?.attempt_history || []).filter(a => a.operation === 'retry').length;
+          const retries = source?.acquisition?.retry_count ?? (source?.acquisition?.attempt_history || []).filter(a => a.operation === 'retry').length;
           const canRetry = state === 'failed' && retries < 3 &&
             (!hasPartial || !!(source?.acquisition?.etag || source?.acquisition?.last_modified));
           zim.hidden = !!source?.installed_verified || recoverable || running;
