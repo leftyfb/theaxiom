@@ -57,7 +57,7 @@ def read_candidate(sid):
     except (ValueError, TypeError) as exc:
         raise ValueError("Invalid ZIM candidate record") from exc
     if (not isinstance(candidate, dict) or candidate.get("source_id") != sid
-            or candidate.get("state") not in {"prepared", "verified", "activated"}
+            or candidate.get("state") not in {"prepared", "verified", "activated", "rolled_back"}
             or not isinstance(candidate.get("configuration"), dict)
             or not isinstance(candidate.get("base_artifact"), dict)):
         raise ValueError("Invalid ZIM candidate record")
@@ -66,9 +66,9 @@ def read_candidate(sid):
             raise ValueError("Invalid ZIM candidate configuration")
     except (KeyError, TypeError, ValueError) as exc:
         raise ValueError("Invalid ZIM candidate configuration") from exc
-    if candidate["state"] in {"verified", "activated"} and not isinstance(candidate.get("artifact"), dict):
+    if candidate["state"] in {"verified", "activated", "rolled_back"} and not isinstance(candidate.get("artifact"), dict):
         raise ValueError("Invalid verified ZIM candidate")
-    if candidate["state"] == "activated" and not isinstance(candidate.get("previous_job"), dict):
+    if candidate["state"] in {"activated", "rolled_back"} and not isinstance(candidate.get("previous_job"), dict):
         raise ValueError("Invalid activated ZIM candidate")
     return candidate
 
@@ -189,6 +189,32 @@ def activate_candidate(sid, config):
             _save_candidate(candidate)
             save(replacement)
             return replacement
+
+
+def rollback_candidate(sid, config):
+    """Restore the previous verified serving record without removing either archive."""
+    configuration = identity(config)
+    with LOCK:
+        with worker_lock():
+            candidate = read_candidate(sid)
+            if not candidate or candidate["configuration"] != configuration:
+                raise ValueError("No matching replacement candidate")
+            if candidate["state"] != "activated":
+                raise ValueError("Replacement has not been activated")
+            current = read(sid)
+            previous = candidate["previous_job"]
+            if (not current or current.get("state") != "completed"
+                    or current.get("configuration") != configuration
+                    or current.get("artifact") != candidate["artifact"]):
+                raise ValueError("Serving archive changed; rollback refused")
+            if (previous.get("source_id") != sid or
+                    previous.get("artifact") != candidate["base_artifact"] or
+                    not installed(previous, previous["configuration"])):
+                raise ValueError("Previous archive missing or invalid; rollback refused")
+            save(previous)
+            candidate["state"] = "rolled_back"
+            _save_candidate(candidate)
+            return previous
 
 
 def _save_candidate(candidate):
