@@ -529,10 +529,16 @@ def test_explicit_kiwix_update_check_requires_same_origin_and_catalog_identity(a
         dict(payload, revision=0), status=409)["error"]
     assert "not support" in request("/api/update-check",
         dict(payload, source_id="missing"), status=400)["error"]
-    # Pinned Wikipedia is now supported by a separate verification-gated
-    # read-only resolver; this fixture is not an installed ZIM.
+    # Pinned Wikipedia uses a separate verification-gated, read-only
+    # checker. Mock it rather than making a live publisher HTTP request.
+    pinned_calls = []
+    monkeypatch.setattr(admin_api.kiwix_update_discovery, "refresh_pinned_wikipedia",
+        lambda record, artifact, *, verified: (
+            pinned_calls.append((record["source_id"], verified))
+            or {"state": "no_newer_edition_listed"}))
     pinned = request("/api/update-check", dict(payload, source_id=SID))
-    assert pinned["state"] == "unable_to_determine"
+    assert pinned["state"] == "no_newer_edition_listed"
+    assert pinned_calls == [(SID, True)]
     assert not called
     result = request("/api/update-check", payload)
     assert result["state"] == "unable_to_determine"
