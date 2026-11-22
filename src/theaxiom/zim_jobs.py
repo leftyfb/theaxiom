@@ -58,7 +58,7 @@ def read_candidate(sid):
     except (ValueError, TypeError) as exc:
         raise ValueError("Invalid ZIM candidate record") from exc
     if (not isinstance(candidate, dict) or candidate.get("source_id") != sid
-            or candidate.get("state") not in {"prepared", "downloading", "verifying", "interrupted", "cancelled", "failed", "verified, "activated", "rolled_back"}
+            or candidate.get("state") not in {"prepared", "downloading", "verifying", "interrupted", "cancelled", "failed", "verified", "activated", "rolled_back"}
             or not isinstance(candidate.get("configuration"), dict)
             or not isinstance(candidate.get("base_artifact"), dict)):
         raise ValueError("Invalid ZIM candidate record")
