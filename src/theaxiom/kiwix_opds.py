@@ -94,7 +94,7 @@ def parse_metalink(raw: bytes, *, expected_filename: str) -> dict[str, object]:
     """
     import re
     if (not isinstance(expected_filename, str)
-            or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9._-]{1,240}\\.zim", expected_filename)
+            or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9._-]{1,240}\.zim", expected_filename)
             or ".." in expected_filename):
         raise ValueError("Invalid expected ZIM filename")
     if not isinstance(raw, bytes) or not 0 < len(raw) <= MAX_METALINK_BYTES:
