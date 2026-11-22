@@ -1366,14 +1366,14 @@
             'Replacement: ' + replacementState + percent + (replacement.error ? ' · ' + replacement.error : '') : '';
           for (const button of (card.querySelectorAll?.('[data-zim-replacement]') || [])) {
             const op = button.dataset.zimReplacement;
-            button.hidden = op === 'prepare' ? !source?.zim_download || !source?.installed_verified || !!replacement :
+            button.hidden = op === 'prepare' ? !source?.zim_download || source?.acquisition?.state !== 'completed' || source?.acquisition?.verified !== true || !!replacement :
               op === 'download' ? !['prepared','failed','interrupted','cancelled'].includes(replacementState) :
               op === 'cancel' ? !['downloading','verifying'].includes(replacementState) :
               op === 'activate' ? replacementState !== 'verified' :
               op === 'rollback' ? replacementState !== 'activated' :
               replacementState !== 'prepared';
             button.disabled = card.dataset.zimReplacementPosting === 'true' ||
-              (op !== 'cancel' && blocked && !source?.installed_verified);
+              (op !== 'cancel' && blocked && source?.acquisition?.state !== 'completed');
           }
         }
         const toggle = field('publication-toggle');
