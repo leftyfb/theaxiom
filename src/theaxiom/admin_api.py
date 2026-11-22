@@ -1428,12 +1428,12 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
     def _start_zim(self, data):
         sid = data.get("source_id")
         expected_keys = ({"source_id", "action", "revision", "confirm_restart"}
-                         if data.get("action") in {"zim-restart", "zim-replacement-activate", "zim-replacement-rollback"}
+                         if data.get("action") in {"zim-restart", "zim-replacement-activate", "zim-replacement-rollback", "zim-delete-installed"}
                          else {"source_id", "action", "revision"})
         if (set(data) != expected_keys
-                or (data.get("action") in {"zim-restart", "zim-replacement-activate", "zim-replacement-rollback"} and data.get("confirm_restart") is not True)
+                or (data.get("action") in {"zim-restart", "zim-replacement-activate", "zim-replacement-rollback", "zim-delete-installed"} and data.get("confirm_restart") is not True)
                 or not isinstance(sid, str)
-                or data.get("action") not in {"zim-download", "zim-resume", "zim-pause", "zim-cancel", "zim-cancel-keep", "zim-restart", "zim-retry", "zim-revalidate", "zim-replacement-prepare", "zim-replacement-discard", "zim-replacement-activate", "zim-replacement-rollback", "zim-replacement-download", "zim-replacement-cancel"}
+                or data.get("action") not in {"zim-download", "zim-resume", "zim-pause", "zim-cancel", "zim-cancel-keep", "zim-restart", "zim-retry", "zim-revalidate", "zim-replacement-prepare", "zim-replacement-discard", "zim-replacement-activate", "zim-replacement-rollback", "zim-replacement-download", "zim-replacement-cancel", "zim-delete-installed"}
                 or not catalog_store.ID_RE.fullmatch(sid) or not self._valid_revision(data["revision"])):
             self._send_json(400, {"error": "ZIM control requires a source ID and current revision only"})
             return
@@ -1450,8 +1450,10 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     raise ValueError("Source has no supported ZIM download URL")
                 operation = data["action"]
                 if publication.load().get(sid) and not operation.startswith("zim-replacement-"):
-                    raise ValueError("Unpublish before downloading")
-                if operation == "zim-replacement-cancel":
+                    raise ValueError("Unpublish before downloading or deleting")
+                if operation == "zim-delete-installed":
+                    result = zim_jobs.delete_installed(sid)
+                elif operation == "zim-replacement-cancel":
                     result = zim_jobs.cancel_candidate_acquisition(sid, record["configuration"])
                 elif operation == "zim-replacement-download":
                     result = zim_jobs.start_candidate_acquisition(sid, record["configuration"])
