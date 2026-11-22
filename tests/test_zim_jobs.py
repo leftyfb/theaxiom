@@ -892,3 +892,42 @@ def test_replacement_candidate_refuses_hardlinked_record(disk):
     with pytest.raises(ValueError, match="Unsafe ZIM candidate"):
         zim_jobs.read_candidate("ready")
     assert other.read_text() == "{}"
+
+
+def test_acquire_candidate_keeps_live_archive_when_transfer_fails(disk, monkeypatch):
+    data = fixture_bytes()
+    artifact = zim_source.install_stream("ready", CONFIG, BytesIO(data))
+    live = dict(source_id="ready", state="completed", active=False, verified=True,
+                configuration=zim_jobs.identity(CONFIG), artifact=artifact)
+    zim_jobs.save(live)
+    changed = CONFIG | {"source_url": "https://example.org/next.zim"}
+    zim_jobs.prepare_candidate("ready", changed)
+    def fail(*args, **kwargs):
+        assert args[0] == "ready-candidate"
+        raise ValueError("network unavailable")
+    monkeypatch.setattr(zim_source, "download_resumable", fail)
+    with pytest.raises(ValueError, match="network unavailable"):
+        zim_jobs.acquire_candidate("ready", changed)
+    assert zim_jobs.read_candidate("ready")["state"] == "prepared"
+    assert zim_jobs.read("ready") == live
+    assert (disk / "library/zim" / artifact["filename"]).read_bytes() == data
+
+
+def test_acquire_candidate_records_verified_artifact_without_activation(disk, monkeypatch):
+    data = fixture_bytes()
+    artifact = zim_source.install_stream("ready", CONFIG, BytesIO(data))
+    live = dict(source_id="ready", state="completed", active=False, verified=True,
+                configuration=zim_jobs.identity(CONFIG), artifact=artifact)
+    zim_jobs.save(live)
+    changed = CONFIG | {"source_url": "https://example.org/next.zim"}
+    zim_jobs.prepare_candidate("ready", changed)
+    candidate_artifact = {"filename": "ready-candidate." + "a" * 64 + ".zim",
+                          "sha256": "a" * 64, "bytes": len(data)}
+    monkeypatch.setattr(zim_source, "download_resumable",
+                        lambda *args, **kwargs: candidate_artifact)
+    result = zim_jobs.acquire_candidate("ready", changed)
+    assert result["state"] == "verified"
+    assert zim_jobs.read_candidate("ready")["artifact"] == candidate_artifact
+    assert zim_jobs.read("ready") == live
+    with pytest.raises(ValueError, match="cannot be discarded"):
+        zim_jobs.discard_candidate("ready", changed)
