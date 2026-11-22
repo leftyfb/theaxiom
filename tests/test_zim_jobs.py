@@ -646,3 +646,25 @@ def test_retry_budget_survives_successive_failed_attempts_without_staged_data(di
     assert job["state"] == "failed"
     assert len(attempts) == zim_jobs.MAX_RETRIES + 1
     assert sum(a.get("operation") == "retry" for a in job["attempt_history"]) == zim_jobs.MAX_RETRIES
+
+
+@pytest.mark.parametrize("operation", ["pause", "cancel", "cancel-keep"])
+def test_publishing_state_rejects_all_stop_controls_without_touching_archive(disk, operation):
+    """Atomic promotion cannot be interrupted by a late control request."""
+    job = dict(source_id="ready", state="publishing", active=True,
+               configuration=zim_jobs.identity(CONFIG), downloaded_bytes=len(fixture_bytes()))
+    zim_jobs.save(job)
+    before = zim_jobs.read("ready")
+    with pytest.raises(ValueError, match="already finalizing"):
+        zim_jobs.control("ready", CONFIG, operation)
+    assert zim_jobs.read("ready") == before
+    assert not list((disk / "library/zim").iterdir())
+
+
+def test_cancelled_job_never_accepts_retry_even_with_old_retry_history(disk):
+    zim_jobs.save(dict(source_id="ready", state="cancelled", active=False,
+                       configuration=zim_jobs.identity(CONFIG), downloaded_bytes=0,
+                       attempt_history=[{"operation": "retry", "state": "failed"}]))
+    with pytest.raises(ValueError, match="matching failed"):
+        zim_jobs.start("ready", CONFIG, retry=True)
+    assert zim_jobs.read("ready")["state"] == "cancelled"
