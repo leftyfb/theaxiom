@@ -247,7 +247,8 @@ def _run_candidate(sid, configuration, guard, signal, offset, validator):
                 candidate["etag"] = metadata["etag"]
             if metadata.get("last_modified"):
                 candidate["last_modified"] = metadata["last_modified"]
-            if metadata.get("verifying"):
+            if metadata.get("verifying") and candidate["state"] != "cancelling":
+                # A verification callback must not erase a pending stop request.
                 candidate["state"] = "verifying"
             _save_candidate(candidate)
         last = now
