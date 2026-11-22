@@ -166,3 +166,91 @@ def classify_remote_revision(
         return {"state": "representation_changed", "evidence": "different strong ETag; newer edition unproven"}
 
     return unknown
+
+
+def compare_catalog_editions(
+    installed: dict[str, Any] | None,
+    candidate: dict[str, Any] | None,
+    *,
+    trusted_catalog: bool = False,
+) -> dict[str, Any]:
+    """Compare edition metadata supplied by a separately verified publisher resolver.
+
+    This is a pure decision function, not a URL resolver or security boundary.
+    The caller MUST authenticate an allowlisted publisher catalog and bind its
+    entries to the installed source family before passing trusted_catalog=True.
+    Arbitrary scraped listings or values sent by a browser are not authority.
+    """
+    unknown: dict[str, Any] = {
+        "state": "unable_to_determine",
+        "evidence": "no authenticated publisher edition comparison",
+    }
+    if trusted_catalog is not True or not isinstance(installed, dict) or not isinstance(candidate, dict):
+        return unknown
+
+    # Identity fields come from verified installed metadata and authenticated
+    # publisher catalog entries, NOT filename guessing or remote byte length.
+    from datetime import date
+    from urllib.parse import urlsplit
+
+    def valid_digest(value):
+        return (isinstance(value, str) and len(value) == 64
+                and all(char in "0123456789abcdef" for char in value))
+
+    def edition_date(value):
+        if not isinstance(value, str) or len(value) != 7 or value[4] != "-":
+            return None
+        try:
+            year, month = int(value[:4]), int(value[5:])
+            return date(year, month, 1) if value[:4].isdigit() and value[5:].isdigit() else None
+        except ValueError:
+            return None
+
+    def https_location(value):
+        if not isinstance(value, str):
+            return None
+        try:
+            parsed = urlsplit(value)
+            if (parsed.scheme != "https" or not parsed.hostname or parsed.username
+                    or parsed.password or parsed.fragment or parsed.port not in (None, 443)):
+                return None
+            return parsed.hostname.lower()
+        except ValueError:
+            return None
+
+    if (installed.get("verified") is not True
+            or not valid_digest(installed.get("sha256"))
+            or not valid_digest(candidate.get("sha256"))
+            or not isinstance(installed.get("family"), str)
+            or not installed["family"]
+            or candidate.get("family") != installed["family"]
+            or not isinstance(installed.get("language"), str)
+            or not installed["language"]
+            or candidate.get("language") != installed["language"]
+            or candidate.get("variant") != installed.get("variant")
+            or candidate.get("publisher") != installed.get("publisher")
+            or not isinstance(installed.get("publisher"), str)
+            or not installed["publisher"]):
+        return unknown
+    installed_host = https_location(installed.get("source_url"))
+    candidate_host = https_location(candidate.get("source_url"))
+    if not installed_host or candidate_host != installed_host:
+        return unknown
+    old_edition = edition_date(installed.get("edition"))
+    new_edition = edition_date(candidate.get("edition"))
+    if not old_edition or not new_edition:
+        return unknown
+    if new_edition > old_edition and candidate["sha256"] != installed["sha256"]:
+        return {
+            "state": "update_available",
+            "evidence": "newer authenticated publisher catalog edition with distinct SHA-256",
+            "installed_edition": installed["edition"],
+            "candidate_edition": candidate["edition"],
+            "candidate_url": candidate["source_url"],
+            "candidate_sha256": candidate["sha256"],
+        }
+    if new_edition == old_edition and candidate["sha256"] == installed["sha256"]:
+        return {"state": "up_to_date", "evidence": "same authenticated catalog edition and SHA-256"}
+    if new_edition < old_edition:
+        return {"state": "older_candidate", "evidence": "publisher catalog edition predates installed edition"}
+    return unknown
