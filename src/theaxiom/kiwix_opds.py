@@ -85,7 +85,9 @@ METALINK = "{urn:ietf:params:xml:ns:metalink}"
 MAX_METALINK_BYTES = 64 * 1024
 
 
-def parse_metalink(raw: bytes, *, expected_filename: str) -> dict[str, object]:
+def parse_metalink(
+    raw: bytes, *, expected_filename: str, preferred_host: str | None = None,
+) -> dict[str, object]:
     """Validate explicit Metalink4 file digest and HTTPS mirror, without I/O.
 
     The caller must obtain the Metalink through an independently guarded,
@@ -93,6 +95,8 @@ def parse_metalink(raw: bytes, *, expected_filename: str) -> dict[str, object]:
     expected filename. No output can trigger acquisition automatically.
     """
     import re
+    if preferred_host is not None and preferred_host not in DOWNLOAD_HOSTS:
+        raise ValueError("Unapproved preferred Metalink host")
     if (not isinstance(expected_filename, str)
             or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9._-]{1,240}\.zim", expected_filename)
             or ".." in expected_filename):
@@ -140,11 +144,16 @@ def parse_metalink(raw: bytes, *, expected_filename: str) -> dict[str, object]:
         except ValueError:
             continue
         urls.append(href)
-    if len(set(urls)) != 1:
-        # Do not pick among mirrors without an explicit operator trust policy.
-        raise ValueError("No unique approved ZIM URL in Metalink")
+    # The installed and verified job supplies the preferred publisher host.
+    # Reject ambiguity within that host; never silently select an alternate.
+    approved = sorted(set(
+        url for url in urls
+        if preferred_host is None or urlsplit(url).hostname == preferred_host
+    ))
+    if len(approved) != 1:
+        raise ValueError("No unique same-publisher ZIM URL in Metalink")
     return {
-        "filename": expected_filename, "source_url": urls[0],
+        "filename": expected_filename, "source_url": approved[0],
         "bytes": size, "sha256": sha, "verification": "metadata_only",
     }
 
