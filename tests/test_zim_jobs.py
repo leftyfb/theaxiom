@@ -1450,3 +1450,40 @@ def test_failed_candidate_with_staging_cannot_be_silently_discarded(disk):
             zim_jobs.discard_candidate("ready", changed)
     assert zim_jobs.read_candidate("ready")["state"] == "failed"
     assert zim_jobs.read("ready") == live
+
+
+def test_explicit_installed_deletion_requires_unpublished_and_no_candidate(disk):
+    from theaxiom import publication
+    artifact = zim_source.install_stream("ready", CONFIG, BytesIO(fixture_bytes()))
+    zim_jobs.save(dict(source_id="ready", state="completed", active=False,
+                       verified=True, configuration=zim_jobs.identity(CONFIG),
+                       artifact=artifact))
+    archive = disk / "library/zim" / artifact["filename"]
+    assert archive.exists()
+    publication.save("ready", True)
+    with pytest.raises(ValueError, match="Unpublish"):
+        zim_jobs.delete_installed("ready")
+    publication.save("ready", False)
+    replacement = CONFIG | {"source_url": "https://example.org/replacement.zim"}
+    zim_jobs.prepare_candidate("ready", replacement)
+    with pytest.raises(ValueError, match="Retire"):
+        zim_jobs.delete_installed("ready")
+    zim_jobs.discard_candidate("ready", replacement)
+    assert zim_jobs.delete_installed("ready")["state"] == "deleted"
+    assert not archive.exists()
+    assert zim_jobs.read("ready") is None
+    with pytest.raises(ValueError, match="No inactive"):
+        zim_jobs.delete_installed("ready")
+
+
+def test_explicit_installed_deletion_refuses_modified_archive(disk):
+    artifact = zim_source.install_stream("ready", CONFIG, BytesIO(fixture_bytes()))
+    zim_jobs.save(dict(source_id="ready", state="completed", active=False,
+                       verified=True, configuration=zim_jobs.identity(CONFIG),
+                       artifact=artifact))
+    archive = disk / "library/zim" / artifact["filename"]
+    archive.write_bytes(b"corrupted")
+    with pytest.raises(ValueError, match="missing or invalid"):
+        zim_jobs.delete_installed("ready")
+    assert archive.exists()
+    assert zim_jobs.read("ready") is not None
