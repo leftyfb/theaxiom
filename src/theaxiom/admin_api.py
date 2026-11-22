@@ -1165,7 +1165,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
     def _import_pdf(self, data):
         sid = data.get("source_id")
         if (set(data) != ({"source_id", "action", "revision", "confirm_restart"} if data.get("action") == "zim-restart" else {"source_id", "action", "revision"})
-                or (data.get("action") in {"zim-restart", "zim-replacement-activate", "zim-replacement-rollback", "zim-replacement-download"} and data.get("confirm_restart") is not True)
+                or (data.get("action") in {"zim-restart", "zim-replacement-activate", "zim-replacement-rollback", "zim-replacement-download", "zim-replacement-cancel"} and data.get("confirm_restart") is not True)
                 or not isinstance(sid, str)
                 or not catalog_store.ID_RE.fullmatch(sid) or not self._valid_revision(data["revision"])):
             self._send_json(400, {"error": "import requires a source ID and catalog revision only"})
@@ -1422,7 +1422,9 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 if publication.load().get(sid):
                     raise ValueError("Unpublish before downloading")
                 operation = data["action"]
-                if operation == "zim-replacement-download":
+                if operation == "zim-replacement-cancel":
+                    result = zim_jobs.cancel_candidate_acquisition(sid, record["configuration"])
+                elif operation == "zim-replacement-download":
                     result = zim_jobs.start_candidate_acquisition(sid, record["configuration"])
                 elif operation == "zim-replacement-activate":
                     result = zim_jobs.activate_candidate(sid, record["configuration"])
