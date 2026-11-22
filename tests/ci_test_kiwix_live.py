@@ -215,6 +215,51 @@ def main():
             assert calls[-1] == (0, None)
             assert (storage_root / "library" / "zim" /
                     restarted["artifact"]["filename"]).read_bytes() == payload
+
+            # Exercise an active pause against genuine ZIM bytes, including
+            # rejection of conflicting stop requests while the worker exits.
+            entered, release = threading.Event(), threading.Event()
+
+            def controlled_download(sid, source_config, *, progress, stopped, **kwargs):
+                with zim_source.pdf_source._directory("staging", writing=True,
+                                                      format_name="zim") as (fd, _, _):
+                    handle = zim_source.os.open(zim_source.partial_name(sid),
+                                                zim_source.os.O_CREAT | zim_source.os.O_WRONLY,
+                                                0o600, dir_fd=fd)
+                    with zim_source.os.fdopen(handle, "wb") as output_file:
+                        output_file.write(payload[:offset])
+                progress(offset, len(payload), {"etag": '"real-zim-v1"'})
+                entered.set()
+                assert release.wait(10)
+                assert stopped()
+                raise zim_source.TransferStopped()
+
+            with patch.object(zim_source, "download_resumable", controlled_download):
+                try:
+                    assert zim_jobs.start("paused-real", config)["accepted"]
+                    assert entered.wait(10)
+                    assert zim_jobs.control("paused-real", config, "pause")["accepted"]
+                    with pytest.raises(ValueError, match="Stop request already pending"):
+                        zim_jobs.control("paused-real", config, "cancel")
+                finally:
+                    release.set()
+                for worker in threading.enumerate():
+                    if worker.name == "zim-acquisition":
+                        worker.join(10)
+                        assert not worker.is_alive()
+            paused = zim_jobs.status("paused-real")
+            assert paused["state"] == "paused", paused
+            assert zim_jobs.staged_size("paused-real") == offset
+            with patch.object(zim_source.pdf_transport, "open_pdf", transport):
+                assert zim_jobs.start("paused-real", config, resume=True)["accepted"]
+                for worker in threading.enumerate():
+                    if worker.name == "zim-acquisition":
+                        worker.join(10)
+                        assert not worker.is_alive()
+            final = zim_jobs.status("paused-real")
+            assert final["state"] == "completed" and final["verified"], final
+            assert (storage_root / "library" / "zim" /
+                    final["artifact"]["filename"]).read_bytes() == payload
         output.unlink()
         with archive.open("rb") as stream:
             book_id = zim_catalog.archive_uuid(stream)
