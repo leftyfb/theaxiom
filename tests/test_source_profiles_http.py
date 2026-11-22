@@ -561,3 +561,57 @@ def test_document_update_check_never_starts_download(app, monkeypatch, format_na
     assert result["state"] == "representation_changed"
     assert result["source_id"] == sid
     assert calls == [sid]
+
+
+@pytest.mark.parametrize("action,method", [
+    ("zim-replacement-activate", "activate_candidate"),
+    ("zim-replacement-rollback", "rollback_candidate"),
+])
+def test_zim_switch_requires_confirmation_and_schedules_reader_reconcile(
+        app, monkeypatch, action, method):
+    request, _ = app
+    revision = request("/api/sources")["revision"]
+    calls, refreshes = [], []
+
+    def switch(sid, configuration):
+        calls.append((sid, configuration["format"]))
+        return {"accepted": True, "state": "completed"}
+
+    monkeypatch.setattr(getattr(admin_api, "zim_jobs"), method, switch)
+    monkeypatch.setattr(admin_api.zim_refresh, "schedule",
+                        lambda load_records: refreshes.append(load_records))
+    request_body = dict(source_id="fema-ready", action=action, revision=revision)
+    assert request("/api/action", request_body, status=400)["error"]
+    assert request("/api/action", dict(request_body, confirm_restart=False),
+                   status=400)["error"]
+    assert request("/api/action", dict(request_body, confirm_restart=True, extra="bad"),
+                   status=400)["error"]
+    assert not calls and not refreshes
+    accepted = request("/api/action", dict(request_body, confirm_restart=True), status=202)
+    assert accepted["accepted"] is True
+    assert calls == [("fema-ready", "zim")]
+    assert len(refreshes) == 1
+    assert callable(refreshes[0])
+
+
+def test_zim_delete_is_explicit_confirmed_and_unpublished_at_http_boundary(
+        app, monkeypatch):
+    request, _ = app
+    revision = request("/api/sources")["revision"]
+    deletes = []
+    monkeypatch.setattr(admin_api.zim_jobs, "delete_installed",
+                        lambda sid: (deletes.append(sid) or
+                                     {"accepted": True, "source_id": sid, "state": "deleted"}))
+    payload = dict(source_id="fema-ready", action="zim-delete-installed", revision=revision)
+    assert request("/api/action", payload, status=400)["error"]
+    assert request("/api/action", dict(payload, confirm_restart=False), status=400)["error"]
+    assert deletes == []
+
+    publication.save("fema-ready", True)
+    rejected = request("/api/action", dict(payload, confirm_restart=True), status=409)
+    assert "Unpublish" in rejected["error"]
+    assert deletes == []
+    publication.save("fema-ready", False)
+    result = request("/api/action", dict(payload, confirm_restart=True), status=202)
+    assert result["state"] == "deleted"
+    assert deletes == ["fema-ready"]
