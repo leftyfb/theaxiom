@@ -782,3 +782,16 @@ def test_changed_candidate_cannot_replace_completed_installed_job(disk):
             zim_jobs.start("ready", CONFIG | change)
         assert zim_jobs.read("ready") == original
         assert (disk / "library/zim" / artifact["filename"]).read_bytes() == data
+
+
+def test_completed_job_with_inconsistent_verified_flag_still_blocks_replacement(disk):
+    """A malformed completion flag must not authorize an unsafe replacement."""
+    data = fixture_bytes()
+    artifact = zim_source.install_stream("ready", CONFIG, BytesIO(data))
+    job = dict(source_id="ready", state="completed", active=False, verified=False,
+               configuration=zim_jobs.identity(CONFIG), artifact=artifact)
+    zim_jobs.save(job)
+    with pytest.raises(ValueError, match="replacement is not yet supported"):
+        zim_jobs.start("ready", CONFIG | {"source_url": "https://example.org/new.zim"})
+    assert zim_jobs.read("ready") == job
+    assert (disk / "library/zim" / artifact["filename"]).read_bytes() == data
