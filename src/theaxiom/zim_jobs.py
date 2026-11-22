@@ -57,7 +57,7 @@ def read_candidate(sid):
     except (ValueError, TypeError) as exc:
         raise ValueError("Invalid ZIM candidate record") from exc
     if (not isinstance(candidate, dict) or candidate.get("source_id") != sid
-            or candidate.get("state") not in {"prepared", "verified", "activated", "rolled_back"}
+            or candidate.get("state") not in {"prepared", "downloading", "verifying", "failed", "verified", "activated", "rolled_back"}
             or not isinstance(candidate.get("configuration"), dict)
             or not isinstance(candidate.get("base_artifact"), dict)):
         raise ValueError("Invalid ZIM candidate record")
@@ -156,6 +156,80 @@ def acquire_candidate(sid, config):
         finally:
             Path(name).unlink(missing_ok=True)
         return candidate
+
+
+def start_candidate_acquisition(sid, config):
+    """Queue a replacement download without blocking the HTTP request."""
+    configuration = identity(config)
+    with LOCK:
+        guard = worker_lock()
+        guard.__enter__()
+        try:
+            candidate = read_candidate(sid)
+            live = read(sid)
+            if not candidate or candidate["configuration"] != configuration:
+                raise ValueError("No matching replacement candidate")
+            if candidate["state"] != "prepared":
+                raise ValueError("Replacement candidate is not prepared")
+            if (not live or live.get("state") != "completed"
+                    or live.get("artifact") != candidate["base_artifact"]
+                    or not installed(live, live["configuration"])):
+                raise ValueError("Installed archive changed; replacement requires review")
+            staging_id = sid + "-candidate"
+            catalog_store.CatalogStore._validate_id(staging_id)
+            if staged_present(staging_id):
+                raise ValueError("Replacement staging already exists; manual recovery required")
+            candidate["state"] = "downloading"
+            candidate["downloaded_bytes"] = 0
+            _save_candidate(candidate)
+            threading.Thread(target=_run_candidate, args=(sid, configuration, guard),
+                             daemon=True, name="zim-replacement").start()
+        except BaseException:
+            guard.__exit__(None, None, None)
+            raise
+    return {"accepted": True, "source_id": sid, "state": "downloading"}
+
+
+def _run_candidate(sid, configuration, guard):
+    last = 0.0
+
+    def progress(current, total, metadata):
+        nonlocal last
+        now = time.monotonic()
+        if now - last < 0.5 and not metadata.get("verifying"):
+            return
+        with LOCK:
+            candidate = read_candidate(sid)
+            if not candidate or candidate["state"] not in {"downloading", "verifying"}:
+                return
+            candidate["downloaded_bytes"] = current
+            if total is not None:
+                candidate["expected_bytes"] = total
+            if metadata.get("verifying"):
+                candidate["state"] = "verifying"
+            _save_candidate(candidate)
+        last = now
+
+    try:
+        artifact = zim_source.download_resumable(
+            sid, configuration, offset=0, promote_lock=LOCK,
+            staging_id=sid + "-candidate", progress=progress)
+        with LOCK:
+            candidate = read_candidate(sid)
+            if not candidate or candidate["configuration"] != configuration:
+                raise ValueError("Replacement candidate changed during acquisition")
+            candidate.update(state="verified", artifact=artifact)
+            candidate.pop("error", None)
+            _save_candidate(candidate)
+    except Exception as exc:
+        with LOCK:
+            candidate = read_candidate(sid)
+            if candidate and candidate["configuration"] == configuration:
+                candidate["state"] = "failed"
+                candidate["error"] = str(exc)[:512]
+                _save_candidate(candidate)
+    finally:
+        guard.__exit__(None, None, None)
 
 
 def activate_candidate(sid, config):
