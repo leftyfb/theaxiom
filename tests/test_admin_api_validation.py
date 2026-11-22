@@ -216,7 +216,8 @@ class AdminAPIValidationTests(unittest.TestCase):
         self.assertIn("fetch('/api/sources'", body)
         self.assertIn("action:'epub-add-download'", body)
         for action in ("download", "redownload", "update"):
-            self.assertIn(f'data-action="{action}" disabled', body)
+            self.assertNotIn(f'data-action="{action}" disabled', body)
+        self.assertIn("data-zim-update-check", body)
         with urllib.request.urlopen(
             f"http://127.0.0.1:{self.port}/api/acquisitions", timeout=5
         ) as response:
