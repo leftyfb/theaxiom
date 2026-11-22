@@ -839,6 +839,10 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 state = epub_source.status(record, artifacts[sid])
             verified = (bool(state and state["verified"]) if self._pdf_record(record) or self._epub_record(record)
                         else publication.verified(matched, sid))
+            if (verified and (self._pdf_record(record) or self._epub_record(record))
+                    and isinstance(artifacts.get(sid), dict)
+                    and record["configuration"].get("source_url")):
+                update_check = update_check_store.load(sid, artifacts[sid]["sha256"])
             job = jobs.get(sid)
             if lifecycles[sid].get("zim_download"):
                 try:
