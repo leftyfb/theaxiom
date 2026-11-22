@@ -317,7 +317,10 @@ def status(record, records):
             return result
         enabled = publication.load().get(sid, False)
         job = zim_jobs.status(sid)
-        artifact = (zim_jobs.installed(job, config) if job and
+        # The serving record remains authoritative while the catalog URL is
+        # edited to prepare a replacement. Do not report the still-installed
+        # published archive as missing until activation changes that record.
+        artifact = (zim_jobs.installed(job, job["configuration"]) if job and
                     job.get("verified") is True and job.get("active") is False else None)
         verified = artifact is not None
         rights = bool(config.get("license", "").strip())
