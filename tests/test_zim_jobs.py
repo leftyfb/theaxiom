@@ -661,7 +661,7 @@ def test_publishing_state_rejects_all_stop_controls_without_touching_archive(dis
         with pytest.raises(ValueError, match="already finalizing"):
             zim_jobs.control("ready", CONFIG, operation)
     assert zim_jobs.read("ready") == before
-    assert not list((disk / "library/zim").iterdir())
+    assert not (disk / "library/zim").exists() or not list((disk / "library/zim").iterdir())
 
 
 def test_cancelled_job_never_accepts_retry_even_with_old_retry_history(disk):
