@@ -767,3 +767,18 @@ def test_retry_counter_survives_failed_fresh_retry(disk):
         assert zim_jobs.read("ready")["retry_count"] == 2
         join_worker()
     assert zim_jobs.read("ready")["retry_count"] == 2
+
+
+def test_changed_candidate_cannot_replace_completed_installed_job(disk):
+    """Editing remote metadata must never orphan a published archive."""
+    data = fixture_bytes()
+    artifact = zim_source.install_stream("ready", CONFIG, BytesIO(data))
+    original = dict(source_id="ready", state="completed", active=False, verified=True,
+                    configuration=zim_jobs.identity(CONFIG), artifact=artifact)
+    zim_jobs.save(original)
+    for change in ({"source_url": "https://example.org/new-edition.zim"},
+                   {"sha256": "a" * 64}, {"expected_size_bytes": "999"}):
+        with pytest.raises(ValueError, match="replacement is not yet supported"):
+            zim_jobs.start("ready", CONFIG | change)
+        assert zim_jobs.read("ready") == original
+        assert (disk / "library/zim" / artifact["filename"]).read_bytes() == data
