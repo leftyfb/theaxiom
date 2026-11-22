@@ -35,7 +35,9 @@ def fetcher(catalog, metadata, calls):
     def fetch(url, *, kind):
         calls.append((kind, url))
         if kind == "catalog":
-            assert url == discovery.CATALOG_URL
+            assert url == discovery.kiwix_metadata_transport.catalog_page_url(
+                family=FAMILY, language="eng", start=0, count=discovery.CATALOG_PAGE_SIZE
+            )
             return catalog
         assert kind == "metalink"
         return metadata
@@ -251,3 +253,40 @@ def test_concurrent_check_does_not_start_another_remote_lookup(monkeypatch):
         assert discovery.refresh_checked_source("wikipedia", fetch=forbidden)["state"] == "unable_to_determine"
     finally:
         discovery.CHECK_LOCK.release()
+
+
+def test_catalog_second_page_is_checked_before_picking_newest_candidate():
+    # A complete first page cannot establish the latest publisher edition.
+    first = feed(*(atom("2026-09") for _ in range(discovery.CATALOG_PAGE_SIZE)))
+    second = feed(atom("2026-11"))
+    calls = []
+
+    def fetch(url, *, kind):
+        calls.append((kind, url))
+        if kind == "metalink":
+            return metalink("2026-11")
+        assert kind == "catalog"
+        if "start=0&count=25" in url:
+            return first
+        if "start=25&count=25" in url:
+            return second
+        raise AssertionError("Unexpected page")
+
+    result = discovery.check_kiwix_update(INSTALLED, fetch=fetch)
+    assert result["state"] == "update_available"
+    assert result["candidate_edition"] == "2026-11"
+    assert [kind for kind, _ in calls] == ["catalog", "catalog", "metalink"]
+
+
+def test_incomplete_bounded_catalog_does_not_claim_latest_candidate():
+    full_page = feed(*(atom("2026-11") for _ in range(discovery.CATALOG_PAGE_SIZE)))
+    calls = []
+
+    def fetch(url, *, kind):
+        calls.append((kind, url))
+        assert kind == "catalog"
+        return full_page
+
+    result = discovery.check_kiwix_update(INSTALLED, fetch=fetch)
+    assert result["state"] == "unable_to_determine"
+    assert len(calls) == discovery.MAX_CATALOG_PAGES
