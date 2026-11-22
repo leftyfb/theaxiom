@@ -159,6 +159,32 @@ def main():
             assert archive.read_bytes() == payload
             with pytest.raises(ValueError, match="matching paused"):
                 zim_jobs.start("discarded", config, resume=True)
+
+            # A stale active state left by a crashed process must reconcile to
+            # paused and retain its actual bytes, not trust the stale counter.
+            interrupted = stage / ".download-interrupted.partial"
+            interrupted.write_bytes(payload[:offset])
+            interrupted.chmod(0o600)
+            zim_jobs.save(dict(source_id="interrupted", state="downloading", active=True,
+                               configuration=zim_jobs.identity(config),
+                               downloaded_bytes=offset + 17, expected_bytes=len(payload),
+                               etag='"real-zim-v1"'))
+            orphan = zim_jobs.status("interrupted")
+            assert orphan["state"] == "paused" and not orphan["active"]
+            assert orphan["downloaded_bytes"] == offset
+            assert interrupted.read_bytes() == payload[:offset]
+            with patch.object(zim_source.pdf_transport, "open_pdf", transport):
+                assert zim_jobs.start("interrupted", config, resume=True)["accepted"]
+                for worker in threading.enumerate():
+                    if worker.name == "zim-acquisition":
+                        worker.join(10)
+                        assert not worker.is_alive()
+            finished = zim_jobs.status("interrupted")
+            assert finished["state"] == "completed" and finished["verified"], finished
+            assert calls[-1] == (offset, '"real-zim-v1"')
+            assert not interrupted.exists()
+            assert (storage_root / "library" / "zim" /
+                    finished["artifact"]["filename"]).read_bytes() == payload
         output.unlink()
         with archive.open("rb") as stream:
             book_id = zim_catalog.archive_uuid(stream)
