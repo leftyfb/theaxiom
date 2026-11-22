@@ -449,3 +449,43 @@ def test_pinned_wikipedia_requires_verified_immutable_installed_record(monkeypat
         assert discovery.refresh_pinned_wikipedia(
             bad_record, bad_artifact, verified=verified, fetch=forbidden
         )["state"] == "unable_to_determine"
+
+
+def test_journal_logs_catalog_counts_and_inconclusive_reason_without_remote_payload(monkeypatch):
+    """Operator journal shows diagnostic stages, without echoing remote XML."""
+    messages = []
+    monkeypatch.setattr(discovery.LOGGER, "info",
+                        lambda fmt, *args: messages.append(fmt % args))
+    monkeypatch.setattr(discovery.LOGGER, "warning",
+                        lambda fmt, *args: messages.append(fmt % args))
+    monkeypatch.setattr(discovery.LOGGER, "log",
+                        lambda level, fmt, *args: messages.append(fmt % args))
+
+    # A real-looking, but deliberately unmatched catalog entry must fail closed.
+    payload = feed(atom("2026-11", family="wikipedia_en_all_mini"))
+    result = discovery.check_kiwix_update(
+        INSTALLED, fetch=lambda url, *, kind: payload)
+    assert result["state"] == "unable_to_determine"
+    assert any("stage=catalog_scan page=0 entries=1 parsed=1" in msg
+               for msg in messages)
+    assert any("stage=catalog_match state=unable_to_determine" in msg
+               for msg in messages)
+    assert not any("https://" in msg or "<feed" in msg or "urn:uuid" in msg
+                   for msg in messages)
+
+
+def test_journal_logs_failure_stage_and_exception_class_only(monkeypatch):
+    messages = []
+    monkeypatch.setattr(discovery.LOGGER, "info", lambda *args: None)
+    monkeypatch.setattr(discovery.LOGGER, "warning",
+                        lambda fmt, *args: messages.append(fmt % args))
+    monkeypatch.setattr(discovery.LOGGER, "log", lambda *args: None)
+
+    secret = "https://publisher.invalid/secret?token=do-not-log"
+    def failed_fetch(url, *, kind):
+        raise ValueError(secret)
+    result = discovery.check_kiwix_update(INSTALLED, fetch=failed_fetch)
+    assert result["state"] == "unable_to_determine"
+    assert any("stage=catalog metadata request exception_type=ValueError" in msg
+               for msg in messages)
+    assert all(secret not in msg for msg in messages)
