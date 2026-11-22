@@ -536,3 +536,28 @@ def test_explicit_kiwix_update_check_requires_same_origin_and_catalog_identity(a
     assert result["state"] == "unable_to_determine"
     assert result["source_id"] == "update-fixture"
     assert called == ["update-fixture"]
+
+
+@pytest.mark.parametrize("format_name", ["pdf", "epub"])
+def test_document_update_check_never_starts_download(app, monkeypatch, format_name):
+    request, _ = app
+    catalog = request("/api/sources")
+    sid = "document-update"
+    catalog = mutate(request, catalog, "add",
+                     {"title": "Document", "format": format_name,
+                      "source_url": "https://publisher.org/manual." + format_name},
+                     sid=sid)
+    calls = []
+    def check(record):
+        calls.append(record["source_id"])
+        return {"state": "representation_changed",
+                "evidence": "changed strong ETag; newer edition unproven"}
+    monkeypatch.setattr(admin_api.document_update_discovery, "check_installed_document", check)
+    payload = {"source_id": sid, "revision": catalog["revision"]}
+    assert request("/api/update-check", payload, status=403, origin="")["error"]
+    assert request("/api/update-check", dict(payload, revision=0), status=409)["error"]
+    assert not calls
+    result = request("/api/update-check", payload)
+    assert result["state"] == "representation_changed"
+    assert result["source_id"] == sid
+    assert calls == [sid]
