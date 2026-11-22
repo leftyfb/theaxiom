@@ -135,7 +135,8 @@ def acquire_candidate(sid, config):
             if staged_present(replacement_id):
                 raise ValueError("Replacement staging already exists; manual recovery required")
             artifact = zim_source.download_resumable(
-                replacement_id, configuration, offset=0, promote_lock=LOCK)
+                sid, configuration, offset=0, promote_lock=LOCK,
+                staging_id=replacement_id)
             candidate["state"] = "verified"
             candidate["artifact"] = artifact
             target = candidate_path_for(sid)
