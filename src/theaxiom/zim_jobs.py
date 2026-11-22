@@ -230,7 +230,7 @@ def _run_candidate(sid, configuration, guard, signal, offset, validator):
     def progress(current, total, metadata):
         nonlocal last
         now = time.monotonic()
-        if now - last < 0.5 and not metadata.get("verifying"):
+        if now - last < 0.5 and not metadata.get("verifying") and not metadata.get("etag") and not metadata.get("last_modified"):
             return
         with LOCK:
             candidate = read_candidate(sid)
