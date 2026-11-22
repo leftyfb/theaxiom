@@ -53,7 +53,10 @@ def reconcile_activation(load_records, *, source_id, configuration,
         return True
     from . import zim_jobs
     try:
-        zim_jobs.rollback_candidate(source_id, configuration)
+        zim_jobs.rollback_candidate(
+            source_id, configuration,
+            reason="Replacement reader verification failed; previous verified archive restored",
+        )
     except (BlockingIOError, OSError, ValueError, TypeError, KeyError):
         # The serving identity may have changed while reconciliation ran.
         # Never overwrite a divergent job or manufacture a rollback.
