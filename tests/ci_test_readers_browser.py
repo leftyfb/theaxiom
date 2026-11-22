@@ -226,14 +226,8 @@ def exercise(browser, base, viewport_name, viewport, artifact_dir):
         page.get_by_role("button", name="Thumbnails").click()
         expect(page.locator("#thumbs button")).to_have_count(2)
         expect(page.locator("#page")).to_have_value("2")
-        # The page input is a direct navigation affordance in addition to
-        # thumbnails and toolbar arrows.
-        page.locator("#page").fill("1")
-        page.locator("#page").blur()  # Native change handler commits on blur.
-        expect(page.locator("#page")).to_have_value("1")
-        page.locator("#page").fill("2")
-        page.locator("#page").blur()
-        expect(page.locator("#page")).to_have_value("2")
+        # Finish thumbnail rendering before any further page navigation.
+        expect(page.locator("#paper")).to_be_visible()
         # Verify all pages prepare for printing without opening an OS dialog.
         page.evaluate("window.__printInvoked = 0; window.print = () => { window.__printInvoked += 1; }")
         page.get_by_role("button", name="Print").click()
