@@ -205,6 +205,10 @@ def start(sid, config, *, resume=False, restart=False, retry=False):
                 offset, validator = 0, None
                 job = dict(source_id=sid, configuration=configuration, verified=False, downloaded_bytes=0,
                            expected_bytes=int(configuration["expected_size_bytes"]) if configuration["expected_size_bytes"] else None)
+                if retry:
+                    # Preserve the retry budget across fresh retries with no
+                    # staged bytes; replacing the record must not reset it.
+                    job["attempt_history"] = list(old.get("attempt_history", []))
             with (pdf_source._directory("staging", writing=True, format_name="zim") as (sfd, sm, _),
                   pdf_source._directory("library", writing=True, format_name="zim") as (_, lm, reserve)):
                 cap = os.fstatvfs(sfd)
