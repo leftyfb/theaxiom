@@ -869,3 +869,26 @@ def test_invalid_replacement_candidate_metadata_is_rejected(disk, payload):
     path.write_text(payload)
     with pytest.raises(ValueError, match="Invalid ZIM candidate"):
         zim_jobs.read_candidate("ready")
+
+
+def test_replacement_candidate_refuses_symlink_without_following(disk):
+    path = zim_jobs.candidate_path_for("ready")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    outside = path.parent / "unrelated"
+    outside.write_text("private content")
+    path.symlink_to(outside)
+    with pytest.raises((OSError, ValueError)):
+        zim_jobs.read_candidate("ready")
+    assert outside.read_text() == "private content"
+
+
+def test_replacement_candidate_refuses_hardlinked_record(disk):
+    path = zim_jobs.candidate_path_for("ready")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    other = path.parent / "other"
+    other.write_text("{}")
+    import os
+    os.link(other, path)
+    with pytest.raises(ValueError, match="Unsafe ZIM candidate"):
+        zim_jobs.read_candidate("ready")
+    assert other.read_text() == "{}"
