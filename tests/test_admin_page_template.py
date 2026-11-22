@@ -362,3 +362,21 @@ def test_retained_zim_offline_revalidation_is_explicit_and_gated():
     assert "canRevalidate = recoverable && complete" in page
     assert "source?.acquisition?.retained === true" in page
     assert "Number.isSafeInteger(expected)" in page
+
+
+def test_zim_stop_restart_retry_controls_are_context_sensitive():
+    page = render([profile("small-zim", "Small ZIM", format="zim",
+                           source_url="https://example.org/small.zim")])
+    parser = Parser()
+    parser.feed(page)
+    controls = {attrs["data-zim-control"]: attrs for tag, attrs in parser.tags
+                if tag == "button" and "data-zim-control" in attrs}
+    assert {"pause", "resume", "revalidate", "cancel", "cancel-keep",
+            "restart", "retry"} <= controls.keys()
+    assert all("hidden" in controls[action] for action in ("cancel", "cancel-keep", "restart", "retry"))
+    assert "confirm_restart:true" in page
+    assert "operation === 'restart'" in page
+    assert "operation === 'cancel-keep'" in page
+    assert "retries < 3" in page
+    assert "canRestart = ['paused','interrupted','failed','cancelled'].includes(state) && !hasPartial" in page
+    assert "permanently discard the partial download" in page
