@@ -57,7 +57,7 @@ def read_candidate(sid):
     except (ValueError, TypeError) as exc:
         raise ValueError("Invalid ZIM candidate record") from exc
     if (not isinstance(candidate, dict) or candidate.get("source_id") != sid
-            or candidate.get("state") not in {"prepared", "downloading", "verifying", "failed", "verified", "activated", "rolled_back"}
+            or candidate.get("state") not in {"prepared", "downloading", "verifying", "interrupted", "failed", "verified", "activated", "rolled_back"}
             or not isinstance(candidate.get("configuration"), dict)
             or not isinstance(candidate.get("base_artifact"), dict)):
         raise ValueError("Invalid ZIM candidate record")
@@ -70,6 +70,28 @@ def read_candidate(sid):
         raise ValueError("Invalid verified ZIM candidate")
     if candidate["state"] in {"activated", "rolled_back"} and not isinstance(candidate.get("previous_job"), dict):
         raise ValueError("Invalid activated ZIM candidate")
+    return candidate
+
+
+def candidate_status(sid):
+    """Return replacement progress and mark orphaned workers interrupted.
+
+    The serving archive is never changed. A held worker lock means another
+    acquisition may still be running, so do not mark it interrupted.
+    """
+    candidate = read_candidate(sid)
+    if not candidate or candidate["state"] not in {"downloading", "verifying"}:
+        return candidate
+    with LOCK:
+        try:
+            with worker_lock():
+                candidate = read_candidate(sid)
+                if candidate and candidate["state"] in {"downloading", "verifying"}:
+                    candidate["state"] = "interrupted"
+                    candidate["error"] = "Replacement worker stopped; staged bytes retained for review"
+                    _save_candidate(candidate)
+        except BlockingIOError:
+            return candidate
     return candidate
 
 
