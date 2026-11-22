@@ -41,6 +41,7 @@ zim_jobs = importlib.import_module(f"{__package__}.zim_jobs" if __package__ else
 zim_source = importlib.import_module(f"{__package__}.zim_source" if __package__ else "theaxiom.zim_source")
 zim_catalog = importlib.import_module(f"{__package__}.zim_catalog" if __package__ else "theaxiom.zim_catalog")
 zim_refresh = importlib.import_module(f"{__package__}.zim_refresh" if __package__ else "theaxiom.zim_refresh")
+update_check_store = importlib.import_module(f"{__package__}.update_check_store" if __package__ else "theaxiom.update_check_store")
 library_search = importlib.import_module(f"{__package__}.search" if __package__ else "theaxiom.search")
 BIND_HOST = "127.0.0.1"
 BIND_PORT = 8080
@@ -819,6 +820,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         for record in catalog["sources"]:
             sid = record["source_id"]
             busy = source_busy(snapshot, sid)
+            update_check = None
             state = None
             if sid in publication.ROUTES:
                 state = publication.status(matched, sid)
@@ -846,6 +848,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                         if artifact:
                             lifecycles[sid]["artifact"] = artifact
                             verified = True
+                            update_check = update_check_store.load(sid, artifact["sha256"])
                         elif local_job["state"] == "completed":
                             job = dict(local_job, state="unavailable", verified=False, detail="Installed archive unavailable")
                     elif local_job and local_job.get("active"):
@@ -902,6 +905,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 except (ValueError, OSError):
                     replacement = {"state": "unavailable", "error": "Replacement status unavailable"}
             sources.append(dict(record, **lifecycles[sid], acquisition=job, replacement=replacement, replacement_available=replacement_available,
+                                update_check=update_check,
                                 installed_verified=verified, publication=state, mutation_blocked=busy,
                                 publication_filter=publication_filter, download_filter=download_filter))
         return dict(catalog, sources=sources, acquisition_stale=snapshot["stale"])
