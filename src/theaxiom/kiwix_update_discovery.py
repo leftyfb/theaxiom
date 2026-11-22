@@ -43,6 +43,13 @@ def check_kiwix_update(installed: dict, *, fetch=None) -> dict:
             or not isinstance(installed.get("source_url"), str)
             or not re.fullmatch(r"[a-f0-9]{64}", str(installed.get("sha256", "")))):
         return dict(UNKNOWN, evidence="installed identity lacks verified catalog matching fields")
+    # OPDS 'name' is the Kiwix book identity, not necessarily the complete
+    # edition filename family. For known ZIM flavour suffixes, query the stable
+    # book name and still require exact full-family candidate filenames below.
+    catalog_name = family
+    variant = installed.get("variant")
+    if variant in {"maxi", "mini", "nopic"} and family.endswith("_" + variant):
+        catalog_name = family[:-(len(variant) + 1)]
     # Caller-supplied fetch is only intended for deterministic test fixtures.
     fetch = kiwix_metadata_transport.fetch_metadata if fetch is None else fetch
     try:
@@ -51,7 +58,7 @@ def check_kiwix_update(installed: dict, *, fetch=None) -> dict:
         completed_scan = False
         for page in range(MAX_CATALOG_PAGES):
             query = kiwix_metadata_transport.catalog_page_url(
-                family=family, language=installed["language"],
+                family=catalog_name, language=installed["language"],
                 start=page * CATALOG_PAGE_SIZE, count=CATALOG_PAGE_SIZE,
             )
             stage = "catalog metadata request"
