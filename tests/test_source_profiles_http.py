@@ -140,7 +140,7 @@ def test_published_profile_edit_unpublish_remove_and_equivalent_readd(app, tmp_p
     assert not restored["publication"]["enabled"]
     for action in restored["actions"]:
         assert not restored["actions"][action]
-        assert "disabled" in control(card(request("/admin/sources")), "data-action", action)
+        assert 'data-action="' + action + '"' not in card(request("/admin/sources"))
         assert "acquisition disabled" in refuse_action(request, added, 503, action=action)
     publish(request, True, status=409, revision=removed["revision"])
     publish(request, True)
@@ -529,8 +529,10 @@ def test_explicit_kiwix_update_check_requires_same_origin_and_catalog_identity(a
         dict(payload, revision=0), status=409)["error"]
     assert "not support" in request("/api/update-check",
         dict(payload, source_id="missing"), status=400)["error"]
-    assert "not support" in request("/api/update-check",
-        dict(payload, source_id=SID), status=400)["error"]
+    # Pinned Wikipedia is now supported by a separate verification-gated
+    # read-only resolver; this fixture is not an installed ZIM.
+    pinned = request("/api/update-check", dict(payload, source_id=SID))
+    assert pinned["state"] == "unable_to_determine"
     assert not called
     result = request("/api/update-check", payload)
     assert result["state"] == "unable_to_determine"
