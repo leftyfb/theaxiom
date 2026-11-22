@@ -118,3 +118,51 @@ def test_nonpublic_dns_rejected_before_tls(monkeypatch):
                         lambda *args: pytest.fail("TLS must not run"))
     with pytest.raises(ValueError, match="non-public"):
         transport.fetch_metadata(CATALOG, kind="catalog")
+
+
+def test_bounded_catalog_query_reaches_exact_encoded_request_path(monkeypatch):
+    query = transport.catalog_page_url(
+        family="wikipedia_en_all_maxi", language="eng", start=25, count=25)
+    response = Response(body=b"<feed/>")
+    calls = fake_transport(monkeypatch, [response], expected_host="opds.library.kiwix.org")
+    assert transport.fetch_metadata(query, kind="catalog") == b"<feed/>"
+    assert calls[0][1] == (
+        "/catalog/v2/entries?name=wikipedia_en_all_maxi&lang=eng&start=25&count=25"
+    )
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"family": "../etc"}, {"family": "a"},
+    {"family": "wikipedia_en_all_maxi", "language": "en"},
+    {"family": "wikipedia_en_all_maxi", "start": -1},
+    {"family": "wikipedia_en_all_maxi", "start": 1001},
+    {"family": "wikipedia_en_all_maxi", "start": True},
+    {"family": "wikipedia_en_all_maxi", "count": 0},
+    {"family": "wikipedia_en_all_maxi", "count": 51},
+    {"family": "wikipedia_en_all_maxi", "count": True},
+])
+def test_catalog_url_builder_refuses_unbounded_or_ambiguous_filters(kwargs):
+    with pytest.raises(ValueError):
+        transport.catalog_page_url(**dict(
+            family="wikipedia_en_all_maxi", language="eng", **{
+                k: v for k, v in kwargs.items()
+                if k not in {"family", "language"}
+            }) if "family" not in kwargs and "language" not in kwargs
+            else dict({"family": "wikipedia_en_all_maxi", "language": "eng"}, **kwargs))
+
+
+@pytest.mark.parametrize("url", [
+    CATALOG + "?count=-1",
+    CATALOG + "?count=0",
+    CATALOG + "?name=wikipedia_en_all_maxi&lang=eng&start=0&count=0",
+    CATALOG + "?name=wikipedia_en_all_maxi&lang=eng&start=0&count=51",
+    CATALOG + "?name=wikipedia_en_all_maxi&lang=eng&start=0&count=25&count=25",
+    CATALOG + "?name=wikipedia_en_all_maxi&lang=eng&start=0&count=25&url=http://internal/",
+    CATALOG + "?name=wikipedia_en_all_maxi&lang=eng&start=00&count=25",
+    CATALOG + "?lang=eng&name=wikipedia_en_all_maxi&start=0&count=25",
+])
+def test_catalog_refuses_unbounded_duplicate_or_noncanonical_queries(monkeypatch, url):
+    monkeypatch.setattr(transport.pdf_transport, "_public_addresses",
+                        lambda *args: pytest.fail("unsafe query tried DNS"))
+    with pytest.raises(ValueError):
+        transport.fetch_metadata(url, kind="catalog")
