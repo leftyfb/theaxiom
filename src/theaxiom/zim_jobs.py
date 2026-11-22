@@ -38,10 +38,18 @@ def read_candidate(sid):
     """Read candidate metadata without modifying the installed archive."""
     target = candidate_path_for(sid)
     try:
-        with target.open("rb") as stream:
-            raw = stream.read(16385)
+        fd = os.open(target, os.O_RDONLY | os.O_NOFOLLOW)
     except FileNotFoundError:
         return None
+    try:
+        import stat
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise ValueError("Unsafe ZIM candidate record")
+        with os.fdopen(fd, "rb", closefd=False) as stream:
+            raw = stream.read(16385)
+    finally:
+        os.close(fd)
     if len(raw) > 16384:
         raise ValueError("ZIM candidate record exceeds size limit")
     try:
