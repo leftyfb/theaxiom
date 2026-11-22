@@ -56,6 +56,12 @@ def exercise(browser, base, name, viewport, artifacts):
         page.locator("#submit").click()
         expect(page).to_have_url(base + "/admin")
         expect(page.locator("h1")).to_contain_text("Manage offline sources")
+        # The settings page polls storage status. A local import inside
+        # do_GET previously shadowed WIKIPEDIA_SOURCE and crashed this API.
+        storage_status = context.request.get(base + "/api/storage-status")
+        assert storage_status.status in (200, 503), (
+            name, "storage status endpoint crashed", storage_status.status)
+        assert isinstance(storage_status.json(), dict)
 
         # An authenticated browser context must not authorize a separate
         # browser context. This catches accidental global auth state and
