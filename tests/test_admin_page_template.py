@@ -380,3 +380,25 @@ def test_zim_stop_restart_retry_controls_are_context_sensitive():
     assert "retries < 3" in page
     assert "canRestart = ['paused','interrupted','failed','cancelled'].includes(state) && !hasPartial" in page
     assert "permanently discard the partial download" in page
+
+
+def test_zim_replacement_controls_render_with_explicit_confirmation():
+    parser = Parser()
+    parser.feed(render([profile("replacement", format="zim",
+                                source_url="https://example.org/archive.zim")]))
+    actions = [attrs for tag, attrs in parser.tags
+               if tag == "button" and "data-zim-replacement" in attrs]
+    assert {attrs["data-zim-replacement"] for attrs in actions} == {
+        "prepare", "download", "cancel", "activate", "rollback", "discard"}
+    assert all("hidden" in attrs for attrs in actions)
+    page = render([profile("replacement", format="zim",
+                           source_url="https://example.org/archive.zim")])
+    assert "confirm_restart:true" in page
+    assert "action:'zim-replacement-' + operation" in page
+
+
+def test_pdf_card_has_no_zim_replacement_controls():
+    parser = Parser()
+    parser.feed(render([profile("document", format="pdf")]))
+    assert not [attrs for tag, attrs in parser.tags
+                if tag == "button" and "data-zim-replacement" in attrs]
