@@ -57,7 +57,7 @@ def read_candidate(sid):
     except (ValueError, TypeError) as exc:
         raise ValueError("Invalid ZIM candidate record") from exc
     if (not isinstance(candidate, dict) or candidate.get("source_id") != sid
-            or candidate.get("state") not in {"prepared", "verified"}
+            or candidate.get("state") not in {"prepared", "verified", "activated"}
             or not isinstance(candidate.get("configuration"), dict)
             or not isinstance(candidate.get("base_artifact"), dict)):
         raise ValueError("Invalid ZIM candidate record")
@@ -66,8 +66,10 @@ def read_candidate(sid):
             raise ValueError("Invalid ZIM candidate configuration")
     except (KeyError, TypeError, ValueError) as exc:
         raise ValueError("Invalid ZIM candidate configuration") from exc
-    if candidate["state"] == "verified" and not isinstance(candidate.get("artifact"), dict):
+    if candidate["state"] in {"verified", "activated"} and not isinstance(candidate.get("artifact"), dict):
         raise ValueError("Invalid verified ZIM candidate")
+    if candidate["state"] == "activated" and not isinstance(candidate.get("previous_job"), dict):
+        raise ValueError("Invalid activated ZIM candidate")
     return candidate
 
 
@@ -155,6 +157,56 @@ def acquire_candidate(sid, config):
             finally:
                 Path(name).unlink(missing_ok=True)
             return candidate
+
+
+def activate_candidate(sid, config):
+    """Switch the serving record only after the replacement artifact is installed.
+
+    The old content-addressed archive remains on disk. Candidate metadata is
+    retained for a subsequent explicit rollback operation.
+    """
+    configuration = identity(config)
+    with LOCK:
+        with worker_lock():
+            candidate = read_candidate(sid)
+            if not candidate or candidate["configuration"] != configuration:
+                raise ValueError("No matching replacement candidate")
+            if candidate["state"] != "verified":
+                raise ValueError("Replacement must be verified before activation")
+            live = read(sid)
+            if (not live or live.get("state") != "completed"
+                    or live.get("artifact") != candidate["base_artifact"]
+                    or not installed(live, live["configuration"])):
+                raise ValueError("Installed archive changed; activation refused")
+            replacement = dict(source_id=sid, state="completed", active=False,
+                               verified=True, configuration=configuration,
+                               artifact=candidate["artifact"])
+            if not installed(replacement, configuration):
+                raise ValueError("Replacement archive is missing or invalid")
+            # Preserve the complete original serving record for rollback.
+            candidate["previous_job"] = live
+            candidate["state"] = "activated"
+            _save_candidate(candidate)
+            save(replacement)
+            return replacement
+
+
+def _save_candidate(candidate):
+    target = candidate_path_for(candidate["source_id"])
+    fd, name = tempfile.mkstemp(prefix=".candidate-", dir=target.parent)
+    try:
+        with os.fdopen(fd, "w") as stream:
+            json.dump(candidate, stream, separators=(",", ":"))
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(name, target)
+        dfd = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(dfd)
+        finally:
+            os.close(dfd)
+    finally:
+        Path(name).unlink(missing_ok=True)
 
 
 def discard_candidate(sid, config):
