@@ -226,10 +226,9 @@ def exercise(browser, base, viewport_name, viewport, artifact_dir):
         page.get_by_role("button", name="Thumbnails").click()
         expect(page.locator("#thumbs button")).to_have_count(2)
         expect(page.locator("#page")).to_have_value("2")
-        # Explicitly wait for the active thumbnail render to finish before
-        # exercising the native page input (which fires change on blur).
+        # The reader remains interactive after the thumbnail panel is
+        # reopened; this does not assert direct page-number editing.
         expect(page.get_by_role("button", name="Previous page")).to_be_enabled()
-        # Finish thumbnail rendering before any further page navigation.
         expect(page.locator("#paper")).to_be_visible()
         # Keyboard focus must stay within an accessible document control.
         page.locator("#page").focus()
@@ -237,6 +236,15 @@ def exercise(browser, base, viewport_name, viewport, artifact_dir):
         # Reader navigation remains available after reopening thumbnails.
         previous_page.click()
         expect(page.locator("#page")).to_have_value("1")
+        next_page.click()
+        expect(page.locator("#page")).to_have_value("2")
+        # A fresh reader URL must reset navigation to page one and clear
+        # transient search/thumbnail state, even after prior interaction.
+        page.reload()
+        expect(page.locator("#message")).to_be_empty(timeout=20000)
+        expect(page.locator("#page")).to_have_value("1")
+        expect(page.locator("#search-tools")).to_be_hidden()
+        expect(page.locator("#thumbs")).to_be_hidden()
         next_page.click()
         expect(page.locator("#page")).to_have_value("2")
         # Verify all pages prepare for printing without opening an OS dialog.
