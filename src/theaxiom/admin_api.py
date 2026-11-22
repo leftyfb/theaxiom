@@ -1140,7 +1140,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             self._send_json(200, settings)
         elif self.path.rstrip("/") == "/api/action":
             data = self._read_body()
-            if data.get("action") in {"zim-download", "zim-resume", "zim-pause", "zim-cancel", "zim-cancel-keep", "zim-restart", "zim-revalidate"}:
+            if data.get("action") in {"zim-download", "zim-resume", "zim-pause", "zim-cancel", "zim-cancel-keep", "zim-restart", "zim-retry", "zim-revalidate"}:
                 self._start_zim(data)
             elif data.get("action") == "import":
                 self._import_pdf(data)
@@ -1392,7 +1392,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
     def _start_zim(self, data):
         sid = data.get("source_id")
         if (set(data) != {"source_id", "action", "revision"} or not isinstance(sid, str)
-                or data.get("action") not in {"zim-download", "zim-resume", "zim-pause", "zim-cancel", "zim-cancel-keep", "zim-restart", "zim-revalidate"}
+                or data.get("action") not in {"zim-download", "zim-resume", "zim-pause", "zim-cancel", "zim-cancel-keep", "zim-restart", "zim-retry", "zim-revalidate"}
                 or not catalog_store.ID_RE.fullmatch(sid) or not self._valid_revision(data["revision"])):
             self._send_json(400, {"error": "ZIM control requires a source ID and current revision only"})
             return
@@ -1418,6 +1418,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     result = zim_jobs.start(sid, record["configuration"], resume=True)
                 elif operation == "zim-restart":
                     result = zim_jobs.start(sid, record["configuration"], restart=True)
+                elif operation == "zim-retry":
+                    result = zim_jobs.start(sid, record["configuration"], retry=True)
                 else:
                     result = zim_jobs.start(sid, record["configuration"])
             except BlockingIOError:
