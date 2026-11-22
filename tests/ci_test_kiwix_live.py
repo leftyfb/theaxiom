@@ -115,6 +115,32 @@ def main():
             assert not partial.exists()
             assert (storage_root / "library" / "zim" /
                     resumed["artifact"]["filename"]).read_bytes() == payload
+
+            # A real archive must also survive explicit cancel-with-retention,
+            # without publishing incomplete bytes or losing its resume identity.
+            retained = stage / ".download-retained.partial"
+            retained.write_bytes(payload[:offset])
+            retained.chmod(0o600)
+            zim_jobs.save(dict(source_id="retained", state="failed", active=False,
+                               configuration=zim_jobs.identity(config),
+                               downloaded_bytes=offset, expected_bytes=len(payload),
+                               etag='"real-zim-v1"'))
+            assert zim_jobs.control("retained", config, "cancel-keep")["accepted"]
+            assert retained.read_bytes() == payload[:offset]
+            assert zim_jobs.status("retained")["state"] == "paused"
+            assert not list((storage_root / "library" / "zim").glob("retained.*.zim"))
+            with patch.object(zim_source.pdf_transport, "open_pdf", transport):
+                assert zim_jobs.start("retained", config, resume=True)["accepted"]
+                for worker in threading.enumerate():
+                    if worker.name == "zim-acquisition":
+                        worker.join(10)
+                        assert not worker.is_alive()
+            recovered = zim_jobs.status("retained")
+            assert recovered["state"] == "completed" and recovered["verified"], recovered
+            assert not retained.exists()
+            assert (storage_root / "library" / "zim" /
+                    recovered["artifact"]["filename"]).read_bytes() == payload
+            assert calls[-1] == (offset, '"real-zim-v1"')
         output.unlink()
         with archive.open("rb") as stream:
             book_id = zim_catalog.archive_uuid(stream)
