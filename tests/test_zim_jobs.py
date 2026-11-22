@@ -456,7 +456,8 @@ def test_stale_partial_is_never_overwritten_by_fresh_start(disk, state):
     zim_jobs.save(dict(source_id="ready", state=state, active=False,
                        configuration=zim_jobs.identity(CONFIG),
                        downloaded_bytes=len(payload)))
-    with pytest.raises(ValueError, match="Partial download exists"):
+    error = ("Archive already installed" if state == "completed" else "Partial download exists")
+    with pytest.raises(ValueError, match=error):
         zim_jobs.start("ready", CONFIG)
     assert partial.read_bytes() == payload
     assert zim_jobs.read("ready")["state"] == state
