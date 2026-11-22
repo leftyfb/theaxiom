@@ -185,6 +185,30 @@ def main():
             assert not interrupted.exists()
             assert (storage_root / "library" / "zim" /
                     finished["artifact"]["filename"]).read_bytes() == payload
+
+            # Retry exhaustion must remain enforced with real ZIM bytes in
+            # staging. Explicit restart cannot silently discard those bytes.
+            exhausted = stage / ".download-exhausted.partial"
+            exhausted.write_bytes(payload[:offset])
+            exhausted.chmod(0o600)
+            zim_jobs.save(dict(source_id="exhausted", state="failed", active=False,
+                               configuration=zim_jobs.identity(config),
+                               downloaded_bytes=offset, expected_bytes=len(payload),
+                               etag='"real-zim-v1"',
+                               attempt_history=[{"operation": "retry"}] * zim_jobs.MAX_RETRIES))
+            with pytest.raises(ValueError, match="retry limit"):
+                zim_jobs.start("exhausted", config, retry=True)
+            with pytest.raises(ValueError, match="Partial download exists"):
+                zim_jobs.start("exhausted", config, restart=True)
+            assert exhausted.read_bytes() == payload[:offset]
+            assert not list((storage_root / "library" / "zim").glob("exhausted.*.zim"))
+            assert zim_jobs.control("exhausted", config, "cancel")["accepted"]
+            assert not exhausted.exists()
+            assert zim_jobs.start("exhausted", config, restart=True)["accepted"]
+            for worker in threading.enumerate():
+                if worker.name == "zim-acquisition":
+                    worker.join(10)
+                    assert not worker.is_alive()
         output.unlink()
         with archive.open("rb") as stream:
             book_id = zim_catalog.archive_uuid(stream)
