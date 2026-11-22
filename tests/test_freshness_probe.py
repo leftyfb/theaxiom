@@ -284,5 +284,76 @@ class RemoteRevisionEvidenceTests(unittest.TestCase):
                 self.assertEqual(self.classify(remote)["state"], "unable_to_determine")
 
 
+
+class PublisherCatalogEditionTests(unittest.TestCase):
+    INSTALLED = {
+        "verified": True, "sha256": "a" * 64, "edition": "2026-08",
+        "family": "wikipedia_en_all_maxi", "language": "eng",
+        "variant": "maxi", "publisher": "kiwix",
+        "source_url": "https://download.kiwix.org/zim/wikipedia/wikipedia_en_all_maxi_2026-08.zim",
+    }
+    CANDIDATE = {
+        "sha256": "b" * 64, "edition": "2026-11",
+        "family": "wikipedia_en_all_maxi", "language": "eng",
+        "variant": "maxi", "publisher": "kiwix",
+        "source_url": "https://download.kiwix.org/zim/wikipedia/wikipedia_en_all_maxi_2026-11.zim",
+    }
+
+    def compare(self, candidate=None, installed=None, trusted=True):
+        return freshness_probe.compare_catalog_editions(
+            self.INSTALLED if installed is None else installed,
+            self.CANDIDATE if candidate is None else candidate,
+            trusted_catalog=trusted,
+        )
+
+    def test_authenticated_new_edition_and_digest_is_available(self):
+        result = self.compare()
+        self.assertEqual(result["state"], "update_available")
+        self.assertEqual(result["installed_edition"], "2026-08")
+        self.assertEqual(result["candidate_edition"], "2026-11")
+        self.assertEqual(result["candidate_sha256"], "b" * 64)
+
+    def test_untrusted_catalog_never_reports_available(self):
+        self.assertEqual(self.compare(trusted=False)["state"], "unable_to_determine")
+
+    def test_equal_edition_and_digest_is_current(self):
+        candidate = dict(self.INSTALLED)
+        self.assertEqual(self.compare(candidate=candidate)["state"], "up_to_date")
+
+    def test_older_edition_is_not_an_update(self):
+        candidate = dict(self.CANDIDATE, edition="2025-12")
+        self.assertEqual(self.compare(candidate=candidate)["state"], "older_candidate")
+
+    def test_invalid_or_conflicting_edition_and_digest_are_unknown(self):
+        for change in (
+            {"edition": "2026-13"}, {"edition": "2026-1"},
+            {"edition": "2026-11", "sha256": "a" * 64},
+            {"edition": "2026-08", "sha256": "b" * 64},
+            {"sha256": "bad"}, {"sha256": "A" * 64},
+            {"source_url": "http://download.kiwix.org/zim/latest.zim"},
+            {"source_url": "https://other.invalid/zim/latest.zim"},
+            {"source_url": "https://user@download.kiwix.org/zim/latest.zim"},
+            {"source_url": "https://download.kiwix.org:444/zim/latest.zim"},
+            {"language": "spa"}, {"variant": "mini"},
+            {"publisher": "other"}, {"family": "wikipedia_en_all_mini"},
+        ):
+            with self.subTest(change=change):
+                candidate = dict(self.CANDIDATE, **change)
+                self.assertEqual(self.compare(candidate=candidate)["state"], "unable_to_determine")
+
+    def test_installed_evidence_must_be_verified_and_complete(self):
+        for change in ({"verified": False}, {"sha256": None}, {"edition": ""},
+                       {"language": ""}, {"publisher": ""}):
+            with self.subTest(change=change):
+                self.assertEqual(self.compare(installed=dict(self.INSTALLED, **change))["state"],
+                                 "unable_to_determine")
+
+    def test_content_length_and_last_modified_never_confer_authority(self):
+        candidate = dict(self.CANDIDATE, content_length=9999999,
+                         last_modified="Wed, 21 Oct 2030 07:28:00 GMT")
+        self.assertEqual(self.compare(candidate=candidate, trusted=False)["state"],
+                         "unable_to_determine")
+
+
 if __name__ == "__main__":
     unittest.main()
