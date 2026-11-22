@@ -57,7 +57,7 @@ def read_candidate(sid):
     except (ValueError, TypeError) as exc:
         raise ValueError("Invalid ZIM candidate record") from exc
     if (not isinstance(candidate, dict) or candidate.get("source_id") != sid
-            or candidate.get("state") != "prepared"
+            or candidate.get("state") not in {"prepared", "verified"}
             or not isinstance(candidate.get("configuration"), dict)
             or not isinstance(candidate.get("base_artifact"), dict)):
         raise ValueError("Invalid ZIM candidate record")
@@ -66,6 +66,8 @@ def read_candidate(sid):
             raise ValueError("Invalid ZIM candidate configuration")
     except (KeyError, TypeError, ValueError) as exc:
         raise ValueError("Invalid ZIM candidate configuration") from exc
+    if candidate["state"] == "verified" and not isinstance(candidate.get("artifact"), dict):
+        raise ValueError("Invalid verified ZIM candidate")
     return candidate
 
 
@@ -106,6 +108,50 @@ def prepare_candidate(sid, config):
 
 
 
+
+def acquire_candidate(sid, config):
+    """Synchronously download and verify replacement bytes without switching the live archive.
+
+    Uses a separate staging identity; callers must explicitly activate later.
+    On failure, candidate metadata and the installed job remain intact.
+    """
+    configuration = identity(config)
+    with LOCK:
+        with worker_lock():
+            candidate = read_candidate(sid)
+            live = read(sid)
+            if not candidate or candidate["configuration"] != configuration:
+                raise ValueError("No matching replacement candidate")
+            if (not live or live.get("state") != "completed"
+                    or live.get("artifact") != candidate["base_artifact"]
+                    or not installed(live, live["configuration"])):
+                raise ValueError("Installed archive changed; replacement requires review")
+            replacement_id = sid + "-candidate"
+            catalog_store.CatalogStore._validate_id(replacement_id)
+            if staged_size(replacement_id):
+                raise ValueError("Replacement staging already exists; manual recovery required")
+            artifact = zim_source.download_resumable(
+                replacement_id, configuration, offset=0, promote_lock=LOCK)
+            candidate["state"] = "verified"
+            candidate["artifact"] = artifact
+            target = candidate_path_for(sid)
+            fd, name = tempfile.mkstemp(prefix=".candidate-", dir=target.parent)
+            try:
+                with os.fdopen(fd, "w") as stream:
+                    json.dump(candidate, stream, separators=(",", ":"))
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.replace(name, target)
+                dfd = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY)
+                try:
+                    os.fsync(dfd)
+                finally:
+                    os.close(dfd)
+            finally:
+                Path(name).unlink(missing_ok=True)
+            return candidate
+
+
 def discard_candidate(sid, config):
     """Explicitly discard preparation metadata, never archive bytes or the live job.
 
@@ -118,6 +164,8 @@ def discard_candidate(sid, config):
             candidate = read_candidate(sid)
             if not candidate or candidate["configuration"] != configuration:
                 raise ValueError("No matching replacement candidate")
+            if candidate["state"] != "prepared":
+                raise ValueError("Verified replacement cannot be discarded without artifact cleanup")
             live = read(sid)
             if (not live or live.get("state") != "completed"
                     or live.get("artifact") != candidate.get("base_artifact")):
