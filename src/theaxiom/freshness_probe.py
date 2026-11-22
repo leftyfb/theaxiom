@@ -13,13 +13,14 @@ def probe_source(
     timeout: float = 5.0,
     opener=urllib.request.urlopen,
 ) -> dict[str, Any]:
-    """Probe one origin URL and compare reported length with manifest metadata."""
+    """Probe origin metadata only; a HEAD response cannot verify local bytes."""
     result: dict[str, Any] = {
         "source_url": source_url,
         "reachable": False,
         "last_modified": "",
         "content_length": "",
-        "local_current": False,
+        "local_current": False,  # compatibility: never infer installed state from HEAD
+        "origin_length_matches_manifest": None,
         "error": "",
     }
     request = urllib.request.Request(source_url, method="HEAD")
@@ -38,9 +39,10 @@ def probe_source(
 
     reported_length = result["content_length"]
     if reported_length and expected_bytes:
-        result["local_current"] = int(reported_length) == int(expected_bytes) and bool(expected_sha256)
-    elif expected_sha256:
-        result["local_current"] = True
+        try:
+            result["origin_length_matches_manifest"] = int(reported_length) == int(expected_bytes)
+        except (ValueError, TypeError):
+            result["origin_length_matches_manifest"] = None
     return result
 
 
@@ -58,7 +60,8 @@ def probe_documents(
                 "source_url": "", "id": doc.get("id", ""),
                 "title": doc.get("title", ""), "reachable": False,
                 "last_modified": "", "content_length": "",
-                "local_current": False, "error": "no source_url in manifest",
+                "local_current": False, "origin_length_matches_manifest": None,
+                "error": "no source_url in manifest",
             })
             continue
         probe = probe_source(source_url, doc.get("sha256", ""), doc.get("bytes", 0), timeout, opener)
