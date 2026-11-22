@@ -6,6 +6,7 @@ downloaded, or authorized for automatic replacement.
 """
 from __future__ import annotations
 
+import logging
 import re
 import threading
 import time
@@ -20,6 +21,30 @@ MIN_RECHECK_SECONDS = 300
 CATALOG_PAGE_SIZE = 25
 MAX_CATALOG_PAGES = 4
 UNKNOWN = {"state": "unable_to_determine", "evidence": "publisher candidate could not be verified"}
+
+# systemd captures stderr in the application journal. Keep this handler isolated
+# from unrelated application logging, with no remote payloads or URLs.
+LOGGER = logging.getLogger("theaxiom.kiwix_update")
+if not LOGGER.handlers:
+    _journal_handler = logging.StreamHandler()
+    _journal_handler.setFormatter(logging.Formatter(
+        "%(levelname)s theaxiom.update_check %(message)s"))
+    LOGGER.addHandler(_journal_handler)
+LOGGER.setLevel(logging.INFO)
+LOGGER.propagate = False
+
+
+def _report(result: dict, *, family: str, stage: str, **counts: int) -> dict:
+    """Log validated archive identity and bounded diagnostic counts only."""
+    safe_counts = " ".join(
+        f"{name}={value}" for name, value in counts.items()
+        if name in {"page", "entries", "parsed", "candidates"} and type(value) is int
+    )
+    level = logging.WARNING if result.get("state") == "unable_to_determine" else logging.INFO
+    LOGGER.log(level, "family=%r stage=%s state=%s evidence=%s %s",
+               family, stage, result.get("state"), result.get("evidence", "none"),
+               safe_counts)
+    return result
 
 
 def check_kiwix_update(installed: dict, *, fetch=None) -> dict:
@@ -50,6 +75,7 @@ def check_kiwix_update(installed: dict, *, fetch=None) -> dict:
     variant = installed.get("variant")
     if variant in {"maxi", "mini", "nopic"} and family.endswith("_" + variant):
         catalog_name = family[:-(len(variant) + 1)]
+    LOGGER.info("family=%r stage=start edition=%s catalog_name=%r", family, edition, catalog_name)
     # Caller-supplied fetch is only intended for deterministic test fixtures.
     fetch = kiwix_metadata_transport.fetch_metadata if fetch is None else fetch
     try:
@@ -69,6 +95,8 @@ def check_kiwix_update(installed: dict, *, fetch=None) -> dict:
             # Count all Atom entries, including unsupported acquisition types,
             # so a partial page cannot silently terminate the catalog scan.
             entry_count = len(ET.fromstring(raw).findall(kiwix_opds.ATOM + "entry"))
+            LOGGER.info("family=%r stage=catalog_scan page=%d entries=%d parsed=%d",
+                        family, page, entry_count, len(entries))
             for entry in entries:
                 if entry["acquisition_kind"] != "metalink":
                     continue
@@ -85,21 +113,24 @@ def check_kiwix_update(installed: dict, *, fetch=None) -> dict:
         if not completed_scan:
             # The filtered catalog may have more pages: no claim that the
             # selected edition is the latest or unique without full evidence.
-            return dict(UNKNOWN, evidence="filtered catalog scan exceeded the bounded page limit")
+            return _report(dict(UNKNOWN, evidence="filtered catalog scan exceeded the bounded page limit"),
+                           family=family, stage="catalog_scan", candidates=len(candidates))
         if not candidates:
             # Listing the installed edition on a complete filtered scan is
             # evidence that no later edition was listed, not that the remote
             # artifact matches the installed digest.
             if installed_edition_listed:
-                return {"state": "no_newer_edition_listed",
+                return _report({"state": "no_newer_edition_listed",
                         "evidence": "complete filtered catalog listed no later matching edition",
-                        "installed_edition": edition}
-            return dict(UNKNOWN, evidence="installed edition was absent from the filtered publisher catalog")
+                        "installed_edition": edition}, family=family, stage="catalog_match")
+            return _report(dict(UNKNOWN, evidence="installed edition was absent from the filtered publisher catalog"),
+                           family=family, stage="catalog_match", candidates=0)
         candidates.sort(key=lambda candidate: candidate[0], reverse=True)
         newest = candidates[0][0]
         # Ambiguous duplicate records must not result in an arbitrary choice.
         if sum(version == newest for version, _ in candidates) != 1:
-            return dict(UNKNOWN, evidence="multiple matching newest publisher editions were listed")
+            return _report(dict(UNKNOWN, evidence="multiple matching newest publisher editions were listed"),
+                           family=family, stage="catalog_match", candidates=len(candidates))
         entry = candidates[0][1]
         link = entry["acquisition_url"]
         name = urlsplit(link).path.rsplit("/", 1)[-1][:-6]
@@ -112,13 +143,15 @@ def check_kiwix_update(installed: dict, *, fetch=None) -> dict:
         )
         stage = "publisher candidate identity comparison"
         candidate = kiwix_opds.resolve_catalog_candidate(entry, metadata, installed=installed)
-        return freshness_probe.compare_catalog_editions(
+        return _report(freshness_probe.compare_catalog_editions(
             installed, candidate, trusted_catalog=True,
-        )
-    except (ValueError, TypeError, KeyError, OverflowError, OSError):
-        # Keep fail-closed semantics, but preserve a static, safe diagnostic
-        # stage. Never echo exception text, untrusted URLs or remote payloads.
-        return dict(UNKNOWN, evidence=f"Kiwix metadata check failed during {stage}")
+        ), family=family, stage="edition_comparison", candidates=len(candidates))
+    except (ValueError, TypeError, KeyError, OverflowError, OSError) as exc:
+        # Exception type only; messages may include remote URLs or payloads.
+        LOGGER.warning("family=%r stage=%s exception_type=%s",
+                       family, stage, type(exc).__name__)
+        return _report(dict(UNKNOWN, evidence=f"Kiwix metadata check failed during {stage}"),
+                       family=family, stage=stage)
 
 
 def installed_identity_from_job(job: dict, artifact: dict) -> dict | None:
