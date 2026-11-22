@@ -903,7 +903,8 @@ def test_acquire_candidate_keeps_live_archive_when_transfer_fails(disk, monkeypa
     changed = CONFIG | {"source_url": "https://example.org/next.zim"}
     zim_jobs.prepare_candidate("ready", changed)
     def fail(*args, **kwargs):
-        assert args[0] == "ready-candidate"
+        assert args[0] == "ready"
+        assert kwargs["staging_id"] == "ready-candidate"
         raise ValueError("network unavailable")
     monkeypatch.setattr(zim_source, "download_resumable", fail)
     with pytest.raises(ValueError, match="network unavailable"):
@@ -921,7 +922,7 @@ def test_acquire_candidate_records_verified_artifact_without_activation(disk, mo
     zim_jobs.save(live)
     changed = CONFIG | {"source_url": "https://example.org/next.zim"}
     zim_jobs.prepare_candidate("ready", changed)
-    candidate_artifact = {"filename": "ready-candidate." + "a" * 64 + ".zim",
+    candidate_artifact = {"filename": "ready." + "a" * 64 + ".zim",
                           "sha256": "a" * 64, "bytes": len(data)}
     monkeypatch.setattr(zim_source, "download_resumable",
                         lambda *args, **kwargs: candidate_artifact)
