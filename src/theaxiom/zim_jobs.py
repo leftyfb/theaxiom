@@ -278,18 +278,22 @@ def _run(job, guard, signal, offset, validator, *, local=False):
     def progress(current, total, metadata):
         nonlocal last
         now = time.monotonic()
-        for key in ("etag", "last_modified"):
-            if metadata.get(key):
-                job[key] = metadata[key]
-        if total is not None:
-            job["expected_bytes"] = total
-        if metadata.get("verifying"):
-            job["state"] = "verifying"
-        if now - last >= 1 or metadata.get("verifying") or current == offset:
-            job.update(downloaded_bytes=current, sampled_at=time.time(),
-                       speed_bytes_per_second=max(0, current-offset) / max(1, now-begun))
-            save(job)
-            last = now
+        # The worker can report progress after an operator has requested a
+        # stop. Serialize both writes so a late verification notification
+        # cannot replace the durable pausing/cancelling state in the UI.
+        with LOCK:
+            for key in ("etag", "last_modified"):
+                if metadata.get(key):
+                    job[key] = metadata[key]
+            if total is not None:
+                job["expected_bytes"] = total
+            if metadata.get("verifying") and job["state"] not in {"pausing", "cancelling"}:
+                job["state"] = "verifying"
+            if now - last >= 1 or metadata.get("verifying") or current == offset:
+                job.update(downloaded_bytes=current, sampled_at=time.time(),
+                           speed_bytes_per_second=max(0, current-offset) / max(1, now-begun))
+                save(job)
+                last = now
 
     try:
         job.update(state="verifying" if local else "downloading", sampled_at=time.time())
