@@ -10,6 +10,7 @@ import http.client
 from io import BytesIO
 from contextlib import contextmanager
 import threading
+import pytest
 from pathlib import Path
 import shutil
 import socket
@@ -141,6 +142,23 @@ def main():
             assert (storage_root / "library" / "zim" /
                     recovered["artifact"]["filename"]).read_bytes() == payload
             assert calls[-1] == (offset, '"real-zim-v1"')
+
+            # Discard cancellation is destructive only for the selected partial;
+            # it must never disturb previously published readable archives.
+            discarded = stage / ".download-discarded.partial"
+            discarded.write_bytes(payload[:offset])
+            discarded.chmod(0o600)
+            zim_jobs.save(dict(source_id="discarded", state="paused", active=False,
+                               configuration=zim_jobs.identity(config),
+                               downloaded_bytes=offset, expected_bytes=len(payload),
+                               etag='"real-zim-v1"'))
+            assert zim_jobs.control("discarded", config, "cancel")["accepted"]
+            assert zim_jobs.status("discarded")["state"] == "cancelled"
+            assert not discarded.exists()
+            assert not list((storage_root / "library" / "zim").glob("discarded.*.zim"))
+            assert archive.read_bytes() == payload
+            with pytest.raises(ValueError, match="matching paused"):
+                zim_jobs.start("discarded", config, resume=True)
         output.unlink()
         with archive.open("rb") as stream:
             book_id = zim_catalog.archive_uuid(stream)
