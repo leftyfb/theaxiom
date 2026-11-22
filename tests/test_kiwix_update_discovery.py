@@ -52,6 +52,7 @@ def test_newer_edition_requires_both_documents_and_sha():
     assert result["state"] == "update_available"
     assert result["candidate_edition"] == "2026-11"
     assert result["candidate_sha256"] == "b" * 64
+    assert result["candidate_bytes"] == 123456
     assert [kind for kind, _ in calls] == ["catalog", "metalink"]
 
 
