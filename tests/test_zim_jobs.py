@@ -1239,3 +1239,49 @@ def test_candidate_retry_refuses_unvalidated_partial(disk):
             zim_jobs.start_candidate_acquisition("ready", changed)
     assert zim_jobs.read("ready") == live
     assert zim_jobs.read_candidate("ready")["state"] == "failed"
+
+
+def test_candidate_late_cancel_preserves_verified_artifact(disk):
+    artifact = zim_source.install_stream("ready", CONFIG, BytesIO(fixture_bytes()))
+    live = dict(source_id="ready", state="completed", active=False, verified=True,
+                configuration=zim_jobs.identity(CONFIG), artifact=artifact)
+    zim_jobs.save(live)
+    changed = CONFIG | {"source_url": "https://example.org/replacement.zim"}
+    zim_jobs.prepare_candidate("ready", changed)
+    entered, release = threading.Event(), threading.Event()
+
+    def promoted(*args, **kwargs):
+        entered.set()
+        assert release.wait(5)
+        return artifact
+
+    with patch.object(zim_source, "download_resumable", promoted):
+        try:
+            zim_jobs.start_candidate_acquisition("ready", changed)
+            assert entered.wait(5)
+            assert zim_jobs.cancel_candidate_acquisition("ready", changed)["state"] == "cancelling"
+        finally:
+            release.set()
+        for thread in threading.enumerate():
+            if thread.name == "zim-replacement":
+                thread.join(5)
+                assert not thread.is_alive()
+    candidate = zim_jobs.read_candidate("ready")
+    assert candidate["state"] == "verified"
+    assert candidate["artifact"] == artifact
+    assert "Cancellation arrived" in candidate["error"]
+    assert zim_jobs.read("ready") == live
+
+
+def test_candidate_status_recovers_orphaned_worker_without_touching_live(disk):
+    artifact = zim_source.install_stream("ready", CONFIG, BytesIO(fixture_bytes()))
+    live = dict(source_id="ready", state="completed", active=False, verified=True,
+                configuration=zim_jobs.identity(CONFIG), artifact=artifact)
+    zim_jobs.save(live)
+    changed = CONFIG | {"source_url": "https://example.org/replacement.zim"}
+    zim_jobs.prepare_candidate("ready", changed)
+    candidate = zim_jobs.read_candidate("ready")
+    candidate["state"] = "cancelling"
+    zim_jobs._save_candidate(candidate)
+    assert zim_jobs.candidate_status("ready")["state"] == "interrupted"
+    assert zim_jobs.read("ready") == live
