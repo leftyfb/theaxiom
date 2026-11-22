@@ -28,6 +28,12 @@ This repository is the standalone home for the project. The current migration pr
 
 **Deployment remains on hold while Ready.gov downloads on Vancouver.** See the [development-to-deployment acceptance register](docs/deployment-acceptance-register.md) for exact CI evidence, pending live checks, and authorization gates. A green GitHub Actions run does not authorize deployment.
 
+## License
+
+The Axiom application source code and original project documentation are licensed under the **Apache License, Version 2.0**. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+This license **does not apply** to downloaded, imported, or served ZIM, PDF, EPUB, Wikipedia, Ready.gov, or other third-party content. Each resource retains its own copyright and license; operators are responsible for permission, attribution, and redistribution terms. External dependencies (including Kiwix, PDF.js, Python packages, and system tools) retain their respective licenses. No third-party material is relicensed by this repository's LICENSE. See [dependency documentation](docs/dependencies.md).
+
 ## Development
 
 The supported development baseline is Ubuntu 24.04 LTS and Ubuntu 26.04 LTS with Python 3.10 or newer:
