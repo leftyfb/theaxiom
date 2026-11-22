@@ -130,5 +130,9 @@ def test_update_available_badge_only_when_cached_evidence_confirms_it():
     }
     states = run_ui([confirmed, unconfirmed, job("completed")])["states"]
     assert states[0]["update-status"]["hidden"] is False
+    assert not states[0]["update-details"]["hidden"]
+    assert "2026-11" in states[0]["update-details"]["textContent"]
     assert states[1]["update-status"]["hidden"] is True
+    assert states[1]["update-details"]["hidden"] is True
+    assert states[1]["update-details"]["textContent"] == ""
     assert states[2]["update-status"]["hidden"] is True
