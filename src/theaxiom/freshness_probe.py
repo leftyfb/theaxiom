@@ -84,6 +84,14 @@ def installed_evidence(snapshot: dict[str, Any] | None, entry: dict[str, Any]) -
     jobs = snapshot.get("acquisitions")
     if not isinstance(jobs, list):
         return result
+    # Missing identities must never compare equal to missing job fields.
+    # A verified checksum without an unambiguous source/file binding is not
+    # evidence that the requested local artifact is installed.
+    source_id = entry.get("source_id")
+    filename = entry.get("filename")
+    if (not isinstance(source_id, str) or not source_id.strip()
+            or not isinstance(filename, str) or not filename.strip()):
+        return result
     expected_bytes = entry.get("bytes")
     expected_digest = entry.get("sha256")
     if (type(expected_bytes) is not int or expected_bytes <= 0
