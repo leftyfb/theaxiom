@@ -1487,3 +1487,42 @@ def test_explicit_installed_deletion_refuses_modified_archive(disk):
         zim_jobs.delete_installed("ready")
     assert archive.exists()
     assert zim_jobs.read("ready") is not None
+
+
+def test_installed_job_reader_refuses_symlink_and_preserves_target(disk):
+    archive = zim_source.install_stream("ready", CONFIG, BytesIO(fixture_bytes()))
+    live = dict(source_id="ready", state="completed", active=False,
+                verified=True, configuration=zim_jobs.identity(CONFIG),
+                artifact=archive)
+    zim_jobs.save(live)
+    target = zim_jobs.path_for("ready")
+    original = target.read_bytes()
+    outside = disk / "independent-job.json"
+    outside.write_bytes(original)
+    target.unlink()
+    target.symlink_to(outside)
+    with pytest.raises(OSError):
+        zim_jobs.read("ready")
+    with pytest.raises(OSError):
+        zim_jobs.delete_installed("ready")
+    assert outside.read_bytes() == original
+    assert (disk / "library/zim" / archive["filename"]).exists()
+
+
+def test_installed_job_reader_refuses_hardlinks_before_explicit_deletion(disk):
+    import os
+
+    archive = zim_source.install_stream("ready", CONFIG, BytesIO(fixture_bytes()))
+    live = dict(source_id="ready", state="completed", active=False,
+                verified=True, configuration=zim_jobs.identity(CONFIG),
+                artifact=archive)
+    zim_jobs.save(live)
+    target = zim_jobs.path_for("ready")
+    shared = disk / "shared-job.json"
+    os.link(target, shared)
+    with pytest.raises(ValueError, match="Unsafe ZIM job"):
+        zim_jobs.read("ready")
+    with pytest.raises(ValueError, match="Unsafe ZIM job"):
+        zim_jobs.delete_installed("ready")
+    assert shared.exists() and target.exists()
+    assert (disk / "library/zim" / archive["filename"]).exists()
