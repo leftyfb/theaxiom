@@ -521,3 +521,12 @@ def test_cancel_keep_on_failed_job_preserves_staging(disk):
     result = zim_jobs.control("ready", CONFIG, "cancel-keep")
     assert result["state"] == "paused"
     assert zim_jobs.read("ready")["state"] == "paused"
+
+
+def test_cancel_keep_requires_exclusive_worker_lock(disk):
+    zim_jobs.save(dict(source_id="ready", state="failed", active=False,
+                       configuration=zim_jobs.identity(CONFIG), downloaded_bytes=0))
+    with patch.object(zim_jobs, "worker_lock", side_effect=BlockingIOError):
+        with pytest.raises(BlockingIOError):
+            zim_jobs.control("ready", CONFIG, "cancel-keep")
+    assert zim_jobs.read("ready")["state"] == "failed"
