@@ -27,14 +27,15 @@ class Response:
 
 
 class FreshnessProbeTests(unittest.TestCase):
-    def test_matching_manifest_metadata_is_current_without_network(self):
+    def test_matching_origin_length_does_not_prove_local_installation(self):
         opener = mock.Mock(return_value=Response())
         result = freshness_probe.probe_source(
             "https://example.invalid/document", "trusted-sha256", 754723, opener=opener
         )
 
         self.assertTrue(result["reachable"])
-        self.assertTrue(result["local_current"])
+        self.assertFalse(result["local_current"])
+        self.assertTrue(result["origin_length_matches_manifest"])
         self.assertEqual(result["content_length"], "754723")
         self.assertEqual(result["last_modified"], Response.headers["Last-Modified"])
         opener.assert_called_once()
@@ -53,6 +54,7 @@ class FreshnessProbeTests(unittest.TestCase):
 
         self.assertTrue(result["reachable"])
         self.assertFalse(result["local_current"])
+        self.assertFalse(result["origin_length_matches_manifest"])
         self.assertEqual(result["id"], "trusted-id")
         self.assertEqual(result["title"], "Trusted title")
         opener.assert_called_once()
@@ -65,6 +67,7 @@ class FreshnessProbeTests(unittest.TestCase):
 
         self.assertFalse(result["reachable"])
         self.assertFalse(result["local_current"])
+        self.assertIsNone(result["origin_length_matches_manifest"])
         self.assertIn("offline", result["error"])
         opener.assert_called_once()
 
@@ -77,8 +80,28 @@ class FreshnessProbeTests(unittest.TestCase):
 
         self.assertFalse(result["reachable"])
         self.assertFalse(result["local_current"])
+        self.assertIsNone(result["origin_length_matches_manifest"])
         self.assertEqual(result["error"], "no source_url in manifest")
         opener.assert_not_called()
+
+    def test_missing_length_does_not_claim_origin_match_or_local_installation(self):
+        response = Response()
+        response.headers = {"Last-Modified": "Wed, 21 Oct 2015 07:28:00 GMT"}
+        result = freshness_probe.probe_source(
+            "https://example.invalid/document", "trusted-sha256", 754723,
+            opener=mock.Mock(return_value=response))
+        self.assertTrue(result["reachable"])
+        self.assertIsNone(result["origin_length_matches_manifest"])
+        self.assertFalse(result["local_current"])
+
+    def test_malformed_length_is_unknown_not_a_server_error(self):
+        response = Response()
+        response.headers = {"Content-Length": "not-a-number"}
+        result = freshness_probe.probe_source(
+            "https://example.invalid/document", "trusted-sha256", 754723,
+            opener=mock.Mock(return_value=response))
+        self.assertIsNone(result["origin_length_matches_manifest"])
+        self.assertFalse(result["local_current"])
 
 
 if __name__ == "__main__":
