@@ -519,3 +519,43 @@ def test_journal_reports_missing_job_before_discovery(monkeypatch):
                         lambda fmt, *args: warnings.append(fmt % args))
     assert discovery.refresh_checked_source("missing")["state"] == "unable_to_determine"
     assert any("stage=job_lookup" in msg for msg in warnings)
+
+
+def test_verified_installed_zim_without_operator_supplied_sha_supports_update_discovery():
+    """The independently measured digest is authoritative when the source was downloaded without a pre-pinned SHA."""
+    job = installed_job_for_fixture()
+    job["configuration"] = dict(job["configuration"], sha256="")
+    installed = discovery.installed_identity_from_job(job, job["artifact"])
+    assert installed == INSTALLED
+
+    # An expected publisher pin, if supplied, must still agree with the
+    # independently verified installed artifact.
+    job["configuration"]["sha256"] = "b" * 64
+    assert discovery.installed_identity_from_job(job, job["artifact"]) is None
+
+
+def test_unpinned_sha_verified_fema_can_reach_opds_discovery(monkeypatch, tmp_path):
+    from theaxiom import update_check_store, zim_jobs
+    family = "ready.gov_en_all"
+    root = "https://download.kiwix.org/zim/zimit/"
+    job = installed_job_for_fixture()
+    job["source_id"] = "fema-ready"
+    job["configuration"] = {
+        "format": "zim", "source_url": root + family + "_2026-10.zim",
+        "expected_size_bytes": "", "sha256": "",
+    }
+    digest = "a" * 64
+    job["artifact"] = {"filename": "fema-ready." + digest + ".zim",
+                       "sha256": digest, "bytes": 123456}
+    monkeypatch.setattr(zim_jobs, "status", lambda sid: job)
+    monkeypatch.setattr(zim_jobs, "installed", lambda j, config: j["artifact"])
+    monkeypatch.setattr(update_check_store, "root_path", lambda: tmp_path / "checks")
+    calls = []
+    def fetch(url, *, kind):
+        calls.append((kind, url))
+        assert kind == "catalog"
+        assert "name=ready.gov_en_all" in url
+        return feed(atom("2026-10", family=family))
+    result = discovery.refresh_checked_source("fema-ready", fetch=fetch)
+    assert result["state"] == "no_newer_edition_listed"
+    assert len(calls) == 1
