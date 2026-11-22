@@ -655,8 +655,11 @@ def test_publishing_state_rejects_all_stop_controls_without_touching_archive(dis
                configuration=zim_jobs.identity(CONFIG), downloaded_bytes=len(fixture_bytes()))
     zim_jobs.save(job)
     before = zim_jobs.read("ready")
-    with pytest.raises(ValueError, match="already finalizing"):
-        zim_jobs.control("ready", CONFIG, operation)
+    # status() correctly reconciles orphaned 'publishing' records after a
+    # restart. Simulate the live worker's state for this control-boundary test.
+    with patch.object(zim_jobs, "status", return_value=job):
+        with pytest.raises(ValueError, match="already finalizing"):
+            zim_jobs.control("ready", CONFIG, operation)
     assert zim_jobs.read("ready") == before
     assert not list((disk / "library/zim").iterdir())
 
