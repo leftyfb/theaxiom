@@ -290,3 +290,28 @@ def test_incomplete_bounded_catalog_does_not_claim_latest_candidate():
     result = discovery.check_kiwix_update(INSTALLED, fetch=fetch)
     assert result["state"] == "unable_to_determine"
     assert len(calls) == discovery.MAX_CATALOG_PAGES
+
+
+def test_discovery_accepts_one_same_publisher_mirror_in_multi_mirror_metalink():
+    calls = []
+    doc = metalink("2026-11").replace(
+        b"</file>",
+        (b"<url>https://lb.download.kiwix.org/zim/wikipedia/"
+         b"wikipedia_en_all_maxi_2026-11.zim</url></file>"),
+    )
+    result = discovery.check_kiwix_update(
+        INSTALLED, fetch=fetcher(feed(atom("2026-11")), doc, calls))
+    assert result["state"] == "update_available"
+    assert result["candidate_url"] == ROOT + FAMILY + "_2026-11.zim"
+    assert [kind for kind, _ in calls] == ["catalog", "metalink"]
+
+
+def test_discovery_never_uses_untrusted_alternate_mirror_when_origin_missing():
+    calls = []
+    doc = metalink("2026-11").replace(
+        ("https://download.kiwix.org/zim/wikipedia/" + FAMILY + "_2026-11.zim").encode(),
+        ("https://lb.download.kiwix.org/zim/wikipedia/" + FAMILY + "_2026-11.zim").encode(),
+    )
+    result = discovery.check_kiwix_update(
+        INSTALLED, fetch=fetcher(feed(atom("2026-11")), doc, calls))
+    assert result["state"] == "unable_to_determine"
