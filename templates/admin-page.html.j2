@@ -1183,6 +1183,11 @@
             : result.state === 'no_newer_edition_listed'
             ? 'No newer edition listed in the checked Kiwix catalog. This does not verify the installed archive is the latest everywhere.'
             : 'Unable to determine whether a newer edition is available from publisher metadata.';
+          if (result.state === 'unable_to_determine' && typeof result.evidence === 'string' && result.evidence) {
+            // The API returns bounded, nonsecret status evidence from the update
+            // checker; textContent prevents interpretation as HTML.
+            feedback.textContent += ' Reason: ' + result.evidence.slice(0, 180);
+          }
         } catch (error) {
           feedback.textContent = error.message || 'Publisher update check unavailable.';
         } finally {
