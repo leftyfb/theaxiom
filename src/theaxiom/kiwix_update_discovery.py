@@ -142,3 +142,40 @@ def check_installed_kiwix_job(source_id: str, *, fetch=None) -> dict:
         return check_kiwix_update(installed, fetch=fetch)
     except (OSError, ValueError, TypeError, KeyError):
         return dict(UNKNOWN)
+
+
+def refresh_checked_source(source_id: str, *, fetch=None) -> dict:
+    """Explicit metadata check; save evidence only for the verified installed job.
+
+    This is not scheduled, and cannot download a candidate or change serving.
+    """
+    from . import update_check_store, zim_jobs
+    try:
+        job = zim_jobs.status(source_id)
+        if not job:
+            return dict(UNKNOWN)
+        artifact = zim_jobs.installed(job, job["configuration"])
+        installed = installed_identity_from_job(job, artifact) if artifact else None
+        if installed is None:
+            return dict(UNKNOWN)
+        result = check_kiwix_update(installed, fetch=fetch)
+        update_check_store.save(source_id, installed["sha256"], result)
+        return result
+    except (OSError, ValueError, TypeError, KeyError):
+        return dict(UNKNOWN)
+
+
+def cached_checked_source(source_id: str) -> dict:
+    """Read current source evidence without network, using live installed identity."""
+    from . import update_check_store, zim_jobs
+    try:
+        job = zim_jobs.status(source_id)
+        if not job:
+            return dict(UNKNOWN)
+        artifact = zim_jobs.installed(job, job["configuration"])
+        installed = installed_identity_from_job(job, artifact) if artifact else None
+        if installed is None:
+            return dict(UNKNOWN)
+        return update_check_store.load(source_id, installed["sha256"])
+    except (OSError, ValueError, TypeError, KeyError):
+        return dict(UNKNOWN)
