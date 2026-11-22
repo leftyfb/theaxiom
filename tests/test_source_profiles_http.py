@@ -462,3 +462,25 @@ def test_admin_source_refresh_never_updates_removed_verification_field(app):
     assert "put('verified'" not in page
     assert "querySelector('[data-field=\\\"verified\\\"]')" not in page
     assert "data-field=\"status\"" in page
+
+
+def test_zim_restart_requires_explicit_confirmation_at_http_boundary(app, monkeypatch):
+    request, _ = app
+    catalog = request("/api/sources")
+    revision = catalog["revision"]
+    calls = []
+
+    def start(sid, config, *, restart=False):
+        calls.append((sid, restart))
+        return {"accepted": True, "state": "queued"}
+
+    monkeypatch.setattr(admin_api.zim_jobs, "start", start)
+    base = dict(source_id="fema-ready", action="zim-restart", revision=revision)
+    assert request("/api/action", base, status=400)["error"]
+    assert request("/api/action", dict(base, confirm_restart=False), status=400)["error"]
+    assert request("/api/action", dict(base, confirm_restart="true"), status=400)["error"]
+    assert request("/api/action", dict(base, confirm_restart=True, extra=True), status=400)["error"]
+    assert calls == []
+    result = request("/api/action", dict(base, confirm_restart=True), status=202)
+    assert result["accepted"]
+    assert calls == [("fema-ready", True)]
