@@ -153,6 +153,16 @@ def staged_size(sid):
             os.close(fd)
 
 
+def staged_present(sid):
+    """Detect even zero-byte or unsafe leftovers before a fresh download."""
+    with pdf_source._directory("staging", writing=True, format_name="zim") as (root, _, _):
+        try:
+            os.stat(zim_source.partial_name(sid), dir_fd=root, follow_symlinks=False)
+        except FileNotFoundError:
+            return False
+        return True
+
+
 def start(sid, config, *, resume=False):
     configuration = identity(config)
     with LOCK:
@@ -176,7 +186,7 @@ def start(sid, config, *, resume=False):
                 # A stale partial is never safe to truncate, even if its job
                 # record says cancelled/completed (for example after a crash
                 # between the record and filesystem operations).
-                if staged_size(sid):
+                if staged_present(sid):
                     raise ValueError("Partial download exists; resume or cancel it first")
                 offset, validator = 0, None
                 job = dict(source_id=sid, configuration=configuration, verified=False, downloaded_bytes=0,
