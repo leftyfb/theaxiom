@@ -1549,11 +1549,17 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 self._send_json(503, {"error": "ZIM job or storage unavailable; check Storage settings before retrying"})
                 return
         if operation in {"zim-replacement-activate", "zim-replacement-rollback"}:
-            # Switching the serving job is not enough: Kiwix reads a
-            # separately generated manifest. Refresh it using the existing
-            # publication reconciliation path, which verifies the reader's
-            # actual OPDS book set before acknowledging readiness.
-            zim_refresh.schedule(lambda: SOURCE_CATALOG.get()["sources"])
+            # Kiwix reads a separate manifest and only acknowledges the
+            # exact loaded book set. A failed activation must restore the
+            # retained previous verified serving record, never delete it.
+            if operation == "zim-replacement-activate":
+                zim_refresh.schedule(
+                    lambda: SOURCE_CATALOG.get()["sources"],
+                    activated_source=sid,
+                    activated_configuration=record["configuration"],
+                )
+            else:
+                zim_refresh.schedule(lambda: SOURCE_CATALOG.get()["sources"])
         self._send_json(202, result)
 
     def _refuse_acquisition(self, data):
