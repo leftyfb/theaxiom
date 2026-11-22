@@ -186,7 +186,7 @@ def open_pdf(url, *, format_name="pdf", limit=None, total_seconds=None, offset=0
             connection.close()
 
 
-def download(source_id, url, *, expected_size=None, expected_sha256=None):
+def download(source_id, url, *, expected_size=None, expected_sha256=None, capture_validator=False):
     from contextlib import ExitStack
     with ExitStack() as stack:
         try:
@@ -199,8 +199,11 @@ def download(source_id, url, *, expected_size=None, expected_sha256=None):
             raise DownloadError("PDF publisher connection timed out") from exc
         except (OSError, http.client.HTTPException) as exc:
             raise DownloadError("PDF publisher network connection or HTTP response failed") from exc
-        return pdf_source.install_stream(source_id, stream, expected_size=expected_size,
-                                         expected_sha256=expected_sha256)
+        artifact = pdf_source.install_stream(source_id, stream, expected_size=expected_size,
+                                             expected_sha256=expected_sha256)
+        # Only expose the validator from the exact successful GET that was
+        # installed. It is not independent evidence of a newer edition.
+        return (artifact, stream.etag) if capture_validator else artifact
 
 
 def probe_document_metadata(url, *, if_none_match=None, total_seconds=15):
