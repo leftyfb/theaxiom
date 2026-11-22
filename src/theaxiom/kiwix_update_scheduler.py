@@ -56,6 +56,7 @@ def check_records(records, *, max_checks=DEFAULT_MAX_CHECKS, start_index=0, chec
         results.append({"source_id": sid,
                         "state": state if state in {
                             "update_available", "up_to_date", "older_candidate",
+                             "no_newer_edition_listed",
                             "representation_changed", "representation_unchanged",
                             "unable_to_determine"} else "unable_to_determine"})
     return results
