@@ -257,7 +257,13 @@ def _run_candidate(sid, configuration, guard, signal, offset, validator):
             if not candidate or candidate["configuration"] != configuration:
                 raise ValueError("Replacement candidate changed during acquisition")
             if candidate["state"] == "cancelling":
-                raise ValueError("Replacement cancellation arrived after verification; activation remains manual")
+                # Promotion may already have completed before cancellation arrived.
+                # Preserve the verified artifact so it is not orphaned; activation
+                # remains a separate, explicit operator decision.
+                candidate.update(state="verified", artifact=artifact)
+                candidate["error"] = "Cancellation arrived after verification; archive retained, activation requires confirmation"
+                _save_candidate(candidate)
+                return
             candidate.update(state="verified", artifact=artifact)
             candidate.pop("error", None)
             _save_candidate(candidate)
