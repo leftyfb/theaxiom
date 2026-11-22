@@ -489,3 +489,33 @@ def test_journal_logs_failure_stage_and_exception_class_only(monkeypatch):
     assert any("stage=catalog metadata request exception_type=ValueError" in msg
                for msg in messages)
     assert all(secret not in msg for msg in messages)
+
+
+def test_journal_reports_cache_hit_without_network(monkeypatch, tmp_path):
+    from theaxiom import update_check_store, zim_jobs
+    monkeypatch.setattr(update_check_store, "root_path", lambda: tmp_path / "checks")
+    job = installed_job_for_fixture()
+    monkeypatch.setattr(zim_jobs, "status", lambda sid: job)
+    monkeypatch.setattr(zim_jobs, "installed", lambda j, config: j["artifact"])
+    messages = []
+    monkeypatch.setattr(discovery.LOGGER, "info",
+                        lambda fmt, *args: messages.append(fmt % args))
+    monkeypatch.setattr(discovery.LOGGER, "warning", lambda *args: None)
+    monkeypatch.setattr(discovery.LOGGER, "log", lambda *args: None)
+    fetch = fetcher(feed(atom("2026-08")), b"", [])
+    assert discovery.refresh_checked_source("wikipedia", fetch=fetch)["state"] == "no_newer_edition_listed"
+    assert discovery.refresh_checked_source("wikipedia", fetch=lambda *args, **kwargs: (
+        _ for _ in ()).throw(AssertionError("cache should prevent network")))["state"] == "no_newer_edition_listed"
+    assert any("stage=cache_hit state=no_newer_edition_listed" in line for line in messages)
+    assert any("stage=metadata_check cache=miss" in line for line in messages)
+
+
+def test_journal_reports_missing_job_before_discovery(monkeypatch):
+    from theaxiom import zim_jobs
+    monkeypatch.setattr(zim_jobs, "status", lambda sid: None)
+    warnings = []
+    monkeypatch.setattr(discovery.LOGGER, "info", lambda *args: None)
+    monkeypatch.setattr(discovery.LOGGER, "warning",
+                        lambda fmt, *args: warnings.append(fmt % args))
+    assert discovery.refresh_checked_source("missing")["state"] == "unable_to_determine"
+    assert any("stage=job_lookup" in msg for msg in warnings)
