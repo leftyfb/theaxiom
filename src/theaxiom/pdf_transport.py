@@ -201,3 +201,75 @@ def download(source_id, url, *, expected_size=None, expected_sha256=None):
             raise DownloadError("PDF publisher network connection or HTTP response failed") from exc
         return pdf_source.install_stream(source_id, stream, expected_size=expected_size,
                                          expected_sha256=expected_sha256)
+
+
+def probe_document_metadata(url, *, if_none_match=None, total_seconds=15):
+    """HEAD-only metadata probe; never read or download a document body.
+
+    Reuse the same pinned TLS/public DNS protections as document acquisition.
+    Redirects are deliberately refused: following publisher-provided URLs
+    requires separate trust review. No response metadata verifies local bytes
+    or authorizes an update.
+    """
+    if not isinstance(url, str) or not pdf_source.valid_source_url(url):
+        raise ValueError("Metadata check requires a plain HTTPS source URL")
+    if (if_none_match is not None and
+            (not isinstance(if_none_match, str)
+             or re.fullmatch(r'"[\\x21\\x23-\\x7e]{1,200}"', if_none_match) is None)):
+        raise ValueError("Conditional HEAD requires a strong, safe ETag")
+    if (type(total_seconds) not in (float, int)
+            or not 0 < total_seconds <= TOTAL_SECONDS):
+        raise ValueError("Invalid metadata check deadline")
+    parsed = urlsplit(url)
+    deadline = time.monotonic() + total_seconds
+    addresses = _public_addresses(parsed.hostname)
+    _remaining(deadline)
+    connection = _PinnedHTTPS(parsed.hostname, addresses[0], deadline)
+    try:
+        headers = {"Accept-Encoding": "identity", "Connection": "close",
+                   "User-Agent": "The-Axiom document metadata check"}
+        if if_none_match is not None:
+            headers["If-None-Match"] = if_none_match
+        connection.request("HEAD", parsed.path, headers=headers)
+        response = connection.getresponse()
+        try:
+            _remaining(deadline)
+            # Never follow even an HTTPS redirect: the configured publisher
+            # and its exact URL are part of the installed source identity.
+            if response.status not in (200, 304):
+                return {"source_url": url, "reachable": False,
+                        "status": response.status, "etag": "",
+                        "last_modified": "", "content_length": "",
+                        "error": "metadata unavailable"}
+            if response.getheader("Content-Encoding") not in (None, "identity"):
+                raise ValueError("Encoded metadata response refused")
+            if response.headers.get_all("Transfer-Encoding", []):
+                raise ValueError("Unexpected transfer framing on HEAD")
+            etags = response.headers.get_all("ETag", [])
+            modified = response.headers.get_all("Last-Modified", [])
+            lengths = response.headers.get_all("Content-Length", [])
+            if max(len(etags), len(modified), len(lengths)) > 1:
+                raise ValueError("Ambiguous metadata response headers")
+            etag = (etags[0] if etags and
+                    re.fullmatch(r'"[\\x21\\x23-\\x7e]{1,200}"', etags[0])
+                    else "")
+            last_modified = (modified[0] if modified and
+                             re.fullmatch(r"[\\x20-\\x7e]{1,200}", modified[0])
+                             else "")
+            size = ""
+            if lengths:
+                if (not lengths[0].isascii() or not lengths[0].isdecimal()
+                        or len(lengths[0]) > 20):
+                    raise ValueError("Invalid document metadata length")
+                size = lengths[0]
+            if response.status == 304 and not if_none_match:
+                raise ValueError("Unsolicited conditional response")
+            return {"source_url": url, "reachable": True, "status": response.status,
+                    "etag": etag, "last_modified": last_modified,
+                    "content_length": size, "error": ""}
+        finally:
+            response.close()
+    except (OSError, TimeoutError, http.client.HTTPException) as exc:
+        raise DownloadError("Document metadata connection failed or timed out") from exc
+    finally:
+        connection.close()
