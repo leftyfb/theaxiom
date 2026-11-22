@@ -147,3 +147,64 @@ def parse_metalink(raw: bytes, *, expected_filename: str) -> dict[str, object]:
         "filename": expected_filename, "source_url": urls[0],
         "bytes": size, "sha256": sha, "verification": "metadata_only",
     }
+
+
+def resolve_catalog_candidate(
+    entry: dict[str, str],
+    metalink: dict[str, object],
+    *,
+    installed: dict[str, object],
+) -> dict[str, object]:
+    """Bind a parsed OPDS entry and separately fetched Metalink to one family.
+
+    These values are NOT trusted merely because they parse. The caller must
+    obtain both responses via the guarded transport and pin the Metalink URL
+    to the exact OPDS acquisition link before calling this function. This is
+    a conservative identity check, not an update permission.
+    """
+    import re
+    if (not isinstance(entry, dict) or not isinstance(metalink, dict)
+            or not isinstance(installed, dict)
+            or entry.get("acquisition_kind") != "metalink"
+            or entry.get("verification") != "unverified"
+            or metalink.get("verification") != "metadata_only"):
+        raise ValueError("Unverified or incomplete Kiwix candidate")
+    source = entry.get("acquisition_url")
+    if not isinstance(source, str):
+        raise ValueError("Missing OPDS acquisition link")
+    location = urlsplit(source)
+    if (location.scheme != "https" or location.hostname not in DOWNLOAD_HOSTS
+            or not location.path.endswith(".zim.meta4")
+            or location.query or location.fragment):
+        raise ValueError("Invalid OPDS acquisition link")
+    filename = location.path.rsplit("/", 1)[-1][:-6]  # remove .meta4, never synthesize a URL
+    if not isinstance(metalink.get("filename"), str) or metalink["filename"] != filename:
+        raise ValueError("OPDS and Metalink file identities disagree")
+    family = installed.get("family")
+    edition = installed.get("edition")
+    if (not isinstance(family, str) or not re.fullmatch(r"[a-z0-9_]{3,120}", family)
+            or not isinstance(edition, str) or not re.fullmatch(r"20[0-9]{2}-(0[1-9]|1[0-2])", edition)
+            or not re.fullmatch(re.escape(family) + r"_(20[0-9]{2}-(?:0[1-9]|1[0-2]))\.zim", filename)):
+        raise ValueError("Candidate is outside the installed archive family")
+    candidate_edition = filename[len(family) + 1:-4]
+    if (not isinstance(metalink.get("sha256"), str)
+            or not re.fullmatch(r"[a-f0-9]{64}", metalink["sha256"])
+            or type(metalink.get("bytes")) is not int
+            or metalink["bytes"] < 96):
+        raise ValueError("Candidate lacks a verified metadata pin")
+    candidate_url = metalink.get("source_url")
+    if not isinstance(candidate_url, str):
+        raise ValueError("Missing explicit Metalink download URL")
+    parsed_url = urlsplit(candidate_url)
+    installed_url = installed.get("source_url")
+    if (not isinstance(installed_url, str)
+            or parsed_url.hostname != urlsplit(installed_url).hostname
+            or parsed_url.path.rsplit("/", 1)[-1] != filename):
+        raise ValueError("Candidate crosses the installed publisher host")
+    return {
+        "family": family, "edition": candidate_edition,
+        "language": installed.get("language"), "variant": installed.get("variant"),
+        "publisher": installed.get("publisher"),
+        "source_url": candidate_url, "sha256": metalink["sha256"],
+        "bytes": metalink["bytes"], "verification": "metadata_only",
+    }
