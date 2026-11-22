@@ -371,7 +371,13 @@ def worker_lock():
 def status(sid):
     # Resolve an interrupted, durable replacement transition before exposing
     # the serving job to the catalog or admin API.
-    recover_candidate_transition(sid)
+    candidate = read_candidate(sid)
+    if candidate and candidate["state"] in {"activated", "rolled_back"}:
+        try:
+            recover_candidate_transition(sid)
+        except BlockingIOError:
+            # A running acquisition owns the worker lock; status is read-only.
+            pass
     with LOCK:
         job = read(sid)
         if job and job["state"] in ACTIVE:
