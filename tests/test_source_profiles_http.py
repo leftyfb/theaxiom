@@ -508,3 +508,31 @@ def test_zim_recovery_actions_dispatch_through_http(app, monkeypatch, action, me
                                          revision=revision), status=202)
     assert result["accepted"]
     assert calls == [("fema-ready", True if method == "start" else keyword)]
+
+
+def test_explicit_kiwix_update_check_requires_same_origin_and_catalog_identity(app, monkeypatch):
+    request, _ = app
+    catalog = request("/api/sources")
+    catalog = mutate(request, catalog, "add", {
+        "title": "Offline update test", "format": "zim",
+        "source_url": PIN["source_url"],
+        "expected_size_bytes": str(PIN["bytes"]), "sha256": PIN["sha256"],
+    }, sid="update-fixture")
+    called = []
+    monkeypatch.setattr(admin_api.kiwix_update_discovery, "refresh_checked_source",
+                        lambda sid: (called.append(sid) or {
+                            "state": "unable_to_determine", "evidence": "fixture has no installed content",
+                        }))
+    payload = {"source_id": "update-fixture", "revision": catalog["revision"]}
+    assert "same-origin" in request("/api/update-check", payload, status=403, origin="")["error"]
+    assert "revision" in request("/api/update-check",
+        dict(payload, revision=0), status=409)["error"]
+    assert "not support" in request("/api/update-check",
+        dict(payload, source_id="missing"), status=400)["error"]
+    assert "not support" in request("/api/update-check",
+        dict(payload, source_id=SID), status=400)["error"]
+    assert not called
+    result = request("/api/update-check", payload)
+    assert result["state"] == "unable_to_determine"
+    assert result["source_id"] == "update-fixture"
+    assert called == ["update-fixture"]
