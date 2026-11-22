@@ -995,6 +995,7 @@ def test_activate_candidate_retains_previous_job_and_archive(disk):
     zim_jobs._save_candidate(candidate)
     activated = zim_jobs.activate_candidate("ready", changed)
     assert activated["configuration"] == zim_jobs.identity(changed)
+    assert activated["active"] is False
     assert zim_jobs.read_candidate("ready")["previous_job"] == live
     assert zim_jobs.read_candidate("ready")["state"] == "activated"
     assert (disk / "library/zim" / artifact["filename"]).read_bytes() == data
