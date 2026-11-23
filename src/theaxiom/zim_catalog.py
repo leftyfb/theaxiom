@@ -45,7 +45,9 @@ def legacy_pinned_entries():
     from . import source_catalog
     result = {}
     for entry in source_catalog.builtin_sources():
-        if entry.get("kind") != "zim" or entry.get("legacy_acquisition") != "systemd-monitor":
+        from . import acquisition_monitor
+        if (entry.get("kind") != "zim" or
+                source_catalog.LEGACY_ACQUISITION_UNITS.get(entry.get("source_id")) != acquisition_monitor.UNIT):
             continue
         sid, filename, digest, size = (entry.get("source_id"), entry.get("filename"),
                                        entry.get("sha256"), entry.get("bytes"))
