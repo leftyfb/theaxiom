@@ -1167,3 +1167,23 @@ def test_public_search_paginates_only_selected_published_source(app, monkeypatch
     request("/search?q=water&page=2", status=400)
     request("/search?q=water&source=reference&page=0", status=400)
     request("/search?q=water&source=reference&page=2&base=3", status=400)
+
+
+def test_acquisition_preview_adds_retained_document_bytes_to_peak(app, monkeypatch):
+    request, _ = app
+    catalog = request("/api/sources")
+    for sid, format_name, size in [("guide", "pdf", "900"), ("book", "epub", "")]:
+        catalog = mutate(request, catalog, "add", dict(
+            title=sid, format=format_name, expected_size_bytes=size,
+            source_url=f"https://example.org/{sid}.{format_name}"), sid=sid)
+    measured = Mock(side_effect=[{"guide": 120}, {"book": 240}])
+    monkeypatch.setattr(admin_api.pdf_source, "preview_installed_sizes", measured)
+    result = request("/api/acquisition-preview", {
+        "revision": catalog["revision"], "source_ids": ["guide", "book"],
+    })
+    pdf, epub = result["sources"]
+    assert pdf["installed_bytes"] == 120 and pdf["peak_bytes"] == 1020
+    assert epub["installed_bytes"] == 240 and epub["peak_bytes"] is None
+    assert [call.args for call in measured.call_args_list] == [
+        (["guide"], "pdf"), (["book"], "epub"),
+    ]

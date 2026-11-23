@@ -140,6 +140,35 @@ def _file(directory, mount_id, filename, size, *, allowed_links=(1,)):
         yield stream
 
 
+def preview_installed_sizes(source_ids, format_name):
+    """Count retained, structurally safe document files without reading their contents."""
+    if format_name not in {"pdf", "epub"}:
+        raise ValueError("Unsupported document format")
+    sizes = dict.fromkeys(source_ids, 0)
+    try:
+        with _directory("library", format_name=format_name) as (directory, mount, _):
+            with os.scandir(directory) as entries:
+                for index, entry in enumerate(entries):
+                    if index >= 10_000:
+                        return {}
+                    sid, _, suffix = entry.name.partition(".")
+                    if sid not in sizes or sizes[sid] is None:
+                        continue
+                    if not re.fullmatch(r"[a-f0-9]{64}\." + format_name, suffix):
+                        continue
+                    try:
+                        size = entry.stat(follow_symlinks=False).st_size
+                        if not 0 < size <= MAX_BYTES:
+                            raise ValueError("Unexpected installed document size")
+                        with _file(directory, mount, entry.name, size):
+                            sizes[sid] += size
+                    except (OSError, ValueError):
+                        sizes[sid] = None
+    except (OSError, ValueError):
+        return {}
+    return sizes
+
+
 def _verify(stream, artifact, destination=None):
     """Verify the pin and basic PDF framing, not PDF semantics or active content."""
     remaining = artifact["bytes"]

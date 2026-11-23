@@ -858,6 +858,19 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 limit = pdf_source.MAX_BYTES if format_name == "pdf" else epub_source.MAX_BYTES
                 estimate = _preview_document_acquisition(configuration, byte_limit=limit)
             rows.append(dict(estimate, title=record["profile"]["title"], source_id=sid, format=format_name))
+        for format_name in ("pdf", "epub"):
+            documents = [row for row in rows if row["format"] == format_name
+                         and row["state"] == "estimated"]
+            if not documents:
+                continue
+            sizes = pdf_source.preview_installed_sizes(
+                [row["source_id"] for row in documents], format_name)
+            for row in documents:
+                installed = sizes.get(row["source_id"])
+                staging = row["staging_bytes"]
+                row["installed_bytes"] = installed
+                if installed is not None and staging is not None:
+                    row["peak_bytes"] = installed + staging
         return {"sources": rows, "capacity": _preview_capacity(rows)}
 
     def _zim_publications(self, catalog=None):

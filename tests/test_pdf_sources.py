@@ -554,3 +554,26 @@ def test_pdf_compact_toolbar_and_disclosed_search():
     assert '$("find").value = "";' in script
     assert 'event.key === "Escape"' in script
     assert '$("search-toggle").focus();' in script
+
+
+@pytest.mark.parametrize("format_name", ["pdf", "epub"])
+def test_preview_counts_safe_retained_document_editions(disk, format_name):
+    _, library = disk
+    library = library.parent / format_name
+    library.mkdir(exist_ok=True)
+
+    def artifact(sid, digest, data):
+        path = library / f"{sid}.{digest * 64}.{format_name}"
+        path.write_bytes(data)
+        path.chmod(0o600)
+        return path
+
+    first = artifact(SID, "a", b"first edition")
+    second = artifact(SID, "b", b"next edition")
+    artifact("unselected", "c", b"unrelated")
+    (library / f"unsafe.{'d' * 64}.{format_name}").symlink_to(first)
+    assert pdf_source.preview_installed_sizes([SID, "empty", "unsafe"], format_name) == {
+        SID: first.stat().st_size + second.stat().st_size,
+        "empty": 0,
+        "unsafe": None,
+    }
