@@ -510,6 +510,23 @@ def test_zim_recovery_actions_dispatch_through_http(app, monkeypatch, action, me
     assert calls == [("fema-ready", True if method == "start" else keyword)]
 
 
+def test_freshness_endpoint_selects_trusted_source_without_wikipedia_default(app, monkeypatch):
+    request, _ = app
+    second = dict(PIN, source_id="second-zim", title="Second pinned ZIM",
+                  source_url="https://download.kiwix.org/zim/second_en_all_2026-11.zim",
+                  sha256="b" * 64, bytes=4096)
+    checked = []
+    monkeypatch.setattr(admin_api, "probe_source",
+                        lambda url, digest, size: (checked.append((url, digest, size))
+                                                   or {"state": "no_newer_edition_listed"}))
+    monkeypatch.setattr(admin_api, "installed_evidence", lambda snapshot, entry: {})
+    monkeypatch.setitem(admin_api.TRUSTED_SOURCES, "second-zim", second)
+    assert "Specify" in request("/api/freshness", status=400)["error"]
+    assert request("/api/freshness?source_id=unknown", status=400)["error"]
+    assert request("/api/freshness?source_id=second-zim")["source_id"] == "second-zim"
+    assert checked == [(second["source_url"], second["sha256"], second["bytes"])]
+
+
 def test_storage_status_not_tied_to_default_wikipedia_archive_size(app, monkeypatch):
     request, _ = app
     calls = []
