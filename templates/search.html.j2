@@ -19,7 +19,7 @@
 <p role="alert">{{ error }}</p>
 {% elif query %}
 {% set matched = groups|selectattr("results")|list %}
-{% set incomplete = groups|selectattr("status", "in", ["timeout", "unavailable", "indexing", "partial", "unsupported", "no_text"])|list %}
+{% set incomplete = groups|selectattr("status", "in", ["timeout", "unavailable", "indexing", "partial", "unsupported"])|list %}
 <p>Results for “{{ query }}”</p>
 {% if search_source %}
 <p><a href="/search?{{ dict(selected, q=query)|urlencode }}">Search all selected sources</a></p>
@@ -31,7 +31,7 @@
 <p role="status">Some content couldn’t be searched. Results may be incomplete.</p>
 <ul>
 {% for group in incomplete %}
-<li>{{ group.name }} — {{ {"timeout": "Search timed out", "unavailable": "Search unavailable", "indexing": "Indexing in progress", "partial": "Only part of the source is indexed", "unsupported": "Search unsupported", "no_text": "No searchable text"}[group.status] }}</li>
+<li>{{ group.name }} — {{ {"timeout": "Search timed out", "unavailable": "Search unavailable", "indexing": "Indexing in progress", "partial": "Only part of the source is indexed", "unsupported": "Search unsupported"}[group.status] }}</li>
 {% endfor %}
 </ul>
 {% endif %}
