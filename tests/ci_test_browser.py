@@ -286,6 +286,30 @@ def exercise(browser, base, name, viewport, artifacts):
         page.get_by_role("button", name="Preview storage").click()
         expect(page.locator("#bulk-preview-capacity")).to_contain_text("Staging could use up to 16.0 MiB")
         page.unroute("**/api/acquisition-preview", bounded_preview)
+        batch_jobs = []
+        job_id = "a" * 32
+
+        def batch_downloads(route):
+            if route.request.method == "GET":
+                route.fulfill(json={"jobs": batch_jobs})
+                return
+            payload = route.request.post_data_json
+            if payload.get("cancel") == job_id:
+                batch_jobs[0]["state"] = "cancelled"
+                route.fulfill(status=202, json={"accepted": True})
+                return
+            assert payload["confirm"] is True and payload["source_ids"] == [sid]
+            batch_jobs.append(dict(id=job_id, source_id=sid, title="Fixture download",
+                                   bytes=16777216, state="queued", stop=0, detail=""))
+            route.fulfill(status=202, json={"job_ids": [job_id]})
+
+        page.route("**/api/acquisition-batch", batch_downloads)
+        page.once("dialog", lambda dialog: dialog.accept())
+        page.get_by_role("button", name="Queue selected downloads").click()
+        expect(page.locator("#acquisition-queue-summary")).to_contain_text("16.0 MiB reserved")
+        page.get_by_role("button", name="Cancel Fixture download").click()
+        expect(page.locator("#acquisition-queue-jobs")).to_contain_text("Fixture download · Cancelled")
+        page.unroute("**/api/acquisition-batch", batch_downloads)
         page.get_by_role("button", name="Export ZIM verification manifest").click()
         expect(page.locator("#catalog-feedback")).to_contain_text("Choose only installed, verified ZIM sources")
         with page.expect_download() as download:

@@ -8,6 +8,7 @@ from io import BytesIO
 import importlib
 import os
 import re
+import sqlite3
 import subprocess
 import threading
 import time
@@ -27,6 +28,9 @@ storage_settings = importlib.import_module(
     f"{__package__}.storage_settings" if __package__ else "storage_settings"
 )
 
+acquisition_queue = importlib.import_module(
+    f"{__package__}.acquisition_queue" if __package__ else "theaxiom.acquisition_queue"
+)
 storage = importlib.import_module(f"{__package__}.storage" if __package__ else "theaxiom.storage")
 catalog_store = importlib.import_module(f"{__package__}.catalog_store" if __package__ else "theaxiom.catalog_store")
 
@@ -429,6 +433,199 @@ def _preview_document_acquisition(configuration, *, byte_limit):
     return estimate
 
 
+def _acquire_document(sid, record, config, revision, is_epub, fields, *, adding=False,
+                      auto_title=False, stop=None):
+    """Acquire and commit a document using the caller's publication lock."""
+    stopping = stop or (lambda: False)
+    stop_options = {"stop": stop} if stop else {}
+    url = config.get("source_url", "")
+    if not pdf_source.valid_source_url(url):
+        raise ValueError("A direct HTTPS PDF URL is required")
+    size = config.get("expected_size_bytes") or None
+    digest = config.get("sha256") or None
+    extracted = {}
+    installed_etag = None
+    if stopping():
+        raise acquisition_queue.Cancelled()
+    if is_epub:
+        with pdf_transport.open_pdf(url, format_name="epub") as stream:
+            observed, extracted = epub_source.install_stream(sid, stream,
+                expected_size=int(size) if size else None, expected_sha256=digest, **stop_options)
+            installed_etag = getattr(stream, "etag", None)
+    else:
+        observed, installed_etag = pdf_transport.download(
+            sid, url, expected_size=int(size) if size else None,
+            expected_sha256=digest, capture_validator=True, **stop_options)
+        if not record["profile"].get("language"):
+            language = pdf_language.installed_language(observed)
+            if language:
+                extracted["language"] = language
+    provenance = config.get("provenance", "").strip()
+    if not provenance:
+        provenance = "Downloaded via configured HTTPS URL; SHA-256 calculated locally, not independently publisher-verified."
+    elif not digest:
+        suffix = " SHA-256 calculated locally, not independently publisher-verified."
+        provenance = provenance[:catalog_store.MAX_FIELD - len(suffix)] + suffix
+    fields.update(expected_size_bytes=str(observed["bytes"]), sha256=observed["sha256"],
+                  provenance=provenance)
+    profile = fields if adding else record["profile"]
+    for key in ("author", "publisher", "language"):
+        if not profile.get(key) and extracted.get(key):
+            fields[key] = extracted[key]
+    if adding and auto_title and extracted.get("title"):
+        fields["title"] = extracted["title"]
+    updated = SOURCE_CATALOG.mutate("add" if adding else "edit", sid, fields, revision)
+    # Preserve only a strong ETag captured from the actual successful GET,
+    # and only after the verified artifact and source catalog both commit.
+    # This auxiliary evidence is advisory; failures must never convert an
+    # already installed archive into a failed acquisition.
+    if installed_etag:
+        try:
+            document_origin_evidence.save(
+                sid, "epub" if is_epub else "pdf", url,
+                observed["sha256"], installed_etag)
+        except (OSError, ValueError):
+            pass
+    return {"accepted": True, "installed_verified": True, "revision": updated["revision"]}
+
+
+def _batch_job(record, published):
+    sid = record["source_id"]
+    config = record["configuration"]
+    kind = config["format"]
+    if publication.legacy_only(sid):
+        raise ValueError("Legacy sources cannot be queued")
+    size = config.get("expected_size_bytes")
+    if kind in {"pdf", "epub"}:
+        limit = pdf_source.MAX_BYTES if kind == "pdf" else epub_source.MAX_BYTES
+        if (published.get(sid) or not pdf_source.valid_source_url(config.get("source_url", ""))
+                or size and int(size) > limit):
+            raise ValueError("Document must be unpublished and have a supported download URL and size")
+        adapter = pdf_source if kind == "pdf" else epub_source
+        try:
+            pin = adapter.pin(sid, config, require_rights=False)
+        except ValueError:
+            pin = None
+        if pin and adapter.ready(pin, verify=False):
+            raise ValueError("Document is already installed")
+        operation, reservation = kind, int(size) if size else limit
+    elif kind == "zim":
+        identity = zim_jobs.identity(config)
+        if not size:
+            raise ValueError("A ZIM download needs a known size to reserve space")
+        current = zim_jobs.read(sid)
+        candidate = zim_jobs.read_candidate(sid)
+        if candidate and candidate["state"] == "prepared" and candidate["configuration"] == identity:
+            operation = "replacement"
+        elif current is None and not published.get(sid) and candidate is None:
+            operation = "zim"
+        else:
+            raise ValueError("Resolve the existing ZIM acquisition or prepare a replacement first")
+        reservation = int(size)
+    else:
+        raise ValueError("Unsupported batch source format")
+    return dict(source_id=sid, title=record["profile"]["title"], operation=operation,
+                configuration=config, bytes=reservation)
+
+
+def _batch_available(settings, formats):
+    sample = storage.inspect_storage(settings, formats=tuple(sorted(formats)))
+    if not sample["write_ready"]:
+        raise ValueError("Configured storage is not ready for acquisition")
+    return max(0, sample["free_bytes"] - settings["minimum_free_bytes"])
+
+
+def _execute_batch_job(job, stopping, shutdown):
+    sid, operation = job["source_id"], job["operation"]
+    recovering = job["state"] == "running"
+    config = json.loads(job["configuration"])
+    kind = config["format"]
+
+    def stop_document():
+        return stopping() or shutdown.is_set()
+
+    with publication.LOCK:
+        settings = storage_settings.load_settings()
+        if settings != json.loads(job["storage"]):
+            raise ValueError("Storage settings changed; review and queue again")
+        catalog = SOURCE_CATALOG.get()
+        record = next((item for item in catalog["sources"] if item["source_id"] == sid), None)
+        if not record or record["configuration"] != config:
+            raise ValueError("Source configuration changed; review the catalog before retrying")
+        if operation in {"pdf", "epub"}:
+            if stopping():
+                raise acquisition_queue.Cancelled()
+            if recovering:
+                return "interrupted", "Document transfer stopped; review the source before queuing again"
+            _batch_job(record, publication.load())
+            if _batch_available(settings, {kind}) < job["bytes"]:
+                raise ValueError("Free space fell below the reserved download size")
+            if shutdown.is_set():
+                return "running", ""
+            try:
+                _acquire_document(sid, record, config, catalog["revision"], operation == "epub",
+                                  {}, stop=stop_document)
+            except acquisition_queue.Cancelled:
+                if shutdown.is_set() and not stopping():
+                    return "running", ""
+                raise
+            return "completed", ""
+        replacement = operation == "replacement"
+        inspect = zim_jobs.candidate_status if replacement else zim_jobs.status
+        current = inspect(sid) if recovering else None
+        finished = "verified" if replacement else "completed"
+        if current and current["configuration"] != zim_jobs.identity(config):
+            raise ValueError("ZIM job configuration changed")
+        if current and current["state"] == finished:
+            return "completed", "Replacement ready for activation" if replacement else ""
+        if stopping() and not (current and current["state"] in zim_jobs.ACTIVE):
+            raise acquisition_queue.Cancelled()
+        if not replacement and publication.load().get(sid):
+            raise ValueError("Source was published after the download was queued")
+        if not recovering:
+            _batch_job(record, publication.load())
+        if not current or current["state"] not in zim_jobs.ACTIVE:
+            if current and current["state"] not in {"prepared", "paused", "interrupted"}:
+                return current["state"] if current["state"] in {"failed", "cancelled"} else "interrupted", "Review the existing ZIM job"
+            try:
+                with zim_jobs.worker_lock():
+                    pass
+            except BlockingIOError:
+                return "running" if recovering else "queued", ""
+            staging_id = sid + "-candidate" if replacement else sid
+            retained = zim_jobs.staged_size(staging_id) if current else 0
+            if _batch_available(settings, {kind}) < max(0, job["bytes"] - retained):
+                raise ValueError("Free space fell below the reserved download size")
+            try:
+                if replacement:
+                    zim_jobs.start_candidate_acquisition(sid, config)
+                else:
+                    zim_jobs.start(sid, config, resume=bool(retained),
+                                   restart=current is not None and not retained)
+            except BlockingIOError:
+                return "running" if recovering else "queued", ""
+    while not shutdown.is_set():
+        current = inspect(sid)
+        if not current:
+            raise ValueError("ZIM job record unavailable")
+        if current["state"] not in zim_jobs.ACTIVE:
+            if current["state"] == finished:
+                return "completed", "Replacement ready for activation" if replacement else ""
+            state = current["state"] if current["state"] in {"failed", "cancelled"} else "interrupted"
+            return state, current.get("error", current.get("detail", ""))[:300]
+        if stopping() and current["state"] not in {"cancelling", "publishing", "pausing"}:
+            try:
+                if replacement:
+                    zim_jobs.cancel_candidate_acquisition(sid, config)
+                else:
+                    zim_jobs.control(sid, config, "cancel-keep")
+            except ValueError:
+                # Transfer may have reached a terminal state before cancellation.
+                pass
+        shutdown.wait(1)
+    return "running", ""
+
+
 class AdminAPIHandler(BaseHTTPRequestHandler):
     """Minimal HTTP handler for the admin API."""
 
@@ -594,6 +791,12 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802 - http.server convention
         if not self._guard():
+            return
+        if self.path == "/api/acquisition-batch":
+            try:
+                self._send_json(200, {"jobs": acquisition_queue.status()})
+            except (OSError, sqlite3.Error):
+                self._send_json(503, {"error": "Batch queue unavailable"})
             return
         if self.path == "/admin/login":
             environment = Environment(loader=FileSystemLoader(ADMIN_TEMPLATE_DIR), autoescape=True)
@@ -840,6 +1043,48 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
     def _zim_record(record):
         return (not publication.legacy_only(record["source_id"])
                 and record["configuration"].get("format") == "zim")
+
+    def _manage_acquisition_batch(self, data):
+        if not self.headers.get("Origin"):
+            self._send_json(403, {"error": "same-origin request required"})
+            return
+        try:
+            if data.keys() == {"cancel"} and isinstance(data["cancel"], str) and re.fullmatch("[a-f0-9]{32}", data["cancel"]):
+                acquisition_queue.cancel(data["cancel"])
+                self._send_json(202, {"accepted": True})
+                return
+            ids = data.get("source_ids")
+            if (data.keys() != {"revision", "source_ids", "confirm"} or data["confirm"] is not True
+                    or not self._valid_revision(data["revision"])
+                    or not isinstance(ids, list) or not 1 <= len(ids) <= catalog_store.MAX_ENTRIES
+                    or any(not isinstance(sid, str) or not catalog_store.ID_RE.fullmatch(sid) for sid in ids)
+                    or len(set(ids)) != len(ids)):
+                self._send_json(400, {"error": "invalid confirmed batch selection"})
+                return
+            with publication.LOCK:
+                catalog = SOURCE_CATALOG.get()
+                if catalog["revision"] != data["revision"]:
+                    raise ValueError("Catalog changed; preview the selection again")
+                known = {item["source_id"]: item for item in catalog["sources"]}
+                if any(sid not in known for sid in ids):
+                    raise ValueError("Unknown selected source")
+                published = publication.load()
+                jobs = []
+                for sid in ids:
+                    try:
+                        jobs.append(_batch_job(known[sid], published))
+                    except ValueError as exc:
+                        raise ValueError(f"{known[sid]['profile']['title']}: {exc}") from exc
+                settings = storage_settings.load_settings()
+                available = _batch_available(settings, {job["configuration"]["format"] for job in jobs})
+                accepted = acquisition_queue.enqueue(jobs, available, settings)
+        except (OSError, sqlite3.Error, catalog_store.CatalogError):
+            self._send_json(503, {"error": "Batch queue, catalog or storage unavailable"})
+            return
+        except ValueError as exc:
+            self._send_json(409, {"error": str(exc)})
+            return
+        self._send_json(202, {"job_ids": accepted})
 
     def _acquisition_preview(self, records, ids, *, exact_selection=False):
         rows = []
@@ -1492,6 +1737,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 self._send_json(400, {"error": str(exc)})
                 return
             self._send_json(200, result)
+        elif self.path == "/api/acquisition-batch":
+            self._manage_acquisition_batch(self._read_body())
         elif self.path == "/api/acquisition-preview":
             if not self.headers.get("Origin"):
                 self._send_json(403, {"error": "same-origin request required"})
@@ -1957,41 +2204,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 if publication.load().get(sid, False):
                     raise ValueError("Unpublish source before downloading")
                 config = fields if adding else record["configuration"]
-                url = config.get("source_url", "")
-                if not pdf_source.valid_source_url(url):
-                    raise ValueError("A direct HTTPS PDF URL is required")
-                size = config.get("expected_size_bytes") or None
-                digest = config.get("sha256") or None
-                extracted = {}
-                installed_etag = None
-                if is_epub:
-                    with pdf_transport.open_pdf(url, format_name="epub") as stream:
-                        observed, extracted = epub_source.install_stream(sid, stream,
-                            expected_size=int(size) if size else None, expected_sha256=digest)
-                        installed_etag = getattr(stream, "etag", None)
-                else:
-                    observed, installed_etag = pdf_transport.download(
-                        sid, url, expected_size=int(size) if size else None,
-                        expected_sha256=digest, capture_validator=True)
-                    if not record["profile"].get("language"):
-                        language = pdf_language.installed_language(observed)
-                        if language:
-                            extracted["language"] = language
-                provenance = config.get("provenance", "").strip()
-                if not provenance:
-                    provenance = "Downloaded via configured HTTPS URL; SHA-256 calculated locally, not independently publisher-verified."
-                elif not digest:
-                    suffix = " SHA-256 calculated locally, not independently publisher-verified."
-                    provenance = provenance[:catalog_store.MAX_FIELD - len(suffix)] + suffix
-                fields.update(expected_size_bytes=str(observed["bytes"]), sha256=observed["sha256"],
-                              provenance=provenance)
-                profile = fields if adding else record["profile"]
-                for key in ("author", "publisher", "language"):
-                    if not profile.get(key) and extracted.get(key):
-                        fields[key] = extracted[key]
-                if adding and data["auto_title"] and extracted.get("title"):
-                    fields["title"] = extracted["title"]
-                updated = SOURCE_CATALOG.mutate("add" if adding else "edit", sid, fields, data["revision"])
+                result = _acquire_document(sid, record, config, data["revision"], is_epub,
+                                           fields, adding=adding, auto_title=data.get("auto_title"))
             except catalog_store.RevisionConflict as exc:
                 self._send_json(409, {"error": str(exc)})
                 return
@@ -2010,18 +2224,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             except OSError:
                 self._send_json(503, {"error": "PDF storage or catalog I/O failed"})
                 return
-        # Preserve only a strong ETag captured from the actual successful GET,
-        # and only after the verified artifact and source catalog both commit.
-        # This auxiliary evidence is advisory; failures must never convert an
-        # already installed archive into a failed acquisition.
-        if installed_etag:
-            try:
-                document_origin_evidence.save(
-                    sid, "epub" if is_epub else "pdf", url,
-                    observed["sha256"], installed_etag)
-            except (OSError, ValueError):
-                pass
-        self._send_json(200, {"accepted": True, "installed_verified": True, "revision": updated["revision"]})
+        self._send_json(200, result)
 
     def _start_zim(self, data):
         sid = data.get("source_id")
@@ -2192,11 +2395,13 @@ def main() -> None:
     server.acquisition_monitor = monitoring.Monitor(legacy) if legacy else None
     if server.acquisition_monitor:
         server.acquisition_monitor.start()
+    queue_shutdown = acquisition_queue.start(_execute_batch_job)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
+        queue_shutdown.set()
         if server.acquisition_monitor:
             server.acquisition_monitor.stop.set()
         server.server_close()

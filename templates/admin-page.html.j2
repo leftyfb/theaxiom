@@ -570,8 +570,15 @@
         <p id="bulk-preview-summary" role="status"></p>
         <p id="bulk-preview-capacity" role="status"></p>
         <ul id="bulk-preview-sources"></ul>
+        <button class="button" type="button" id="bulk-queue" hidden>Queue selected downloads</button>
+        <p id="bulk-queue-feedback" role="status"></p>
       </div>
     </section>
+    <details class="group-panel" id="acquisition-queue" hidden>
+      <summary>Batch downloads</summary>
+      <p id="acquisition-queue-summary" role="status"></p>
+      <ul id="acquisition-queue-jobs"></ul>
+    </details>
     <details class="group-panel" id="group-panel" hidden>
       <summary>Organize sources · Categories, collections &amp; tags</summary>
       <p class="source-note">Select source cards to assign groupings. <a href="/admin/groupings">Manage categories, tags and collections separately.</a></p>
@@ -1084,7 +1091,7 @@
       const previewSummary = document.getElementById('bulk-preview-summary');
       const previewCapacity = document.getElementById('bulk-preview-capacity');
       const previewSources = document.getElementById('bulk-preview-sources');
-      let previewIds = '', previewRequest = 0;
+      let previewIds = '', previewRequest = 0, previewRevision;
       function previewSize(bytes) {
         if (!Number.isSafeInteger(bytes) || bytes < 0) return 'unknown';
         if (bytes < 1048576) return bytes.toLocaleString() + ' B';
@@ -1145,21 +1152,107 @@
           installed: 'Already recorded as installed'
         }[state] || '';
       }
+      const queueButton = document.getElementById('bulk-queue');
+      const queueFeedback = document.getElementById('bulk-queue-feedback');
+      const queuePanel = document.getElementById('acquisition-queue');
+      const queueSummary = document.getElementById('acquisition-queue-summary');
+      const queueJobs = document.getElementById('acquisition-queue-jobs');
+      let queueView = '';
+      const queueStates = {
+        queued: 'Queued', running: 'Running', completed: 'Completed', failed: 'Failed',
+        cancelled: 'Cancelled', interrupted: 'Interrupted'
+      };
+      async function batchRequest(payload) {
+        const response = await fetch('/api/acquisition-batch', {
+          method: 'POST',
+          headers: {...(window.axiomCsrfHeaders?.() || {}), 'Content-Type':'application/json'},
+          body: JSON.stringify(payload)
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Batch request failed.');
+        return result;
+      }
+      async function loadQueue() {
+        try {
+          const response = await fetch('/api/acquisition-batch', {cache: 'no-store'});
+          if (!response.ok) return;
+          const {jobs} = await response.json();
+          if (!Array.isArray(jobs)) return;
+          const view = JSON.stringify(jobs);
+          if (view === queueView) return;
+          queueView = view;
+          queuePanel.hidden = !jobs.length;
+          const pending = jobs.filter(job => ['queued', 'running'].includes(job.state));
+          queueSummary.textContent = pending.length ?
+            previewSize(pending.reduce((total, job) => total + job.bytes, 0)) + ' reserved for ' +
+            pending.length + (pending.length === 1 ? ' pending download.' : ' pending downloads.') : '';
+          queueJobs.replaceChildren();
+          for (const job of jobs) {
+            const row = document.createElement('li');
+            const label = job.stop && job.state === 'running' ? 'Stopping' : queueStates[job.state];
+            row.textContent = job.title + ' · ' + label + (job.detail ? ' · ' + job.detail : '');
+            if (!job.stop && ['queued', 'running'].includes(job.state)) {
+              const cancel = document.createElement('button');
+              cancel.className = 'button';
+              cancel.type = 'button';
+              cancel.textContent = 'Cancel';
+              cancel.setAttribute('aria-label', 'Cancel ' + job.title);
+              cancel.addEventListener('click', async () => {
+                cancel.disabled = true;
+                try {
+                  await batchRequest({cancel: job.id});
+                  await loadQueue();
+                } catch (error) {
+                  cancel.disabled = false;
+                  queueSummary.textContent = error.message;
+                }
+              });
+              row.append(' ', cancel);
+            }
+            queueJobs.append(row);
+          }
+        } catch (error) {
+          if (!queuePanel.hidden) queueSummary.textContent = 'Could not refresh batch downloads.';
+        }
+      }
+      loadQueue();
+      window.setInterval(loadQueue, 3000);
+      queueButton.addEventListener('click', async () => {
+        const ids = selectedIds();
+        if (!ids.length || ids.join(',') !== previewIds || queueButton.disabled) return;
+        if (!window.confirm('Queue ' + ids.length + (ids.length === 1 ? ' download?' : ' downloads?'))) return;
+        queueButton.disabled = true;
+        try {
+          await batchRequest({revision: previewRevision, source_ids: ids, confirm: true});
+          queueButton.hidden = true;
+          queueFeedback.textContent = 'Downloads queued.';
+          await loadQueue();
+          queuePanel.open = true;
+        } catch (error) {
+          queueFeedback.textContent = error.message;
+        } finally {
+          queueButton.disabled = false;
+        }
+      });
       document.getElementById('bulk-preview').addEventListener('click', async () => {
         const ids = selectedIds();
         const selection = ids.join(',');
         const requestId = ++previewRequest;
+        const requestedRevision = revision;
         const current = () => previewIds === selection && previewRequest === requestId;
         previewIds = selection;
+        previewRevision = requestedRevision;
         preview.hidden = false;
         previewSummary.textContent = 'Calculating estimates…';
+        queueButton.hidden = true;
+        queueFeedback.textContent = '';
         previewCapacity.textContent = '';
         previewSources.replaceChildren();
         async function requestPreview() {
           const response = await fetch('/api/acquisition-preview', {
             method: 'POST',
             headers: {...(window.axiomCsrfHeaders?.() || {}), 'Content-Type':'application/json'},
-            body: JSON.stringify({revision, source_ids: ids})
+            body: JSON.stringify({revision: requestedRevision, source_ids: ids})
           });
           const result = await response.json();
           if (!response.ok) throw new Error(result.error || 'Storage preview unavailable.');
@@ -1175,6 +1268,8 @@
             if (!current()) return;
           }
           previewSummary.textContent = formatEstimates(result.sources);
+          queueButton.hidden = !['fits', 'fits_with_unknown_sizes'].includes(result.capacity?.state) ||
+            !result.sources.every(source => source.state === 'estimated');
           previewCapacity.textContent = capacitySummary(result.capacity);
           for (const source of result.sources) {
             const row = document.createElement('li');

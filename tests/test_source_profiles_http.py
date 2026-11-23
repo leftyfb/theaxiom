@@ -1187,3 +1187,60 @@ def test_acquisition_preview_adds_retained_document_bytes_to_peak(app, monkeypat
     assert [call.args for call in measured.call_args_list] == [
         (["guide"], "pdf"), (["book"], "epub"),
     ]
+
+
+def test_confirmed_batch_reuses_document_acquisition_and_revalidates_capacity(app, monkeypatch):
+    request, _ = app
+    catalog = request("/api/sources")
+    for sid in ("first", "second"):
+        catalog = mutate(request, catalog, "add", {
+            "title": sid, "format": "pdf", "source_url": f"https://example.org/{sid}.pdf",
+            "expected_size_bytes": "100",
+        }, sid=sid)
+    available = Mock(return_value=300)
+    monkeypatch.setattr(admin_api, "_batch_available", available)
+    acquire = Mock()
+    monkeypatch.setattr(admin_api, "_acquire_document", acquire)
+    payload = {"revision": catalog["revision"], "source_ids": ["first", "second"], "confirm": True}
+    request("/api/acquisition-batch", payload, status=403, origin="")
+    request("/api/acquisition-batch", payload | {"confirm": False}, status=400)
+    batch = request("/api/acquisition-batch", payload, status=202)
+    assert len(batch["job_ids"]) == 2
+    request("/api/acquisition-batch", payload, status=409)
+    acquire.assert_not_called()
+
+    queue = admin_api.acquisition_queue
+    shutdown = threading.Event()
+    assert queue.run_next(admin_api._execute_batch_job, shutdown)
+    assert acquire.call_args.args[0] == "first"
+    available.return_value = 99
+    assert queue.run_next(admin_api._execute_batch_job, shutdown)
+    acquire.assert_called_once()
+    jobs = request("/api/acquisition-batch")["jobs"]
+    assert [(job["source_id"], job["state"]) for job in jobs] == [
+        ("second", "failed"), ("first", "completed"),
+    ]
+
+
+def test_batch_restarts_zim_from_retained_bytes(app, monkeypatch):
+    import json
+
+    request, _ = app
+    catalog = request("/api/sources")
+    updated = mutate(request, catalog, "add", {
+        "title": "Fixture", "format": "zim", "source_url": "https://example.org/data.zim",
+        "expected_size_bytes": "1000",
+    }, sid="fixture")
+    config = source(updated, "fixture")["configuration"]
+    jobs = admin_api.zim_jobs
+    old = dict(state="paused", configuration=jobs.identity(config))
+    monkeypatch.setattr(jobs, "status", Mock(side_effect=[old, old | {"state": "completed"}]))
+    monkeypatch.setattr(jobs, "staged_size", Mock(return_value=300))
+    start = Mock()
+    monkeypatch.setattr(jobs, "start", start)
+    monkeypatch.setattr(admin_api, "_batch_available", Mock(return_value=700))
+    job = dict(source_id="fixture", operation="zim", state="running", bytes=1000,
+               configuration=json.dumps(config),
+               storage=json.dumps(admin_api.storage_settings.load_settings()))
+    assert admin_api._execute_batch_job(job, lambda: False, threading.Event()) == ("completed", "")
+    start.assert_called_once_with("fixture", config, resume=True, restart=False)

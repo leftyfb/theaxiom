@@ -191,7 +191,7 @@ def _verify(stream, artifact):
     return metadata
 
 
-def install_stream(source_id, stream, *, expected_size=None, expected_sha256=None):
+def install_stream(source_id, stream, *, expected_size=None, expected_sha256=None, stop=None):
     metadata = {}
 
     def validate(staged, artifact):
@@ -199,7 +199,7 @@ def install_stream(source_id, stream, *, expected_size=None, expected_sha256=Non
 
     artifact = pdf_source._install_stream(
         source_id, stream, expected_size=expected_size, expected_sha256=expected_sha256,
-        format_name="epub", verify=validate)
+        format_name="epub", verify=validate, stop=stop)
     return artifact, metadata
 
 

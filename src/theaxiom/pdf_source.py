@@ -8,7 +8,7 @@ import stat
 from urllib.parse import urlsplit
 from uuid import uuid4
 
-from . import catalog_store, storage, storage_settings
+from . import acquisition_queue, catalog_store, storage, storage_settings
 
 MAX_BYTES = 16 * 1024 * 1024
 CHUNK = 128 * 1024
@@ -310,12 +310,12 @@ def import_local(source_id, artifact):
 
 
 
-def install_stream(source_id, stream, *, expected_size=None, expected_sha256=None):
-    return _install_stream(source_id, stream, expected_size=expected_size, expected_sha256=expected_sha256)
+def install_stream(source_id, stream, *, expected_size=None, expected_sha256=None, stop=None):
+    return _install_stream(source_id, stream, expected_size=expected_size, expected_sha256=expected_sha256, stop=stop)
 
 
 def _install_stream(source_id, stream, *, expected_size=None, expected_sha256=None,
-                    format_name="pdf", verify=None):
+                    format_name="pdf", verify=None, stop=None):
     """Install bounded incoming PDF bytes, returning their observed identity.
 
     The caller must authorize acquisition and persist provenance separately.
@@ -346,7 +346,12 @@ def _install_stream(source_id, stream, *, expected_size=None, expected_sha256=No
                 count = 0
                 digest = hashlib.sha256()
                 limit = min(budget, expected_size or MAX_BYTES)
-                while block := stream.read(min(CHUNK, limit - count + 1)):
+                while True:
+                    if stop and stop():
+                        raise acquisition_queue.Cancelled()
+                    block = stream.read(min(CHUNK, limit - count + 1))
+                    if not block:
+                        break
                     count += len(block)
                     if count > limit:
                         raise ValueError("PDF exceeds expected size or storage limit")
@@ -363,6 +368,8 @@ def _install_stream(source_id, stream, *, expected_size=None, expected_sha256=No
                 verify(target, artifact)
                 target.flush()
                 os.fsync(target.fileno())
+            if stop and stop():
+                raise acquisition_queue.Cancelled()
             os.replace(temporary, artifact["filename"], src_dir_fd=staging, dst_dir_fd=library)
             for directory in (library, staging):
                 try:
