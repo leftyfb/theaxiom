@@ -41,6 +41,18 @@ def valid_book_id_from_seed(seed):
 ROUTES = legacy_reader_routes()
 
 
+def managed_installation(source_id):
+    """Return whether a compatibility source has been explicitly adopted."""
+    if source_id not in ROUTES:
+        return False
+    from . import zim_adoption
+    return source_id == zim_adoption.SOURCE_ID and zim_adoption.managed()
+
+
+def legacy_only(source_id):
+    return source_id in ROUTES and not managed_installation(source_id)
+
+
 def state_path():
     return storage_settings.SETTINGS_PATH.with_name("publication.json")
 
@@ -186,6 +198,17 @@ def reader_location(route, book_id=None):
 
 
 def status(snapshot, source_id, *, probe=True):
+    if source_id in ROUTES and managed_installation(source_id):
+        from . import zim_catalog
+        try:
+            record = next(r for r in snapshot.get("sources", [])
+                          if r.get("source_id") == source_id)
+            return zim_catalog.status(record, snapshot.get("sources", []))
+        except (OSError, ValueError, KeyError, TypeError, StopIteration):
+            return {"enabled": False, "verified": False, "serving": False,
+                    "published": False, "path": "/read/zim/" + source_id,
+                    "entry_path": "/read/zim/" + source_id,
+                    "error": "publication state unavailable"}
     route = ROUTES[source_id]
     try:
         enabled = load().get(source_id, False)
@@ -199,6 +222,14 @@ def status(snapshot, source_id, *, probe=True):
 
 
 def allowed(snapshot, source_id):
+    if source_id in ROUTES and managed_installation(source_id):
+        from . import zim_catalog
+        try:
+            record = next(r for r in snapshot.get("sources", [])
+                          if r.get("source_id") == source_id)
+            return bool(zim_catalog.status(record, snapshot.get("sources", []))["published"])
+        except (OSError, ValueError, KeyError, TypeError, StopIteration):
+            return False
     try:
         return source_id in ROUTES and load().get(source_id, False) and verified(snapshot, source_id)
     except (OSError, ValueError):

@@ -75,7 +75,7 @@ def verified_books(records, enabled=None):
     if not root:
         return []
     candidates = [record for record in records
-                  if record["source_id"] not in publication.ROUTES
+                  if not publication.legacy_only(record["source_id"])
                   and record["configuration"].get("format") == "zim"
                   and enabled.get(record["source_id"], False)]
     result = []
@@ -96,14 +96,18 @@ def verified_books(records, enabled=None):
                 digest = artifact["sha256"]
                 size = artifact["bytes"]
                 filename = artifact["filename"]
+                adopted = zim_jobs.adopted_filename(job, artifact)
                 if (not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest)
                         or type(size) is not int or size < 96
-                        or filename != f"{sid}.{digest}.zim"):
+                        or (filename != f"{sid}.{digest}.zim" and not adopted)):
                     continue
                 # O_NOFOLLOW and verified mount, ownership, size and installed-file
                 # mode checks live in the existing storage adapter.
                 try:
                     with pdf_source._file(directory, mount, filename, size) as stream:
+                        if (adopted and zim_jobs.archive_identity(os.fstat(stream.fileno()))
+                                != job["adopted_from_legacy"]["identity"]):
+                            continue
                         book_uuid = archive_uuid(stream)
                 except (OSError, ValueError):
                     continue
@@ -121,7 +125,7 @@ def verified_books(records, enabled=None):
     # never by source ID. Do not read/have to rehash a large installed ZIM.
     from . import acquisition_monitor
     for trusted in legacy_pinned_entries().values():
-        if not enabled.get(trusted["source_id"], False):
+        if not enabled.get(trusted["source_id"], False) or not publication.legacy_only(trusted["source_id"]):
             continue
         evidence = acquisition_monitor.collect(trusted)
         if (evidence.get("state") != "completed" or
@@ -280,7 +284,12 @@ def acknowledged_reader_books(records):
             name = Path(filename).stem
             if not publication.valid_book_id(name) or not filename.endswith(".zim"):
                 return {}
-            if pinned is not None:
+            if pinned is not None and not publication.legacy_only(sid):
+                job = zim_jobs.read(sid)
+                artifact = zim_jobs.installed(job, job["configuration"]) if job else None
+                if not artifact or artifact["filename"] != filename:
+                    continue
+            elif pinned is not None:
                 if (book.get("title") != pinned["title"] or
                         book.get("language") != pinned["language"]):
                     return {}
@@ -345,7 +354,7 @@ def status(record, records):
               "publication_reason": ""}
     try:
         config = record["configuration"]
-        if sid in publication.ROUTES or config.get("format") != "zim":
+        if publication.legacy_only(sid) or config.get("format") != "zim":
             return result
         enabled = publication.load().get(sid, False)
         job = zim_jobs.status(sid)

@@ -154,7 +154,7 @@ def select_lifecycle(source_id, configuration):
         return dict(adapter=adapter, configuration_valid=artifact is not None, artifact=artifact,
                     pdf_download=pdf_source.valid_source_url(configuration.get("source_url", "")),
                     acquisition_reason=reason, actions={})
-    if adapter == "kiwix" and source_id not in publication.ROUTES:
+    if adapter == "kiwix" and not publication.legacy_only(source_id):
         try:
             zim_source.candidate(configuration)
         except ValueError as exc:
@@ -299,7 +299,7 @@ def _public_acquisition(job):
     """Only expose recorded outcomes and timestamps from the attempt journal."""
     if job is None:
         return None
-    job = {key: value for key, value in job.items() if key != "promotion_intent"}
+    job = {key: value for key, value in job.items() if key not in {"promotion_intent", "adopted_from_legacy"}}
     if "attempt_history" not in job:
         return job
     history = job["attempt_history"]
@@ -619,17 +619,31 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         elif (compat := next(((sid, route) for sid, route in publication.ROUTES.items()
                               if self.path == route["entry_path"]), None)) is not None:
             source_id, route = compat
-            if not publication.allowed(self._publication_snapshot(), source_id):
-                self._send_json(403, {"error": "collection unavailable"})
-                return
-            # Historical bookmarks resolve their exact independently verified
-            # book through shared OPDS, never the first available ZIM.
-            location = publication.reader_location(
-                {"path": route["reader_path"], "port": route["port"]},
-                route["book_id"])
-            if location is None:
-                self._send_json(503, {"error": "reader entry unavailable"})
-                return
+            if publication.managed_installation(source_id):
+                try:
+                    records = SOURCE_CATALOG.get()["sources"]
+                    record = next((r for r in records if r["source_id"] == source_id), None)
+                    state = zim_catalog.status(record, records) if record else None
+                    location = (publication.reader_location(zim_catalog.GENERIC_READER,
+                                                              zim_catalog.source_content_name(record))
+                                if state and state["published"] else None)
+                except (OSError, ValueError, catalog_store.CatalogError, KeyError, TypeError):
+                    location = None
+                if location is None:
+                    self._send_json(503, {"error": "reader entry unavailable"})
+                    return
+            else:
+                if not publication.allowed(self._publication_snapshot(), source_id):
+                    self._send_json(403, {"error": "collection unavailable"})
+                    return
+                # Historical bookmarks resolve their exact independently verified
+                # book through shared OPDS, never the first available ZIM.
+                location = publication.reader_location(
+                    {"path": route["reader_path"], "port": route["port"]},
+                    route["book_id"])
+                if location is None:
+                    self._send_json(503, {"error": "reader entry unavailable"})
+                    return
             self.send_response(302)
             self.send_header("Location", location)
             self.send_header("Content-Length", "0")
@@ -695,17 +709,17 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
 
     @staticmethod
     def _pdf_record(record):
-        return (record["source_id"] not in publication.ROUTES
+        return (not publication.legacy_only(record["source_id"])
                 and record["configuration"].get("format") == "pdf")
 
     @staticmethod
     def _epub_record(record):
-        return (record["source_id"] not in publication.ROUTES
+        return (not publication.legacy_only(record["source_id"])
                 and record["configuration"].get("format") == "epub")
 
     @staticmethod
     def _zim_record(record):
-        return (record["source_id"] not in publication.ROUTES
+        return (not publication.legacy_only(record["source_id"])
                 and record["configuration"].get("format") == "zim")
 
     def _zim_publications(self, catalog=None):
@@ -792,7 +806,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             snapshot = self._publication_snapshot()
             sources = []
             for sid, route in publication.ROUTES.items():
-                if sid in records and publication.status(snapshot, sid)["published"]:
+                if sid in records and publication.legacy_only(sid) and publication.status(snapshot, sid)["published"]:
                     profile = records[sid]["profile"]
                     sources.append(dict(route, source_id=sid, name=profile["title"]))
             for record, state in self._pdf_publications():
@@ -973,8 +987,10 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
 
     def _publication_snapshot(self):
         try:
-            lifecycles = self._lifecycles(SOURCE_CATALOG.get())
-            return self._matched_snapshot(self._snapshot(), {sid: life["artifact"] for sid, life in lifecycles.items()})
+            catalog = SOURCE_CATALOG.get()
+            lifecycles = self._lifecycles(catalog)
+            snapshot = self._matched_snapshot(self._snapshot(), {sid: life["artifact"] for sid, life in lifecycles.items()})
+            return dict(snapshot, sources=catalog["sources"])
         except (catalog_store.CatalogError, OSError):
             return {"acquisitions": [], "stale": True}
 
@@ -992,7 +1008,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             update_check = None
             discovery = update_discovery_config.settings(record["configuration"])
             state = None
-            if sid in publication.ROUTES:
+            if publication.legacy_only(sid):
                 state = publication.status(matched, sid)
                 state["entry_path"] = publication.ROUTES[sid]["entry_path"]
                 if not artifacts[sid] and not state["enabled"] and not state.get("error"):
@@ -1035,7 +1051,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             if self._zim_record(record):
                 state = zim_catalog.status(record, catalog["sources"])
                 verified = bool(state["verified"])
-            if sid in publication.ROUTES and verified and isinstance(artifacts.get(sid), dict):
+            if publication.legacy_only(sid) and verified and isinstance(artifacts.get(sid), dict):
                 if kiwix_update_discovery.pinned_seed_identity(
                         record, artifacts[sid], verified=verified) is not None:
                     update_check = update_check_store.load(sid, artifacts[sid]["sha256"])
@@ -1247,7 +1263,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 self._send_json(400, {"error": "source does not support update checks"})
                 return
             with update_diagnostics.attempt(sid, discovery, trigger="manual") as diagnostic:
-                if sid in publication.ROUTES:
+                if publication.legacy_only(sid):
                     lifecycle = select_lifecycle(sid, record["configuration"])
                     artifact = lifecycle.get("artifact")
                     matched = self._matched_snapshot(self._snapshot(), {sid: artifact})
@@ -1301,7 +1317,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                         existing is None and isinstance(sid, str) and sid not in publication.ROUTES
                         and isinstance(fields, dict) and fields.get("format") in {"pdf", "epub"})
                     busy = not is_pdf and source_busy(self._snapshot(), sid)
-                    if isinstance(sid, str) and sid not in publication.ROUTES:
+                    if isinstance(sid, str) and not publication.legacy_only(sid):
                         local_job = zim_jobs.status(sid)
                         if local_job and local_job.get("active"):
                             busy = True
@@ -1767,7 +1783,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 if data["revision"] != catalog["revision"]:
                     raise ValueError("catalog revision changed")
                 record = next((r for r in catalog["sources"] if r["source_id"] == sid), None)
-                if not record or sid in publication.ROUTES or not select_lifecycle(sid, record["configuration"]).get("zim_download"):
+                if not record or publication.legacy_only(sid) or not select_lifecycle(sid, record["configuration"]).get("zim_download"):
                     raise ValueError("Source has no supported ZIM download URL")
                 operation = data["action"]
                 if publication.load().get(sid) and not operation.startswith("zim-replacement-"):
@@ -1871,7 +1887,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             return
         if operation in ("remove", "add"):
             raise catalog_store.RevisionConflict("unpublish source before removing or re-adding it")
-        guarded_fields = ARTIFACT_FIELDS if sid in publication.ROUTES else catalog_store.ARTIFACT_CONFIG_FIELDS
+        guarded_fields = ARTIFACT_FIELDS if publication.legacy_only(sid) else catalog_store.ARTIFACT_CONFIG_FIELDS
         if isinstance(fields, dict) and fields.keys() & guarded_fields:
             catalog = SOURCE_CATALOG.get()
             if catalog["revision"] != revision:
@@ -1880,8 +1896,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             if record:
                 config = record["configuration"]
                 proposed = config | fields
-                if ((sid in publication.ROUTES and not select_lifecycle(sid, proposed)["artifact"])
-                        or (sid not in publication.ROUTES and any(proposed.get(k) != config.get(k) for k in guarded_fields))):
+                if ((publication.legacy_only(sid) and not select_lifecycle(sid, proposed)["artifact"])
+                        or (not publication.legacy_only(sid) and any(proposed.get(k) != config.get(k) for k in guarded_fields))):
                     raise catalog_store.RevisionConflict("unpublish source before changing artifact configuration")
 
     def log_message(self, format: str, *args: Any) -> None:  # noqa: A002

@@ -120,6 +120,20 @@ def test_scheduled_pinned_zim_uses_verified_generic_seed_gate(monkeypatch):
     assert calls == [(record, {"sha256": "a" * 64, "filename": "example.zim", "bytes": 100}, True)]
 
 
+def test_adopted_legacy_zim_uses_managed_scheduler_check(monkeypatch):
+    from theaxiom import kiwix_update_discovery, publication
+    sid = next(iter(publication.ROUTES))
+    record = {"source_id": sid, "configuration": {"format": "zim"}}
+    calls = []
+    monkeypatch.setattr(publication, "legacy_only", lambda source_id: False)
+    monkeypatch.setattr(kiwix_update_discovery, "refresh_checked_source",
+                        lambda source_id: (calls.append(source_id) or
+                                           {"state": "up_to_date"}))
+    result = scheduler.check_records([record])
+    assert result == [{"source_id": sid, "state": "up_to_date"}]
+    assert calls == [sid]
+
+
 def test_scheduled_pinned_zim_does_not_assume_installed_verification(monkeypatch):
     from theaxiom import acquisition_monitor, admin_api, kiwix_update_discovery, publication
     sid = next(iter(publication.ROUTES))
