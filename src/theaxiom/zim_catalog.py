@@ -36,6 +36,29 @@ def archive_uuid(stream):
     return str(uuid.UUID(bytes=header[8:24]))
 
 
+def legacy_pinned_entries():
+    """Packaged, fully verified external acquisition capability definitions.
+
+    These entries are an explicit compatibility adapter for archives installed
+    before the generic ZIM ledger. No editable source profile may supply one.
+    """
+    from . import source_catalog
+    result = {}
+    for entry in source_catalog.builtin_sources():
+        if entry.get("kind") != "zim" or entry.get("legacy_acquisition") != "systemd-monitor":
+            continue
+        sid, filename, digest, size = (entry.get("source_id"), entry.get("filename"),
+                                       entry.get("sha256"), entry.get("bytes"))
+        if (not isinstance(sid, str) or not re.fullmatch(r"[a-z][a-z0-9-]{0,63}", sid)
+                or not isinstance(filename, str) or not re.fullmatch(
+                    r"[A-Za-z0-9][A-Za-z0-9_.-]{0,195}\.zim", filename)
+                or not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest)
+                or type(size) is not int or size < 96):
+            continue
+        result[sid] = entry
+    return result
+
+
 def verified_books(records, enabled=None):
     """Return vetted Kiwix entries without touching installed content or its modes.
 
@@ -91,33 +114,31 @@ def verified_books(records, enabled=None):
                     "id": book_uuid, "path": str(Path(root) / "library" / "zim" / filename),
                     "title": title, "language": language,
                 })
-    # Wikipedia is the existing trusted acquisition, not a generic ZIM job.
-    # Require the acquisition monitor's current, independent verification
-    # evidence; never hash or modify the 127 GB archive at reader startup.
-    if enabled.get("wikipedia-en", False):
-        from . import acquisition_monitor, source_catalog
-        trusted = source_catalog.WIKIPEDIA_SOURCE
+    # The compatibility capability is selected by immutable seed metadata,
+    # never by source ID. Do not read/have to rehash a large installed ZIM.
+    from . import acquisition_monitor
+    for trusted in legacy_pinned_entries().values():
+        if not enabled.get(trusted["source_id"], False):
+            continue
         evidence = acquisition_monitor.collect(trusted)
-        if (evidence.get("state") == "completed" and
-                evidence.get("verified") is True and evidence.get("active") is False and
-                evidence.get("filename") == trusted["filename"] and
-                evidence.get("sha256") == trusted["sha256"] and
-                evidence.get("expected_bytes") == trusted["bytes"]):
-            # Read only the 24-byte header; never hash or mutate Wikipedia.
-            trusted_path = Path(root) / "library" / "zim" / trusted["filename"]
-            try:
-                fd = os.open(trusted_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
-                with os.fdopen(fd, "rb") as stream:
-                    info = os.fstat(stream.fileno())
-                    if not stat.S_ISREG(info.st_mode) or info.st_size != trusted["bytes"]:
-                        raise ValueError("Unexpected Wikipedia archive")
-                    trusted_uuid = archive_uuid(stream)
-            except (OSError, ValueError):
-                pass
-            else:
-                result.append({"id": trusted_uuid,
-                               "path": str(trusted_path),
-                               "title": trusted["title"], "language": trusted["language"]})
+        if (evidence.get("state") != "completed" or
+                evidence.get("verified") is not True or evidence.get("active") is not False or
+                evidence.get("filename") != trusted["filename"] or
+                evidence.get("sha256") != trusted["sha256"] or
+                evidence.get("expected_bytes") != trusted["bytes"]):
+            continue
+        trusted_path = Path(root) / "library" / "zim" / trusted["filename"]
+        try:
+            fd = os.open(trusted_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+            with os.fdopen(fd, "rb") as stream:
+                info = os.fstat(stream.fileno())
+                if not stat.S_ISREG(info.st_mode) or info.st_size != trusted["bytes"]:
+                    raise ValueError("Unexpected legacy ZIM archive")
+                trusted_uuid = archive_uuid(stream)
+        except (OSError, ValueError):
+            continue
+        result.append({"id": trusted_uuid, "path": str(trusted_path),
+                       "title": trusted["title"], "language": trusted["language"]})
     return sorted(result, key=lambda book: book["id"])
 
 
@@ -235,8 +256,8 @@ def acknowledged_reader_books(records):
         root = ET.fromstring(stored)
         if root.tag != "library" or root.get("version") != "20110515":
             return {}
-        from .source_catalog import WIKIPEDIA_SOURCE
-        trusted = WIKIPEDIA_SOURCE
+        trusted_by_filename = {entry["filename"]: entry
+                               for entry in legacy_pinned_entries().values()}
         known = {record["source_id"]: record for record in records}
         result = {}
         seen = set()
@@ -248,15 +269,17 @@ def acknowledged_reader_books(records):
             except (ValueError, AttributeError):
                 return {}
             filename = Path(book.get("path", "")).name
-            sid = ("wikipedia-en" if filename == trusted["filename"] else filename.split(".", 1)[0])
+            pinned = trusted_by_filename.get(filename)
+            sid = pinned["source_id"] if pinned is not None else filename.split(".", 1)[0]
             if sid in seen or not enabled.get(sid, False):
                 return {}
             seen.add(sid)
             name = Path(filename).stem
             if not publication.valid_book_id(name) or not filename.endswith(".zim"):
                 return {}
-            if sid == trusted["source_id"]:
-                if filename != trusted["filename"] or book.get("title") != trusted["title"] or book.get("language") != trusted["language"]:
+            if pinned is not None:
+                if (book.get("title") != pinned["title"] or
+                        book.get("language") != pinned["language"]):
                     return {}
             else:
                 record = known.get(sid)
