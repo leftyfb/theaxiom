@@ -48,10 +48,18 @@ def check_records(records, *, max_checks=DEFAULT_MAX_CHECKS, start_index=0, chec
             elif sid in publication.ROUTES and by_id[sid]["configuration"]["format"] == "zim":
                 # Match the same independently verified immutable artifact and
                 # pinned-seed gate used by the authenticated manual check.
-                from . import admin_api, zim_catalog
+                from . import acquisition_monitor, admin_api
                 record = by_id[sid]
                 artifact = admin_api.select_lifecycle(sid, record["configuration"]).get("artifact")
-                verified = bool(zim_catalog.status(record, records).get("verified"))
+                trusted = admin_api.TRUSTED_SOURCES.get(sid)
+                monitored = acquisition_monitor.collect(trusted) if trusted else None
+                verified = bool(
+                    artifact and monitored and monitored.get("state") == "completed"
+                    and monitored.get("verified") is True and monitored.get("active") is False
+                    and all(monitored.get(field) == artifact[key] for field, key in (
+                        ("filename", "filename"), ("expected_bytes", "bytes"),
+                        ("sha256", "sha256")))
+                )
                 outcome = kiwix_update_discovery.refresh_pinned_seed(
                     record, artifact, verified=verified)
             elif by_id[sid]["configuration"]["format"] == "zim":
