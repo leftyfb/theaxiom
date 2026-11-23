@@ -61,3 +61,5 @@ The Sources page defaults to published first, verified downloaded second, and al
 ## 9. Export ZIM verification records
 
 In Administration → Sources, select installed, verified ZIMs and choose **Export ZIM verification manifest**. The JSON records the local archive filename, byte count, recorded SHA-256, edition, and catalog provenance and license notes. It is a metadata export. Archive copying and import verification are separate steps.
+
+Open **Library selections** and choose the manifest JSON to check its shape and compare it with local source IDs and recorded checksums. The preview leaves file verification, copying, and import to separate steps.

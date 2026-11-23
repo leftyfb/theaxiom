@@ -885,7 +885,8 @@ def test_export_local_transfer_manifest_checks_verified_zim_without_copying(app,
     request(route, payload | {"source_ids": [sid, sid]}, status=400)
     request(route, payload | {"transfer_manifest": "true"}, status=400)
     before = archive.stat()
-    assert request(route, payload)["manifest"] == {
+    manifest = request(route, payload)["manifest"]
+    assert manifest == {
         "version": 1, "kind": "axiom-local-transfer", "artifacts": [{
             "source_id": sid, "format": "zim", "language": "eng", "edition": "2026-01",
             "title": "Portable reference", "filename": filename, "bytes": len(contents),
@@ -902,6 +903,23 @@ def test_export_local_transfer_manifest_checks_verified_zim_without_copying(app,
     archive.rename(separate)
     archive.symlink_to(separate)
     assert "Verified installation unavailable" in request(route, payload, status=400)["error"]
+
+    # The preflight sees the ledger but does not open the archive, even if
+    # the local path has since been replaced.
+    monkeypatch.setattr(jobs, "installed", Mock(side_effect=AssertionError("preflight must not open archives")))
+    item = manifest["artifacts"][0]
+    for changes, expected in (({}, "matching_record"),
+                              ({"sha256": "b" * 64}, "conflicting_record"),
+                              ({"source_id": "other-source"}, "new_source")):
+        result = request(route, {"transfer_preview": manifest | {"artifacts": [item | changes]}})
+        assert result["transfer_artifacts"][0]["state"] == expected
+    for filename in ("../secret.zim", "/var/archive.zim", ".secret.zim", "part..backup.zim"):
+        request(route, {"transfer_preview": manifest | {"artifacts": [item | {"filename": filename}]}}, status=400)
+    request(route, {"transfer_preview": manifest | {"artifacts": [item, item]}}, status=400)
+    request(route, {"transfer_preview": manifest | {"artifacts": [item, item | {"source_id": "second"}]}}, status=400)
+    request(route, {"transfer_preview": manifest | {"version": True}}, status=400)
+    assert admin_api.SOURCE_CATALOG.get()["revision"] == catalog["revision"]
+    assert jobs.read(sid) == job
 
 
 def test_selection_presets_report_missing_planned_and_bounded_configured_sources(app):

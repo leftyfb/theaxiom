@@ -1416,7 +1416,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 return
             data = self._read_body()
             if data.keys() not in ({"revision", "source_ids"}, {"revision", "source_ids", "transfer_manifest"},
-                                   {"manifest"}, {"preset"}) or (
+                                   {"manifest"}, {"preset"}, {"transfer_preview"}) or (
                     "transfer_manifest" in data and data["transfer_manifest"] is not True) or (
                     "source_ids" in data and not self._valid_revision(data["revision"])):
                 self._send_json(400, {"error": "invalid selection request"})
@@ -1434,6 +1434,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 if "source_ids" in data:
                     exporter = local_transfer.export_manifest if data.get("transfer_manifest") else library_selection.export_selection
                     result = {"manifest": exporter(known, data["source_ids"])}
+                elif "transfer_preview" in data:
+                    result = {"transfer_artifacts": local_transfer.preview_manifest(known, data["transfer_preview"])}
                 else:
                     matches = (library_selection.preview_preset(known, data["preset"]) if "preset" in data
                                else library_selection.preview_selection(known, data["manifest"]))

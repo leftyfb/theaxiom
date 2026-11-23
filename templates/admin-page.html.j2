@@ -435,13 +435,13 @@
     </dialog>
     <dialog id="selection-file-dialog" aria-labelledby="selection-file-title">
       <h3 id="selection-file-title">Preview a library selection</h3>
-      <p class="source-note">Review a starter preset or selection file against your catalog.</p>
+      <p class="source-note">Review a starter preset, selection file or ZIM transfer manifest against your catalog.</p>
       <label for="selection-preset">Starter preset</label>
       <select id="selection-preset">
         <option value="">Choose a preset</option>
         {% for key, name in (selection_presets|default({})).items() %}<option value="{{ key }}">{{ name }}</option>{% endfor %}
       </select>
-      <label for="selection-file">Library selection JSON</label>
+      <label for="selection-file">Selection or transfer manifest JSON</label>
       <input id="selection-file" type="file" accept=".json,application/json">
       <p id="selection-file-feedback" role="status"></p>
       <ul id="selection-file-matches"></ul>
@@ -972,7 +972,8 @@
         selectionPreset.value = '';
         reviewSelection(async () => {
           if (file.size > 15000) throw new Error('Selection file is too large.');
-          return {manifest: JSON.parse(await file.text())};
+          const manifest = JSON.parse(await file.text());
+          return manifest?.kind === 'axiom-local-transfer' ? {transfer_preview: manifest} : {manifest};
         });
       });
       selectionPreset.addEventListener('change', () => {
@@ -993,6 +994,23 @@
             return;
           }
           let result = await selectionRequest(payload);
+          if (result.transfer_artifacts) {
+            const labels = {new_source: 'New source ID', source_exists: 'Local source ID already configured',
+              matching_record: 'Matching local verification record',
+              conflicting_record: 'Conflicting local verification record'};
+            for (const artifact of result.transfer_artifacts) {
+              const row = document.createElement('li');
+              row.textContent = [artifact.title, labels[artifact.state], artifact.language, artifact.edition, artifact.filename,
+                previewSize(artifact.bytes), 'SHA-256 ' + artifact.sha256,
+                artifact.license ? 'License: ' + artifact.license : 'Rights not recorded',
+                artifact.provenance ? 'Provenance: ' + artifact.provenance : ''].filter(Boolean).join(' · ');
+              selectionMatches.append(row);
+            }
+            selectionFeedback.textContent = 'Transfer manifest reviewed. File verification and import require separate steps.';
+            selectionStorage.textContent = 'Declared total size: ' +
+              previewSize(result.transfer_artifacts.reduce((sum, artifact) => sum + artifact.bytes, 0));
+            return;
+          }
           if (result.storage.capacity.state === 'pending') {
             await new Promise(resolve => window.setTimeout(resolve, 600));
             result = await selectionRequest(payload);

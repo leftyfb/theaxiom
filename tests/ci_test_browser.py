@@ -3,6 +3,7 @@
 Runs on isolated loopback with temporary catalog, credentials and configuration.
 Never connects to Vancouver or opens a production archive.
 """
+import json
 import os
 from pathlib import Path
 import tempfile
@@ -279,6 +280,16 @@ def exercise(browser, base, name, viewport, artifacts):
         page.get_by_role("button", name="Library selections").click()
         page.get_by_label("Starter preset").select_option("medical")
         expect(page.locator("#selection-file-matches")).to_contain_text("No supported format configured")
+        expect(page.get_by_role("button", name="Select matching sources")).to_be_disabled()
+        transfer = {"kind": "axiom-local-transfer", "version": 1, "artifacts": [{
+            "source_id": sid, "format": "zim", "title": "Portable reference", "language": "eng",
+            "edition": "2026-01", "bytes": 4096, "filename": "reference.zim",
+            "sha256": "a" * 64, "license": "Synthetic fixture", "provenance": "",
+        }]}
+        page.locator("#selection-file").set_input_files({
+            "name": "transfer.json", "mimeType": "application/json", "buffer": json.dumps(transfer).encode(),
+        })
+        expect(page.locator("#selection-file-matches")).to_contain_text("Local source ID already configured")
         expect(page.get_by_role("button", name="Select matching sources")).to_be_disabled()
         page.locator("#selection-file").set_input_files({
             "name": "selection.json", "mimeType": "application/json", "buffer": manifest,
