@@ -643,6 +643,9 @@
           </button>
           {% endif %}
           {% if (source.zim_download or source.legacy_pinned) and discovery.get("method") != "manual" %}<button class="button" type="button" data-zim-update-check{% if not source.installed_verified %} hidden disabled{% endif %}>Check for updates</button>{% endif %}
+          {% if document and url_managed and (discovery.get("method") == "head" or not discovery) %}
+          <button class="button" type="button" data-document-update-check{% if not source.installed_verified %} hidden disabled{% endif %}>Check for updates</button>
+          {% endif %}
           {% if source.zim_download %}<button class="button" type="button" data-zim-download{% if source.installed_verified %} hidden{% endif %}{% if source.mutation_blocked or source.installed_verified %} disabled{% endif %}>Download</button>{% endif %}
           {% if source.zim_download %}
           <button class="button danger-action" type="button" data-zim-delete hidden>Delete installed archive</button>
@@ -663,9 +666,6 @@
           <button class="button" type="button" data-zim-control="cancel-keep" hidden>Cancel · keep partial</button>
           <button class="button danger-action" type="button" data-zim-control="cancel" hidden>Cancel · discard partial</button>
           {% endif %}
-          {% if document and (discovery.get("method") == "head" or not discovery and url_managed) and source.installed_verified %}
-          <button class="button" type="button" data-document-update-check>Check publisher metadata</button>
-          {% endif %}
           {% if document %}
           {% if source.pdf_download %}
           <button class="button" type="button" data-pdf-download{% if pub.enabled %} hidden{% endif %}{% if pub.enabled or source.mutation_blocked or pub.error %} disabled{% endif %}>{{ 'Re-download' if source.installed_verified else 'Download from URL' }}</button>
@@ -685,7 +685,6 @@
         {% if document %}
         <div class="busy-indicator" data-pdf-busy hidden><span class="busy-spinner" aria-hidden="true"></span><span role="status" data-pdf-busy-text></span></div>
         <p class="source-note" data-pdf-feedback role="status"></p>
-        <p class="source-note" data-field="document-origin-status">{% if source.update_check and source.update_check.state == "representation_changed" %}Publisher representation changed; a newer verified edition is not established.{% endif %}</p>
         {% if url_managed and not source.pdf_download %}<p class="source-note">Configured download URL is unsupported. Edit the source URL.</p>{% endif %}
         {% elif source.acquisition_reason and source.acquisition_reason != 'acquisition disabled pending storage safety integration' %}<p class="source-note" data-field="acquisition-reason">{{ source.acquisition_reason }}</p>{% endif %}
         {% if pub %}<p class="source-note" data-field="publication-status" role="status"{% if pub.published %} hidden{% endif %}>{{ publication_label }}</p>{% endif %}
@@ -1724,39 +1723,14 @@
           button.disabled = card.dataset.zimAccepted === 'true' || card.dataset.zimBlocked === 'true';
         }
       }));
-      document.querySelectorAll('[data-document-update-check]').forEach(button => button.addEventListener('click', async () => {
-        if (button.disabled) return;
-        const card = button.closest('.source-card');
-        const feedback = card.querySelector('[data-pdf-feedback]');
-        button.disabled = true;
-        feedback.textContent = 'Checking…';
-        try {
-          const response = await fetch('/api/update-check', {
-            method: 'POST',
-            headers: {...((typeof window !== 'undefined' && window.axiomCsrfHeaders?.()) || {}), 'Content-Type': 'application/json'},
-            body: JSON.stringify({source_id: card.dataset.sourceId, revision})
-          });
-          const result = await response.json().catch(() => ({}));
-          if (!response.ok) throw new Error(result.error || 'Document metadata check failed');
-          feedback.textContent = result.state === 'representation_changed'
-            ? 'Publisher representation changed. A newer verified document edition is not established.'
-            : result.state === 'representation_unchanged'
-            ? 'Publisher representation matches the captured installed validator.'
-            : (result.evidence || 'Unable to determine whether the publisher document changed.');
-        } catch (error) {
-          feedback.textContent = error.message || 'Publisher metadata unavailable.';
-        } finally {
-          button.disabled = false;
-        }
-      }));
-      document.querySelectorAll('[data-zim-update-check]').forEach(button => button.addEventListener('click', async () => {
+      document.querySelectorAll('[data-zim-update-check], [data-document-update-check]').forEach(button => button.addEventListener('click', async () => {
         if (button.disabled) return;
         const card = button.closest('.source-card');
         const feedback = card.querySelector('[data-field="discovery-evidence"]');
-        const actionFeedback = card.querySelector('[data-zim-feedback]');
+        const actionFeedback = card.querySelector('[data-zim-feedback], [data-pdf-feedback]');
         if (actionFeedback) actionFeedback.textContent = '';
         button.disabled = true;
-        card.dataset.zimCheckPosting = 'true';
+        card.dataset.updateCheckPosting = 'true';
         feedback.textContent = 'Checking…';
         try {
           const response = await fetch('/api/update-check', {
@@ -1772,14 +1746,17 @@
             update_available: 'Update available',
             up_to_date: 'Up to date',
             no_newer_edition_listed: 'No newer edition found',
-            older_candidate: 'Publisher lists an older edition'
-          }[result.state] || 'Unable to check for updates';
+            older_candidate: 'Publisher lists an older edition',
+            representation_changed: 'Publisher file changed · newer edition unverified',
+            representation_unchanged: 'No change detected'
+          }[result.state] || (button.hasAttribute('data-document-update-check')
+            ? 'Couldn’t compare with the installed file' : 'Unable to check for updates');
           const details = card.querySelector('[data-field="update-evidence"]');
           if (details) details.textContent = result.evidence || '';
         } catch (error) {
           feedback.textContent = error.message || 'Publisher update check unavailable.';
         } finally {
-          delete card.dataset.zimCheckPosting;
+          delete card.dataset.updateCheckPosting;
           button.disabled = false;
         }
       }));
@@ -2048,10 +2025,10 @@
               source?.installed_verified ? 'Re-download' : 'Download from URL';
           }
         }
-        const updateCheckButton = card.querySelector('[data-zim-update-check]');
+        const updateCheckButton = card.querySelector('[data-zim-update-check], [data-document-update-check]');
         if (updateCheckButton) {
           updateCheckButton.hidden = !source?.installed_verified;
-          updateCheckButton.disabled = !source?.installed_verified || card.dataset.zimCheckPosting === 'true';
+          updateCheckButton.disabled = !source?.installed_verified || card.dataset.updateCheckPosting === 'true';
         }
         const zim = card.querySelector('[data-zim-download]');
         if (zim && card.dataset.filterFormat === 'zim') {
@@ -2192,10 +2169,6 @@
               const last = acquired?.last_successful_acquisition;
               card.querySelector('[data-field="last-acquisition"]').textContent = last ? timestamp(last) : '—';
             }
-            const documentStatus = card.querySelector('[data-field="document-origin-status"]');
-            if (documentStatus) documentStatus.textContent =
-              source?.update_check?.state === 'representation_changed'
-                ? 'Publisher representation changed; a newer verified edition is not established.' : '';
             const updateBadge = card.querySelector('[data-field="update-status"]');
             const updateDetails = card.querySelector('[data-field="update-details"]');
             const update = source?.update_check;
@@ -2206,16 +2179,17 @@
                 up_to_date: 'Installed edition matches publisher metadata',
                 no_newer_edition_listed: 'No newer edition found',
                 older_candidate: 'Publisher lists an older edition',
-                representation_changed: 'Publisher representation changed',
-                representation_unchanged: 'Publisher representation unchanged',
-                unable_to_determine: 'Unable to check for updates'
+                representation_changed: 'Publisher file changed · newer edition unverified',
+                representation_unchanged: 'No change detected',
+                unable_to_determine: ['pdf', 'epub'].includes(source?.adapter)
+                  ? 'Couldn’t compare with the installed file' : 'Unable to check for updates'
               };
-              if (card.dataset.zimCheckPosting !== 'true') evidence.textContent = update ? (update.stale ? 'Last update check is stale' :
+              if (card.dataset.updateCheckPosting !== 'true') evidence.textContent = update ? (update.stale ? 'Last update check is stale' :
                 update.state === 'update_available' ? '' : description[update.state] || '') :
-                (source?.discovery?.method && source.discovery.method !== 'manual' ? 'No update check recorded' : '');
+                (source?.installed_verified && source?.discovery?.method && source.discovery.method !== 'manual' ? 'No update check recorded' : '');
             }
             const technical = card.querySelector('[data-field="update-evidence"]');
-            if (technical) {
+            if (technical && card.dataset.updateCheckPosting !== 'true') {
               technical.textContent = update ? [
                 update.evidence,
                 update.checked_at ? 'Last check ' + new Date(update.checked_at * 1000).toLocaleString() : '',

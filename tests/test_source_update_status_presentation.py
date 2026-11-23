@@ -21,7 +21,7 @@ class SourceUpdateStatusPresentationTests(unittest.TestCase):
         self.assertIn('data-field="discovery-evidence" role="status" aria-live="polite"', self.template)
 
     def test_manual_zim_check_reuses_persistent_status(self):
-        start = self.template.index("document.querySelectorAll('[data-zim-update-check]')")
+        start = self.template.index("document.querySelectorAll('[data-zim-update-check], [data-document-update-check]')")
         end = self.template.index("document.querySelectorAll('[data-zim-delete]')", start)
         handler = self.template[start:end]
         self.assertIn("card.querySelector('[data-field=\"discovery-evidence\"]')", handler)
@@ -41,7 +41,7 @@ class SourceUpdateStatusPresentationTests(unittest.TestCase):
         self.assertIn("Kiwix OPDS / Metalink", technical)
 
     def test_refresh_does_not_overwrite_inflight_check(self):
-        self.assertIn("if (card.dataset.zimCheckPosting !== 'true') evidence.textContent", self.template)
+        self.assertIn("if (card.dataset.updateCheckPosting !== 'true') evidence.textContent", self.template)
 
 
 if __name__ == "__main__":

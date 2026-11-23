@@ -54,7 +54,12 @@ def test_unverified_or_missing_etag_never_performs_network_request(monkeypatch):
     monkeypatch.setattr(discovery.pdf_source, "ready", lambda *args, **kwargs: True)
     monkeypatch.setattr(discovery.document_origin_evidence, "load",
                         lambda *args: None)
-    assert discovery.check_installed_document(rec, probe=forbidden)["state"] == "unable_to_determine"
+    save = Mock()
+    monkeypatch.setattr(discovery.update_check_store, "save", save)
+    result = discovery.check_installed_document(rec, probe=forbidden)
+    assert result["state"] == "unable_to_determine"
+    assert "No strong ETag was saved" in result["evidence"]
+    save.assert_called_once_with(SID, DIGEST, result)
 
 
 def test_wrong_format_and_bad_adapter_fail_closed_without_network():

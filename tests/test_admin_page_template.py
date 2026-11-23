@@ -440,3 +440,22 @@ def test_failed_replacement_discard_requires_safe_retirement_flag():
                            source_url="https://example.org/new.zim")])
     assert "replacement?.can_discard !== true" in page
     assert "['failed','cancelled','interrupted'].includes(replacementState)" in page
+
+
+def test_installed_url_sources_share_the_update_label():
+    url = "https://publisher.org/guide.pdf"
+    for kind in ("pdf", "epub", "zim"):
+        if kind == "zim":
+            source = profile("wikipedia-en", format=kind, source_url=WIKIPEDIA_SOURCE["source_url"])
+        else:
+            source = profile(format=kind, source_url=url)
+        source["installed_verified"] = True
+        page = render([source])
+        assert ">Check for updates</button>" in page
+        assert "Check publisher metadata" not in page
+
+    pending = render([profile(source_url=url)])
+    assert "data-document-update-check hidden disabled>Check for updates" in pending
+    upload = profile()
+    upload["installed_verified"] = True
+    assert "data-document-update-check>Check for updates" not in render([upload])

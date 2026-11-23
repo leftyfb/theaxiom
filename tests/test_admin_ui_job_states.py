@@ -175,7 +175,12 @@ def test_document_origin_status_is_informational_not_an_update_badge():
     unchanged = job("completed")
     unchanged["sources"][0].update(
         adapter="pdf", update_check={"state": "representation_unchanged"})
-    states = run_ui([changed, unchanged])["states"]
-    assert "newer verified edition is not established" in states[0]["document-origin-status"]["textContent"]
+    inconclusive = job("completed")
+    inconclusive["sources"][0].update(
+        adapter="pdf", update_check={"state": "unable_to_determine", "evidence": "No saved ETag"})
+    states = run_ui([changed, unchanged, inconclusive])["states"]
+    assert states[0]["discovery-evidence"]["textContent"] == "Publisher file changed · newer edition unverified"
     assert states[0]["update-status"]["hidden"] is True
-    assert states[1]["document-origin-status"]["textContent"] == ""
+    assert states[1]["discovery-evidence"]["textContent"] == "No change detected"
+    assert states[2]["discovery-evidence"]["textContent"] == "Couldn’t compare with the installed file"
+    assert states[2]["update-evidence"]["textContent"] == "No saved ETag"

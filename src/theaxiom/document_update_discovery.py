@@ -40,12 +40,12 @@ def check_installed_document(record, *, probe=None, persist=True):
         etag = document_origin_evidence.load(sid, kind, url, digest) if endpoint == url else None
         cache_id = update_discovery_config.cache_identity(config, digest)
         if not etag:
-            if not config.get("update_endpoint"):
-                return dict(UNKNOWN)
-            update_diagnostics.mark("document_head")
-            diagnostic = update_discovery_config.probe_endpoint(selected)
-            result = dict(UNKNOWN, evidence=diagnostic["evidence"] if diagnostic["state"] == "failed"
-                          else "Endpoint reachable; no capture-time ETag for this exact URL")
+            result = dict(UNKNOWN, evidence="No strong ETag was saved for the installed file and this URL.")
+            if config.get("update_endpoint"):
+                update_diagnostics.mark("document_head")
+                diagnostic = update_discovery_config.probe_endpoint(selected)
+                result["evidence"] = (diagnostic["evidence"] if diagnostic["state"] == "failed"
+                                      else "Endpoint reachable; no capture-time ETag for this exact URL")
             if persist:
                 update_check_store.save(sid, cache_id, result)
             return result
