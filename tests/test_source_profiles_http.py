@@ -796,17 +796,32 @@ def test_acquisition_preview_uses_recorded_sizes_without_starting_jobs(app, monk
     monkeypatch.setattr(jobs, "status", forbidden)
     monkeypatch.setattr(jobs, "start", forbidden)
     monkeypatch.setattr(jobs, "installed", forbidden)
+    settings = storage_settings.DEFAULT_SETTINGS | {"minimum_free_bytes": 100}
+    monkeypatch.setattr(storage_settings, "load_settings", lambda: settings)
+    probe = Mock(return_value={"write_ready": True, "free_bytes": 500})
+    monkeypatch.setattr(admin_api.STORAGE_PROBE, "status", probe)
     payload = {"revision": catalog["revision"], "source_ids": [sid for sid, _ in definitions]}
     request("/api/acquisition-preview", payload, status=403, origin="")
     request("/api/acquisition-preview", payload | {"revision": 0}, status=409)
     request("/api/acquisition-preview", payload | {"source_ids": ["replace-me", "replace-me"]}, status=400)
     request("/api/acquisition-preview", payload | {"source_ids": ["missing"]}, status=400)
-    planned, unknown, document = request("/api/acquisition-preview", payload)["sources"]
+    result = request("/api/acquisition-preview", payload)
+    planned, unknown, document = result["sources"]
     assert planned == {"state": "estimated", "source_id": "replace-me", "title": "replace-me",
                        "installed_bytes": 200, "transfer_bytes": 400, "staging_bytes": 400,
                        "peak_bytes": 600}
     assert unknown["transfer_bytes"] is None and unknown["peak_bytes"] is None
     assert document["state"] == "unsupported"
+    assert result["capacity"] == {"state": "uncertain", "free_bytes": 500, "reserve_bytes": 100,
+                                  "available_bytes": 400}
+    sized = payload | {"source_ids": ["replace-me"]}
+    assert request("/api/acquisition-preview", sized)["capacity"]["state"] == "fits"
+    probe.return_value["free_bytes"] = 499
+    assert request("/api/acquisition-preview", payload)["capacity"]["state"] == "insufficient"
+    probe.return_value = {"pending": True}
+    assert request("/api/acquisition-preview", sized)["capacity"] == {"state": "pending"}
+    probe.return_value = {"error": "required_mount_missing_or_replaced", "free_bytes": 5000}
+    assert request("/api/acquisition-preview", sized)["capacity"] == {"state": "unavailable"}
     assert jobs.read("replace-me") == installed
     assert admin_api.SOURCE_CATALOG.get()["revision"] == catalog["revision"]
     forbidden.assert_not_called()

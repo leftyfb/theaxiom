@@ -519,8 +519,9 @@
         <button class="button" type="button" id="bulk-preview">Preview ZIM storage</button>
       </div>
       <div id="bulk-preview-result" hidden>
-        <p class="source-note">Estimates cover the selected ZIMs. They include full staging and any recorded installed editions. Other files and available space are outside this estimate.</p>
+        <p class="source-note">Estimates cover the selected ZIMs. They include full staging and any recorded installed editions.</p>
         <p id="bulk-preview-summary" role="status"></p>
+        <p id="bulk-preview-capacity" role="status"></p>
         <ul id="bulk-preview-sources"></ul>
       </div>
     </section>
@@ -769,8 +770,9 @@
       const selectedIds = () => selecting ? groupChecks.filter(item => item.checked).map(item => item.value) : [];
       const preview = document.getElementById('bulk-preview-result');
       const previewSummary = document.getElementById('bulk-preview-summary');
+      const previewCapacity = document.getElementById('bulk-preview-capacity');
       const previewSources = document.getElementById('bulk-preview-sources');
-      let previewIds = '';
+      let previewIds = '', previewRequest = 0;
       function previewSize(bytes) {
         if (!Number.isSafeInteger(bytes) || bytes < 0) return 'unknown';
         if (bytes < 1048576) return bytes.toLocaleString() + ' B';
@@ -784,19 +786,32 @@
       document.getElementById('bulk-preview').addEventListener('click', async () => {
         const ids = selectedIds();
         const selection = ids.join(',');
+        const requestId = ++previewRequest;
+        const current = () => previewIds === selection && previewRequest === requestId;
         previewIds = selection;
         preview.hidden = false;
         previewSummary.textContent = 'Calculating estimates…';
+        previewCapacity.textContent = '';
         previewSources.replaceChildren();
-        try {
+        async function requestPreview() {
           const response = await fetch('/api/acquisition-preview', {
             method: 'POST',
             headers: {...(window.axiomCsrfHeaders?.() || {}), 'Content-Type':'application/json'},
             body: JSON.stringify({revision, source_ids: ids})
           });
           const result = await response.json();
-          if (previewIds !== selection) return;
           if (!response.ok) throw new Error(result.error || 'Storage preview unavailable.');
+          return result;
+        }
+        try {
+          let result = await requestPreview();
+          if (!current()) return;
+          if (result.capacity?.state === 'pending') {
+            await new Promise(resolve => window.setTimeout(resolve, 600));
+            if (!current()) return;
+            result = await requestPreview();
+            if (!current()) return;
+          }
           const estimates = result.sources.filter(source => source.state !== 'unsupported');
           previewSummary.textContent = estimates.length ? previewFields.map(([label, field]) => {
             const known = estimates.map(source => source[field]).filter(Number.isSafeInteger);
@@ -804,6 +819,17 @@
             return label + ' ' + previewSize(known.reduce((sum, bytes) => sum + bytes, 0)) +
               (unknown ? ' + ' + unknown + ' unknown' : '');
           }).join(' · ') : 'No supported ZIM sources selected.';
+          const capacity = result.capacity || {};
+          const capacityResult = {
+            fits: 'Estimated staging fits.',
+            insufficient: 'Insufficient space for the staging estimate and configured reserve.',
+            uncertain: 'Some staging sizes are unknown.',
+            pending: 'Storage capacity check still pending. Preview again to refresh.',
+            unavailable: 'Current storage capacity is unavailable.'
+          }[capacity.state] || '';
+          previewCapacity.textContent = Number.isSafeInteger(capacity.available_bytes) ?
+            previewSize(capacity.available_bytes) + ' available for staging after the ' +
+              previewSize(capacity.reserve_bytes) + ' reserve. ' + capacityResult : capacityResult;
           for (const source of result.sources) {
             const row = document.createElement('li');
             const notes = {unsupported: 'Outside the ZIM preview', unavailable: 'Estimate unavailable',
@@ -813,7 +839,7 @@
             previewSources.append(row);
           }
         } catch (error) {
-          if (previewIds === selection) previewSummary.textContent = error.message;
+          if (current()) previewSummary.textContent = error.message;
         }
       });
       function selectionMode() {

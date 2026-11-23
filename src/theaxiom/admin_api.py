@@ -369,6 +369,32 @@ def _source_update_summary(sources):
     return " · ".join(messages)
 
 
+def _preview_capacity(rows):
+    staging = [row.get("staging_bytes") for row in rows if row["state"] != "unsupported"]
+    if not staging:
+        return {"state": "not_applicable"}
+    try:
+        settings = storage_settings.load_settings()
+        sample = STORAGE_PROBE.status(settings)
+    except (OSError, ValueError):
+        return {"state": "unavailable"}
+    if sample.get("pending"):
+        return {"state": "pending"}
+    free = sample.get("free_bytes")
+    if (type(free) is not int or free < 0 or
+            (sample.get("write_ready") is not True and sample.get("error") != "insufficient_capacity")):
+        return {"state": "unavailable"}
+    reserve = settings["minimum_free_bytes"]
+    known_staging = sum(size for size in staging if size is not None)
+    available = max(0, free - reserve)
+    if free < reserve or known_staging > available:
+        state = "insufficient"
+    else:
+        state = "uncertain" if None in staging else "fits"
+    return {"state": state, "free_bytes": free, "reserve_bytes": reserve,
+            "available_bytes": available}
+
+
 class AdminAPIHandler(BaseHTTPRequestHandler):
     """Minimal HTTP handler for the admin API."""
 
@@ -1362,7 +1388,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     except (OSError, ValueError, KeyError, TypeError):
                         estimate = {"state": "unavailable"}
                 rows.append(dict(estimate, title=record["profile"]["title"], source_id=sid))
-            self._send_json(200, {"sources": rows})
+            self._send_json(200, {"sources": rows, "capacity": _preview_capacity(rows)})
         elif self.path == "/api/library-layout":
             if not self.headers.get("Origin"):
                 self._send_json(403, {"error": "same-origin request required"})
