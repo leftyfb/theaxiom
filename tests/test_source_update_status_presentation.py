@@ -17,7 +17,7 @@ class SourceUpdateStatusPresentationTests(unittest.TestCase):
         cls.template = TEMPLATE.read_text(encoding="utf-8")
 
     def test_single_persistent_update_status_element(self):
-        self.assertEqual(self.template.count('data-field="discovery-evidence"'), 2)
+        self.assertEqual(self.template.count('data-field="discovery-evidence"'), 3)
         self.assertIn('data-field="discovery-evidence" role="status" aria-live="polite"', self.template)
 
     def test_manual_zim_check_reuses_persistent_status(self):
