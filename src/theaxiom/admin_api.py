@@ -240,6 +240,7 @@ _active_downloads: dict[str, subprocess.Popen[bytes]] = {}
 _jobs: dict[str, dict[str, Any]] = {}
 _active_downloads_lock = threading.Lock()
 MAX_RETAINED_JOBS = 100
+STORAGE_PROBE = storage.StorageProbe()
 
 
 def source_busy(snapshot, source_id):
@@ -637,7 +638,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             self._send_json(200, monitor.snapshot() if monitor else {"acquisitions": [], "stale": True})
         elif self.path.rstrip("/") == "/api/storage-status":
             try:
-                self._send_json(200, storage.inspect_storage(storage_settings.load_settings()))
+                self._send_json(200, STORAGE_PROBE.status(storage_settings.load_settings()))
             except ValueError:
                 self._send_json(503, {"ready": False, "error": "stored settings are invalid"})
         elif self.path.rstrip("/") == "/api/storage-settings":
@@ -1393,10 +1394,25 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         elif self.path.rstrip("/") == "/api/storage-settings":
             data = self._read_body()
             try:
-                with publication.LOCK:
-                    settings = storage_settings.save_settings(data)
-            except (ValueError, OSError):
+                settings = storage_settings.validate_settings(data)
+            except ValueError:
                 self._send_json(400, {"error": "invalid storage settings"})
+                return
+            try:
+                with publication.LOCK:
+                    try:
+                        current = storage_settings.load_settings()
+                    except ValueError:
+                        current = None  # Explicit save can replace invalid preferences.
+                    if current != settings:
+                        with zim_jobs.worker_lock():
+                            self._check_storage_change()
+                            settings = storage_settings.save_settings(settings)
+            except BlockingIOError:
+                self._send_json(409, {"error": "Finish or resolve the acquisition before changing storage settings"})
+                return
+            except (ValueError, OSError):
+                self._send_json(503, {"error": "Storage settings could not be saved safely"})
                 return
             self._send_json(200, settings)
         elif self.path.rstrip("/") == "/api/action":
@@ -1411,6 +1427,38 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 self._refuse_acquisition(data)
         else:
             self._send_json(404, {"error": "not found"})
+
+    def _check_storage_change(self):
+        """Check local acquisition records without probing the managed mount."""
+        monitor = getattr(self.server, "acquisition_monitor", None)
+        if monitor is not None:
+            snapshot = self._snapshot()
+            if snapshot["stale"] or any(
+                    job.get("active") is not False or
+                    job.get("state") not in {"completed", "not_started", "unavailable"}
+                    for job in snapshot["acquisitions"]):
+                raise BlockingIOError("External acquisition unresolved")
+        with _active_downloads_lock:
+            if any(job["process"].poll() is None for job in _jobs.values()):
+                raise BlockingIOError("External acquisition active")
+        for record in SOURCE_CATALOG.get()["sources"]:
+            sid = record["source_id"]
+            job = zim_jobs.read(sid)
+            if job and (job["state"] not in {"completed", "cancelled"}
+                        or job["state"] == "cancelled" and job.get("downloaded_bytes") not in (0, None)):
+                raise BlockingIOError("ZIM acquisition unresolved")
+            replacement = zim_jobs.read_candidate(sid)
+            if not replacement:
+                continue
+            if replacement["state"] == "activated":
+                expected = dict(source_id=sid, state="completed", active=False, verified=True,
+                                configuration=replacement["configuration"], artifact=replacement["artifact"])
+            elif replacement["state"] == "rolled_back":
+                expected = replacement["previous_job"]
+            else:
+                raise BlockingIOError("ZIM replacement unresolved")
+            if job != expected:
+                raise BlockingIOError("ZIM replacement transition unresolved")
 
     @staticmethod
     def _valid_revision(revision):

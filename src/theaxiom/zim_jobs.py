@@ -39,7 +39,7 @@ def read_candidate(sid):
     """Read candidate metadata without modifying the installed archive."""
     target = candidate_path_for(sid)
     try:
-        fd = os.open(target, os.O_RDONLY | os.O_NOFOLLOW)
+        fd = os.open(target, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except FileNotFoundError:
         return None
     try:
@@ -536,7 +536,7 @@ def read(sid):
     import stat
     target = path_for(sid)
     try:
-        fd = os.open(target, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        fd = os.open(target, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
     except FileNotFoundError:
         return None
     try:

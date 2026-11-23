@@ -805,3 +805,21 @@ def test_public_search_groups_two_published_zims_and_hides_unpublished(app, monk
     assert f'href="/zim/content/{second}/water"' in page
     publication.save("second-book", False)
     assert "Emergency reference article" not in request("/search?q=water")
+
+
+def test_storage_preferences_block_unresolved_acquisition(app, monkeypatch, tmp_path):
+    request, snapshot = app
+    path = tmp_path / "storage.json"
+    monkeypatch.setattr(storage_settings, "SETTINGS_PATH", path)
+    saved = dict(storage_settings.DEFAULT_SETTINGS, storage_root=str(tmp_path / "old"))
+    storage_settings.save_settings(saved)
+    changed = dict(saved, storage_root=str(tmp_path / "new"))
+    snapshot["acquisitions"][0].update(active=True, state="downloading")
+    assert "resolve the acquisition" in request("/api/storage-settings", changed, status=409)["error"]
+    assert storage_settings.load_settings() == saved
+    assert request("/api/storage-settings", saved) == saved
+    snapshot["acquisitions"][0].update(active=False, state="completed")
+    monkeypatch.setattr(admin_api.zim_jobs, "read", lambda sid: {"state": "paused"})
+    assert "resolve the acquisition" in request("/api/storage-settings", changed, status=409)["error"]
+    monkeypatch.setattr(admin_api.zim_jobs, "read", lambda sid: None)
+    assert request("/api/storage-settings", changed) == changed

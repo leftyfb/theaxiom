@@ -197,6 +197,7 @@
         <dt>Filesystem / source</dt><dd id="status-source">—</dd>
         <dt>Total capacity</dt><dd id="status-total">—</dd>
         <dt>Available capacity</dt><dd id="status-free">—</dd>
+        <dt>Failed check</dt><dd id="status-failure">—</dd>
         <dt>Write readiness (advisory)</dt><dd id="status-write">—</dd>
         <dt>Staging directory</dt><dd id="status-staging">—</dd>
         <dt>Verified library directory</dt><dd id="status-library">—</dd>
@@ -1762,6 +1763,9 @@
         storage_not_writable: 'The application cannot write to the selected directory.',
         insufficient_capacity: 'Not enough free space for the configured minimum or selected content.',
         mount_changed_during_inspection: 'The mount changed during validation. Check again.',
+        storage_permission_denied: 'The service account could not inspect this path. Check directory permissions.',
+        stale_storage_handle: 'The filesystem reported a stale handle. Check the NFS server and mount.',
+        storage_probe_timeout: 'The filesystem did not respond in time. Check the mount and storage server.',
         storage_io_error: 'Storage is unavailable or could not be inspected.'
       };
       function syncMode() {
@@ -1779,8 +1783,11 @@
       }
       function renderStatus(status) {
         const put = (id, value) => { byId(id).textContent = value || '—'; };
-        put('status-ready', status.ready === true ? 'Ready (advisory)' :
+        put('status-ready', status.pending ? 'Checking storage…' : status.ready === true ? 'Ready (advisory)' :
           (status.error ? 'Not ready: ' + (errors[status.error] || status.error) : 'Not checked'));
+        const operations = {validate_settings: 'Validate settings', inspect_mount: 'Inspect mount',
+          inspect_path: 'Inspect path', check_access: 'Check write access', check_capacity: 'Check free space'};
+        put('status-failure', [operations[status.operation], status.failed_path].filter(Boolean).join(' · '));
         put('status-root', status.root);
         put('status-mount', status.mount?.target);
         put('status-source', status.mount ? status.mount.type + ' · ' + status.mount.source : '');
@@ -1803,7 +1810,12 @@
       async function statusCheck() {
         renderStatus({});
         try {
-          const status = await json('/api/storage-status');
+          let status = await json('/api/storage-status');
+          for (let attempt = 0; status.pending && attempt < 8; attempt++) {
+            renderStatus(status);
+            await new Promise(resolve => setTimeout(resolve, 500));
+            status = await json('/api/storage-status');
+          }
           renderStatus(status);
           return status.ready === true;
         } catch (error) {
