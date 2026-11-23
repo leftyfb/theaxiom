@@ -269,7 +269,7 @@ def exercise(browser, base, name, viewport, artifacts):
         expect(page.locator("#bulk-unpublish")).to_be_disabled()
         page.get_by_role("button", name="Preview storage").click()
         expect(page.locator("#bulk-preview-summary")).to_contain_text("Installed and peak sizes unknown")
-        expect(page.locator("#bulk-preview-capacity")).to_be_empty()
+        expect(page.locator("#bulk-preview-capacity")).to_have_text("Current storage capacity is unavailable.")
         with page.expect_download() as download:
             page.get_by_role("button", name="Export selected sources").click()
         manifest = download.value.path().read_bytes()

@@ -12,8 +12,8 @@ from . import catalog_store, storage, storage_settings
 
 MAX_BYTES = 16 * 1024 * 1024
 CHUNK = 128 * 1024
-LOCAL_FILESYSTEMS = {"ext4", "ext3", "ext2", "xfs", "btrfs", "tmpfs", "zfs"}
-NETWORK_FILESYSTEMS = {"nfs", "nfs4"}
+LOCAL_FILESYSTEMS = storage.LOCAL_FILESYSTEMS
+NETWORK_FILESYSTEMS = storage.NETWORK_FILESYSTEMS
 DIRECTORY = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
 FILES = os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW
 # The existing frontend proxies /api/ to this application, not /read/.

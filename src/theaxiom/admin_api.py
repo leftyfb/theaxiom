@@ -372,12 +372,15 @@ def _source_update_summary(sources):
 
 
 def _preview_capacity(rows):
-    staging = [row.get("staging_bytes") for row in rows if row["state"] != "unsupported"]
+    eligible = [row for row in rows if (
+        row["format"] == "zim" and row["state"] != "unsupported"
+        or row["format"] in {"pdf", "epub"} and row["state"] == "estimated")]
+    staging = [row.get("staging_bytes") for row in eligible]
     if not staging:
         return {"state": "not_applicable"}
     try:
         settings = storage_settings.load_settings()
-        sample = STORAGE_PROBE.status(settings)
+        sample = STORAGE_PROBE.status(settings, formats=tuple(sorted({row['format'] for row in eligible})))
     except (OSError, ValueError):
         return {"state": "unavailable"}
     if sample.get("pending"):
@@ -822,8 +825,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 limit = pdf_source.MAX_BYTES if format_name == "pdf" else epub_source.MAX_BYTES
                 estimate = _preview_document_acquisition(configuration, byte_limit=limit)
             rows.append(dict(estimate, title=record["profile"]["title"], source_id=sid, format=format_name))
-        return {"sources": rows,
-                "capacity": _preview_capacity([row for row in rows if row["format"] == "zim"])}
+        return {"sources": rows, "capacity": _preview_capacity(rows)}
 
     def _zim_publications(self, catalog=None):
         catalog = catalog or SOURCE_CATALOG.get()

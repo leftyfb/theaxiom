@@ -565,7 +565,7 @@
         <button class="button" type="button" id="selection-export">Export selected sources</button>
       </div>
       <div id="bulk-preview-result" hidden>
-        <p class="source-note">Storage capacity and recorded installed sizes are available for ZIMs. PDF and EPUB estimates use the configured download sizes.</p>
+        <p class="source-note">Capacity is a snapshot of free space after the configured reserve. PDF and EPUB estimates use the configured download sizes.</p>
         <p id="bulk-preview-summary" role="status"></p>
         <p id="bulk-preview-capacity" role="status"></p>
         <ul id="bulk-preview-sources"></ul>
@@ -1087,8 +1087,8 @@
       }
       function capacitySummary(capacity) {
         const result = {
-          fits: 'Estimated ZIM staging fits.',
-          insufficient: 'Insufficient space for the ZIM staging estimate and configured reserve.',
+          fits: 'Estimated staging fits.',
+          insufficient: 'Insufficient space for the staging estimate and configured reserve.',
           uncertain: 'Some staging sizes are unknown.',
           pending: 'Storage capacity check still pending. Preview again to refresh.',
           unavailable: 'Current storage capacity is unavailable.'

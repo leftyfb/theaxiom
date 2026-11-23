@@ -67,6 +67,24 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(self.inspect(mounts=[self.mount, nested])["error"],
                          "nested_or_replaced_mount")
 
+    def test_document_preview_checks_only_selected_format_paths(self):
+        (self.root / "staging").mkdir()
+        (self.root / "library").mkdir()
+        (self.root / "library/zim").symlink_to("/tmp", target_is_directory=True)
+        result = self.inspect(formats=("pdf",))
+        self.assertTrue(result["ready"], result)
+        self.assertEqual(list((self.root / "staging").iterdir()), [])
+        (self.root / "staging/pdf").symlink_to("/tmp", target_is_directory=True)
+        self.assertEqual(self.inspect(formats=("pdf",))["error"], "symlink_not_allowed")
+        nested = dict(self.mount, target=str(self.root / "library/epub"))
+        self.assertEqual(self.inspect(mounts=[self.mount, nested], formats=("epub",))["error"],
+                         "nested_or_replaced_mount")
+
+    def test_document_scope_requires_parent_and_supported_filesystem(self):
+        self.assertEqual(self.inspect(formats=("pdf",))["error"], "storage_parent_missing")
+        self.assertEqual(self.inspect(mounts=[dict(self.mount, type="nfs")], formats=("pdf",))["error"],
+                         "unsupported_storage_filesystem")
+
     def test_mount_escape(self):
         self.assertEqual(storage._decode(r"/media/my\040disk"), "/media/my disk")
 
@@ -94,13 +112,13 @@ def test_blocked_probe_does_not_start_another_or_report_previous_root(tmp_path, 
     real_check = storage.inspect_storage
     checks = []
 
-    def check(settings, *, progress):
+    def check(settings, *, progress, **kwargs):
         checks.append(settings["storage_root"])
         if len(checks) == 1:
             progress("check_capacity", settings["storage_root"])
             entered.set()
             release.wait(5)
-        return real_check(settings, progress=progress)
+        return real_check(settings, progress=progress, **kwargs)
 
     monkeypatch.setattr(storage, "inspect_storage", check)
     probe = storage.StorageProbe()
@@ -127,3 +145,9 @@ def test_blocked_probe_does_not_start_another_or_report_previous_root(tmp_path, 
         release.set()
         assert finished.wait(2)
     assert not probe.status(cfg).get("pending")
+    monkeypatch.setattr(probe, "STALL_AFTER", 3)
+    finished.clear()
+    assert probe.status(cfg, formats=("pdf",))["pending"]
+    assert finished.wait(2)
+    assert probe.status(cfg, formats=("pdf",))["error"] in {
+        "storage_parent_missing", "unsupported_storage_filesystem"}

@@ -13,6 +13,10 @@ from typing import Any
 
 from .storage_settings import validate_settings
 
+LOCAL_FILESYSTEMS = {"ext4", "ext3", "ext2", "xfs", "btrfs", "tmpfs", "zfs"}
+NETWORK_FILESYSTEMS = {"nfs", "nfs4"}
+ACQUISITION_FORMATS = frozenset({"zim", "pdf", "epub"})
+
 
 def _decode(field: str) -> str:
     return re.sub(r"\\([0-7]{3})", lambda match: chr(int(match.group(1), 8)), field)
@@ -41,7 +45,7 @@ def _covering(path: Path, mounts: list[dict[str, Any]]) -> dict[str, Any]:
     return deepest[0]
 
 
-def inspect_storage(settings: dict[str, Any], *, required_bytes: int = 0, progress=None) -> dict[str, Any]:
+def inspect_storage(settings: dict[str, Any], *, required_bytes: int = 0, progress=None, formats=()) -> dict[str, Any]:
     """Return advisory readiness without mkdir, file writes, or fallback.
 
     This cannot guarantee future writes or bound I/O on an unhealthy hard NFS mount.
@@ -73,7 +77,16 @@ def inspect_storage(settings: dict[str, Any], *, required_bytes: int = 0, progre
             raise ValueError("required_mount_missing_or_replaced")
         if mount["read_only"]:
             raise ValueError("read_only_filesystem")
-        paths = {"staging": root / "staging", "library": root / "library" / "zim"}
+        if formats:
+            if not set(formats) <= ACQUISITION_FORMATS:
+                raise ValueError("unsupported_storage_format")
+            allowed = LOCAL_FILESYSTEMS | (NETWORK_FILESYSTEMS if config["storage_mount"] else set())
+            if mount["type"] not in allowed:
+                raise ValueError("unsupported_storage_filesystem")
+            paths = {f"{branch}_{kind}": root / branch / kind
+                     for kind in formats for branch in ("staging", "library")}
+        else:
+            paths = {"staging": root / "staging", "library": root / "library" / "zim"}
         result["paths"] = {key: str(path) for key, path in paths.items()}
         # Reject symlinks and nested mounts throughout managed paths before any capacity probe.
         for path in (root, *paths.values()):
@@ -94,15 +107,24 @@ def inspect_storage(settings: dict[str, Any], *, required_bytes: int = 0, progre
                     raise ValueError("symlink_not_allowed")
                 if not stat.S_ISDIR(mode):
                     raise ValueError("storage_path_not_directory")
-        for path in (root, *paths.values()):
+        for target in (root, *paths.values()):
+            path = target
             while True:
                 mark("check_access", path)
                 try:
-                    path.stat()
+                    info = path.lstat()
+                    if stat.S_ISLNK(info.st_mode):
+                        raise ValueError("symlink_not_allowed")
+                    if not stat.S_ISDIR(info.st_mode):
+                        raise ValueError("storage_path_not_directory")
+                    if formats and path == target and target != root and info.st_uid != os.geteuid():
+                        raise ValueError("storage_directory_owner_mismatch")
                     break
                 except FileNotFoundError:
                     if path == root:
                         raise ValueError("storage_root_missing")
+                    if formats and path != target:
+                        raise ValueError("storage_parent_missing")
                     path = path.parent
             if not os.access(path, os.W_OK | os.X_OK, effective_ids=True):
                 raise ValueError("storage_not_writable")
@@ -113,7 +135,8 @@ def inspect_storage(settings: dict[str, Any], *, required_bytes: int = 0, progre
         if capacity.f_flag & os.ST_RDONLY:
             raise ValueError("read_only_filesystem")
         mark("inspect_mount", root)
-        if _covering(root, read_mounts()) != mount:
+        current_mounts = read_mounts()
+        if any(_covering(path, current_mounts) != mount for path in (root, *paths.values())):
             raise ValueError("mount_changed_during_inspection")
         mark("check_capacity", root)
         if result["free_bytes"] < max(config["minimum_free_bytes"], required_bytes):
@@ -143,17 +166,18 @@ class StorageProbe:
         self._sample = None
         self._running = None
 
-    def status(self, settings):
+    def status(self, settings, *, formats=()):
         now = time.monotonic()
         if not settings["storage_root"]:
             return inspect_storage(settings)
         with self._lock:
             if self._sample:
-                sampled_settings, stamped, result = self._sample
-                if sampled_settings == settings and now - stamped < self.SAMPLE_MAX_AGE:
+                sampled_settings, sampled_formats, stamped, result = self._sample
+                if (sampled_settings == settings and sampled_formats == formats
+                        and now - stamped < self.SAMPLE_MAX_AGE):
                     return dict(result)
             if self._running is None:
-                run = {"settings": settings, "started": now, "operation": "inspect_mount",
+                run = {"settings": settings, "formats": formats, "started": now, "operation": "inspect_mount",
                        "failed_path": settings["storage_root"]}
                 self._running = run
                 try:
@@ -167,7 +191,7 @@ class StorageProbe:
             stalled = now - run["started"] >= self.STALL_AFTER
             result = dict(ready=False, write_ready=False, root=settings["storage_root"],
                           pending=not stalled, error="storage_probe_timeout" if stalled else None)
-            if stalled and run["settings"] == settings:
+            if stalled and run["settings"] == settings and run["formats"] == formats:
                 result.update(operation=run["operation"], failed_path=run["failed_path"])
             return result
 
@@ -179,8 +203,9 @@ class StorageProbe:
         result = dict(ready=False, write_ready=False, error="storage_io_error",
                       root=run["settings"]["storage_root"])
         try:
-            result = inspect_storage(run["settings"], progress=report)
+            options = {"formats": run["formats"]} if run["formats"] else {}
+            result = inspect_storage(run["settings"], progress=report, **options)
         finally:
             with self._lock:
-                self._sample = run["settings"], time.monotonic(), result
+                self._sample = run["settings"], run["formats"], time.monotonic(), result
                 self._running = None

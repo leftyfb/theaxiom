@@ -922,12 +922,18 @@ def test_acquisition_preview_uses_recorded_sizes_without_starting_jobs(app, monk
     assert unknown_epub["format"] == "epub" and unknown_epub["staging_bytes"] is None
     assert [upload["state"], oversized["state"], invalid["state"]] == [
         "upload_required", "over_size_limit", "invalid_download_url"]
+    probe.assert_called_once_with(settings, formats=("epub", "pdf", "zim"))
+    assert result["capacity"] == {"state": "insufficient", "free_bytes": 500, "reserve_bytes": 100,
+                                  "available_bytes": 400}
     probe.reset_mock()
     documents_only = payload | {"source_ids": ["document", "unknown-epub"]}
-    assert request("/api/acquisition-preview", documents_only)["capacity"] == {"state": "not_applicable"}
+    probe.return_value["free_bytes"] = 1000
+    assert request("/api/acquisition-preview", documents_only)["capacity"]["state"] == "uncertain"
+    probe.assert_called_once_with(settings, formats=("epub", "pdf"))
+    probe.reset_mock()
+    upload_only = payload | {"source_ids": ["upload-epub"]}
+    assert request("/api/acquisition-preview", upload_only)["capacity"] == {"state": "not_applicable"}
     probe.assert_not_called()
-    assert result["capacity"] == {"state": "uncertain", "free_bytes": 500, "reserve_bytes": 100,
-                                  "available_bytes": 400}
     sized = payload | {"source_ids": ["replace-me"]}
     assert request("/api/acquisition-preview", sized)["capacity"]["state"] == "fits"
     probe.return_value["free_bytes"] = 499
