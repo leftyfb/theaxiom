@@ -1538,11 +1538,26 @@
           !pub || pub.error ? 'Publication status unavailable' : pub.published ? 'Published · available in library' :
           pub.enabled ? (pub.ready_for_publication ? 'Verified · awaiting Kiwix reader activation' : 'Enabled · reader unavailable') : pub.serving ? 'Unpublished · ready to publish' : pub.ready_for_publication ? 'Verified · ready to publish' : pub.publication_reason ? 'Unpublished · ' + pub.publication_reason : 'Unpublished · reader not ready';
       }
+      let sessionExpired = false;
+      function redirectExpiredSession() {
+        if (sessionExpired) return;
+        sessionExpired = true;
+        const feedback = document.getElementById('catalog-feedback');
+        if (feedback) feedback.textContent = 'Your administrator session expired. Sign in again.';
+        // Preserve only a same-origin return path; login itself remains the
+        // sole place where credentials are collected.
+        window.location.assign('/admin/login');
+      }
       async function refresh() {
+        if (sessionExpired) return;
         const controller = new AbortController();
         const timer = window.setTimeout(() => controller.abort(), 5000);
         try {
           const response = await fetch('/api/sources', {cache: 'no-store', signal: controller.signal});
+          if (response.status === 401) {
+            redirectExpiredSession();
+            return;
+          }
           if (!response.ok) throw new Error('Status unavailable');
           const data = await response.json();
           if (data.revision !== revision) {
@@ -1608,7 +1623,7 @@
           window.axiomSourceFilters?.apply(false);
         } finally {
           window.clearTimeout(timer);
-          window.setTimeout(refresh, 2000);
+          if (!sessionExpired) window.setTimeout(refresh, 2000);
         }
       }
       refresh();
