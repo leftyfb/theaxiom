@@ -13,7 +13,7 @@ from pathlib import Path
 import sys
 
 from . import (catalog_store, document_update_discovery, kiwix_update_discovery,
-               publication, storage_settings, update_discovery_config)
+               publication, storage_settings, update_discovery_config, update_diagnostics)
 
 DEFAULT_MAX_CHECKS = 10
 MAX_CHECKS = 20
@@ -41,33 +41,37 @@ def check_records(records, *, max_checks=DEFAULT_MAX_CHECKS, start_index=0, chec
     offset = start_index % len(eligible) if eligible else 0
     selected = (eligible[offset:] + eligible[:offset])[:max_checks]
     for sid in selected:
-        try:
-            if checker is not None:
-                outcome = checker(sid)
-            elif sid in publication.ROUTES and by_id[sid]["configuration"]["format"] == "zim":
-                # Match the same independently verified immutable artifact and
-                # pinned-seed gate used by the authenticated manual check.
-                from . import acquisition_monitor, admin_api
-                record = by_id[sid]
-                artifact = admin_api.select_lifecycle(sid, record["configuration"]).get("artifact")
-                trusted = admin_api.TRUSTED_SOURCES.get(sid)
-                monitored = acquisition_monitor.collect(trusted) if trusted else None
-                verified = bool(
-                    artifact and monitored and monitored.get("state") == "completed"
-                    and monitored.get("verified") is True and monitored.get("active") is False
-                    and all(monitored.get(field) == artifact[key] for field, key in (
-                        ("filename", "filename"), ("expected_bytes", "bytes"),
-                        ("sha256", "sha256")))
-                )
-                outcome = kiwix_update_discovery.refresh_pinned_seed(
-                    record, artifact, verified=verified)
-            elif by_id[sid]["configuration"]["format"] == "zim":
-                outcome = kiwix_update_discovery.refresh_checked_source(sid)
-            else:
-                outcome = document_update_discovery.check_installed_document(by_id[sid])
-            state = outcome.get("state") if isinstance(outcome, dict) else None
-        except (OSError, ValueError, TypeError, KeyError):
-            state = None
+        discovery = update_discovery_config.settings(by_id[sid]["configuration"])
+        with update_diagnostics.attempt(sid, discovery, trigger="scheduled") as diagnostic:
+            try:
+                if checker is not None:
+                    outcome = checker(sid)
+                elif sid in publication.ROUTES and by_id[sid]["configuration"]["format"] == "zim":
+                    # Match the same independently verified immutable artifact and
+                    # pinned-seed gate used by the authenticated manual check.
+                    from . import acquisition_monitor, admin_api
+                    record = by_id[sid]
+                    artifact = admin_api.select_lifecycle(sid, record["configuration"]).get("artifact")
+                    trusted = admin_api.TRUSTED_SOURCES.get(sid)
+                    monitored = acquisition_monitor.collect(trusted) if trusted else None
+                    verified = bool(
+                        artifact and monitored and monitored.get("state") == "completed"
+                        and monitored.get("verified") is True and monitored.get("active") is False
+                        and all(monitored.get(field) == artifact[key] for field, key in (
+                            ("filename", "filename"), ("expected_bytes", "bytes"),
+                            ("sha256", "sha256")))
+                    )
+                    outcome = kiwix_update_discovery.refresh_pinned_seed(
+                        record, artifact, verified=verified)
+                elif by_id[sid]["configuration"]["format"] == "zim":
+                    outcome = kiwix_update_discovery.refresh_checked_source(sid)
+                else:
+                    outcome = document_update_discovery.check_installed_document(by_id[sid])
+                if isinstance(outcome, dict):
+                    diagnostic.update(outcome)
+                state = diagnostic.get("state")
+            except (OSError, ValueError, TypeError, KeyError):
+                state = None
         results.append({"source_id": sid,
                         "state": state if state in {
                             "update_available", "up_to_date", "older_candidate",

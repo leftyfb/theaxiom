@@ -47,6 +47,7 @@ zim_refresh = importlib.import_module(f"{__package__}.zim_refresh" if __package_
 ENDPOINT_TEST_LOCK = threading.Lock()
 ENDPOINT_TEST_NEXT = 0.0
 update_discovery_config = importlib.import_module(f"{__package__}.update_discovery_config" if __package__ else "theaxiom.update_discovery_config")
+update_diagnostics = importlib.import_module(f"{__package__}.update_diagnostics" if __package__ else "theaxiom.update_diagnostics")
 update_check_store = importlib.import_module(f"{__package__}.update_check_store" if __package__ else "theaxiom.update_check_store")
 kiwix_update_discovery = importlib.import_module(f"{__package__}.kiwix_update_discovery" if __package__ else "theaxiom.kiwix_update_discovery")
 library_search = importlib.import_module(f"{__package__}.search" if __package__ else "theaxiom.search")
@@ -1147,24 +1148,24 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 return
             sid = data["source_id"]
             record = next((item for item in catalog["sources"] if item["source_id"] == sid), None)
-            if record and update_discovery_config.settings(record["configuration"])["method"] == "manual":
+            discovery = update_discovery_config.settings(record["configuration"]) if record else None
+            if not discovery or discovery["method"] == "manual":
                 self._send_json(400, {"error": "source does not support update checks"})
                 return
-            if record and sid in publication.ROUTES:
-                lifecycle = select_lifecycle(sid, record["configuration"])
-                artifact = lifecycle.get("artifact")
-                matched = self._matched_snapshot(self._snapshot(), {sid: artifact})
-                verified = publication.verified(matched, sid)
-                result = kiwix_update_discovery.refresh_pinned_seed(
-                    record, artifact, verified=verified,
-                )
-            elif record and self._zim_record(record):
-                result = kiwix_update_discovery.refresh_checked_source(sid)
-            elif record and (self._pdf_record(record) or self._epub_record(record)):
-                result = document_update_discovery.check_installed_document(record)
-            else:
-                self._send_json(400, {"error": "source does not support update checks"})
-                return
+            with update_diagnostics.attempt(sid, discovery, trigger="manual") as diagnostic:
+                if sid in publication.ROUTES:
+                    lifecycle = select_lifecycle(sid, record["configuration"])
+                    artifact = lifecycle.get("artifact")
+                    matched = self._matched_snapshot(self._snapshot(), {sid: artifact})
+                    verified = publication.verified(matched, sid)
+                    result = kiwix_update_discovery.refresh_pinned_seed(
+                        record, artifact, verified=verified,
+                    )
+                elif self._zim_record(record):
+                    result = kiwix_update_discovery.refresh_checked_source(sid)
+                else:
+                    result = document_update_discovery.check_installed_document(record)
+                diagnostic.update(result)
             self._send_json(200, dict(source_id=sid, **result))
         elif self.path == "/api/groups":
             if not self.headers.get("Origin"):

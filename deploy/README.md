@@ -107,3 +107,19 @@ Before enabling the timer, review the deployed source-catalog location,
 service account privileges, proxy restrictions, NFS availability, rate
 limits, exact systemd unit content and existing acquisition state. No
 existing running service or download must be interrupted.
+
+### Update-check diagnostics
+
+In **Admin → Sources**, expand a source's **Technical details** to see the
+cached check timestamp, evidence, and available candidate identity. Scheduled
+and manual checks emit one `source_update_check` JSON summary with a request
+ID, source ID, phase, reason code, duration, timestamp, cache status, and
+publisher host. HTTP status is included when available for the reported phase.
+Failed checks use warning level. The event excludes publisher response bodies,
+full URLs, validator values, exception messages, and credentials.
+
+Read recent summaries in the systemd journal for the application and
+`theaxiom-update-check.service`. Search for `source_update_check` and the source
+ID. Summary retention follows the host's journal settings. A cache hit
+includes the age of the original check and does not make another publisher
+request. Checking metadata does not transfer or change installed files.

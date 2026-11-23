@@ -6,7 +6,7 @@ authorized newer edition. No acquisition, update or deletion is possible here.
 from __future__ import annotations
 
 from . import (document_origin_evidence, epub_source, freshness_probe,
-               pdf_source, pdf_transport, update_check_store, update_discovery_config)
+               pdf_source, pdf_transport, update_check_store, update_discovery_config, update_diagnostics)
 
 UNKNOWN = {"state": "unable_to_determine",
            "evidence": "no comparable installed document origin"}
@@ -42,6 +42,7 @@ def check_installed_document(record, *, probe=None, persist=True):
         if not etag:
             if not config.get("update_endpoint"):
                 return dict(UNKNOWN)
+            update_diagnostics.mark("document_head")
             diagnostic = update_discovery_config.probe_endpoint(selected)
             result = dict(UNKNOWN, evidence=diagnostic["evidence"] if diagnostic["state"] == "failed"
                           else "Endpoint reachable; no capture-time ETag for this exact URL")
@@ -50,7 +51,10 @@ def check_installed_document(record, *, probe=None, persist=True):
             return result
         probe = pdf_transport.probe_document_metadata if probe is None else probe
         try:
+            update_diagnostics.mark("document_head")
             response = probe(url, if_none_match=etag)
+            update_diagnostics.mark("document_compare" if response.get("reachable") else "document_head",
+                                    http_status=response.get("status"))
             result = freshness_probe.classify_document_origin({
                 "verified": True, "source_url": url,
                 "sha256": digest, "etag": etag,

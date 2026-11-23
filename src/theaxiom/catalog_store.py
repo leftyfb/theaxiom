@@ -13,13 +13,14 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from . import source_catalog, update_discovery_config
+from . import source_catalog
 
 SCHEMA_VERSION = 2
 PROFILE_FIELDS = {"title", "description", "publisher", "edition", "language", "author"}
 CANDIDATE_FIELDS = {"source_url", "expected_size_bytes", "sha256", "provenance", "license"}
 ARTIFACT_CONFIG_FIELDS = CANDIDATE_FIELDS | {"format"}
-CONFIG_FIELDS = ARTIFACT_CONFIG_FIELDS | update_discovery_config.FIELDS
+DISCOVERY_FIELDS = {"update_method", "update_endpoint", "update_periodic"}
+CONFIG_FIELDS = ARTIFACT_CONFIG_FIELDS | DISCOVERY_FIELDS
 V1_FIELDS = PROFILE_FIELDS | CANDIDATE_FIELDS
 EDITABLE = PROFILE_FIELDS | CONFIG_FIELDS
 HEADER_FIELDS = {"schema_version", "revision", "updated_at"}
@@ -249,7 +250,8 @@ class CatalogStore:
             ids.add(sid)
             self._validate_fields(record["profile"], PROFILE_FIELDS, required={"title"})
             self._validate_fields(record["configuration"], CONFIG_FIELDS, required={"format"})
-            if update_discovery_config.FIELDS & record["configuration"].keys():
+            if DISCOVERY_FIELDS & record["configuration"].keys():
+                from . import update_discovery_config
                 try:
                     update_discovery_config.settings(record["configuration"])
                 except ValueError as exc:

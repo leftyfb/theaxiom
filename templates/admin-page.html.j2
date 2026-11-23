@@ -491,17 +491,6 @@
           <p class="source-note" data-field="rate" hidden></p>
           <p data-field="detail" class="source-note" hidden></p>
         </div>
-        {% if source.zim_download or source.legacy_pinned %}
-        <p class="source-note" data-field="update-details"{% if not source.update_check or source.update_check.state != "update_available" %} hidden{% endif %}>
-        {% if source.update_check and source.update_check.state == "update_available" %}
-          Installed edition: {{ source.update_check.installed_edition }} · Publisher edition: {{ source.update_check.candidate_edition }}
-          {% if source.update_check.candidate_bytes %} · Candidate size: {{ source.update_check.candidate_bytes | filesizeformat(true) }}{% endif %}
-          · Check recorded: {{ source.update_check.checked_at }}
-          · Candidate: {{ source.update_check.candidate_url }}
-          · No download started; replacement requires separate explicit review.
-        {% endif %}
-        </p>
-        {% endif %}
         {% set document = source.adapter in ('pdf','epub') %}
         {% set url_managed = source.configuration.source_url|default('', true)|trim %}
         {% set discovery = source.discovery|default({}) %}
@@ -582,6 +571,21 @@
         {% endif %}
         <details class="source-technical">
           <summary>Technical details</summary>
+          <p class="source-note" data-field="update-evidence">
+            {% if source.update_check %}{{ source.update_check.evidence }}{% endif %}
+          </p>
+        {% if source.zim_download or source.legacy_pinned %}
+        <p class="source-note" data-field="update-details"{% if not source.update_check or source.update_check.state != "update_available" %} hidden{% endif %}>
+        {% if source.update_check and source.update_check.state == "update_available" %}
+          Installed edition: {{ source.update_check.installed_edition }} · Publisher edition: {{ source.update_check.candidate_edition }}
+          {% if source.update_check.candidate_bytes %} · Candidate size: {{ source.update_check.candidate_bytes | filesizeformat(true) }}{% endif %}
+          · Check recorded: {{ source.update_check.checked_at }}
+          · Candidate: {{ source.update_check.candidate_url }}
+          · No download started; replacement requires separate explicit review.
+        {% endif %}
+        </p>
+        {% endif %}
+
           <dl class="storage-status source-details">
             {% for key, label in [('source_url','Source URL'),('expected_size_bytes','Expected size (bytes)'),('sha256','Expected SHA-256'),('provenance','Provenance'),('license','License')] if source.configuration.get(key) %}
             <dt>{{ label }}</dt><dd>{{ source.configuration.get(key) }}</dd>
@@ -1225,7 +1229,7 @@
         const card = button.closest('.source-card');
         const feedback = card.querySelector('[data-pdf-feedback]');
         button.disabled = true;
-        feedback.textContent = 'Checking publisher headers…';
+        feedback.textContent = 'Checking…';
         try {
           const response = await fetch('/api/update-check', {
             method: 'POST',
@@ -1251,7 +1255,7 @@
         const feedback = card.querySelector('[data-zim-feedback]');
         button.disabled = true;
         card.dataset.zimCheckPosting = 'true';
-        feedback.textContent = 'Checking publisher metadata…';
+        feedback.textContent = 'Checking…';
         try {
           const response = await fetch('/api/update-check', {
             method: 'POST',
@@ -1262,18 +1266,14 @@
           if (!response.ok) throw new Error(result.error || 'Update check failed');
           const badge = card.querySelector('[data-field="update-status"]');
           if (badge) badge.hidden = result.state !== 'update_available';
-          feedback.textContent = result.state === 'update_available'
-            ? 'Newer publisher edition detected. No download started.'
-            : result.state === 'up_to_date'
-            ? 'Installed edition matches verified publisher metadata.'
-            : result.state === 'no_newer_edition_listed'
-            ? 'No newer edition listed in the checked Kiwix catalog. This does not verify the installed archive is the latest everywhere.'
-            : 'Unable to determine whether a newer edition is available from publisher metadata.';
-          if (result.state === 'unable_to_determine' && typeof result.evidence === 'string' && result.evidence) {
-            // The API returns bounded, nonsecret status evidence from the update
-            // checker; textContent prevents interpretation as HTML.
-            feedback.textContent += ' Reason: ' + result.evidence.slice(0, 180);
-          }
+          feedback.textContent = {
+            update_available: 'Update available',
+            up_to_date: 'Up to date',
+            no_newer_edition_listed: 'No newer edition found',
+            older_candidate: 'Publisher lists an older edition'
+          }[result.state] || 'Unable to check for updates';
+          const details = card.querySelector('[data-field="update-evidence"]');
+          if (details) details.textContent = result.evidence || '';
         } catch (error) {
           feedback.textContent = error.message || 'Publisher update check unavailable.';
         } finally {
@@ -1676,19 +1676,23 @@
               const description = {
                 update_available: 'Newer edition listed with verification evidence',
                 up_to_date: 'Installed edition matches publisher metadata',
-                no_newer_edition_listed: 'No newer edition listed',
+                no_newer_edition_listed: 'No newer edition found',
                 older_candidate: 'Publisher lists an older edition',
                 representation_changed: 'Publisher representation changed',
                 representation_unchanged: 'Publisher representation unchanged',
-                unable_to_determine: 'Unable to determine update status'
+                unable_to_determine: 'Unable to check for updates'
               };
-              evidence.textContent = update ? [
-                description[update.state], update.evidence,
+              evidence.textContent = update ? (update.state === 'update_available' ? '' : description[update.state] || '') :
+                (source?.discovery?.method && source.discovery.method !== 'manual' ? 'No update check recorded' : '');
+            }
+            const technical = card.querySelector('[data-field="update-evidence"]');
+            if (technical) {
+              technical.textContent = update ? [
+                update.evidence,
                 update.checked_at ? 'Last check ' + new Date(update.checked_at * 1000).toLocaleString() : '',
                 update.candidate_edition ? 'Candidate ' + update.candidate_edition : '',
                 update.candidate_sha256 ? 'SHA-256 ' + update.candidate_sha256 : ''
-              ].filter(Boolean).join(' · ') : (source?.discovery?.method &&
-                source.discovery.method !== 'manual' ? 'No update check recorded' : '');
+              ].filter(Boolean).join(' · ') : '';
             }
             const hasUpdate = update?.state === "update_available";
             if (updateBadge) updateBadge.hidden = !hasUpdate;

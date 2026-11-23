@@ -11,7 +11,7 @@ import re
 import time
 from urllib.parse import urlsplit, urlencode, parse_qsl
 
-from . import kiwix_opds, pdf_transport
+from . import kiwix_opds, pdf_transport, update_diagnostics
 
 CATALOG_HOST = "opds.library.kiwix.org"
 CATALOG_PATH = "/catalog/v2/entries"
@@ -91,6 +91,8 @@ def fetch_metadata(url: str, *, kind: str) -> bytes:
             "User-Agent": "The-Axiom Kiwix metadata checker",
         })
         response = conn.getresponse()
+        update_diagnostics.mark("catalog_request" if kind == "catalog" else "metalink_request",
+                                http_status=response.status)
         try:
             pdf_transport._remaining(deadline)
             if response.status != 200:

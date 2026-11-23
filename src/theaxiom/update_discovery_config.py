@@ -5,7 +5,7 @@ from urllib.parse import urlsplit
 
 from . import kiwix_metadata_transport as kiwix, kiwix_opds, pdf_source, pdf_transport
 
-FIELDS = {"update_method", "update_endpoint", "update_periodic"}
+from .catalog_store import DISCOVERY_FIELDS as FIELDS
 OPDS = f"https://{kiwix.CATALOG_HOST}{kiwix.CATALOG_PATH}"
 
 
