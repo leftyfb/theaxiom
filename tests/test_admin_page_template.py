@@ -104,6 +104,18 @@ def test_catalog_management_form_exposes_metadata_and_confirmation_controls():
     assert 'id="catalog-feedback" role="status" aria-live="polite"></p>' in page
 
 
+def test_candidate_storage_estimate_includes_verified_installed_bytes_only():
+    source = profile("candidate-fixture", format="zim", source_url="https://example.org/reference.zim")
+    source.update(update_check={"state": "update_available", "candidate_bytes": 1048576},
+                  artifact={"bytes": 2097152})
+    output = render([source])
+    assert "Estimated transfer and staging: 1.0 MiB" in output
+    assert "Installed and candidate archives together: unknown" in " ".join(output.split())
+    source["installed_verified"] = True
+    output = render([source])
+    assert "Installed and candidate archives together: 3.0 MiB" in " ".join(output.split())
+
+
 def test_admin_branding_and_favicon():
     page = render()
     assert 'href="/favicon.svg"' in page

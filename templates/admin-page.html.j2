@@ -724,7 +724,12 @@
         <p class="source-note" data-field="update-details"{% if not source.update_check or source.update_check.state != "update_available" %} hidden{% endif %}>
         {% if source.update_check and source.update_check.state == "update_available" %}
           Installed edition: {{ source.update_check.installed_edition }} · Publisher edition: {{ source.update_check.candidate_edition }}
-          {% if source.update_check.candidate_bytes %} · Candidate size: {{ source.update_check.candidate_bytes | filesizeformat(true) }}{% endif %}
+          {% if source.update_check.candidate_bytes %}
+            · Estimated transfer and staging: {{ source.update_check.candidate_bytes | filesizeformat(true) }}
+            · Installed and candidate archives together:
+              {{ ((source.artifact.bytes + source.update_check.candidate_bytes) | filesizeformat(true))
+                 if source.installed_verified and source.artifact and source.artifact.bytes else 'unknown' }}
+          {% endif %}
           · Check recorded: {{ source.update_check.checked_at }}
           · Candidate: {{ source.update_check.candidate_url }}
           · No download started; replacement requires separate explicit review.
@@ -2205,10 +2210,17 @@
             if (updateBadge) updateBadge.hidden = !hasUpdate;
             if (updateDetails) {
               updateDetails.hidden = !hasUpdate;
+              const incoming = update?.candidate_bytes;
+              const installed = source?.installed_verified === true ? source.artifact?.bytes : null;
+              const estimate = Number.isSafeInteger(incoming) && incoming > 0 ?
+                ' · Estimated transfer and staging: ' + size(incoming) +
+                ' · Installed and candidate archives together: ' +
+                (Number.isSafeInteger(installed) && installed > 0 && Number.isSafeInteger(installed + incoming) ?
+                  size(installed + incoming) : 'unknown') : '';
               updateDetails.textContent = hasUpdate
                 ? 'Installed edition: ' + (update.installed_edition || 'unknown') +
                   ' · Publisher edition: ' + (update.candidate_edition || 'unknown') +
-                  ' · Candidate: ' + (update.candidate_url || 'unavailable') +
+                  estimate + ' · Candidate: ' + (update.candidate_url || 'unavailable') +
                   ' · No download started; replacement requires separate explicit review.'
                 : '';
             }

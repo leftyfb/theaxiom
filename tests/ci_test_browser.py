@@ -511,14 +511,17 @@ def exercise_history_poll(browser, viewport):
     from test_admin_page_template import profile, render
 
     first = dict(profile("history-first", format="zim", source_url="https://publisher.org/first.zim"),
-                 publication={}, acquisition=None)
+                 publication={}, acquisition=None, installed_verified=True, artifact={"bytes": 2097152})
     second = dict(profile("history-second", format="zim", source_url="https://publisher.org/second.zim"),
                   publication={}, acquisition=None)
     page = browser.new_page(viewport=viewport)
     changed = False
 
     def poll(route):
-        sources = [dict(first, acquisition={
+        update = ({"state": "unable_to_determine", "last_known_candidate_edition": "2026-11", "stale": True}
+                  if changed else {"state": "update_available", "installed_edition": "2026-10",
+                                   "candidate_edition": "2026-11", "candidate_bytes": 1048576})
+        sources = [dict(first, update_check=update, acquisition={
             "state": "failed" if changed else "downloading",
             "attempt_history": [
                 {"state": "completed", "finished_at": 1700000000},
@@ -546,8 +549,13 @@ def exercise_history_poll(browser, viewport):
         page.keyboard.press("Enter")
         expect(technical.locator('[data-field="acquisition-history"]')).to_contain_text("Succeeded")
         expect(technical.locator('[data-field="last-acquisition"]')).not_to_have_text("—")
+        details = technical.locator('[data-field="update-details"]')
+        expect(details).to_contain_text("Estimated transfer and staging: 1.0 MiB")
+        expect(details).to_contain_text("Installed and candidate archives together: 3.0 MiB")
         changed = True
         expect(technical.locator('[data-field="acquisition-history"]')).to_contain_text("Failed")
+        expect(details).to_be_hidden()
+        expect(technical.locator('[data-field="update-evidence"]')).to_contain_text("Last known candidate 2026-11")
         expect(other.locator('[data-field="status"]')).to_have_text("Acquisition completed")
         expect(card).to_have_attribute("open", "")
         expect(technical).to_have_attribute("open", "")

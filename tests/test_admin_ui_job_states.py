@@ -141,6 +141,8 @@ def test_planned_source_keeps_unsupported_label_during_polling():
 
 def test_update_available_badge_only_when_cached_evidence_confirms_it():
     confirmed = job("completed")
+    confirmed["sources"][0]["installed_verified"] = True
+    confirmed["sources"][0]["artifact"] = {"bytes": 1048576}
     confirmed["sources"][0]["update_check"] = {
         "state": "update_available", "candidate_edition": "2026-11",
         "candidate_sha256": "b" * 64,
@@ -157,6 +159,8 @@ def test_update_available_badge_only_when_cached_evidence_confirms_it():
     assert states[0]["[data-review-zim-update]"]["dataset"]["updateBytes"] == "123456"
     assert not states[0]["update-details"]["hidden"]
     assert "2026-11" in states[0]["update-details"]["textContent"]
+    assert "Estimated transfer and staging: 120.6 KiB" in states[0]["update-details"]["textContent"]
+    assert "Installed and candidate archives together: 1.1 MiB" in states[0]["update-details"]["textContent"]
     assert states[1]["update-status"]["hidden"] is True
     assert states[1]["[data-review-zim-update]"]["hidden"] is True
     assert states[1]["update-details"]["hidden"] is True
