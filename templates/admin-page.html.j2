@@ -1018,10 +1018,19 @@
           const labels = {match: 'Matches this catalog', different: 'Edition, language, or format differs',
             missing: 'Source ID absent from this catalog', planned: 'No supported format configured'};
           if (payload.preset) labels.match = 'Configured source';
+          const plans = new Map(result.storage.sources.map(source => [source.source_id, source]));
           for (const item of result.sources) {
             const row = document.createElement('li');
-            row.textContent = [item.title || item.source_id, labels[item.state], item.language, item.edition,
-              item.license ? 'License: ' + item.license : 'Rights not recorded'].filter(Boolean).join(' · ');
+            const choice = [item.format?.toUpperCase(), item.language, item.edition].filter(Boolean).join(' / ');
+            const local = item.local_choice;
+            const localChoice = local ? [local.format.toUpperCase(), local.language, local.edition].filter(Boolean).join(' / ') : '';
+            const plan = plans.get(item.source_id);
+            row.textContent = [item.title || item.source_id, labels[item.state],
+              local ? 'Requested ' + choice : choice, local ? 'Local ' + localChoice : '',
+              item.license ? 'License: ' + item.license : 'Rights not recorded',
+              plan && plan.state !== 'estimated' ? storagePlanNote(plan.state) : '',
+              plan?.format === 'zim' && plan.state !== 'unsupported' ? 'Reading requires Kiwix' : ''
+            ].filter(Boolean).join(' · ');
             selectionMatches.append(row);
           }
           selectionFeedback.textContent = result.sources.length ? 'Reviewed ' + result.sources.length + ' source choices.' :
@@ -1120,6 +1129,17 @@
           previewSize(capacity.available_bytes) + ' available for staging after the ' +
             previewSize(capacity.reserve_bytes) + ' reserve. ' + result : result;
       }
+      function storagePlanNote(state) {
+        return {
+          unsupported: 'Outside the storage preview',
+          unavailable: 'Estimate unavailable',
+          upload_required: 'Choose a local file to upload',
+          invalid_download_url: 'Requires a direct HTTPS download URL',
+          over_size_limit: 'Configured size exceeds the document download limit',
+          review_replacement: 'Review the replacement before estimating',
+          installed: 'Already recorded as installed'
+        }[state] || '';
+      }
       document.getElementById('bulk-preview').addEventListener('click', async () => {
         const ids = selectedIds();
         const selection = ids.join(',');
@@ -1153,11 +1173,7 @@
           previewCapacity.textContent = capacitySummary(result.capacity);
           for (const source of result.sources) {
             const row = document.createElement('li');
-            const notes = {unsupported: 'Outside the storage preview', unavailable: 'Estimate unavailable',
-              upload_required: 'Choose a local file to upload', invalid_download_url: 'Requires a direct HTTPS download URL',
-              over_size_limit: 'Configured size exceeds the document download limit',
-              review_replacement: 'Review the replacement before estimating', installed: 'Already recorded as installed'};
-            row.textContent = source.title + ' · ' + (notes[source.state] ||
+            row.textContent = source.title + ' · ' + (storagePlanNote(source.state) ||
               previewFields.map(([label, field]) => label + ' ' + previewSize(source[field])).join(' · '));
             previewSources.append(row);
           }

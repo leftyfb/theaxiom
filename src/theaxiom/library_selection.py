@@ -62,12 +62,14 @@ def preview_selection(known, manifest):
         sid = entry["source_id"]
         local = known.get(sid)
         if not local:
-            matches.append({"source_id": sid, "state": "missing"})
+            matches.append(dict(entry, state="missing"))
             continue
         choice = _choice(local)
-        matches.append({"source_id": sid, "state": "match" if entry == choice else "different",
-                        "title": local["profile"]["title"],
-                        "license": local["configuration"].get("license", "")})
+        row = dict(entry, state="match" if entry == choice else "different",
+                   title=local["profile"]["title"], license=local["configuration"].get("license", ""))
+        if row["state"] == "different":
+            row["local_choice"] = choice
+        matches.append(row)
     return matches
 
 

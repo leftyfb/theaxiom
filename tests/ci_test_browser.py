@@ -294,8 +294,20 @@ def exercise(browser, base, name, viewport, artifacts):
         page.locator("#selection-file").set_input_files({
             "name": "selection.json", "mimeType": "application/json", "buffer": manifest,
         })
-        expect(page.locator("#selection-file-matches")).to_contain_text("Matches this catalog")
+        expect(page.locator("#selection-file-matches")).to_contain_text("Matches this catalog · PDF")
         expect(page.locator("#selection-storage-summary")).to_contain_text("Installed and peak sizes unknown")
+        mismatch = json.loads(manifest)
+        mismatch["sources"][0]["edition"] = "2025"
+        page.locator("#selection-file").set_input_files({
+            "name": "other-edition.json", "mimeType": "application/json", "buffer": json.dumps(mismatch).encode(),
+        })
+        expect(page.locator("#selection-file-matches")).to_contain_text("Requested PDF / 2025")
+        expect(page.locator("#selection-file-matches")).to_contain_text("Local PDF")
+        expect(page.get_by_role("button", name="Select matching sources")).to_be_disabled()
+        page.locator("#selection-file").set_input_files({
+            "name": "selection.json", "mimeType": "application/json", "buffer": manifest,
+        })
+        expect(page.get_by_role("button", name="Select matching sources")).to_be_enabled()
         expect(check).not_to_be_checked()
         page.get_by_role("button", name="Select matching sources").click()
         expect(check).to_be_checked()

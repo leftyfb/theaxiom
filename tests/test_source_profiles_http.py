@@ -819,7 +819,7 @@ def test_portable_selection_round_trip_discloses_only_selected_public_metadata(a
     assert preview["revision"] == catalog["revision"]
     assert preview["sources"] == [{
         "source_id": "selection-fixture", "state": "match", "title": "Selection fixture",
-        "license": "Fixture terms",
+        "format": "zim", "language": "en", "edition": "2026-11", "license": "Fixture terms",
     }]
     assert preview["storage"] == {
         "sources": [{"source_id": "selection-fixture", "title": "Selection fixture", "state": "estimated", "format": "zim",
@@ -841,7 +841,10 @@ def test_portable_selection_round_trip_discloses_only_selected_public_metadata(a
         manifest = exported | {"sources": [entry | changes]}
         probe.reset_mock()
         estimate = request(endpoint, {"manifest": manifest})
-        assert estimate["sources"][0]["state"] == state
+        row = estimate["sources"][0]
+        assert row["state"] == state
+        assert all(row[key] == value for key, value in (entry | changes).items())
+        assert row.get("local_choice") == (entry if state == "different" else None)
         assert estimate["storage"] == {"sources": [], "capacity": {"state": "not_applicable"}}
         probe.assert_not_called()
     for invalid in (exported | {"version": 2}, exported | {"sources": [entry, entry]},
