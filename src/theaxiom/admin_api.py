@@ -316,8 +316,10 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         if post and self.headers.get("Sec-Fetch-Site") in {"cross-site", "same-site"}:
             self._send_json(403, {"error": "cross-origin request rejected"})
             return False
-        public_paths = set(PUBLIC_ICON_PATHS) | {"/", "/index.html", "/health", "/health/",
-                        "/internal/publication/wikipedia-en", "/read/wikipedia-en", "/api/pdf-reader.mjs"}
+        compatibility_paths = ({route["entry_path"] for route in publication.ROUTES.values()}
+                               | {"/internal/publication/" + sid for sid in publication.ROUTES})
+        public_paths = set(PUBLIC_ICON_PATHS) | compatibility_paths | {
+            "/", "/index.html", "/health", "/health/", "/api/pdf-reader.mjs"}
         if not post and (self.path in public_paths or self.path == "/admin/login"
                          or self.path.split("?", 1)[0] in {"/", "/index.html", "/search"}
                          or pdf_source.ROUTE.fullmatch(self.path) or epub_source.ROUTE.fullmatch(self.path)
