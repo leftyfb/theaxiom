@@ -285,7 +285,12 @@ def exercise(browser, base, name, viewport, artifacts):
         def publisher_catalog(route):
             payload = route.request.post_data_json
             if "edition" in payload:
-                route.fulfill(json={"filename": "recent_eng_maxi_2026-11.zim", "bytes": "4096", "sha256": "a" * 64})
+                route.fulfill(json={"filename": "recent_eng_maxi_2026-11.zim", "bytes": "4096", "sha256": "a" * 64,
+                    "draft": {"title": "Offline reference", "format": "zim",
+                              "source_url": "https://download.kiwix.org/zim/reference/recent_eng_maxi_2026-11.zim",
+                              "edition": "2026-11", "language": "eng", "expected_size_bytes": "4096",
+                              "sha256": "a" * 64, "license": "Publisher terms",
+                              "provenance": "Kiwix OPDS and Metalink publisher metadata"}})
             else:
                 stale = payload["family"] == "reference_eng"
                 route.fulfill(json={"cached": stale, "stale": stale, "checked_at": 1000,
@@ -304,7 +309,18 @@ def exercise(browser, base, name, viewport, artifacts):
         page.get_by_role("button", name="Inspect publisher checksum for 2026-11 maxi").click()
         expect(page.locator("#upstream-catalog-results")).to_contain_text("Publisher SHA-256 " + "a" * 64)
         assert page.locator("#upstream-catalog-dialog").evaluate("(dialog) => dialog.scrollWidth <= dialog.clientWidth + 1"), name
-        page.locator("#upstream-catalog-dialog").get_by_role("button", name="Close").click()
+        page.get_by_role("button", name="Review new source").click()
+        draft = page.locator("#source-dialog")
+        expect(draft.get_by_label("Source name")).to_have_value("Offline reference")
+        expect(draft.get_by_label("Download URL")).to_have_value(
+            "https://download.kiwix.org/zim/reference/recent_eng_maxi_2026-11.zim")
+        expect(draft.get_by_label("Content format")).to_have_value("zim")
+        expect(draft.get_by_label("Edition / release")).to_have_value("2026-11")
+        expect(draft.get_by_label("Language", exact=True)).to_have_value("eng")
+        expect(draft.locator("#catalog-sha256")).to_have_value("a" * 64)
+        expect(draft.get_by_label("Periodic metadata checks")).to_have_value("no")
+        draft.get_by_role("button", name="Cancel", exact=True).click()
+        expect(page.locator(".source-card[data-source-id='offline-reference']")).to_have_count(0)
         check.focus()
         page.keyboard.press("Space")
         expect(check).not_to_be_checked()

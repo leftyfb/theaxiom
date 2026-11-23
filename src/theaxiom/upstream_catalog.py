@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from . import kiwix_metadata_transport, kiwix_opds, storage_settings
+from . import kiwix_metadata_transport, kiwix_opds, storage_settings, zim_source
 
 PAGE_SIZE = 25
 MAX_HEADER = 512
@@ -117,6 +117,25 @@ def refresh(family, language):
     return {"entries": [], "unavailable": True}
 
 
+def _source_draft(details, source_url, listings, edition, language):
+    titles = {" ".join(entry["title"].split()) for entry in listings}
+    if not source_url or len(source_url) > 512 or len(titles) != 1:
+        return None
+    rights = {" ".join(entry.get("rights", "").split()) for entry in listings}
+    fields = {
+        "title": titles.pop(), "format": "zim", "source_url": source_url,
+        "edition": edition, "language": language,
+        "expected_size_bytes": details["bytes"], "sha256": details["sha256"],
+        "license": rights.pop() if len(rights) == 1 else "",
+        "provenance": "Kiwix OPDS and Metalink publisher metadata",
+    }
+    try:
+        zim_source.candidate(fields)
+    except ValueError:
+        return None
+    return fields
+
+
 def inspect_edition(family, language, edition, variant):
     """Resolve publisher metadata for one explicit edition from the latest cached listing."""
     global _next_inspect
@@ -128,8 +147,9 @@ def inspect_edition(family, language, edition, variant):
     if not cached or time.time() - cached[1] > STALE_AFTER:
         raise ValueError("Refresh this catalog query before inspecting an edition")
     raw, _stamp = cached
-    links = {entry["acquisition_url"] for key, entry in _matching(raw, family)
-             if key == (edition, variant) and entry["acquisition_kind"] == "metalink"}
+    listings = [entry for key, entry in _matching(raw, family)
+                if key == (edition, variant) and entry["acquisition_kind"] == "metalink"]
+    links = {entry["acquisition_url"] for entry in listings}
     if len(links) != 1:
         raise ValueError("No unique publisher checksum for this edition")
     if not _LOCK.acquire(blocking=False):
@@ -142,7 +162,14 @@ def inspect_edition(family, language, edition, variant):
         parsed = urlsplit(url)
         name = parsed.path.rsplit("/", 1)[-1].removesuffix(".meta4")
         raw = kiwix_metadata_transport.fetch_metadata(url, kind="metalink-inspection")
-        return kiwix_opds.inspect_metalink(raw, expected_filename=name)
+        # The URL can only be used if the Metalink explicitly lists this
+        # exact publisher URL. Never send an archive request during inspection.
+        details = kiwix_opds.inspect_metalink(raw, expected_filename=name,
+                                            publisher_url=url.removesuffix(".meta4"))
+        draft = _source_draft(details, details.pop("source_url", None), listings, edition, language)
+        if draft:
+            details["draft"] = draft
+        return details
     except (OSError, ValueError, http.client.HTTPException):
         return {"unavailable": True}
     finally:

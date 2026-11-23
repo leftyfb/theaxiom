@@ -133,10 +133,13 @@ def _metalink_file(raw, expected_filename, cap):
     return file, size, sha
 
 
-def inspect_metalink(raw, *, expected_filename):
-    """Read publisher size and checksum for display without accepting any mirror."""
-    _, size, sha = _metalink_file(raw, expected_filename, MAX_INSPECTION_BYTES)
-    return {"filename": expected_filename, "bytes": str(size), "sha256": sha}
+def inspect_metalink(raw, *, expected_filename, publisher_url=None):
+    """Read catalog evidence and optionally match an exact caller-pinned URL."""
+    file, size, sha = _metalink_file(raw, expected_filename, MAX_INSPECTION_BYTES)
+    result = {"filename": expected_filename, "bytes": str(size), "sha256": sha}
+    if publisher_url and any(link.text == publisher_url for link in file.findall(METALINK + "url")):
+        result["source_url"] = publisher_url
+    return result
 
 
 def parse_metalink(

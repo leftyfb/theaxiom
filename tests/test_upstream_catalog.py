@@ -84,12 +84,26 @@ def test_inspect_edition_reads_only_cached_exact_listing_and_publisher_metalink(
         catalog.inspect_edition("reference_eng", "fra", "2026-11", "maxi")
     with pytest.raises(ValueError, match="No unique"):
         catalog.inspect_edition("reference_eng", "eng", "2026-10", "maxi")
-    assert catalog.inspect_edition("reference_eng", "eng", "2026-11", "maxi") == {
+    details = catalog.inspect_edition("reference_eng", "eng", "2026-11", "maxi")
+    assert details == {
         "filename": name, "bytes": "4096", "sha256": digest,
+        "draft": {"title": "Reference", "format": "zim", "source_url": url,
+                  "edition": "2026-11", "language": "eng", "expected_size_bytes": "4096",
+                  "sha256": digest, "license": "Publisher terms",
+                  "provenance": "Kiwix OPDS and Metalink publisher metadata"},
     }
     assert fetch.call_count == 2
     assert fetch.call_args.args == (url + ".meta4",)
     assert fetch.call_args.kwargs == {"kind": "metalink-inspection"}
+
+    monkeypatch.setattr(catalog, "_next_inspect", 0)
+    fetch.side_effect = None
+    fetch.return_value = metalink.replace(b"/zim/reference/", b"/zim/another-family/")
+    assert catalog.inspect_edition("reference_eng", "eng", "2026-11", "maxi") == {
+        "filename": name, "bytes": "4096", "sha256": digest,
+    }
+    assert fetch.call_count == 3
+    assert fetch.call_args.args == (url + ".meta4",)
 
 
 def test_large_inspection_only_metadata_preserves_acquisition_limits():

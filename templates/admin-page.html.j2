@@ -847,23 +847,43 @@
               inspect.className = 'button';
               inspect.textContent = 'Inspect publisher checksum';
               inspect.setAttribute('aria-label', 'Inspect publisher checksum for ' + entry.edition + ' ' + entry.variant);
+              const draftButton = document.createElement('button');
+              draftButton.type = 'button';
+              draftButton.className = 'button';
+              draftButton.textContent = 'Review new source';
+              draftButton.hidden = true;
+              let draft = null;
+              draftButton.addEventListener('click', () => {
+                if (!draft) return;
+                upstreamDialog.close();
+                openForm('add');
+                for (const [key, value] of Object.entries(draft)) input(key).value = value;
+                manualFormat = true;
+                discoveryOptions();
+                advanced.open = true;
+                formFeedback.textContent = 'Review the Kiwix publisher metadata before saving. Acquisition is a separate action.';
+              });
               const result = document.createElement('p');
               result.className = 'source-note';
               result.setAttribute('role', 'status');
               inspect.addEventListener('click', async () => {
                 inspect.disabled = true;
+                draftButton.hidden = true;
+                draft = null;
                 result.textContent = 'Checking publisher metadata…';
                 try {
                   const details = await requestUpstream({...query, edition: entry.edition, variant: entry.variant});
                   result.textContent = details.unavailable ? 'Publisher checksum unavailable. Try again later.' :
                     details.filename + ' · Publisher bytes ' + details.bytes + ' · Publisher SHA-256 ' + details.sha256;
+                  draft = details.draft || null;
+                  draftButton.hidden = !draft;
                 } catch (error) {
                   result.textContent = error.message;
                 } finally {
                   inspect.disabled = false;
                 }
               });
-              row.append(' ', inspect, result);
+              row.append(' ', inspect, ' ', draftButton, result);
             }
             upstreamResults.append(row);
           }
