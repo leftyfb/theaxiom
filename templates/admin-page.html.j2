@@ -402,9 +402,19 @@
     <div class="source-search-row">
       <button class="button" type="button" id="source-add">Add Source</button>
       <button class="button" type="button" id="source-guide-open">Content source guide</button>
+      <button class="button" type="button" id="selection-file-open">Preview selection file</button>
       <input id="source-filter-search" type="search" aria-label="Search source names" placeholder="Search sources…" maxlength="512">
     </div>
     <p id="catalog-feedback" role="status" aria-live="polite"></p>
+    <dialog id="selection-file-dialog" aria-labelledby="selection-file-title">
+      <h3 id="selection-file-title">Preview a library selection</h3>
+      <p class="source-note">Check which source choices match this catalog. Source settings and content stay as they are.</p>
+      <label for="selection-file">Library selection JSON</label>
+      <input id="selection-file" type="file" accept=".json,application/json">
+      <p id="selection-file-feedback" role="status"></p>
+      <ul id="selection-file-matches"></ul>
+      <form method="dialog"><button class="button">Close</button></form>
+    </dialog>
     {% set groups = (catalog|default({})).groups|default([]) %}
     <dialog id="source-dialog" aria-labelledby="source-dialog-title">
       <form id="source-form">
@@ -517,6 +527,7 @@
         <button class="button" type="button" id="bulk-unpublish" disabled>Unpublish</button>
         <button class="button" type="button" id="bulk-remove">Remove sources</button>
         <button class="button" type="button" id="bulk-preview">Preview ZIM storage</button>
+        <button class="button" type="button" id="selection-export">Export selected sources</button>
       </div>
       <div id="bulk-preview-result" hidden>
         <p class="source-note">Estimates cover the selected ZIMs. They include full staging and any recorded installed editions.</p>
@@ -768,6 +779,58 @@
       let selecting = selectMode.getAttribute('aria-pressed') === 'true';
       let bulkBusy = false;
       const selectedIds = () => selecting ? groupChecks.filter(item => item.checked).map(item => item.value) : [];
+      const selectionDialog = document.getElementById('selection-file-dialog');
+      const selectionFile = document.getElementById('selection-file');
+      const selectionFeedback = document.getElementById('selection-file-feedback');
+      const selectionMatches = document.getElementById('selection-file-matches');
+      async function selectionRequest(payload) {
+        const response = await fetch('/api/library-selection', {
+          method: 'POST',
+          headers: {...(window.axiomCsrfHeaders?.() || {}), 'Content-Type':'application/json'},
+          body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Selection request failed.');
+        return data;
+      }
+      document.getElementById('selection-file-open').addEventListener('click', () => selectionDialog.showModal());
+      selectionFile.addEventListener('change', async () => {
+        const file = selectionFile.files[0];
+        selectionFile.value = '';
+        selectionMatches.replaceChildren();
+        if (!file) return;
+        selectionFile.disabled = true;
+        selectionFeedback.textContent = 'Checking this catalog…';
+        try {
+          if (file.size > 15000) throw new Error('Selection file is too large.');
+          const result = await selectionRequest({manifest: JSON.parse(await file.text())});
+          const labels = {match: 'Matches this catalog', different: 'Edition, language, or format differs', missing: 'Source ID absent from this catalog'};
+          for (const item of result.sources) {
+            const row = document.createElement('li');
+            row.textContent = (item.title || item.source_id) + ' · ' + labels[item.state] +
+              (item.license ? ' · License: ' + item.license : '');
+            selectionMatches.append(row);
+          }
+          selectionFeedback.textContent = 'Reviewed ' + result.sources.length + ' source choices.';
+        } catch (error) {
+          selectionFeedback.textContent = error.message;
+        } finally {
+          selectionFile.disabled = false;
+        }
+      });
+      document.getElementById('selection-export').addEventListener('click', async () => {
+        try {
+          const manifest = (await selectionRequest({revision, source_ids: selectedIds()})).manifest;
+          const url = URL.createObjectURL(new Blob([JSON.stringify(manifest)], {type:'application/json'}));
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = 'axiom-library-selection.json';
+          link.click();
+          window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+        } catch (error) {
+          feedback.textContent = error.message;
+        }
+      });
       const preview = document.getElementById('bulk-preview-result');
       const previewSummary = document.getElementById('bulk-preview-summary');
       const previewCapacity = document.getElementById('bulk-preview-capacity');

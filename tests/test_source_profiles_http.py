@@ -777,6 +777,35 @@ def test_update_discovery_configuration_and_endpoint_diagnostics(app, monkeypatc
     assert request("/api/sources")["revision"] == saved["revision"]
 
 
+def test_portable_selection_round_trip_discloses_only_selected_public_metadata(app):
+    request, _ = app
+    catalog = request("/api/sources")
+    catalog = mutate(request, catalog, "add", {
+        "title": "Selection fixture", "format": "zim", "language": "en", "edition": "2026-11",
+        "source_url": "https://example.org/library.zim?private=secret", "license": "Fixture terms",
+    }, sid="selection-fixture")
+    endpoint = "/api/library-selection"
+    payload = {"revision": catalog["revision"], "source_ids": ["selection-fixture"]}
+    request(endpoint, payload, status=403, origin="")
+    request(endpoint, payload | {"revision": 0}, status=409)
+    exported = request(endpoint, payload)["manifest"]
+    assert exported == {"version": 1, "sources": [{
+        "source_id": "selection-fixture", "format": "zim", "language": "en", "edition": "2026-11",
+    }]}
+    assert request(endpoint, {"manifest": exported})["sources"] == [{
+        "source_id": "selection-fixture", "state": "match", "title": "Selection fixture",
+        "license": "Fixture terms",
+    }]
+    entry = exported["sources"][0]
+    for changes, state in (({"edition": "2026-10"}, "different"), ({"source_id": "missing"}, "missing")):
+        manifest = exported | {"sources": [entry | changes]}
+        assert request(endpoint, {"manifest": manifest})["sources"][0]["state"] == state
+    for invalid in (exported | {"version": 2}, exported | {"sources": [entry, entry]},
+                    exported | {"sources": [entry | {"source_url": "https://unknown.example/"}]}):
+        request(endpoint, {"manifest": invalid}, status=400)
+    assert request("/api/sources")["revision"] == catalog["revision"]
+
+
 def test_acquisition_preview_uses_recorded_sizes_without_starting_jobs(app, monkeypatch):
     request, _ = app
     catalog = request("/api/sources")

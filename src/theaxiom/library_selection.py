@@ -1,0 +1,63 @@
+"""Portable source choices with read-only matching against a local catalog."""
+import json
+
+from . import catalog_store
+
+VERSION = 1
+MAX_BYTES = 15000  # Leave room for the admin API request envelope.
+FIELDS = {"source_id", "format", "language", "edition"}
+FORMATS = {"zim", "pdf", "epub", "unspecified"}
+
+
+def _validate_entries(entries):
+    if not isinstance(entries, list) or not 1 <= len(entries) <= catalog_store.MAX_ENTRIES:
+        raise ValueError("Select at least one source within the catalog limit")
+    seen = set()
+    for entry in entries:
+        if (not isinstance(entry, dict) or entry.keys() != FIELDS
+                or any(not isinstance(value, str) or len(value) > catalog_store.MAX_FIELD
+                       or any(ord(char) < 32 for char in value) for value in entry.values())
+                or not catalog_store.ID_RE.fullmatch(entry["source_id"])
+                or entry["format"] not in FORMATS):
+            raise ValueError("Invalid selection entry")
+        if entry["source_id"] in seen:
+            raise ValueError("Selection contains a duplicate source ID")
+        seen.add(entry["source_id"])
+
+
+def _choice(record):
+    profile = record["profile"]
+    return {"source_id": record["source_id"], "format": record["configuration"]["format"],
+            "language": profile.get("language", ""), "edition": profile.get("edition", "")}
+
+
+def export_selection(known, source_ids):
+    if (not isinstance(source_ids, list) or not source_ids
+            or any(not isinstance(sid, str) or sid not in known for sid in source_ids)):
+        raise ValueError("Unknown selected source")
+    sources = [_choice(known[sid]) for sid in source_ids]
+    _validate_entries(sources)
+    manifest = {"version": VERSION, "sources": sources}
+    if len(json.dumps(manifest, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) > MAX_BYTES:
+        raise ValueError("Selection file is too large; export fewer sources")
+    return manifest
+
+
+def preview_selection(known, manifest):
+    if (not isinstance(manifest, dict) or manifest.keys() != {"version", "sources"}
+            or type(manifest["version"]) is not int or manifest["version"] != VERSION):
+        raise ValueError("Unsupported selection format or version")
+    sources = manifest["sources"]
+    _validate_entries(sources)
+    matches = []
+    for entry in sources:
+        sid = entry["source_id"]
+        local = known.get(sid)
+        if not local:
+            matches.append({"source_id": sid, "state": "missing"})
+            continue
+        choice = _choice(local)
+        matches.append({"source_id": sid, "state": "match" if entry == choice else "different",
+                        "title": local["profile"]["title"],
+                        "license": local["configuration"].get("license", "")})
+    return matches

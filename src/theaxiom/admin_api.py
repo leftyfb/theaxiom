@@ -51,6 +51,7 @@ update_diagnostics = importlib.import_module(f"{__package__}.update_diagnostics"
 update_check_store = importlib.import_module(f"{__package__}.update_check_store" if __package__ else "theaxiom.update_check_store")
 kiwix_update_discovery = importlib.import_module(f"{__package__}.kiwix_update_discovery" if __package__ else "theaxiom.kiwix_update_discovery")
 library_search = importlib.import_module(f"{__package__}.search" if __package__ else "theaxiom.search")
+library_selection = importlib.import_module(f"{__package__}.library_selection" if __package__ else "theaxiom.library_selection")
 BIND_HOST = "127.0.0.1"
 BIND_PORT = 8080
 ADMIN_TEMPLATE_DIR = Path(__file__).resolve().parents[2] / "templates"
@@ -1354,6 +1355,33 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     result = document_update_discovery.check_installed_document(record)
                 diagnostic.update(result)
             self._send_json(200, dict(source_id=sid, **result))
+        elif self.path == "/api/library-selection":
+            if not self.headers.get("Origin"):
+                self._send_json(403, {"error": "same-origin request required"})
+                return
+            data = self._read_body()
+            if data.keys() not in ({"revision", "source_ids"}, {"manifest"}) or (
+                    "source_ids" in data and not self._valid_revision(data["revision"])):
+                self._send_json(400, {"error": "invalid selection request"})
+                return
+            try:
+                catalog = SOURCE_CATALOG.get()
+            except (catalog_store.CatalogError, OSError):
+                self._send_json(503, {"error": "source catalog unavailable"})
+                return
+            if "source_ids" in data and data["revision"] != catalog["revision"]:
+                self._send_json(409, {"error": "catalog revision changed"})
+                return
+            known = {record["source_id"]: record for record in catalog["sources"]}
+            try:
+                if "source_ids" in data:
+                    result = {"manifest": library_selection.export_selection(known, data["source_ids"])}
+                else:
+                    result = {"sources": library_selection.preview_selection(known, data["manifest"])}
+            except ValueError as exc:
+                self._send_json(400, {"error": str(exc)})
+                return
+            self._send_json(200, result)
         elif self.path == "/api/acquisition-preview":
             if not self.headers.get("Origin"):
                 self._send_json(403, {"error": "same-origin request required"})

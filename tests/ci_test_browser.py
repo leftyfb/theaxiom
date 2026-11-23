@@ -17,7 +17,7 @@ from theaxiom.admin_security import PasswordStore, ServerConfig
 
 
 def exercise(browser, base, name, viewport, artifacts):
-    context = browser.new_context(viewport=viewport, accept_downloads=False)
+    context = browser.new_context(viewport=viewport, accept_downloads=True)
     page = context.new_page()
     page.set_default_timeout(10000)
     errors = []
@@ -269,6 +269,15 @@ def exercise(browser, base, name, viewport, artifacts):
         expect(page.locator("#bulk-unpublish")).to_be_disabled()
         page.get_by_role("button", name="Preview ZIM storage").click()
         expect(page.locator("#bulk-preview-summary")).to_have_text("No supported ZIM sources selected.")
+        with page.expect_download() as download:
+            page.get_by_role("button", name="Export selected sources").click()
+        manifest = download.value.path().read_bytes()
+        page.get_by_role("button", name="Preview selection file").click()
+        page.locator("#selection-file").set_input_files({
+            "name": "selection.json", "mimeType": "application/json", "buffer": manifest,
+        })
+        expect(page.locator("#selection-file-matches")).to_contain_text("Matches this catalog")
+        page.locator("#selection-file-dialog").get_by_role("button", name="Close").click()
         check.focus()
         page.keyboard.press("Space")
         expect(check).not_to_be_checked()
