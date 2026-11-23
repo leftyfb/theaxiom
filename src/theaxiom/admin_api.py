@@ -619,8 +619,20 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         elif self.path.rstrip("/") in {"/admin", "/admin/sources", "/admin/settings", "/admin/groupings"}:
             page = {"/admin/settings": "settings", "/admin/groupings": "groupings"}.get(self.path.rstrip("/"), "sources")
             self._send_admin_page(page)
-        elif self.path.rstrip("/") == "/api/freshness":
-            self._send_json(200, freshness_response(self._snapshot()))
+        elif urlsplit(self.path).path.rstrip("/") == "/api/freshness":
+            try:
+                query = parse_qs(urlsplit(self.path).query, keep_blank_values=True,
+                                 max_num_fields=2, strict_parsing=True)
+                if (set(query) - {"source_id"} or
+                        any(len(values) != 1 for values in query.values()) or
+                        ("source_id" in query and not catalog_store.ID_RE.fullmatch(query["source_id"][0]))):
+                    raise ValueError("invalid freshness source selector")
+            except ValueError:
+                self._send_json(400, {"error": "invalid freshness source selector"})
+                return
+            result = freshness_response(
+                self._snapshot(), source_id=query.get("source_id", [None])[0])
+            self._send_json(400 if "error" in result else 200, result)
         elif self.path.rstrip("/") == "/api/acquisitions":
             monitor = getattr(self.server, "acquisition_monitor", None)
             self._send_json(200, monitor.snapshot() if monitor else {"acquisitions": [], "stale": True})
