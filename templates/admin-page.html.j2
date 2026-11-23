@@ -641,13 +641,12 @@
         {% set document = source.adapter in ('pdf','epub') %}
         {% set url_managed = source.configuration.source_url|default('', true)|trim %}
         {% set discovery = source.discovery|default({}) %}
-        <p class="source-note" data-field="discovery-status" role="status">
+        <p class="source-note" data-field="discovery-status">
           {% if discovery %}
-            {{ {'head': 'HTTPS HEAD / ETag', 'kiwix': 'Kiwix OPDS / Metalink', 'manual': 'Manual update discovery'}[discovery.method] }}
-            · Periodic checks {{ 'enabled' if discovery.periodic else 'disabled' }}
+            {{ 'Automatic update checks enabled' if discovery.periodic else 'Automatic update checks disabled' }}
           {% endif %}
         </p>
-        <p class="source-note" data-field="discovery-evidence" role="status"></p>
+        <p class="source-note" data-field="discovery-evidence" role="status" aria-live="polite"></p>
         <div class="source-actions" aria-label="Source actions">
           {# Legacy pinned-action placeholders cannot execute and must not
              masquerade as Download/Re-download/Update controls. #}
@@ -718,6 +717,9 @@
         {% endif %}
         <details class="source-technical">
           <summary>Technical details</summary>
+          {% if discovery %}
+          <p class="source-note">Update discovery: {{ {'head': 'HTTPS HEAD / ETag', 'kiwix': 'Kiwix OPDS / Metalink', 'manual': 'Manual update discovery'}.get(discovery.method, 'Unknown') }} · Periodic checks {{ 'enabled' if discovery.periodic else 'disabled' }}</p>
+          {% endif %}
           <p class="source-note" data-field="update-evidence">
             {% if source.update_check %}{{ source.update_check.evidence }}{% endif %}
           </p>
@@ -1776,7 +1778,9 @@
       document.querySelectorAll('[data-zim-update-check]').forEach(button => button.addEventListener('click', async () => {
         if (button.disabled) return;
         const card = button.closest('.source-card');
-        const feedback = card.querySelector('[data-zim-feedback]');
+        const feedback = card.querySelector('[data-field="discovery-evidence"]');
+        const actionFeedback = card.querySelector('[data-zim-feedback]');
+        if (actionFeedback) actionFeedback.textContent = '';
         button.disabled = true;
         card.dataset.zimCheckPosting = 'true';
         feedback.textContent = 'Checking…';
@@ -2232,6 +2236,7 @@
                 representation_unchanged: 'Publisher representation unchanged',
                 unable_to_determine: 'Unable to check for updates'
               };
+              if (card.dataset.zimCheckPosting === 'true') return;
               evidence.textContent = update ? (update.stale ? 'Last update check is stale' :
                 update.state === 'update_available' ? '' : description[update.state] || '') :
                 (source?.discovery?.method && source.discovery.method !== 'manual' ? 'No update check recorded' : '');
