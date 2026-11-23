@@ -130,11 +130,11 @@ def _directory(branch, *, writing=False, format_name="pdf"):
 
 
 @contextmanager
-def _file(directory, mount_id, filename, size):
+def _file(directory, mount_id, filename, size, *, allowed_links=(1,)):
     fd = os.open(filename, FILES, dir_fd=directory)
     with os.fdopen(fd, "rb") as stream:
         info = os.fstat(fd)
-        if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_uid != os.geteuid()
+        if (not stat.S_ISREG(info.st_mode) or info.st_nlink not in allowed_links or info.st_uid != os.geteuid()
                 or info.st_mode & 0o022 or _mount_id(fd) != mount_id or info.st_size != size):
             raise ValueError("PDF file is unsafe or does not match its expected size")
         yield stream

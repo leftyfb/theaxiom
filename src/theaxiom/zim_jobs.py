@@ -622,15 +622,38 @@ def _promoted_artifact(job):
                 or (size and length != size)):
             return None
         with pdf_source._directory("library", format_name="zim") as (fd, mount, _):
-            # A crash before staging was unlinked leaves two links. _file
-            # rejects that case, retaining both paths for operator review.
-            with pdf_source._file(fd, mount, name, length) as stream:
-                if zim_source.promotion_identity(os.fstat(stream.fileno())) != intent["identity"]:
+            with pdf_source._file(fd, mount, name, length, allowed_links=(1, 2)) as stream:
+                info = os.fstat(stream.fileno())
+                if zim_source.promotion_identity(info) != intent["identity"]:
                     return None
-            os.fsync(fd)
+                os.fsync(fd)
+                if info.st_nlink == 2:
+                    _remove_promotion_alias(job["source_id"], fd, mount, name, stream.fileno(), info)
         return artifact
     except (OSError, ValueError, KeyError, TypeError):
         return None
+
+
+def _remove_promotion_alias(sid, library, mount, filename, file_fd, info):
+    """Remove only the expected staging name after securing the library link."""
+    with pdf_source._directory("staging", format_name="zim") as (staging, staged_mount, _):
+        if (mount != staged_mount or os.fstat(staging).st_mode & 0o022
+                or os.fstat(library).st_mode & 0o022):
+            raise ValueError("Storage directories are not safe for automatic alias cleanup")
+        name = zim_source.partial_name(sid)
+        with pdf_source._file(staging, mount, name, info.st_size, allowed_links=(2,)) as partial:
+            staged = os.fstat(partial.fileno())
+            current = os.stat(filename, dir_fd=library, follow_symlinks=False)
+            expected = zim_source.promotion_identity(info)
+            if (zim_source.promotion_identity(staged) != expected
+                    or zim_source.promotion_identity(current) != expected
+                    or current.st_nlink != 2):
+                raise ValueError("Promotion links do not match the verified archive")
+            os.unlink(name, dir_fd=staging)
+            os.fsync(staging)
+            final = os.fstat(file_fd)
+            if final.st_nlink != 1 or zim_source.promotion_identity(final) != expected:
+                raise ValueError("Recovered library link changed")
 
 
 def _finish_orphaned_promotion(job, guard):

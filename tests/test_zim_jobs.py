@@ -1576,8 +1576,8 @@ def test_invalid_rollback_reason_never_changes_serving_archive(disk, reason):
     assert zim_jobs.read_candidate("ready")["state"] == "activated"
 
 
-@pytest.mark.parametrize("condition", ["intact", "different-inode", "staging-link"])
-def test_interrupted_promotion_recovers_only_exact_single_link(disk, condition):
+@pytest.mark.parametrize("condition", ["intact", "different-inode", "staging-link", "shared-staging", "other-link"])
+def test_interrupted_promotion_recovers_only_verified_library_and_staging_links(disk, condition):
     data = fixture_bytes()
     artifact = zim_source.install_stream("ready", CONFIG, BytesIO(data))
     final = disk / "library/zim" / artifact["filename"]
@@ -1587,8 +1587,13 @@ def test_interrupted_promotion_recovers_only_exact_single_link(disk, condition):
         other.write_bytes(data)
         other.chmod(0o600)
         other.replace(final)
-    elif condition == "staging-link":
-        (disk / "staging/zim" / zim_source.partial_name("ready")).hardlink_to(final)
+    elif condition in {"staging-link", "shared-staging", "other-link"}:
+        leaf = disk / "staging/zim"
+        link = leaf / (zim_source.partial_name("other") if condition == "other-link"
+                       else zim_source.partial_name("ready"))
+        link.hardlink_to(final)
+        if condition == "shared-staging":
+            leaf.chmod(0o777)
     job = dict(source_id="ready", state="publishing", active=True,
                configuration=zim_jobs.identity(CONFIG),
                promotion_intent={"artifact": artifact, "identity": identity},
@@ -1603,7 +1608,7 @@ def test_interrupted_promotion_recovers_only_exact_single_link(disk, condition):
     assert outcome["active"] is False
     assert "promotion_intent" not in outcome
     assert final.read_bytes() == data
-    if condition == "intact":
+    if condition in {"intact", "staging-link"}:
         assert outcome["state"] == "completed"
         assert zim_jobs.installed(outcome, CONFIG) == artifact
         assert outcome["attempt_history"][-1]["state"] == "completed"
@@ -1612,4 +1617,8 @@ def test_interrupted_promotion_recovers_only_exact_single_link(disk, condition):
         assert outcome["verified"] is False
         assert "review" in outcome["detail"]
     if condition == "staging-link":
+        assert not link.exists()
+        assert final.stat().st_nlink == 1
+    elif condition in {"shared-staging", "other-link"}:
+        assert link.read_bytes() == data
         assert final.stat().st_nlink == 2
