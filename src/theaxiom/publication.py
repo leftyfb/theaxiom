@@ -9,12 +9,12 @@ import xml.etree.ElementTree as ET
 from urllib.parse import urlsplit, quote
 from pathlib import Path
 
-from . import catalog_store, storage_settings
+from . import catalog_store, storage_settings, source_catalog
 
 LOCK = threading.RLock()
 # Trusted deployment configuration, not administrator-supplied URLs.
 ROUTES = {"wikipedia-en": {"path": "/wikipedia/", "port": 8081, "entry_path": "/read/wikipedia-en",
-    "reader_path": "/zim/", "book_id": "wikipedia_en_all_maxi_2026-08",
+    "reader_path": "/zim/", "book_id": Path(source_catalog.WIKIPEDIA_SOURCE["filename"]).stem,
     "name": "Wikipedia", "category": "Encyclopedia",
     "description": "Explore millions of articles, illustrations and reference material without an internet connection.",
     "symbol": "W", "language": "English"}}
