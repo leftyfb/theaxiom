@@ -306,6 +306,21 @@ class HTTPAuthTests(unittest.TestCase):
         self.assertNotIn("WWW-Authenticate", headers)
         self.assertIn(b"sign in required", body)
 
+    def test_origin_only_api_clients_preserve_basic_without_browser_popup(self):
+        """Origin alone is not proof of a browser when Basic is explicit."""
+        origin = {"Origin": "http://" + self.host}
+        self.assertEqual(self.request("/api/sources", auth=self.auth, headers=origin)[0], 200)
+        code, headers, _ = self.request("/api/sources", headers=origin)
+        self.assertEqual(code, 401)
+        self.assertNotIn("WWW-Authenticate", headers)
+        # Fetch metadata identifies a browser even when old Basic credentials
+        # remain cached by it after logout or expiration.
+        code, headers, _ = self.request(
+            "/api/sources", auth=self.auth,
+            headers={**origin, "Sec-Fetch-Site": "same-origin"})
+        self.assertEqual(code, 401)
+        self.assertNotIn("WWW-Authenticate", headers)
+
     def test_invalid_credentials_and_host_rejected(self):
         self.assertEqual(self.request("/admin", auth="Basic bad", headers={"Accept": "text/html"})[0], 303)
         self.assertEqual(self.request("/admin", auth=self.auth, headers={"Host":"attacker.invalid"})[0], 400)
