@@ -802,6 +802,16 @@
       const upstreamFeedback = document.getElementById('upstream-catalog-feedback');
       const upstreamResults = document.getElementById('upstream-catalog-results');
       document.getElementById('upstream-catalog-open').addEventListener('click', () => upstreamDialog.showModal());
+      async function requestUpstream(payload) {
+        const response = await fetch('/api/upstream-kiwix-catalog', {
+          method: 'POST',
+          headers: {...(window.axiomCsrfHeaders?.() || {}), 'Content-Type':'application/json'},
+          body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Publisher catalog unavailable.');
+        return data;
+      }
       upstreamForm.addEventListener('submit', async event => {
         event.preventDefault();
         const submit = upstreamForm.querySelector('[type="submit"]');
@@ -810,14 +820,9 @@
         upstreamResults.replaceChildren();
         upstreamFeedback.textContent = 'Checking the publisher catalog…';
         try {
-          const response = await fetch('/api/upstream-kiwix-catalog', {
-            method: 'POST',
-            headers: {...(window.axiomCsrfHeaders?.() || {}), 'Content-Type':'application/json'},
-            body: JSON.stringify({family: document.getElementById('upstream-family').value.trim(),
-              language: document.getElementById('upstream-language').value})
-          });
-          const data = await response.json();
-          if (!response.ok) throw new Error(data.error || 'Publisher catalog unavailable.');
+          const query = {family: document.getElementById('upstream-family').value.trim(),
+            language: document.getElementById('upstream-language').value};
+          const data = await requestUpstream(query);
           if (data.unavailable) {
             upstreamFeedback.textContent = 'Publisher catalog unavailable for this query. Try refreshing later.';
             return;
@@ -832,6 +837,30 @@
             row.textContent = [entry.title, entry.edition, entry.variant,
               entry.advertised_size ? 'Advertised bytes ' + entry.advertised_size : 'Size not listed',
               entry.rights || 'Rights not listed'].filter(Boolean).join(' · ');
+            if (entry.publisher_checksum_listed && !data.stale && !data.cache_unavailable) {
+              const inspect = document.createElement('button');
+              inspect.type = 'button';
+              inspect.className = 'button';
+              inspect.textContent = 'Inspect publisher checksum';
+              inspect.setAttribute('aria-label', 'Inspect publisher checksum for ' + entry.edition + ' ' + entry.variant);
+              const result = document.createElement('p');
+              result.className = 'source-note';
+              result.setAttribute('role', 'status');
+              inspect.addEventListener('click', async () => {
+                inspect.disabled = true;
+                result.textContent = 'Checking publisher metadata…';
+                try {
+                  const details = await requestUpstream({...query, edition: entry.edition, variant: entry.variant});
+                  result.textContent = details.unavailable ? 'Publisher checksum unavailable. Try again later.' :
+                    details.filename + ' · Publisher bytes ' + details.bytes + ' · Publisher SHA-256 ' + details.sha256;
+                } catch (error) {
+                  result.textContent = error.message;
+                } finally {
+                  inspect.disabled = false;
+                }
+              });
+              row.append(' ', inspect, result);
+            }
             upstreamResults.append(row);
           }
         } catch (error) {

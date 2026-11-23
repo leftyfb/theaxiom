@@ -281,15 +281,27 @@ def exercise(browser, base, name, viewport, artifacts):
         expect(check).not_to_be_checked()
         page.get_by_role("button", name="Select matching sources").click()
         expect(check).to_be_checked()
-        page.route("**/api/upstream-kiwix-catalog", lambda route: route.fulfill(json={
-            "cached": True, "stale": True, "checked_at": 1000,
-            "entries": [{"title": "Offline reference", "edition": "2026-11", "variant": "maxi"}],
-        }))
+        def publisher_catalog(route):
+            payload = route.request.post_data_json
+            if "edition" in payload:
+                route.fulfill(json={"filename": "recent_eng_maxi_2026-11.zim", "bytes": "4096", "sha256": "a" * 64})
+            else:
+                stale = payload["family"] == "reference_eng"
+                route.fulfill(json={"cached": stale, "stale": stale, "checked_at": 1000,
+                    "entries": [{"title": "Offline reference", "edition": "2026-11", "variant": "maxi",
+                                 "publisher_checksum_listed": True}]})
+
+        page.route("**/api/upstream-kiwix-catalog", publisher_catalog)
         page.get_by_role("button", name="Browse Kiwix catalog").click()
         page.get_by_label("Kiwix family").fill("reference_eng")
         page.get_by_role("button", name="Refresh listings").click()
         expect(page.locator("#upstream-catalog-feedback")).to_contain_text("Older cached listings")
         expect(page.locator("#upstream-catalog-results")).to_contain_text("Offline reference")
+        expect(page.get_by_role("button", name="Inspect publisher checksum for 2026-11 maxi")).to_have_count(0)
+        page.get_by_label("Kiwix family").fill("recent_eng")
+        page.get_by_role("button", name="Refresh listings").click()
+        page.get_by_role("button", name="Inspect publisher checksum for 2026-11 maxi").click()
+        expect(page.locator("#upstream-catalog-results")).to_contain_text("Publisher SHA-256 " + "a" * 64)
         page.locator("#upstream-catalog-dialog").get_by_role("button", name="Close").click()
         check.focus()
         page.keyboard.press("Space")

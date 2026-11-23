@@ -29,9 +29,9 @@ def test_exact_query_falls_back_to_last_publication_listings(tmp_path, monkeypat
     assert not first["cached"]
     assert first["entries"] == [
         {"title": "Reference", "edition": "2026-11", "variant": "maxi",
-         "advertised_size": None, "rights": "Publisher terms"},
+         "advertised_size": None, "rights": "Publisher terms", "publisher_checksum_listed": True},
         {"title": "Reference", "edition": "2026-10", "variant": "maxi",
-         "advertised_size": "2048", "rights": "Publisher terms"},
+         "advertised_size": "2048", "rights": "Publisher terms", "publisher_checksum_listed": False},
     ]
     fetch.assert_called_once_with(
         "https://opds.library.kiwix.org/catalog/v2/entries?name=reference_eng&lang=eng&start=0&count=25",
@@ -61,3 +61,51 @@ def test_invalid_response_never_becomes_cached(tmp_path, monkeypatch):
     fetch.assert_not_called()
     assert catalog.refresh("reference_eng", "eng")["unavailable"]
     assert not path.exists()
+    monkeypatch.setattr(catalog, "_next_refresh", 0)
+    fetch.return_value = FEED.decode().encode("utf-16")
+    assert catalog.refresh("reference_eng", "eng")["unavailable"]
+    assert not path.exists()
+
+
+def test_inspect_edition_reads_only_cached_exact_listing_and_publisher_metalink(tmp_path, monkeypatch):
+    monkeypatch.setattr(catalog, "_path", lambda: tmp_path / "metadata")
+    monkeypatch.setattr(catalog, "_next_refresh", 0)
+    monkeypatch.setattr(catalog, "_next_inspect", 0)
+    name = "reference_eng_maxi_2026-11.zim"
+    url = "https://download.kiwix.org/zim/reference/" + name
+    digest = "a" * 64
+    metalink = (f'<metalink xmlns="urn:ietf:params:xml:ns:metalink"><file name="{name}">'
+                f'<size>4096</size><hash type="sha-256">{digest}</hash><url>{url}</url>'
+                '</file></metalink>').encode()
+    fetch = Mock(side_effect=[FEED, metalink])
+    monkeypatch.setattr(catalog.kiwix_metadata_transport, "fetch_metadata", fetch)
+    catalog.refresh("reference_eng", "eng")
+    with pytest.raises(ValueError, match="Refresh"):
+        catalog.inspect_edition("reference_eng", "fra", "2026-11", "maxi")
+    with pytest.raises(ValueError, match="No unique"):
+        catalog.inspect_edition("reference_eng", "eng", "2026-10", "maxi")
+    assert catalog.inspect_edition("reference_eng", "eng", "2026-11", "maxi") == {
+        "filename": name, "bytes": "4096", "sha256": digest,
+    }
+    assert fetch.call_count == 2
+    assert fetch.call_args.args == (url + ".meta4",)
+    assert fetch.call_args.kwargs == {"kind": "metalink-inspection"}
+
+
+def test_large_inspection_only_metadata_preserves_acquisition_limits():
+    name = "reference_eng_2026-11.zim"
+    url = "https://download.kiwix.org/zim/reference/" + name + ".meta4"
+    _, _, inspect_cap = catalog.kiwix_metadata_transport._validated_endpoint(url, "metalink-inspection")
+    _, _, acquire_cap = catalog.kiwix_metadata_transport._validated_endpoint(url, "metalink")
+    assert acquire_cap == catalog.kiwix_opds.MAX_METALINK_BYTES < inspect_cap
+    digest = "b" * 64
+    raw = (f'<metalink xmlns="urn:ietf:params:xml:ns:metalink"><file name="{name}">'
+           f'<size>4096</size><hash type="sha-256">{digest}</hash>'
+           '<!--' + 'x' * acquire_cap + '--></file></metalink>').encode()
+    assert catalog.kiwix_opds.inspect_metalink(raw, expected_filename=name) == {
+        "filename": name, "bytes": "4096", "sha256": digest,
+    }
+    with pytest.raises(ValueError, match="size"):
+        catalog.kiwix_opds.parse_metalink(raw, expected_filename=name)
+    with pytest.raises(ValueError, match="size"):
+        catalog.kiwix_opds.inspect_metalink(raw + b" " * inspect_cap, expected_filename=name)

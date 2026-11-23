@@ -27,7 +27,7 @@ def parse_acquisition_feed(raw: bytes, *, include_catalog_metadata=False) -> lis
     """
     if not isinstance(raw, bytes) or not 0 < len(raw) <= MAX_BYTES:
         raise ValueError("Invalid OPDS feed size")
-    if b"<!DOCTYPE" in raw.upper() or b"<!ENTITY" in raw.upper():
+    if b"\x00" in raw or b"<!DOCTYPE" in raw.upper() or b"<!ENTITY" in raw.upper():
         raise ValueError("DTD and XML entities are not permitted")
     try:
         root = ET.fromstring(raw)
@@ -93,27 +93,18 @@ def parse_acquisition_feed(raw: bytes, *, include_catalog_metadata=False) -> lis
 
 METALINK = "{urn:ietf:params:xml:ns:metalink}"
 MAX_METALINK_BYTES = 64 * 1024
+MAX_INSPECTION_BYTES = 4 * 1024 * 1024  # Some official Metalinks list tens of thousands of piece hashes.
 
 
-def parse_metalink(
-    raw: bytes, *, expected_filename: str, preferred_host: str | None = None,
-) -> dict[str, object]:
-    """Validate explicit Metalink4 file digest and HTTPS mirror, without I/O.
-
-    The caller must obtain the Metalink through an independently guarded,
-    authenticated transport and must NOT trust an arbitrary user-supplied
-    expected filename. No output can trigger acquisition automatically.
-    """
+def _metalink_file(raw, expected_filename, cap):
     import re
-    if preferred_host is not None and preferred_host not in DOWNLOAD_HOSTS:
-        raise ValueError("Unapproved preferred Metalink host")
     if (not isinstance(expected_filename, str)
             or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9._-]{1,240}\.zim", expected_filename)
             or ".." in expected_filename):
         raise ValueError("Invalid expected ZIM filename")
-    if not isinstance(raw, bytes) or not 0 < len(raw) <= MAX_METALINK_BYTES:
+    if not isinstance(raw, bytes) or not 0 < len(raw) <= cap:
         raise ValueError("Invalid Metalink size")
-    if b"<!DOCTYPE" in raw.upper() or b"<!ENTITY" in raw.upper():
+    if b"\x00" in raw or b"<!DOCTYPE" in raw.upper() or b"<!ENTITY" in raw.upper():
         raise ValueError("DTD and XML entities are not permitted")
     try:
         root = ET.fromstring(raw)
@@ -126,7 +117,8 @@ def parse_metalink(
         raise ValueError("Metalink file identity mismatch")
     file = files[0]
     size_value = file.findtext(METALINK + "size")
-    if not isinstance(size_value, str) or not size_value.isascii() or not size_value.isdecimal():
+    if (not isinstance(size_value, str) or len(size_value) > 19
+            or not size_value.isascii() or not size_value.isdecimal()):
         raise ValueError("Missing trusted size")
     size = int(size_value)
     if not 96 <= size <= 2**63 - 1:
@@ -138,6 +130,22 @@ def parse_metalink(
     sha = sha_values[0].lower()
     if len(sha) != 64 or any(ch not in "0123456789abcdef" for ch in sha):
         raise ValueError("Invalid SHA-256")
+    return file, size, sha
+
+
+def inspect_metalink(raw, *, expected_filename):
+    """Read publisher size and checksum for display without accepting any mirror."""
+    _, size, sha = _metalink_file(raw, expected_filename, MAX_INSPECTION_BYTES)
+    return {"filename": expected_filename, "bytes": str(size), "sha256": sha}
+
+
+def parse_metalink(
+    raw: bytes, *, expected_filename: str, preferred_host: str | None = None,
+) -> dict[str, object]:
+    """Validate a known Metalink4 file digest and HTTPS mirror without I/O."""
+    if preferred_host is not None and preferred_host not in DOWNLOAD_HOSTS:
+        raise ValueError("Unapproved preferred Metalink host")
+    file, size, sha = _metalink_file(raw, expected_filename, MAX_METALINK_BYTES)
     urls = []
     for link in file.findall(METALINK + "url"):
         href = link.text

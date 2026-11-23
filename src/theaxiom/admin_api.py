@@ -1361,11 +1361,12 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 self._send_json(403, {"error": "same-origin request required"})
                 return
             data = self._read_body()
-            if data.keys() != {"family", "language"}:
+            if data.keys() not in ({"family", "language"}, {"family", "language", "edition", "variant"}):
                 self._send_json(400, {"error": "provide a Kiwix family and language"})
                 return
             try:
-                result = upstream_catalog.refresh(data["family"], data["language"])
+                result = (upstream_catalog.inspect_edition(**data) if "edition" in data
+                          else upstream_catalog.refresh(**data))
             except ValueError as exc:
                 self._send_json(400, {"error": str(exc)})
                 return

@@ -788,7 +788,7 @@ def test_upstream_catalog_refresh_uses_only_filtered_metadata(app, monkeypatch):
     request("/api/upstream-kiwix-catalog", payload | {"url": "https://unknown.example/"}, status=400)
     refresh.assert_not_called()
     assert request("/api/upstream-kiwix-catalog", payload)["cached"]
-    refresh.assert_called_once_with("wikipedia_en_all", "eng")
+    refresh.assert_called_once_with(family="wikipedia_en_all", language="eng")
     assert request("/api/sources")["revision"] == before
 
 

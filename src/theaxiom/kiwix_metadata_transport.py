@@ -34,7 +34,7 @@ def catalog_page_url(*, family: str, language: str, start: int = 0, count: int =
 
 
 def _validated_endpoint(url: str, kind: str) -> tuple[str, str, int]:
-    if not isinstance(url, str) or len(url) > 2048 or kind not in {"catalog", "metalink"}:
+    if not isinstance(url, str) or len(url) > 2048 or kind not in {"catalog", "metalink", "metalink-inspection"}:
         raise ValueError("Invalid Kiwix metadata endpoint")
     try:
         parsed = urlsplit(url)
@@ -68,7 +68,8 @@ def _validated_endpoint(url: str, kind: str) -> tuple[str, str, int]:
             or not re.fullmatch(r"/zim/[a-zA-Z0-9._/-]+\.zim\.meta4", parsed.path)
             or "/../" in parsed.path or "/./" in parsed.path or "//" in parsed.path):
         raise ValueError("Unapproved Kiwix Metalink endpoint")
-    return host, parsed.path, kiwix_opds.MAX_METALINK_BYTES
+    cap = kiwix_opds.MAX_INSPECTION_BYTES if kind == "metalink-inspection" else kiwix_opds.MAX_METALINK_BYTES
+    return host, parsed.path, cap
 
 
 def fetch_metadata(url: str, *, kind: str) -> bytes:
