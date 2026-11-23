@@ -17,8 +17,9 @@ def test_only_zim_source_records_are_checked_in_stable_order():
         calls.append(sid)
         return {"state": "update_available"}
     results = scheduler.check_records(records, checker=checker)
-    assert calls == ["alpha", "zeta"]
+    assert calls == ["alpha", "wikipedia-en", "zeta"]
     assert results == [{"source_id": "alpha", "state": "update_available"},
+                       {"source_id": "wikipedia-en", "state": "update_available"},
                        {"source_id": "zeta", "state": "update_available"}]
 
 
@@ -96,3 +97,50 @@ def test_url_based_documents_are_checked_but_local_uploads_are_not(monkeypatch):
     assert states["guide-pdf"] == "representation_changed"
     assert states["zim"] == "unable_to_determine"
     assert "upload-only" not in states
+
+
+def test_scheduled_pinned_zim_uses_verified_generic_seed_gate(monkeypatch):
+    from theaxiom import admin_api, kiwix_update_discovery, publication, zim_catalog
+    sid = next(iter(publication.ROUTES))
+    record = {"source_id": sid, "configuration": {"format": "zim"}}
+    calls = []
+    monkeypatch.setattr(admin_api, "select_lifecycle",
+                        lambda source_id, config: {"artifact": {"sha256": "a" * 64}})
+    monkeypatch.setattr(zim_catalog, "status",
+                        lambda entry, records: {"verified": True})
+    def check(entry, artifact, *, verified):
+        calls.append((entry, artifact, verified))
+        return {"state": "no_newer_edition_listed"}
+    monkeypatch.setattr(kiwix_update_discovery, "refresh_pinned_seed", check)
+    result = scheduler.check_records([record])
+    assert result == [{"source_id": sid, "state": "no_newer_edition_listed"}]
+    assert calls == [(record, {"sha256": "a" * 64}, True)]
+
+
+def test_scheduled_pinned_zim_does_not_assume_installed_verification(monkeypatch):
+    from theaxiom import admin_api, kiwix_update_discovery, publication, zim_catalog
+    sid = next(iter(publication.ROUTES))
+    record = {"source_id": sid, "configuration": {"format": "zim"}}
+    monkeypatch.setattr(admin_api, "select_lifecycle",
+                        lambda source_id, config: {"artifact": None})
+    monkeypatch.setattr(zim_catalog, "status",
+                        lambda entry, records: {"verified": False})
+    def check(entry, artifact, *, verified):
+        assert not verified and artifact is None
+        return {"state": "unable_to_determine"}
+    monkeypatch.setattr(kiwix_update_discovery, "refresh_pinned_seed", check)
+    assert scheduler.check_records([record]) == [
+        {"source_id": sid, "state": "unable_to_determine"}]
+
+
+def test_update_check_systemd_units_are_metadata_only_and_daily():
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1] / "deploy"
+    service = (root / "theaxiom-update-check.service").read_text()
+    timer = (root / "theaxiom-update-check.timer").read_text()
+    assert "User=theaxiom" in service
+    assert "theaxiom.kiwix_update_scheduler" in service
+    assert "OnCalendar=*-*-* 03:00:00" in timer
+    assert "Persistent=true" in timer
+    assert "Unit=theaxiom-update-check.service" in timer
+    assert "WantedBy=timers.target" in timer
