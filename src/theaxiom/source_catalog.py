@@ -6,6 +6,9 @@ WIKIPEDIA_SOURCE: dict[str, Any] = {
     "source_id": "wikipedia-en",
     "title": "Wikipedia English All Maxi (2026-08)",
     "kind": "zim",
+    # Historical installed archive verified by an external acquisition unit;
+    # a migration capability, not a source-ID runtime rule.
+    "legacy_acquisition": "systemd-monitor",
     "filename": "wikipedia_en_all_maxi_2026-08.zim",
     "source_url": "https://download.kiwix.org/zim/wikipedia/wikipedia_en_all_maxi_2026-08.zim",
     "sha256": "34162d18b9f96f494eac48a73a309c72e0bc95d85f76be405d0f5de795854aa6",
