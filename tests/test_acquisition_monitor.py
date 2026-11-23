@@ -31,6 +31,26 @@ class MonitorTests(unittest.TestCase):
         self.assertEqual(m.collect(WIKIPEDIA_SOURCE)["state"], "unknown")
         metadata.assert_not_called()
 
+    def test_external_verified_zim_selects_immutable_service_capability(self):
+        from theaxiom import source_catalog
+        second = dict(WIKIPEDIA_SOURCE, source_id="another-zim")
+        with (patch.object(source_catalog, "LEGACY_ACQUISITION_UNITS",
+                           {"another-zim": "acquire-another-zim.service"}),
+              patch.object(m, "unit_state", return_value={"LoadState": "not-found"}) as unit):
+            self.assertEqual(m.collect(second)["state"], "unavailable")
+            unit.assert_called_once_with("acquire-another-zim.service")
+        with (patch.object(source_catalog, "LEGACY_ACQUISITION_UNITS",
+                           {"another-zim": "--invalid.service"}),
+              patch.object(m, "unit_state") as unit):
+            self.assertEqual(m.collect(second)["state"], "unknown")
+            unit.assert_not_called()
+
+    def test_external_service_inspection_is_not_tied_to_wikipedia_unit(self):
+        with patch.object(m, "command", return_value="LoadState=not-found\n") as command:
+            assert m.unit_state("other-archive.service") == {"LoadState": "not-found"}
+            self.assertIn("other-archive.service", command.call_args.args)
+
+
     @patch.object(m, "command", return_value="")
     def test_missing_journal_evidence(self, _):
         self.assertFalse(m.success_evidence({"InvocationID": "a"*32}, WIKIPEDIA_SOURCE, None, "/unused"))
