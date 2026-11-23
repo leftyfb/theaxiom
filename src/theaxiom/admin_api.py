@@ -302,7 +302,7 @@ def _public_acquisition(job):
     """Only expose recorded outcomes and timestamps from the attempt journal."""
     if job is None:
         return None
-    job = {key: value for key, value in job.items() if key != "promotion_intent"}
+    job = {key: value for key, value in job.items() if key not in {"promotion_intent", "adopted_from_legacy"}}
     if "attempt_history" not in job:
         return job
     history = job["attempt_history"]

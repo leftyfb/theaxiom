@@ -733,16 +733,38 @@ def matches(job, config):
         return False
 
 
+def archive_identity(info):
+    """Identity of a verified file whose directory entry is left untouched."""
+    return dict(device=info.st_dev, inode=info.st_ino, bytes=info.st_size,
+                mtime_ns=info.st_mtime_ns, ctime_ns=info.st_ctime_ns)
+
+
+def adopted_filename(job, artifact):
+    from . import zim_adoption
+
+    adoption = job.get("adopted_from_legacy")
+    return bool(isinstance(adoption, dict) and isinstance(adoption.get("identity"), dict)
+                and job.get("source_id") == zim_adoption.SOURCE_ID
+                and artifact.get("filename") == zim_adoption.PINNED_FILENAME
+                and artifact.get("bytes") == zim_adoption.PINNED_BYTES
+                and artifact.get("sha256") == zim_adoption.PINNED_SHA256
+                and artifact.get("source_url") == zim_adoption.PINNED_SOURCE_URL)
+
+
 def installed(job, config):
     if not matches(job, config) or job["state"] != "completed":
         return None
     try:
         artifact = job["artifact"]
         expected_name = job["source_id"] + "." + artifact["sha256"] + ".zim"
-        if artifact["filename"] != expected_name or len(artifact["sha256"]) != 64:
+        filename = artifact["filename"]
+        adopted = filename != expected_name
+        if not re.fullmatch("[a-f0-9]{64}", artifact["sha256"]) or (adopted and not adopted_filename(job, artifact)):
             return None
         with pdf_source._directory("library", format_name="zim") as (fd, mount, _):
-            with pdf_source._file(fd, mount, expected_name, artifact["bytes"]):
+            with pdf_source._file(fd, mount, filename, artifact["bytes"]) as stream:
+                if adopted and archive_identity(os.fstat(stream.fileno())) != job["adopted_from_legacy"]["identity"]:
+                    return None
                 return artifact
     except (OSError, ValueError, KeyError, TypeError):
         return None

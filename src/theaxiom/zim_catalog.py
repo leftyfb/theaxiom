@@ -98,7 +98,7 @@ def verified_books(records, enabled=None):
                 filename = artifact["filename"]
                 if (not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest)
                         or type(size) is not int or size < 96
-                        or filename != f"{sid}.{digest}.zim"):
+                        or (filename != f"{sid}.{digest}.zim" and not zim_jobs.adopted_filename(job, artifact))):
                     continue
                 # O_NOFOLLOW and verified mount, ownership, size and installed-file
                 # mode checks live in the existing storage adapter.
@@ -121,7 +121,7 @@ def verified_books(records, enabled=None):
     # never by source ID. Do not read/have to rehash a large installed ZIM.
     from . import acquisition_monitor
     for trusted in legacy_pinned_entries().values():
-        if not enabled.get(trusted["source_id"], False):
+        if not enabled.get(trusted["source_id"], False) or not publication.legacy_only(trusted["source_id"]):
             continue
         evidence = acquisition_monitor.collect(trusted)
         if (evidence.get("state") != "completed" or
@@ -280,7 +280,12 @@ def acknowledged_reader_books(records):
             name = Path(filename).stem
             if not publication.valid_book_id(name) or not filename.endswith(".zim"):
                 return {}
-            if pinned is not None:
+            if pinned is not None and not publication.legacy_only(sid):
+                job = zim_jobs.read(sid)
+                artifact = zim_jobs.installed(job, job["configuration"]) if job else None
+                if not artifact or artifact["filename"] != filename:
+                    continue
+            elif pinned is not None:
                 if (book.get("title") != pinned["title"] or
                         book.get("language") != pinned["language"]):
                     return {}

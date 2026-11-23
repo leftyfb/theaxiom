@@ -48,18 +48,19 @@ def managed_installation(source_id):
     acquisition. Until that record is present, the legacy service remains
     the only eligible publication path.
     """
+    if source_id not in ROUTES:
+        return False
     try:
         from . import zim_jobs
-        job = zim_jobs.status(source_id)
+        job = zim_jobs.read(source_id)
         # Legacy routes may cross into the managed lifecycle only through the
         # explicit adoption transition.  A completed job by itself is not
         # evidence of that transition.
         adopted = job.get("adopted_from_legacy") if job else None
-        return bool(source_id in ROUTES and isinstance(adopted, dict)
+        return bool(isinstance(adopted, dict)
                     and job and job.get("state") == "completed"
                     and job.get("verified") is True
-                    and job.get("active") is False
-                    and zim_jobs.installed(job, job["configuration"]))
+                    and job.get("active") is False)
     except (OSError, ValueError, KeyError, TypeError):
         return False
 

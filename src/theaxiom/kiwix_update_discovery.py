@@ -175,11 +175,14 @@ def installed_identity_from_job(job: dict, artifact: dict) -> dict | None:
     config = job.get("configuration")
     if not isinstance(config, dict) or config.get("format") != "zim":
         return None
+    from . import zim_jobs
+
     digest = artifact.get("sha256")
     source_id = job.get("source_id")
     if (not isinstance(source_id, str) or not re.fullmatch(r"[a-z][a-z0-9-]{0,63}", source_id)
             or not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest)
-            or artifact.get("filename") != f"{source_id}.{digest}.zim"
+            or (artifact.get("filename") != f"{source_id}.{digest}.zim"
+                and not zim_jobs.adopted_filename(job, artifact))
             # A checksum is optional at acquisition time. The completed,
             # independently verified artifact contains its measured SHA-256;
             # if the operator supplied an expected digest, it must match.
