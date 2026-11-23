@@ -295,6 +295,35 @@ def build_acquisition_args(source_id: str) -> list[str] | None:
     ]
 
 
+def _public_acquisition(job):
+    """Only expose recorded outcomes and timestamps from the attempt journal."""
+    if job is None or "attempt_history" not in job:
+        return job
+    history = job["attempt_history"]
+    if not isinstance(history, list):
+        history = []
+    outcomes = {"completed", "failed", "paused", "cancelled", "interrupted"}
+    attempts = []
+    for entry in history[-zim_jobs.HISTORY_LIMIT:]:
+        if not isinstance(entry, dict):
+            continue
+        state = entry.get("state")
+        finished = entry.get("finished_at")
+        if (not isinstance(state, str) or state not in outcomes
+                or type(finished) not in (int, float) or not 0 < finished < 4102444800):
+            continue
+        attempts.append({"state": state, "finished_at": finished})
+    result = dict(job, attempt_history=attempts)
+    if "retry_count" not in result:
+        result["retry_count"] = sum(isinstance(entry, dict) and entry.get("operation") == "retry"
+                                    for entry in history)
+    result["last_successful_acquisition"] = max(
+        (attempt["finished_at"] for attempt in attempts if attempt["state"] == "completed"),
+        default=None,
+    )
+    return result
+
+
 def _public_zim_replacement(candidate):
     """Expose only replacement UI fields, never internal rollback records."""
     if candidate is None:
@@ -1051,7 +1080,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                         )
                 except (ValueError, OSError):
                     replacement = {"state": "unavailable", "error": "Replacement status unavailable"}
-            sources.append(dict(record, **lifecycles[sid], acquisition=job, replacement=replacement, replacement_available=replacement_available,
+            sources.append(dict(record, **lifecycles[sid], acquisition=_public_acquisition(job), replacement=replacement, replacement_available=replacement_available,
                                 legacy_pinned=(sid in legacy_pins and record["configuration"].get("format") == "zim"),
                                 update_check=update_check if discovery["method"] != "manual" else None,
                                 discovery=discovery,

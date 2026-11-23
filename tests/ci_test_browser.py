@@ -412,6 +412,57 @@ def exercise(browser, base, name, viewport, artifacts):
         context.close()
 
 
+def exercise_history_poll(browser, viewport):
+    """Use the real source-card DOM and poller with two independent timelines."""
+    from test_admin_page_template import profile, render
+
+    first = dict(profile("history-first", format="zim", source_url="https://publisher.org/first.zim"),
+                 publication={}, acquisition=None)
+    second = dict(profile("history-second", format="zim", source_url="https://publisher.org/second.zim"),
+                  publication={}, acquisition=None)
+    page = browser.new_page(viewport=viewport)
+    changed = False
+
+    def poll(route):
+        sources = [dict(first, acquisition={
+            "state": "failed" if changed else "downloading",
+            "attempt_history": [
+                {"state": "completed", "finished_at": 1700000000},
+                *([{"state": "failed", "finished_at": 1700000100}] if changed else []),
+            ],
+            "last_successful_acquisition": 1700000000,
+        }), dict(second, acquisition={
+            "state": "completed" if changed else "paused",
+            "attempt_history": [{"state": "completed" if changed else "paused",
+                                 "finished_at": 1700000300}],
+        })]
+        route.fulfill(json={"sources": sources, "revision": 0, "acquisition_stale": False})
+
+    try:
+        page.route("http://fixture.local/admin/sources", lambda route: route.fulfill(
+            content_type="text/html", body=render([first, second])))
+        page.route("http://fixture.local/api/sources", poll)
+        page.goto("http://fixture.local/admin/sources")
+        card = page.locator('[data-source-id="history-first"]')
+        other = page.locator('[data-source-id="history-second"]')
+        card.locator("summary.source-header").click()
+        technical = card.locator(".source-technical")
+        summary = technical.locator("summary")
+        summary.focus()
+        page.keyboard.press("Enter")
+        expect(technical.locator('[data-field="acquisition-history"]')).to_contain_text("Succeeded")
+        expect(technical.locator('[data-field="last-acquisition"]')).not_to_have_text("—")
+        changed = True
+        expect(technical.locator('[data-field="acquisition-history"]')).to_contain_text("Failed")
+        expect(other.locator('[data-field="status"]')).to_have_text("Acquisition completed")
+        expect(card).to_have_attribute("open", "")
+        expect(technical).to_have_attribute("open", "")
+        expect(summary).to_be_focused()
+        assert not other.evaluate("(card) => card.open")
+    finally:
+        page.close()
+
+
 def main():
     artifacts = Path(os.environ.get("AXIOM_BROWSER_ARTIFACTS", "/tmp/axiom-browser-artifacts"))
     with tempfile.TemporaryDirectory(prefix="axiom-browser-fixtures-") as tmp:
@@ -446,6 +497,7 @@ def main():
                                     ("narrow", {"width": 320, "height": 640}),
                                 ):
                                     exercise(browser, f"http://{host}:{port}", name, viewport, artifacts)
+                                    exercise_history_poll(browser, viewport)
                             finally:
                                 browser.close()
                     finally:

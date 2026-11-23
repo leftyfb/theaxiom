@@ -94,6 +94,7 @@
     .source-technical { margin-top:.6rem; font-size:.9rem; }
     .source-technical summary { cursor:pointer; color:var(--green); font-weight:650; }
     .source-technical .storage-status { gap:.25rem .6rem; margin:.5rem 0; }
+    [data-field="acquisition-history"] { white-space:pre-line; }
     .busy-indicator { display:flex; align-items:center; gap:.6rem; margin:.6rem 0; }
     .busy-indicator[hidden] { display:none; }
     .busy-spinner { display:inline-block; flex:none; width:1rem; height:1rem; border:2px solid currentColor; border-right-color:transparent; border-radius:50%; animation: source-spin .8s linear infinite; }
@@ -597,6 +598,10 @@
             <dt>Artifact SHA-256</dt><dd>{{ source.artifact.sha256 }}</dd>
             {% endif %}
             {% if not document and source.adapter %}<dt>Last sample</dt><dd data-field="sample">—</dd>{% endif %}
+            {% if source.zim_download or (source.acquisition|default({}, true)).get("attempt_history") %}
+            <dt>Last successful acquisition</dt><dd data-field="last-acquisition">—</dd>
+            <dt>Recent download attempts</dt><dd data-field="acquisition-history">No attempts recorded.</dd>
+            {% endif %}
           </dl>
         </details>
         </div>
@@ -1665,6 +1670,18 @@
             } else if (source?.artifact) render(card, source.acquisition, data.acquisition_stale !== false);
             else card.querySelector('[data-field="status"]').textContent = data.acquisition_stale ? 'Status unavailable' :
               source?.mutation_blocked !== false ? 'Acquisition unresolved' : 'Not downloaded';
+            const history = card.querySelector('[data-field="acquisition-history"]');
+            if (history) {
+              const acquired = source?.acquisition;
+              const timestamp = seconds => new Date(seconds * 1000).toLocaleString();
+              const attempts = acquired?.attempt_history || [];
+              history.textContent = attempts.slice(-5).reverse().map(attempt =>
+                timestamp(attempt.finished_at) + ' · ' +
+                (attempt.state === 'completed' ? 'Succeeded' : labels[attempt.state])).join('\n') ||
+                'No attempts recorded.';
+              const last = acquired?.last_successful_acquisition;
+              card.querySelector('[data-field="last-acquisition"]').textContent = last ? timestamp(last) : '—';
+            }
             const documentStatus = card.querySelector('[data-field="document-origin-status"]');
             if (documentStatus) documentStatus.textContent =
               source?.update_check?.state === 'representation_changed'

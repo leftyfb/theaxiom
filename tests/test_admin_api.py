@@ -139,3 +139,19 @@ class ZimReplacementManifestRefreshContractTests(unittest.TestCase):
         self.assertIn('{"zim-replacement-activate", "zim-replacement-rollback"}', handler)
         self.assertIn('zim_refresh.schedule(lambda: SOURCE_CATALOG.get()["sources"])', handler)
         self.assertLess(handler.index('zim_refresh.schedule('), handler.index('self._send_json(202, result)'))
+
+
+def test_acquisition_history_exposes_only_finished_outcomes_and_timestamps():
+    first = {"state": "completed", "finished_at": 1700000000, "etag": "private-validator"}
+    latest = {"state": "failed", "finished_at": 1700000100, "operation": "retry",
+              "source_url": "https://private.example.org/path", "detail": "raw error detail"}
+    running = {"started_at": 1700000200}
+    job = {"state": "downloading", "attempt_history": [first, latest, running]}
+    exposed = admin_api._public_acquisition(job)
+    assert exposed["last_successful_acquisition"] == first["finished_at"]
+    assert exposed["attempt_history"] == [
+        {"state": "completed", "finished_at": first["finished_at"]},
+        {"state": "failed", "finished_at": latest["finished_at"]},
+    ]
+    assert exposed["retry_count"] == 1
+    assert job["attempt_history"] == [first, latest, running]
