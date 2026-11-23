@@ -306,6 +306,17 @@ class HTTPAuthTests(unittest.TestCase):
         self.assertNotIn("WWW-Authenticate", headers)
         self.assertIn(b"sign in required", body)
 
+    def test_cross_site_post_rejected_without_basic_challenge(self):
+        for site in ("cross-site", "same-site"):
+            with self.subTest(site=site):
+                code, headers, body = self.request(
+                    "/api/storage-settings", "POST", auth=self.auth,
+                    headers={"Sec-Fetch-Site": site, "Content-Type": "application/json"},
+                    body="{}")
+                self.assertEqual(code, 403)
+                self.assertNotIn("WWW-Authenticate", headers)
+                self.assertIn(b"cross-origin", body)
+
     def test_loopback_fixture_without_password_still_accepts_origin_posts(self):
         """The unproxied local-only test backend has no credential store."""
         self.server.axiom_config = ServerConfig(
