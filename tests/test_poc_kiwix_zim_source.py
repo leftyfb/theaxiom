@@ -1,4 +1,4 @@
-"""Contract checks for the single explicitly opt-in Kiwix ZIM source."""
+"""Contract checks for immutable pinned Kiwix ZIM source metadata."""
 from theaxiom.admin_api import WIKIPEDIA_SOURCE, TRUSTED_SOURCES, resolve_source
 
 
@@ -15,7 +15,7 @@ def test_approved_zim_source_metadata_is_canonical() -> None:
 
 def test_zim_source_is_explicitly_trusted_and_resolvable() -> None:
     assert TRUSTED_SOURCES == {"wikipedia-en": WIKIPEDIA_SOURCE}
-    assert resolve_source("wikipedia-en") is WIKIPEDIA_SOURCE
+    assert resolve_source("wikipedia-en") == WIKIPEDIA_SOURCE
     assert resolve_source("wikipedia") is None
 
 
