@@ -195,9 +195,19 @@ def health_response() -> dict[str, Any]:
     }
 
 
-def freshness_response(snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Return separate origin metadata and trusted installed verification."""
-    entry = WIKIPEDIA_SOURCE
+def freshness_response(snapshot: dict[str, Any] | None = None, *,
+                       source_id: str | None = None) -> dict[str, Any]:
+    """Return origin metadata for an explicitly trusted pinned source.
+
+    A missing selector only works when exactly one pinned source exists;
+    never silently choose Wikipedia or the first item as the privileged one.
+    """
+    if source_id is None:
+        entry = next(iter(TRUSTED_SOURCES.values())) if len(TRUSTED_SOURCES) == 1 else None
+    else:
+        entry = resolve_source(source_id)
+    if entry is None:
+        return {"error": "Specify a configured pinned source_id"}
     result = probe_source(entry["source_url"], entry["sha256"], entry["bytes"])
     result.update(source_id=entry["source_id"], title=entry["title"])
     result.update(installed_evidence(snapshot, entry))
