@@ -465,7 +465,7 @@
           <p class="source-note" data-field="rate" hidden></p>
           <p data-field="detail" class="source-note" hidden></p>
         </div>
-        {% if source.zim_download or source.source_id == 'wikipedia-en' %}
+        {% if source.zim_download or source.legacy_pinned %}
         <p class="source-note" data-field="update-details"{% if not source.update_check or source.update_check.state != "update_available" %} hidden{% endif %}>
         {% if source.update_check and source.update_check.state == "update_available" %}
           Installed edition: {{ source.update_check.installed_edition }} · Publisher edition: {{ source.update_check.candidate_edition }}
@@ -491,7 +491,7 @@
             Review newer edition
           </button>
           {% endif %}
-          {% if source.zim_download or source.source_id == 'wikipedia-en' %}<button class="button" type="button" data-zim-update-check{% if not source.installed_verified %} hidden disabled{% endif %}>Check for updates</button>{% endif %}
+          {% if source.zim_download or source.legacy_pinned %}<button class="button" type="button" data-zim-update-check{% if not source.installed_verified %} hidden disabled{% endif %}>Check for updates</button>{% endif %}
           {% if source.zim_download %}<button class="button" type="button" data-zim-download{% if source.installed_verified %} hidden{% endif %}{% if source.mutation_blocked or source.installed_verified %} disabled{% endif %}>Download</button>{% endif %}
           {% if source.zim_download %}
           <button class="button danger-action" type="button" data-zim-delete hidden>Delete installed archive</button>
@@ -530,7 +530,7 @@
           <button class="button" type="button" data-catalog-edit="{{ source.source_id }}"{% if source.mutation_blocked or pub.error %} disabled{% endif %}>Edit</button>
           <button class="button danger-action" type="button" data-catalog-remove="{{ source.source_id }}"{% if source.mutation_blocked or pub.error %} disabled{% endif %}>Remove</button>
         </div>
-        {% if source.zim_download or source.source_id == 'wikipedia-en' %}<p class="source-note" data-zim-feedback role="status" aria-live="polite"></p>{% endif %}
+        {% if source.zim_download or source.legacy_pinned %}<p class="source-note" data-zim-feedback role="status" aria-live="polite"></p>{% endif %}
         {% if document %}
         <div class="busy-indicator" data-pdf-busy hidden><span class="busy-spinner" aria-hidden="true"></span><span role="status" data-pdf-busy-text></span></div>
         <p class="source-note" data-pdf-feedback role="status"></p>
