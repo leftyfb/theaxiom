@@ -308,7 +308,12 @@ def test_document_card_actions_are_contextual():
 def test_compact_card_and_acquisition_feedback():
     page = render([profile()])
     card = page.split('<div class="source-expanded">', 1)[1].split('</details></div>', 1)[0]
-    assert card.count('class="source-actions"') == 1
+    primary, more = card.split('<details class="source-more-actions">', 1)
+    assert primary.count('class="source-actions"') == 1
+    assert "Remove source" not in primary
+    assert "<summary>More actions</summary>" in more
+    assert "Delete downloaded files" in more
+    assert "Remove source" in more
     assert "Download from the configured HTTPS URL or upload a PDF from your computer." not in card
     assert "Candidate " not in card
     assert 'id="source-form-busy"' in page
@@ -335,7 +340,7 @@ def test_published_zim_card_hides_routine_notices():
 
 def test_zim_download_feedback_is_local_and_does_not_reload():
     page = render([profile("ready", format="zim", source_url="https://download.kiwix.org/zim/zimit/ready.zim")])
-    card = page.split('data-source-id="ready"', 1)[1].split('</details>', 1)[0]
+    card = page.split('data-source-id="ready"', 1)[1].split('</details></div>', 1)[0]
     assert 'data-zim-download' in card
     assert 'data-zim-feedback role="status" aria-live="polite"' in card
     handler = page.split("document.querySelectorAll('[data-zim-download]').forEach", 1)[1].split("document.querySelectorAll('[data-field=", 1)[0]
