@@ -940,16 +940,13 @@ def test_selection_presets_report_missing_planned_and_bounded_configured_sources
     emergency = request(route, {"preset": "emergency"})
     assert emergency["revision"] == catalog["revision"]
     assert [(item["source_id"], item["state"]) for item in emergency["sources"]] == [
-        ("fema-ready", "match"), ("epa-water", "planned"), ("noaa", "missing"),
+        ("fema-ready", "match"), ("epa-water", "match"), ("noaa", "missing"),
         ("amateur-radio", "planned"),
     ]
-    assert [row["source_id"] for row in emergency["storage"]["sources"]] == ["fema-ready"]
+    assert [row["source_id"] for row in emergency["storage"]["sources"]] == ["fema-ready", "epa-water"]
     lightweight = request(route, {"preset": "lightweight"})
-    assert lightweight["sources"] == [{
-        "source_id": "compact-guide", "title": "Compact guide", "state": "match",
-        "edition": "", "language": "", "format": "pdf", "license": "Fixture terms",
-    }]
-    assert lightweight["storage"]["sources"][0]["transfer_bytes"] == 1024
+    assert [row["source_id"] for row in lightweight["sources"]] == ["epa-water", "cdc", "compact-guide"]
+    assert [row["transfer_bytes"] for row in lightweight["storage"]["sources"]] == [754723, 282412, 1024]
     assert request("/api/sources")["revision"] == catalog["revision"]
 
 
@@ -1246,34 +1243,56 @@ def test_batch_restarts_zim_from_retained_bytes(app, monkeypatch):
     start.assert_called_once_with("fixture", config, resume=True, restart=False)
 
 
-def test_add_starter_pdfs_creates_downloadable_profiles_without_queueing(app, monkeypatch):
+def test_existing_source_placeholders_are_configured_without_downloads(app, monkeypatch):
+    import json
+
     request, _ = app
     catalog = request("/api/sources")
-    revision = catalog["revision"]
-    fetch = Mock(side_effect=AssertionError("Adding profiles must not fetch content"))
+    store = admin_api.SOURCE_CATALOG
+    state = json.loads(store.path.read_text())
+    placeholders = {entry["source_id"]: entry for entry in admin_api.source_catalog.planned_sources()}
+    for index, record in enumerate(state["sources"]):
+        sid = record["source_id"]
+        if sid in {"epa-water", "cdc"}:
+            state["sources"][index] = store._seed_record(placeholders[sid])
+    state["sources"].append(store._record("operator-source", {"title": "Operator entry"}))
+    store.path.write_text(json.dumps(state))
+    fetch = Mock(side_effect=AssertionError("Catalog migration must not fetch content"))
     monkeypatch.setattr(admin_api.pdf_transport, "download", fetch)
-    request("/api/starter-pdfs", {"revision": revision}, status=403, origin="")
-    request("/api/starter-pdfs", {"revision": revision + 1}, status=409)
-    assert 'id="starter-pdfs"' in request("/admin/sources")
-    entries = admin_api.source_catalog.STARTER_PDFS
-    result = request("/api/starter-pdfs", {"revision": revision})
-    assert result == {"revision": revision + 1, "added": list(entries)}
-    catalog = request("/api/sources")
-    assert 'id="starter-pdfs"' not in request("/admin/sources")
-    for sid, expected in entries.items():
-        row = source(catalog, sid)
-        assert row["configuration"]["source_url"] == expected["source_url"]
-        assert row["configuration"]["sha256"] == expected["sha256"]
-        assert not row["publication"]["published"]
-    preview = request("/api/acquisition-preview", {
-        "revision": catalog["revision"], "source_ids": list(entries),
-    })
-    assert [row["transfer_bytes"] for row in preview["sources"]] == [754723, 282412]
-    sid = next(iter(entries))
-    edited = mutate(request, catalog, "edit", {"title": "My EPA reference"}, sid=sid)
-    assert request("/api/starter-pdfs", {"revision": edited["revision"]}) == {
-        "revision": edited["revision"], "added": [],
-    }
-    assert source(request("/api/sources"), sid)["profile"]["title"] == "My EPA reference"
+
+    upgraded = request("/api/sources")
+    assert upgraded["revision"] == catalog["revision"] + 1
+    for sid, expected in admin_api.source_catalog.CONFIGURED_PDFS.items():
+        record = source(upgraded, sid)
+        assert record["configuration"]["format"] == "pdf"
+        assert record["configuration"]["source_url"] == expected["source_url"]
+        assert record["configuration"]["sha256"] == expected["sha256"]
+        assert not record["publication"]["published"]
+    assert source(upgraded, "operator-source")["profile"]["title"] == "Operator entry"
+    assert request("/api/sources")["revision"] == upgraded["revision"]
     assert request("/api/acquisition-batch") == {"jobs": []}
+    assert 'id="starter-pdfs"' not in request("/admin/sources")
     fetch.assert_not_called()
+
+
+def test_configured_defaults_preserve_edited_or_removed_placeholders(app):
+    import json
+
+    request, _ = app
+    catalog = request("/api/sources")
+    store = admin_api.SOURCE_CATALOG
+    state = json.loads(store.path.read_text())
+    state["sources"] = [record for record in state["sources"]
+                        if record["source_id"] not in {"epa-water", "cdc"}]
+    entry = next(entry for entry in admin_api.source_catalog.planned_sources()
+                 if entry["source_id"] == "cdc")
+    edited = store._seed_record(entry)
+    edited["profile"]["title"] = "My custom CDC profile"
+    state["sources"].append(edited)
+    store.path.write_text(json.dumps(state))
+
+    upgraded = request("/api/sources")
+    assert upgraded["revision"] == catalog["revision"]
+    assert not any(row["source_id"] == "epa-water" for row in upgraded["sources"])
+    assert source(upgraded, "cdc")["configuration"]["format"] == "unspecified"
+    assert source(upgraded, "cdc")["profile"]["title"] == "My custom CDC profile"

@@ -316,10 +316,10 @@ def exercise(browser, base, name, viewport, artifacts):
             page.get_by_role("button", name="Export selected sources").click()
         manifest = download.value.path().read_bytes()
         check.uncheck()
-        page.get_by_role("button", name="Library selections").click()
+        page.get_by_role("button", name="Presets and saved selections").click()
         page.get_by_label("Starter preset").select_option("medical")
-        expect(page.locator("#selection-file-matches")).to_contain_text("No supported format configured")
-        expect(page.get_by_role("button", name="Select matching sources")).to_be_disabled()
+        expect(page.locator("#selection-file-matches")).to_contain_text("CDC")
+        expect(page.get_by_role("button", name="Select matching sources")).to_be_enabled()
         transfer = {"kind": "axiom-local-transfer", "version": 1, "artifacts": [{
             "source_id": sid, "format": "zim", "title": "Portable reference", "language": "eng",
             "edition": "2026-01", "bytes": 4096, "filename": "reference.zim",
@@ -350,61 +350,7 @@ def exercise(browser, base, name, viewport, artifacts):
         expect(check).not_to_be_checked()
         page.get_by_role("button", name="Select matching sources").click()
         expect(check).to_be_checked()
-        def publisher_catalog(route):
-            payload = route.request.post_data_json
-            if "edition" in payload:
-                route.fulfill(json={"filename": "recent_eng_maxi_2026-11.zim", "bytes": "4096", "sha256": "a" * 64,
-                    "draft": {"title": "Offline reference", "format": "zim",
-                              "source_url": "https://download.kiwix.org/zim/reference/recent_eng_maxi_2026-11.zim",
-                              "edition": "2026-11", "language": "eng", "expected_size_bytes": "4096",
-                              "sha256": "a" * 64, "license": "Publisher terms",
-                              "provenance": "Kiwix OPDS and Metalink publisher metadata"}})
-            else:
-                stale = payload["family"] == "reference_eng"
-                route.fulfill(json={"cached": stale, "stale": stale, "checked_at": 1000,
-                    "entries": [{"title": "Offline reference", "edition": "2026-11", "variant": "maxi",
-                                 "publisher_checksum_listed": True},
-                                {"title": "Compact reference", "edition": "2026-10", "variant": "mini",
-                                 "advertised_size": "1048576"},
-                                {"title": "Large reference", "edition": "2026-09", "variant": "maxi",
-                                 "advertised_size": "3145728"}]})
-
-        page.route("**/api/upstream-kiwix-catalog", publisher_catalog)
-        page.get_by_role("button", name="Browse Kiwix catalog").click()
-        page.get_by_label("Kiwix family").fill("reference_eng")
-        page.get_by_role("button", name="Refresh listings").click()
-        expect(page.locator("#upstream-catalog-feedback")).to_contain_text("Older cached listings")
-        expect(page.locator("#upstream-catalog-results")).to_contain_text("Offline reference")
-        expect(page.get_by_role("button", name="Inspect publisher checksum for 2026-11 maxi")).to_have_count(0)
-        page.get_by_label("Kiwix family").fill("recent_eng")
-        page.get_by_role("button", name="Refresh listings").click()
-        upstream = page.locator("#upstream-catalog-dialog")
-        visible_listings = upstream.locator("li:visible")
-        expect(visible_listings).to_have_count(3)
-        upstream.get_by_label("Maximum advertised size (MiB)").fill("2")
-        expect(visible_listings).to_have_count(2)
-        upstream.get_by_label("Include listings with unknown sizes").uncheck()
-        expect(visible_listings).to_have_text(["Compact reference · 2026-10 · mini · Advertised bytes 1048576 · Rights not listed"])
-        upstream.get_by_label("Edition", exact=True).select_option("2026-09")
-        expect(upstream.locator("#upstream-filter-count")).to_have_text("0 of 3 editions shown.")
-        upstream.get_by_label("Maximum advertised size (MiB)").fill("")
-        expect(visible_listings).to_contain_text("Large reference")
-        upstream.get_by_label("Edition", exact=True).select_option("")
-        page.get_by_role("button", name="Inspect publisher checksum for 2026-11 maxi").click()
-        expect(page.locator("#upstream-catalog-results")).to_contain_text("Publisher SHA-256 " + "a" * 64)
-        assert page.locator("#upstream-catalog-dialog").evaluate("(dialog) => dialog.scrollWidth <= dialog.clientWidth + 1"), name
-        page.get_by_role("button", name="Review new source").click()
-        draft = page.locator("#source-dialog")
-        expect(draft.get_by_label("Source name")).to_have_value("Offline reference")
-        expect(draft.get_by_label("Download URL")).to_have_value(
-            "https://download.kiwix.org/zim/reference/recent_eng_maxi_2026-11.zim")
-        expect(draft.get_by_label("Content format")).to_have_value("zim")
-        expect(draft.get_by_label("Edition / release")).to_have_value("2026-11")
-        expect(draft.get_by_label("Language", exact=True)).to_have_value("eng")
-        expect(draft.locator("#catalog-sha256")).to_have_value("a" * 64)
-        expect(draft.get_by_label("Periodic metadata checks")).to_have_value("no")
-        draft.get_by_role("button", name="Cancel", exact=True).click()
-        expect(page.locator(".source-card[data-source-id='offline-reference']")).to_have_count(0)
+        expect(page.get_by_role("button", name="Browse Kiwix catalog")).to_have_count(0)
         check.focus()
         page.keyboard.press("Space")
         expect(check).not_to_be_checked()

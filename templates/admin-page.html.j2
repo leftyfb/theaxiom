@@ -125,9 +125,9 @@
     .group-select { display:flex; align-items:center; gap:.35rem; font-size:.8rem; color:var(--muted); }
     .group-select[hidden], [hidden] { display:none !important; }
     .group-select input { width:1.2rem; height:1.2rem; accent-color:var(--green); }
-    #source-dialog, #source-guide, #upstream-catalog-dialog, #selection-file-dialog { width: min(42rem, calc(100% - 2rem)); max-height: calc(100% - 2rem); overflow: auto; border: 1px solid var(--line); border-radius: .85rem; padding: clamp(1rem, 4vw, 1.75rem); color: var(--dark); background: var(--paper); }
-    #source-dialog::backdrop, #source-guide::backdrop, #upstream-catalog-dialog::backdrop, #selection-file-dialog::backdrop { background: rgba(18,60,50,.55); }
-    #upstream-catalog-results, #selection-file-matches { overflow-wrap: anywhere; }
+    #source-dialog, #source-guide, #selection-file-dialog { width: min(42rem, calc(100% - 2rem)); max-height: calc(100% - 2rem); overflow: auto; border: 1px solid var(--line); border-radius: .85rem; padding: clamp(1rem, 4vw, 1.75rem); color: var(--dark); background: var(--paper); }
+    #source-dialog::backdrop, #source-guide::backdrop, #selection-file-dialog::backdrop { background: rgba(18,60,50,.55); }
+    #selection-file-matches { overflow-wrap: anywhere; }
     #selection-file { max-width: 100%; }
     #source-dialog h3 { margin: 0; font-size: 1.4rem; }
     .editor-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 1rem; margin: 1rem 0; }
@@ -403,39 +403,10 @@
     <p class="source-note" id="source-update-summary" role="status"{% if not update_summary %} hidden{% endif %}>{{ update_summary }}</p>
     <div class="source-search-row">
       <button class="button" type="button" id="source-add">Add Source</button>
-      {% if starter_pdfs_available %}
-      <button class="button" type="button" id="starter-pdfs">Add EPA and CDC sources</button>
-      {% endif %}
       <button class="button" type="button" id="source-guide-open">Content source guide</button>
-      <button class="button" type="button" id="selection-file-open">Library selections</button>
-      <button class="button" type="button" id="upstream-catalog-open">Browse Kiwix catalog</button>
       <input id="source-filter-search" type="search" aria-label="Search source names" placeholder="Search sources…" maxlength="512">
     </div>
     <p id="catalog-feedback" role="status" aria-live="polite"></p>
-    <dialog id="upstream-catalog-dialog" aria-labelledby="upstream-catalog-title">
-      <h3 id="upstream-catalog-title">Browse Kiwix catalog</h3>
-      <p class="source-note">Shows one page of publisher listings. Editions and rights are publisher metadata.</p>
-      <form id="upstream-catalog-form">
-        <div class="editor-grid">
-          <div><label for="upstream-family">Kiwix family</label>
-            <input id="upstream-family" required maxlength="120" placeholder="wikipedia_en_all" autocapitalize="none"></div>
-          <div><label for="upstream-language">Three-letter language code</label>
-            <input id="upstream-language" required maxlength="3" pattern="[a-z]{3}" value="eng" autocapitalize="none"></div>
-        </div>
-        <button class="button" type="submit">Refresh listings</button>
-      </form>
-      <p id="upstream-catalog-feedback" role="status"></p>
-      <fieldset id="upstream-filters" class="editor-grid" hidden>
-        <legend>Filter these listings</legend>
-        <div><label for="upstream-edition">Edition</label><select id="upstream-edition"></select></div>
-        <div><label for="upstream-max-size">Maximum advertised size (MiB)</label>
-          <input id="upstream-max-size" type="number" min="1" max="1048576" step="any" inputmode="decimal"></div>
-        <label class="editor-wide membership-option"><input id="upstream-unknown-size" type="checkbox" checked disabled> Include listings with unknown sizes</label>
-      </fieldset>
-      <p id="upstream-filter-count" role="status" hidden></p>
-      <ul id="upstream-catalog-results"></ul>
-      <form method="dialog"><button class="button">Close</button></form>
-    </dialog>
     <dialog id="selection-file-dialog" aria-labelledby="selection-file-title">
       <h3 id="selection-file-title">Preview a library selection</h3>
       <p class="source-note">Review a starter preset, selection file or ZIM transfer manifest against your catalog.</p>
@@ -554,6 +525,7 @@
     </dialog>
     <div class="source-selection-bar" id="source-selection-bar">
       <button class="button" type="button" id="source-select-mode" aria-pressed="false">Select</button>
+      <button class="button" type="button" id="selection-file-open" hidden>Presets and saved selections</button>
       <label id="select-all-label" hidden><input type="checkbox" id="group-select-all" aria-label="Select all visible sources">Select all</label>
       <span id="group-count" class="source-note" aria-live="polite" hidden>0 selected</span>
       <span id="source-filter-count" class="source-note" role="status"></span>
@@ -832,131 +804,6 @@
       let selecting = selectMode.getAttribute('aria-pressed') === 'true';
       let bulkBusy = false;
       const selectedIds = () => selecting ? groupChecks.filter(item => item.checked).map(item => item.value) : [];
-      const upstreamDialog = document.getElementById('upstream-catalog-dialog');
-      const upstreamForm = document.getElementById('upstream-catalog-form');
-      const upstreamFeedback = document.getElementById('upstream-catalog-feedback');
-      const upstreamResults = document.getElementById('upstream-catalog-results');
-      const upstreamFilters = document.getElementById('upstream-filters');
-      const upstreamEdition = document.getElementById('upstream-edition');
-      const upstreamMaxSize = document.getElementById('upstream-max-size');
-      const upstreamUnknownSize = document.getElementById('upstream-unknown-size');
-      const upstreamFilterCount = document.getElementById('upstream-filter-count');
-      function filterUpstreamListings() {
-        const max = upstreamMaxSize.valueAsNumber;
-        const limited = Number.isFinite(max) && upstreamMaxSize.validity.valid;
-        upstreamUnknownSize.disabled = !limited;
-        let visible = 0;
-        for (const row of upstreamResults.children) {
-          const advertised = Number(row.dataset.bytes);
-          const fits = !limited || (advertised > 0 ? advertised <= max * 1048576 : upstreamUnknownSize.checked);
-          row.hidden = !fits || (!!upstreamEdition.value && row.dataset.edition !== upstreamEdition.value);
-          if (!row.hidden) visible++;
-        }
-        upstreamFilterCount.textContent = upstreamMaxSize.validity.valid ?
-          visible + ' of ' + upstreamResults.children.length + ' editions shown.' :
-          'Enter a maximum size from 1 to 1,048,576 MiB.';
-      }
-      upstreamEdition.addEventListener('change', filterUpstreamListings);
-      upstreamMaxSize.addEventListener('input', filterUpstreamListings);
-      upstreamUnknownSize.addEventListener('change', filterUpstreamListings);
-      document.getElementById('upstream-catalog-open').addEventListener('click', () => upstreamDialog.showModal());
-      async function requestUpstream(payload) {
-        const response = await fetch('/api/upstream-kiwix-catalog', {
-          method: 'POST',
-          headers: {...(window.axiomCsrfHeaders?.() || {}), 'Content-Type':'application/json'},
-          body: JSON.stringify(payload)
-        });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error || 'Publisher catalog unavailable.');
-        return data;
-      }
-      upstreamForm.addEventListener('submit', async event => {
-        event.preventDefault();
-        const submit = upstreamForm.querySelector('[type="submit"]');
-        if (submit.disabled) return;
-        submit.disabled = true;
-        upstreamResults.replaceChildren();
-        upstreamFilters.hidden = upstreamFilterCount.hidden = true;
-        upstreamFeedback.textContent = 'Checking the publisher catalog…';
-        try {
-          const query = {family: document.getElementById('upstream-family').value.trim(),
-            language: document.getElementById('upstream-language').value};
-          const data = await requestUpstream(query);
-          if (data.unavailable) {
-            upstreamFeedback.textContent = 'Publisher catalog unavailable for this query. Try refreshing later.';
-            return;
-          }
-          const checked = new Date(data.checked_at * 1000).toLocaleString();
-          const source = data.cached ? (data.stale ? 'Older cached listings from ' : 'Cached listings from ') :
-            'Publisher listings checked ';
-          upstreamFeedback.textContent = source + checked + '. ' + data.entries.length + ' matching editions.' +
-            (data.cache_unavailable ? ' Offline cache unavailable.' : '');
-          for (const entry of data.entries) {
-            const row = document.createElement('li');
-            row.dataset.edition = entry.edition;
-            row.dataset.bytes = entry.advertised_size || '';
-            row.textContent = [entry.title, entry.edition, entry.variant,
-              entry.advertised_size ? 'Advertised bytes ' + entry.advertised_size : 'Size not listed',
-              entry.rights || 'Rights not listed'].filter(Boolean).join(' · ');
-            if (entry.publisher_checksum_listed && !data.stale && !data.cache_unavailable) {
-              const inspect = document.createElement('button');
-              inspect.type = 'button';
-              inspect.className = 'button';
-              inspect.textContent = 'Inspect publisher checksum';
-              inspect.setAttribute('aria-label', 'Inspect publisher checksum for ' + entry.edition + ' ' + entry.variant);
-              const draftButton = document.createElement('button');
-              draftButton.type = 'button';
-              draftButton.className = 'button';
-              draftButton.textContent = 'Review new source';
-              draftButton.hidden = true;
-              let draft = null;
-              draftButton.addEventListener('click', () => {
-                if (!draft) return;
-                upstreamDialog.close();
-                openForm('add');
-                for (const [key, value] of Object.entries(draft)) input(key).value = value;
-                manualFormat = true;
-                discoveryOptions();
-                advanced.open = true;
-                formFeedback.textContent = 'Review the Kiwix publisher metadata before saving. Acquisition is a separate action.';
-              });
-              const result = document.createElement('p');
-              result.className = 'source-note';
-              result.setAttribute('role', 'status');
-              inspect.addEventListener('click', async () => {
-                inspect.disabled = true;
-                draftButton.hidden = true;
-                draft = null;
-                result.textContent = 'Checking publisher metadata…';
-                try {
-                  const details = await requestUpstream({...query, edition: entry.edition, variant: entry.variant});
-                  result.textContent = details.unavailable ? 'Publisher checksum unavailable. Try again later.' :
-                    details.filename + ' · Publisher bytes ' + details.bytes + ' · Publisher SHA-256 ' + details.sha256;
-                  draft = details.draft || null;
-                  draftButton.hidden = !draft;
-                } catch (error) {
-                  result.textContent = error.message;
-                } finally {
-                  inspect.disabled = false;
-                }
-              });
-              row.append(' ', inspect, ' ', draftButton, result);
-            }
-            upstreamResults.append(row);
-          }
-          if (data.entries.length) {
-            const editions = [...new Set(data.entries.map(entry => entry.edition))];
-            upstreamEdition.replaceChildren(new Option('All editions', ''),
-              ...editions.map(edition => new Option(edition, edition)));
-            upstreamFilters.hidden = upstreamFilterCount.hidden = false;
-            filterUpstreamListings();
-          }
-        } catch (error) {
-          upstreamFeedback.textContent = error.message;
-        } finally {
-          submit.disabled = false;
-        }
-      });
       const selectionDialog = document.getElementById('selection-file-dialog');
       const selectionFile = document.getElementById('selection-file');
       const selectionPreset = document.getElementById('selection-preset');
@@ -1292,6 +1139,7 @@
           if (!selecting) item.checked = false;
         });
         document.getElementById('select-all-label').hidden = !selecting;
+        document.getElementById('selection-file-open').hidden = !selecting;
         document.getElementById('group-count').hidden = !selecting;
         document.getElementById('group-panel').open = false;
         groupControls();
@@ -1717,23 +1565,6 @@
         }
         reloadSources();
       }
-      document.getElementById('starter-pdfs')?.addEventListener('click', async event => {
-        const button = event.currentTarget;
-        button.disabled = true;
-        try {
-          const response = await fetch('/api/starter-pdfs', {
-            method: 'POST',
-            headers: {...window.axiomCsrfHeaders(), 'Content-Type': 'application/json'},
-            body: JSON.stringify({revision})
-          });
-          const result = await response.json();
-          if (!response.ok) throw new Error(result.error || 'Could not add starter sources.');
-          reloadSources();
-        } catch (error) {
-          feedback.textContent = error.message;
-          button.disabled = false;
-        }
-      });
       document.getElementById('source-add').addEventListener('click', () => openForm('add'));
       cancelSave.addEventListener('click', () => { if (!formPosting) dialog.close(); });
       dialog.addEventListener('cancel', event => { if (formPosting) event.preventDefault(); });

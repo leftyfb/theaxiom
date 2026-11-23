@@ -113,6 +113,7 @@ class CatalogStore:
     def _read(self, *, initialize=False) -> dict[str, Any]:
         # Both locks are held. A mutation persists seeding or conversion only
         # if the revision check and the requested change also succeed.
+        existing_v2 = False
         try:
             with self.path.open("rb") as stream:
                 raw = stream.read(MAX_CATALOG_BYTES + 1)
@@ -138,12 +139,7 @@ class CatalogStore:
                 self._validate_collection(state)
                 if not any("seeded" in record for record in state["sources"] if isinstance(record, dict)):
                     self._validate_v2(state)
-                    # Existing catalogs are authoritative. Shipped seed changes
-                    # never alter operator records, even if they still match
-                    # a prior packaged default. Historical starter group
-                    # initialization still needs the one-time path below.
-                    if state.get("starter_groups_initialized") is True:
-                        return state
+                    existing_v2 = state.get("starter_groups_initialized") is True
                 else:
                     state = self._convert_draft_v2(state)
             elif state["schema_version"] == 1:
@@ -156,10 +152,28 @@ class CatalogStore:
         if not state.get("starter_groups_initialized"):
             self._merge_starter_groups(state)
             state["starter_groups_initialized"] = True
+        changed = self._configure_planned_pdfs(state)
+        if not changed and existing_v2:
+            return state
+        if changed and existing_v2:
+            state["revision"] += 1
+            state["updated_at"] = datetime.now(timezone.utc).isoformat()
         payload = self._validated_payload(state)
         if initialize:
             self._atomic_write(payload)
         return state
+
+    def _configure_planned_pdfs(self, state):
+        defaults = {entry["source_id"]: self._seed_record(entry)
+                    for entry in source_catalog.planned_sources()
+                    if entry["source_id"] in source_catalog.CONFIGURED_PDFS}
+        changed = False
+        for record in state["sources"]:
+            sid = record["source_id"]
+            if record == defaults.get(sid):
+                self._apply_fields(record, source_catalog.CONFIGURED_PDFS[sid])
+                changed = True
+        return changed
 
     @staticmethod
     def _default_groups():
@@ -430,31 +444,6 @@ class CatalogStore:
             finally:
                 os.close(fd)
 
-
-    def add_starter_pdfs(self, revision):
-        """Add missing preconfigured documents in a single catalog revision."""
-        if type(revision) is not int or revision < 0:
-            raise CatalogError("revision precondition required")
-        with LOCK:
-            fd = self._file_lock()
-            try:
-                state = self._read()
-                if state["revision"] != revision:
-                    raise RevisionConflict("catalog revision changed")
-                ids = {row["source_id"] for row in state["sources"]}
-                added = [sid for sid in source_catalog.STARTER_PDFS if sid not in ids]
-                if added:
-                    for sid in added:
-                        fields = source_catalog.STARTER_PDFS[sid]
-                        self._validate_id(sid)
-                        self._validate_fields(fields, EDITABLE, required={"title"})
-                        state["sources"].append(self._record(sid, fields))
-                    state["revision"] += 1
-                    state["updated_at"] = datetime.now(timezone.utc).isoformat()
-                    self._atomic_write(self._validated_payload(state))
-                return {"revision": state["revision"], "added": added}
-            finally:
-                os.close(fd)
 
     def set_library_layout(self, revision, layout):
         if type(revision) is not int or revision < 0:

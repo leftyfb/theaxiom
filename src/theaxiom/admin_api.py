@@ -1530,9 +1530,6 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         body = template.render(
             admin_page=page,
             catalog=self._source_profiles(catalog_snapshot) if page == "sources" else catalog_snapshot if page == "groupings" else None,
-            starter_pdfs_available=bool(
-                source_catalog.STARTER_PDFS.keys() - {row["source_id"] for row in catalog_snapshot["sources"]}
-            ),
             selection_presets={key: value[0] for key, value in library_selection.PRESETS.items()},
             editable_fields=sorted(catalog_store.EDITABLE),
             action_labels=ACTION_LABELS,
@@ -1808,27 +1805,6 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 return
             except OSError:
                 self._send_json(503, {"error": "group catalog write failed"})
-                return
-            self._send_json(200, result)
-        elif self.path == "/api/starter-pdfs":
-            if not self.headers.get("Origin"):
-                self._send_json(403, {"error": "same-origin request required"})
-                return
-            data = self._read_body()
-            if data.keys() != {"revision"} or not self._valid_revision(data["revision"]):
-                self._send_json(400, {"error": "catalog revision required"})
-                return
-            try:
-                with publication.LOCK:
-                    result = SOURCE_CATALOG.add_starter_pdfs(data["revision"])
-            except catalog_store.RevisionConflict as exc:
-                self._send_json(409, {"error": str(exc)})
-                return
-            except catalog_store.CatalogError as exc:
-                self._send_json(400, {"error": str(exc)})
-                return
-            except OSError:
-                self._send_json(503, {"error": "source catalog write failed"})
                 return
             self._send_json(200, result)
         elif self.path.rstrip("/") == "/api/sources":

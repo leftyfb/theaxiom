@@ -284,10 +284,9 @@ def planned_sources():
     return deepcopy(PLANNED_SOURCES)
 
 
-# Explicitly added by an administrator. Keep these separate from the seed list
-# so upgrading never rewrites a planned source or an operator's existing entry.
-STARTER_PDFS = {
-    "epa-emergency-drinking-water": {
+# Download defaults for existing, unmodified planned source records.
+CONFIGURED_PDFS = {
+    "epa-water": {
         "format": "pdf",
         "title": "EPA — Emergency Disinfection of Drinking Water",
         "description": "Emergency drinking-water treatment guidance from the EPA Office of Water.",
@@ -299,7 +298,7 @@ STARTER_PDFS = {
         "sha256": "f404083d00decedc267bf4265eda776bb250ccfe18c1f7b19152aa006ff727c5",
         "provenance": "Original EPA publication. Size and SHA-256 measured from the EPA download.",
     },
-    "cdc-wash-your-hands": {
+    "cdc": {
         "format": "pdf",
         "title": "CDC — Wash Your Hands",
         "description": "CDC handwashing fact sheet for water, sanitation and hygiene emergencies.",
