@@ -3,6 +3,7 @@ from pathlib import Path
 from jinja2 import Environment
 from theaxiom.admin_api import ACTION_LABELS, WIKIPEDIA_SOURCE, select_lifecycle
 from theaxiom.catalog_store import EDITABLE
+from theaxiom import zim_catalog
 
 TEMPLATE = Path(__file__).parents[1] / "templates/admin-page.html.j2"
 
@@ -11,7 +12,9 @@ def profile(source_id="fixture", title="Fixture", description="", **configuratio
     configuration = {"format": "pdf", **configuration}
     return dict(source_id=source_id, profile=dict(title=title, description=description),
                 configuration=configuration, **select_lifecycle(source_id, configuration),
-                publication=None, installed_verified=False, mutation_blocked=False)
+                publication=None, installed_verified=False, mutation_blocked=False,
+                legacy_pinned=(configuration["format"] == "zim"
+                               and source_id in zim_catalog.legacy_pinned_entries()))
 
 
 def render(sources=(), **overrides):
