@@ -345,7 +345,10 @@ def test_public_group_filters_hide_unpublished_members(app):
     assert "No published sources match" in request("/?category=missing")
     request("/?category=reference&category=other", status=400)
     request("/?tag=../bad", status=400)
-    assert "Wikipedia" in request("/search?q=water&tag=mixed")
+    search_page = request("/search?q=water&tag=mixed")
+    assert "No matching results." in search_page
+    assert "Results may be incomplete." in search_page
+    assert '<h2 id="source-wikipedia-en">' not in search_page
     assert "Wikipedia" not in request("/search?q=water&tag=missing")
     publish(request, False)
     assert 'value="reference"' not in request("/")

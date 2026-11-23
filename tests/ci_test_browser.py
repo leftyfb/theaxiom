@@ -40,6 +40,28 @@ def exercise(browser, base, name, viewport, artifacts):
             assert public_overflow["scroll"] <= public_overflow["viewport"] + 2, (
                 f"{name} {public_path} public horizontal overflow: {public_overflow}")
 
+        with patch.object(admin_api.AdminAPIHandler, "_search_published_content", return_value=[
+            dict(source_id="matching", name="Matching source", status="ok",
+                 results=[dict(title=f"Water result {i}", href=f"/fixture/article/{i}", snippet="Water")
+                          for i in range(1, 8)]),
+            dict(source_id="no-text", name="Image-only document", status="no_text", results=[]),
+            dict(source_id="no-match", name="Unrelated source", status="ok", results=[]),
+        ]):
+            page.goto(base + "/search?q=water")
+            expect(page.get_by_role("link", name="Water result 5")).to_be_visible()
+            sixth = page.get_by_role("link", name="Water result 6")
+            expect(sixth).to_be_hidden()
+            expect(page.get_by_text("Image-only document")).to_have_count(0)
+            expect(page.get_by_text("Unrelated source")).to_have_count(0)
+            expect(page.get_by_text("No searchable text was found", exact=False)).to_have_count(0)
+            disclosure = page.locator("summary").filter(has_text="Show 2 more from Matching source")
+            disclosure.focus()
+            page.keyboard.press("Enter")
+            expect(sixth).to_be_visible()
+            expect(sixth).to_have_attribute("href", "/fixture/article/6")
+            page.keyboard.press("Enter")
+            expect(sixth).to_be_hidden()
+
         # Browser navigation must not bypass the sign-in boundary.
         page.goto(base + "/admin/sources")
         expect(page).to_have_url(base + "/admin/login")

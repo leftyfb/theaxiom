@@ -5,20 +5,36 @@
 <link rel="shortcut icon" href="/favicon.ico" sizes="any">
 <meta name="application-name" content="The Axiom">
 <title>Search · The Axiom</title><style>
-*{box-sizing:border-box}body{margin:0;background:#edf3ef;color:#18362d;font:16px/1.55 system-ui,sans-serif}main{max-width:900px;margin:auto;padding:24px 16px}a{color:#176b4d}a:focus-visible,input:focus-visible,button:focus-visible{outline:3px solid #c38d32;outline-offset:3px}form{display:flex;flex-wrap:wrap;gap:8px}label{width:100%;font-weight:650}input{flex:1;min-width:0;padding:12px;font:inherit;border:1px solid #aac5b7;border-radius:8px}button{font:inherit;background:#176b4d;color:white;border:0;border-radius:8px;padding:10px 16px;min-height:44px}section{background:white;border:1px solid #cfdfd6;border-radius:12px;margin:16px 0;padding:16px;overflow-wrap:anywhere}h2{margin-top:0}li{margin:14px 0}p{margin:6px 0}.muted{color:#536e61}
+*{box-sizing:border-box}body{margin:0;background:#edf3ef;color:#18362d;font:16px/1.55 system-ui,sans-serif}main{max-width:900px;margin:auto;padding:24px 16px}a{color:#176b4d}a:focus-visible,input:focus-visible,button:focus-visible,summary:focus-visible{outline:3px solid #c38d32;outline-offset:3px}form{display:flex;flex-wrap:wrap;gap:8px}label{width:100%;font-weight:650}input{flex:1;min-width:0;padding:12px;font:inherit;border:1px solid #aac5b7;border-radius:8px}button{font:inherit;background:#176b4d;color:white;border:0;border-radius:8px;padding:10px 16px;min-height:44px}section{background:white;border:1px solid #cfdfd6;border-radius:12px;margin:16px 0;padding:16px;overflow-wrap:anywhere}h2{margin-top:0}li{margin:14px 0}p{margin:6px 0}.muted{color:#536e61}
 .filter-label{display:flex;flex-direction:column;gap:4px;flex:1;min-width:130px}.filter-label select{font:inherit;padding:10px;border:1px solid #aac5b7;border-radius:8px;background:white}
+.more-results summary{width:fit-content;min-height:44px;padding:9px 4px;color:#176b4d;cursor:pointer;font-weight:650}.more-results[open] .more-label,.more-results:not([open]) .less-label{display:none}.more-results ol{margin-top:0}
 </style></head><body><main><a href="/">← Back to library</a><h1>Search library</h1>
 <form action="/search" method="get" role="search"><label for="q">Search library content</label><input id="q" name="q" type="search" maxlength="160" value="{{ query }}" required><button>Search</button>{% for kind, plural, label in [("category","categories","Category"),("collection","collections","Collection"),("tag","tags","Tag")] %}{% set options = filter_groups|default([])|selectattr("kind","equalto",plural)|list %}{% if options or (selected|default({})).get(kind) %}<label class="filter-label">{{ label }}<select name="{{ kind }}"><option value="">All</option>{% for group in options %}<option value="{{ group.group_id }}"{% if (selected|default({})).get(kind) == group.group_id %} selected{% endif %}>{{ group.name }}</option>{% endfor %}{% if (selected|default({})).get(kind) and (selected|default({})).get(kind) not in options|map(attribute="group_id")|list %}<option selected value="{{ selected[kind] }}">Unavailable group</option>{% endif %}</select></label>{% endif %}{% endfor %}</form>
-{% if error %}<p role="alert">{{ error }}</p>{% elif query %}
+{% macro result_items(results) %}
+{% for result in results %}
+<li><a href="{{ result.href }}">{{ result.title }}</a>{% if result.snippet %}<p>{{ result.snippet }}</p>{% endif %}</li>
+{% endfor %}
+{% endmacro %}
+{% if error %}
+<p role="alert">{{ error }}</p>
+{% elif query %}
+{% set matched = groups|selectattr("results")|list %}
+{% set incomplete = groups|selectattr("status", "in", ["unavailable", "indexing", "partial", "unsupported"])|list %}
 <p>Results for “{{ query }}”</p>
-{% if not groups %}<p>No published collections are available to search.</p>{% endif %}
-{% for group in groups %}<section><h2>{{ group.name }}</h2>
-{% if group.status == "unsupported" %}<p>Search is not yet supported for this collection.</p>
-{% elif group.status == "unavailable" %}<p>Search is temporarily unavailable for this collection.</p>
-{% elif group.status == "indexing" %}<p>Search index is being prepared. Try this search again shortly.</p>
-{% elif group.status == "no_text" %}<p>No searchable text was found. Image-only pages require OCR.</p>
-{% else %}<p class="muted">{{ group.capability }} · Up to 20 results</p>
-{% if group.status == "partial" %}<p>Results cover the indexed portion of this document.</p>{% endif %}
-{% if group.results %}<ol>{% for result in group.results %}<li><a href="{{ result.href }}">{{ result.title }}</a>{% if result.snippet %}<p>{{ result.snippet }}</p>{% endif %}</li>{% endfor %}</ol>{% else %}<p>No matching results.</p>{% endif %}
-{% endif %}</section>{% endfor %}{% endif %}
+{% if not matched %}<p>{% if not sources %}No published collections are available to search.{% else %}No matching results.{% endif %}</p>{% endif %}
+{% if incomplete %}<p class="muted">Some content couldn’t be searched. Results may be incomplete.</p>{% endif %}
+{% for group in matched %}
+<section aria-labelledby="source-{{ group.source_id }}">
+<h2 id="source-{{ group.source_id }}">{{ group.name }}</h2>
+<ol>{{ result_items(group.results[:5]) }}</ol>
+{% if group.results|length > 5 %}
+{% set remaining = group.results|length - 5 %}
+<details class="more-results">
+<summary><span class="more-label">Show {{ remaining }} more from {{ group.name }}</span><span class="less-label">Show fewer from {{ group.name }}</span></summary>
+<ol start="6">{{ result_items(group.results[5:]) }}</ol>
+</details>
+{% endif %}
+</section>
+{% endfor %}
+{% endif %}
 </main></body></html>
