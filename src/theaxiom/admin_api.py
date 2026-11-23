@@ -585,9 +585,16 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             except RuntimeError:
                 error, code = "Search is busy. Try again.", 503
             environment = Environment(loader=FileSystemLoader(ADMIN_TEMPLATE_DIR), autoescape=True)
+            sections = {}
+            if not search_page:
+                for source in sorted(sources, key=lambda source: source.get("homepage_rank", 0)):
+                    section = source.get("homepage_section") if not selected else None
+                    sections.setdefault(section, []).append(source)
+                if len(sections) > 1 and None in sections:
+                    sections[None] = sections.pop(None)
             body = environment.get_template("search.html.j2" if search_page else "library.html.j2").render(
                 sources=sources, groups=results, filter_groups=groups, selected=selected,
-                query=query, error=error).encode("utf-8")
+                query=query, error=error, sections=sections).encode("utf-8")
             self.send_response(code)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -836,8 +843,18 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                       for group in catalog.get("groups", [])]
             groups = sorted((group for group in groups if group["source_ids"]),
                             key=lambda group: (group["name"].casefold(), group["group_id"]))
+            layout = catalog.get("library_layout", {})
+            order = {sid: position for position, sid in enumerate(layout.get("source_order", []))}
+            sections = {}
+            for group in groups:
+                if group["kind"] == layout.get("group_by"):
+                    for sid in group["source_ids"]:
+                        sections.setdefault(sid, (group["group_id"], group["name"]))
             for source in sources:
-                source["memberships"] = [group["name"] for group in groups if source["source_id"] in group["source_ids"]]
+                sid = source["source_id"]
+                source["memberships"] = [group["name"] for group in groups if sid in group["source_ids"]]
+                source["homepage_rank"] = order.get(sid, len(order))
+                source["homepage_section"] = sections.get(sid)
             return sources, groups
 
     def _pdf_publications(self):
@@ -1284,6 +1301,27 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     result = document_update_discovery.check_installed_document(record)
                 diagnostic.update(result)
             self._send_json(200, dict(source_id=sid, **result))
+        elif self.path == "/api/library-layout":
+            if not self.headers.get("Origin"):
+                self._send_json(403, {"error": "same-origin request required"})
+                return
+            data = self._read_body()
+            if data.keys() != {"revision", "layout"}:
+                self._send_json(400, {"error": "invalid library layout request"})
+                return
+            try:
+                with publication.LOCK:
+                    saved = SOURCE_CATALOG.set_library_layout(data["revision"], data["layout"])
+            except catalog_store.RevisionConflict as exc:
+                self._send_json(409, {"error": str(exc)})
+                return
+            except catalog_store.CatalogError as exc:
+                self._send_json(400, {"error": str(exc)})
+                return
+            except OSError:
+                self._send_json(503, {"error": "library layout write failed"})
+                return
+            self._send_json(200, {"revision": saved["revision"], "layout": saved.get("library_layout")})
         elif self.path == "/api/groups":
             if not self.headers.get("Origin"):
                 self._send_json(403, {"error": "same-origin request required"})

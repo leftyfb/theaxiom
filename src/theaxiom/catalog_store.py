@@ -29,6 +29,7 @@ MAX_CATALOG_BYTES = 256 * 1024
 MAX_ENTRIES = 100
 MAX_FIELD = 512
 GROUP_KINDS = frozenset({'categories', 'collections', 'tags'})
+LIBRARY_GROUP_MODES = ("none", "categories", "collections")
 MAX_GROUPS = 100
 MAX_GROUP_NAME = 100
 DEFAULT_CATEGORIES = (
@@ -230,7 +231,7 @@ class CatalogStore:
     @staticmethod
     def _validate_collection(state):
         required = HEADER_FIELDS | {"sources"}
-        if (not required <= state.keys() or state.keys() - (required | {"groups", "starter_groups_initialized"})
+        if (not required <= state.keys() or state.keys() - (required | {"groups", "starter_groups_initialized", "library_layout"})
                 or not isinstance(state["sources"], list)
                 or ("starter_groups_initialized" in state and state["starter_groups_initialized"] is not True)):
             raise CatalogError("invalid catalog schema")
@@ -258,6 +259,19 @@ class CatalogStore:
                     raise CatalogError(str(exc)) from exc
         if "groups" in state:
             self._validate_groups(state["groups"], ids)
+        if "library_layout" in state:
+            self._validate_library_layout(state["library_layout"], ids)
+
+    def _validate_library_layout(self, layout, known):
+        if not isinstance(layout, dict) or layout.keys() != {"source_order", "group_by"}:
+            raise CatalogError("invalid library layout")
+        order = layout["source_order"]
+        if not isinstance(order, list) or len(order) > MAX_ENTRIES or layout["group_by"] not in LIBRARY_GROUP_MODES:
+            raise CatalogError("invalid library layout order or grouping")
+        for sid in order:
+            self._validate_id(sid)
+        if len(set(order)) != len(order) or not set(order) <= known:
+            raise CatalogError("library layout contains duplicate or unknown source IDs")
 
     def _validated_payload(self, state):
         self._validate_v2(state)
@@ -304,7 +318,7 @@ class CatalogStore:
 
     @staticmethod
     def _snapshot(state):
-        return {key: state[key] for key in ("revision", "updated_at", "sources", "groups") if key in state}
+        return {key: state[key] for key in ("revision", "updated_at", "sources", "groups", "library_layout") if key in state}
 
     @staticmethod
     def _apply_fields(record, fields):
@@ -407,6 +421,8 @@ class CatalogStore:
                         state["sources"].remove(records[source_id])
                         for group in state.get("groups", []):
                             group["source_ids"] = [sid for sid in group["source_ids"] if sid != source_id]
+                        if layout := state.get("library_layout"):
+                            layout["source_order"] = [sid for sid in layout["source_order"] if sid != source_id]
                 state["revision"] += 1
                 state["updated_at"] = datetime.now(timezone.utc).isoformat()
                 self._atomic_write(self._validated_payload(state))
@@ -414,6 +430,27 @@ class CatalogStore:
             finally:
                 os.close(fd)
 
+
+    def set_library_layout(self, revision, layout):
+        if type(revision) is not int or revision < 0:
+            raise CatalogError("revision precondition required")
+        with LOCK:
+            fd = self._file_lock()
+            try:
+                state = self._read()
+                if state["revision"] != revision:
+                    raise RevisionConflict("catalog revision changed")
+                if layout is None:
+                    state.pop("library_layout", None)
+                else:
+                    self._validate_library_layout(layout, {record["source_id"] for record in state["sources"]})
+                    state["library_layout"] = layout
+                state["revision"] += 1
+                state["updated_at"] = datetime.now(timezone.utc).isoformat()
+                self._atomic_write(self._validated_payload(state))
+                return self._snapshot(state)
+            finally:
+                os.close(fd)
 
     def _validate_groups(self, groups, source_ids):
         if not isinstance(groups, list) or len(groups) > MAX_GROUPS:

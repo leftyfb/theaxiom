@@ -305,6 +305,25 @@ def exercise(browser, base, name, viewport, artifacts):
 
         # Closed #71: manage an ephemeral collection in its own namespace.
         page.goto(base + "/admin/groupings")
+        # #52: Keyboard reorder, persist the preference across reload, then reset.
+        layout_rows = page.locator("#layout-sources > li")
+        old_order = layout_rows.evaluate_all("(items) => items.map(item => item.dataset.layoutSource)")
+        assert len(old_order) >= 2
+        move_up = layout_rows.nth(1).locator('[data-layout-move="-1"]')
+        move_up.focus()
+        page.keyboard.press("Enter")
+        expect(layout_rows.first).to_have_attribute("data-layout-source", old_order[1])
+        expect(layout_rows.first.locator('[data-layout-move="1"]')).to_be_focused()
+        page.locator("#layout-group-by").select_option("collections")
+        with page.expect_navigation(wait_until="domcontentloaded"):
+            page.get_by_role("button", name="Save library layout").click()
+        expect(layout_rows.first).to_have_attribute("data-layout-source", old_order[1])
+        expect(page.locator("#layout-group-by")).to_have_value("collections")
+        with page.expect_navigation(wait_until="domcontentloaded"):
+            page.get_by_role("button", name="Reset to default").click()
+        expect(layout_rows.first).to_have_attribute("data-layout-source", old_order[0])
+        expect(page.locator("#layout-group-by")).to_have_value("none")
+        assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), name
         group_name = "Browser Group " + name
         renamed = "Browser Renamed " + name
         page.locator("#manage-kind").select_option("collections")

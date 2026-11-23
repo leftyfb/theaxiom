@@ -777,6 +777,58 @@ def test_update_discovery_configuration_and_endpoint_diagnostics(app, monkeypatc
     assert request("/api/sources")["revision"] == saved["revision"]
 
 
+def test_public_layout_order_groups_reset_and_publication_boundary(app, monkeypatch):
+    request, _ = app
+    catalog = request("/api/sources")
+    for sid, title in (("later", "Later reference"), ("private", "Private reference")):
+        catalog = mutate(request, catalog, "add", {"title": title, "format": "zim"}, sid=sid)
+    for sid in (SID, "fema-ready", "later"):
+        publication.save(sid, True)
+
+    def zim_publications(handler, catalog):
+        for record in catalog["sources"]:
+            sid = record["source_id"]
+            if sid != SID:
+                yield record, {"published": publication.load().get(sid, False), "entry_path": "/read/zim/" + sid}
+
+    monkeypatch.setattr(admin_api.AdminAPIHandler, "_zim_publications", zim_publications)
+    original = request("/")
+    first = 'href="/read/wikipedia-en"'
+    second = 'href="/read/zim/fema-ready"'
+    later = 'href="/read/zim/later"'
+    assert original.index(first) < original.index(second) < original.index(later)
+    group_id = "science-education"
+    catalog = request("/api/groups", {"operation": "add-members", "kind": "categories",
+                      "group_id": group_id, "source_ids": [SID, "fema-ready", "private"],
+                      "revision": catalog["revision"]})
+    order = ["fema-ready", "private", SID]
+    layout = {"source_order": order, "group_by": "categories"}
+    payload = {"revision": catalog["revision"], "layout": layout}
+    request("/api/library-layout", payload, status=403, origin="")
+    request("/api/library-layout", payload | {"layout": layout | {"source_order": ["unknown"]}}, status=400)
+    request("/api/library-layout", payload | {"layout": layout | {"source_order": [SID, SID]}}, status=400)
+    saved = request("/api/library-layout", payload)
+    assert saved["layout"] == layout
+    request("/api/library-layout", payload, status=409)
+    page = request("/")
+    assert page.index(second) < page.index(first) < page.index(later)
+    assert "<h3>Science &amp; Education</h3>" in page
+    assert "<h3>Other sources</h3>" in page
+    assert page.index('id="library-search"') < page.index(second)
+    assert page.index('href="/#getting-started"') < page.index(second)
+    assert "Private reference" not in page
+    filtered = request("/?category=" + group_id)
+    assert second in filtered and first in filtered and later not in filtered
+    assert "<h3>Science &amp; Education</h3>" not in filtered
+    assert "Private reference" not in filtered
+    removed = mutate(request, saved, "remove", sid="private")
+    assert removed["library_layout"]["source_order"] == ["fema-ready", SID]
+    assert request("/api/library-layout", {"revision": removed["revision"], "layout": None})["layout"] is None
+    reset_page = request("/")
+    assert reset_page.index(first) < reset_page.index(second) < reset_page.index(later)
+    assert "<h3>Science &amp; Education</h3>" not in reset_page
+
+
 def test_public_search_groups_two_published_zims_and_hides_unpublished(app, monkeypatch):
     from theaxiom import search, zim_catalog
     request, _ = app

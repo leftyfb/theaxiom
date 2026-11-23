@@ -226,7 +226,7 @@
     {% elif page == "groupings" %}
     <h1>Manage groupings</h1>
     <p>Categories classify subjects, collections curate resources, and tags describe sources. Assign memberships from Sources. Deleting a grouping never deletes sources or installed content.</p>
-    <section class="group-panel" aria-label="Grouping management">
+    <section class="group-panel" id="grouping-management" aria-label="Grouping management">
       <label for="manage-kind">Grouping type</label>
       <select id="manage-kind"><option value="categories">Categories</option><option value="tags">Tags</option><option value="collections">Collections</option></select>
       <label for="manage-search">Search groupings</label><input id="manage-search" type="search">
@@ -236,6 +236,94 @@
       <p id="manage-feedback" role="status" aria-live="polite"></p>
       <div id="manage-list"></div>
     </section>
+    <section class="group-panel" aria-labelledby="library-layout-title">
+      <h2 id="library-layout-title">Public library layout</h2>
+      <p>Move sources to set their order when published. New sources follow the saved order.</p>
+      <form id="library-layout">
+        <label for="layout-group-by">Group the homepage by</label>
+        <select id="layout-group-by">
+          <option value="none">No grouping</option>
+          <option value="categories">Category</option>
+          <option value="collections">Collection</option>
+        </select>
+        <p>For sources in several groups, the first group alphabetically is used. Other memberships stay available in filters.</p>
+        <ol id="layout-sources">
+          {% for source in catalog.sources %}
+          <li data-layout-source="{{ source.source_id }}">
+            <span>{{ source.profile.title }}</span>
+            <div class="source-actions">
+              <button class="button" type="button" data-layout-move="-1" aria-label="Move {{ source.profile.title }} up">Move up</button>
+              <button class="button" type="button" data-layout-move="1" aria-label="Move {{ source.profile.title }} down">Move down</button>
+            </div>
+          </li>
+          {% endfor %}
+        </ol>
+        <div class="source-actions">
+          <button class="button" type="submit">Save library layout</button>
+          <button class="button" id="layout-reset" type="button">Reset to default</button>
+        </div>
+        <p id="layout-feedback" role="status"></p>
+      </form>
+    </section>
+    <script>
+    (() => {
+      const form = document.getElementById('library-layout');
+      const list = document.getElementById('layout-sources');
+      const groupBy = document.getElementById('layout-group-by');
+      const feedback = document.getElementById('layout-feedback');
+      const layout = {{ catalog.library_layout|default({})|tojson }};
+      const revision = {{ catalog.revision|tojson }};
+      let saving = false;
+      const items = new Map(Array.from(list.children, row => [row.dataset.layoutSource, row]));
+      for (const id of new Set([...(layout.source_order || []), ...items.keys()])) {
+        if (items.has(id)) list.append(items.get(id));
+      }
+      groupBy.value = layout.group_by || 'none';
+      function setBoundaries() {
+        Array.from(list.children).forEach((row, index) => {
+          row.querySelector('[data-layout-move="-1"]').disabled = index === 0;
+          row.querySelector('[data-layout-move="1"]').disabled = index === list.children.length - 1;
+        });
+      }
+      list.addEventListener('click', event => {
+        const button = event.target.closest('[data-layout-move]');
+        if (!button || saving) return;
+        const row = button.closest('li');
+        const up = button.dataset.layoutMove === '-1';
+        const sibling = up ? row.previousElementSibling : row.nextElementSibling;
+        if (!sibling) return;
+        if (up) list.insertBefore(row, sibling);
+        else list.insertBefore(sibling, row);
+        setBoundaries();
+        (button.disabled ? row.querySelector('[data-layout-move]:not(:disabled)') : button)?.focus();
+        feedback.textContent = row.firstElementChild.textContent + ' moved to position ' +
+          (Array.from(list.children).indexOf(row) + 1) + '. Save to apply.';
+      });
+      async function save(next) {
+        if (saving) return;
+        saving = true;
+        try {
+          const response = await fetch('/api/library-layout', {
+            method: 'POST',
+            headers: {...(window.axiomCsrfHeaders?.() || {}), 'Content-Type': 'application/json'},
+            body: JSON.stringify({revision, layout: next})
+          });
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.error || 'Library layout could not be saved.');
+          location.reload();
+        } catch (error) {
+          feedback.textContent = error.message;
+          saving = false;
+        }
+      }
+      form.addEventListener('submit', event => {
+        event.preventDefault();
+        save({group_by: groupBy.value, source_order: Array.from(list.children, row => row.dataset.layoutSource)});
+      });
+      document.getElementById('layout-reset').addEventListener('click', () => save(null));
+      setBoundaries();
+    })();
+    </script>
     <script>
     (() => {
       const groups = {{ catalog.groups|default([])|tojson }};
@@ -245,13 +333,14 @@
       const name = document.getElementById('manage-new');
       const list = document.getElementById('manage-list');
       const feedback = document.getElementById('manage-feedback');
+      const panel = document.getElementById('grouping-management');
       let busy = false;
       try { kind.value = sessionStorage.getItem('axiom-group-kind') || 'categories'; } catch (_) {}
       if (!kind.value) kind.value = 'categories';
       async function mutate(payload) {
         if (busy) return;
         busy = true;
-        document.querySelectorAll('.group-panel button,.group-panel input,.group-panel select').forEach(e => e.disabled = true);
+        panel.querySelectorAll('button,input,select').forEach(e => e.disabled = true);
         try {
           const response = await fetch('/api/groups',{method:'POST',headers:{...((typeof window !== 'undefined' && window.axiomCsrfHeaders?.()) || {}),'Content-Type':'application/json'},body:JSON.stringify({...payload,revision})});
           const result = await response.json();
@@ -261,7 +350,7 @@
         } catch (error) {
           feedback.textContent = error.message;
           busy = false;
-          document.querySelectorAll('.group-panel button,.group-panel input,.group-panel select').forEach(e => e.disabled = false);
+          panel.querySelectorAll('button,input,select').forEach(e => e.disabled = false);
         }
       }
       function render() {
