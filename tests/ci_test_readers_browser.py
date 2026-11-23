@@ -364,9 +364,18 @@ def exercise(browser, base, viewport_name, viewport, artifact_dir):
             expect(page.locator(f'.source-card[data-source-id="{sid}"]')).to_be_visible()
             card = page.locator(f'.source-card[data-source-id="{sid}"]')
             card.locator("summary.source-header").click()
+            delete_files = card.get_by_role("button", name="Delete downloaded files")
+            expect(delete_files).to_be_hidden()
+            card.get_by_text("More actions", exact=True).click()
+            expect(delete_files).to_be_visible()
+            with page.expect_event("dialog") as preview:
+                page.once("dialog", lambda dialog: dialog.dismiss())
+                delete_files.click()
+            assert "The source profile will be kept." in preview.value.message
+            assert f".{kind} (" in preview.value.message
             page.once("dialog", lambda dialog: dialog.accept())
             with page.expect_navigation(wait_until="domcontentloaded"):
-                card.locator("[data-catalog-remove]").click()
+                card.get_by_role("button", name="Remove source").click()
             expect(page.locator(f'.source-card[data-source-id="{sid}"]')).to_have_count(0)
         assert not errors, f"{viewport_name}: reader JS errors {errors}"
         print(f"PASS {viewport_name}: real PDF search/navigation and EPUB chapters/download")
