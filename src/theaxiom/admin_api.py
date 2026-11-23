@@ -321,9 +321,13 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                                "navigate", "cors", "same-origin"
                            } or bool(self.headers.get("Sec-Fetch-Site"))
                            or bool(self.headers.get("Sec-Fetch-Dest"))
-                           or bool(self.headers.get("Origin"))
-                           or bool(self.headers.get("Referer"))
-                           or bool(self.headers.get("Cookie")))
+                           or bool(self.headers.get("Cookie"))
+                           # Some programmatic Basic clients legitimately send
+                           # Origin for CSRF validation. A bare Origin/Referer
+                           # without browser fetch metadata is browser-like only
+                           # when no explicit Authorization header is supplied.
+                           or (not auth and (bool(self.headers.get("Origin"))
+                                             or bool(self.headers.get("Referer")))))
         basic = (not browser_request and len(auth) <= 1 and
                  not (config.store is None and hosts[0].lower() not in local_hosts)
                  and config.authorized(auth[0] if auth else None))
