@@ -668,6 +668,18 @@ def test_all_non_destructive_zim_replacement_actions_reach_guarded_http_handler(
     assert calls == [("fema-ready", "zim")]
 
 
+def test_zim_controls_follow_capabilities_not_source_identity(app):
+    request, _ = app
+    catalog = request("/api/sources")
+    entries = {source["source_id"]: source for source in catalog["sources"]}
+    assert entries["wikipedia-en"]["legacy_pinned"] is True
+    assert entries["wikipedia-en"].get("zim_download") is not True
+    assert entries["fema-ready"]["legacy_pinned"] is False
+    assert entries["fema-ready"]["zim_download"] is True
+    template = admin_api.ADMIN_TEMPLATE_DIR / "admin-page.html.j2"
+    assert "source.source_id == 'wikipedia-en'" not in template.read_text()
+
+
 def test_pinned_wikipedia_shows_metadata_check_without_inert_download_actions(app):
     request, _ = app
     html = card(request("/admin/sources"), "wikipedia-en")
