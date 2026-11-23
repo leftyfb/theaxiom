@@ -906,7 +906,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 state = zim_catalog.status(record, catalog["sources"])
                 verified = bool(state["verified"])
             if sid in publication.ROUTES and verified and isinstance(artifacts.get(sid), dict):
-                if kiwix_update_discovery.pinned_wikipedia_identity(
+                if kiwix_update_discovery.pinned_seed_identity(
                         record, artifacts[sid], verified=verified) is not None:
                     update_check = update_check_store.load(sid, artifacts[sid]["sha256"])
             publication_filter = ("unknown" if state and state.get("error") else
@@ -1086,7 +1086,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 artifact = lifecycle.get("artifact")
                 matched = self._matched_snapshot(self._snapshot(), {sid: artifact})
                 verified = publication.verified(matched, sid)
-                result = kiwix_update_discovery.refresh_pinned_wikipedia(
+                result = kiwix_update_discovery.refresh_pinned_seed(
                     record, artifact, verified=verified,
                 )
             elif record and self._zim_record(record):
