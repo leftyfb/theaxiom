@@ -614,7 +614,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             self._send_json(200, monitor.snapshot() if monitor else {"acquisitions": [], "stale": True})
         elif self.path.rstrip("/") == "/api/storage-status":
             try:
-                self._send_json(200, storage.inspect_storage(storage_settings.load_settings(), required_bytes=WIKIPEDIA_SOURCE["bytes"]))
+                self._send_json(200, storage.inspect_storage(storage_settings.load_settings()))
             except ValueError:
                 self._send_json(503, {"ready": False, "error": "stored settings are invalid"})
         elif self.path.rstrip("/") == "/api/storage-settings":
