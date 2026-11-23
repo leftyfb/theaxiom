@@ -128,6 +128,8 @@
     #source-dialog::backdrop, #source-guide::backdrop { background: rgba(18,60,50,.55); }
     #source-dialog h3 { margin: 0; font-size: 1.4rem; }
     .editor-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 1rem; margin: 1rem 0; }
+    #source-form fieldset { min-inline-size: 0; border: 1px solid #aac5b7; border-radius: .4rem; }
+    #source-form legend { font-weight: 650; }
     .editor-wide { grid-column: 1 / -1; }
     .editor-grid > div { min-width: 0; }
     .editor-grid label { display: block; font-weight: 650; margin-bottom: .35rem; }
@@ -320,11 +322,35 @@
         <div class="editor-grid">
           <div class="editor-wide" id="source-upload-row"><label for="source-upload-file">Upload PDF or EPUB (optional)</label><input id="source-upload-file" type="file" accept=".pdf,.epub,application/pdf,application/epub+zip"><small>Choose a PDF or EPUB to populate its name and format automatically.</small></div>
           <div class="editor-wide"><label for="catalog-title">Source name</label><input id="catalog-title" name="title" required maxlength="512"></div>
-          <div class="editor-wide"><label for="catalog-url">Source URL</label><input id="catalog-url" name="source_url" type="url" maxlength="512">
+          <div class="editor-wide"><label for="catalog-url">Download URL</label><input id="catalog-url" name="source_url" type="url" maxlength="512">
             <small>Direct HTTP(S) download URL, if available.</small></div>
           <div><label for="catalog-format">Content format</label><select id="catalog-format" name="format"><option value="unspecified">Auto / not yet specified</option><option value="zim">Kiwix / ZIM</option><option value="pdf">PDF</option><option value="epub">EPUB</option></select></div>
           <div class="editor-wide"><label for="catalog-description">Description (optional)</label><textarea id="catalog-description" name="description" maxlength="512"></textarea></div>
         </div>
+        <fieldset class="editor-grid">
+          <legend>Update discovery</legend>
+          <div><label for="catalog-update-method">Discovery method</label>
+            <select id="catalog-update-method" name="update_method">
+              <option value="">Automatic by format</option>
+              <option value="kiwix">Kiwix OPDS / Metalink (ZIM)</option>
+              <option value="head">HTTPS HEAD / ETag (PDF, EPUB)</option>
+              <option value="manual">Manual / unsupported</option>
+            </select>
+          </div>
+          <div><label for="catalog-update-periodic">Periodic metadata checks</label>
+            <select id="catalog-update-periodic" name="update_periodic">
+              <option value="">Use method default</option>
+              <option value="yes">Enabled</option><option value="no">Disabled</option>
+            </select>
+          </div>
+          <div class="editor-wide"><label for="catalog-update-endpoint">Update discovery endpoint (optional)</label>
+            <input id="catalog-update-endpoint" name="update_endpoint" type="url" maxlength="512" aria-describedby="update-endpoint-hint">
+            <small id="update-endpoint-hint">Leave blank to use the provider default.</small>
+          </div>
+          <div class="editor-wide"><button class="button" type="button" id="test-update-endpoint">Test endpoint</button>
+            <p class="source-note" id="update-endpoint-feedback" role="status"></p>
+          </div>
+        </fieldset>
         <details id="source-editor-groups" hidden>
           <summary>Groupings <span id="editor-group-count" class="source-note"></span></summary>
           <p class="source-note">Choose memberships for this source. <a href="/admin/groupings">Manage grouping options</a>.</p>
@@ -478,6 +504,14 @@
         {% endif %}
         {% set document = source.adapter in ('pdf','epub') %}
         {% set url_managed = source.configuration.source_url|default('', true)|trim %}
+        {% set discovery = source.discovery|default({}) %}
+        <p class="source-note" data-field="discovery-status" role="status">
+          {% if discovery %}
+            {{ {'head': 'HTTPS HEAD / ETag', 'kiwix': 'Kiwix OPDS / Metalink', 'manual': 'Manual update discovery'}[discovery.method] }}
+            · Periodic checks {{ 'enabled' if discovery.periodic else 'disabled' }}
+          {% endif %}
+        </p>
+        <p class="source-note" data-field="discovery-evidence" role="status"></p>
         <div class="source-actions" aria-label="Source actions">
           {# Legacy pinned-action placeholders cannot execute and must not
              masquerade as Download/Re-download/Update controls. #}
@@ -491,7 +525,7 @@
             Review newer edition
           </button>
           {% endif %}
-          {% if source.zim_download or source.legacy_pinned %}<button class="button" type="button" data-zim-update-check{% if not source.installed_verified %} hidden disabled{% endif %}>Check for updates</button>{% endif %}
+          {% if (source.zim_download or source.legacy_pinned) and discovery.get("method") != "manual" %}<button class="button" type="button" data-zim-update-check{% if not source.installed_verified %} hidden disabled{% endif %}>Check for updates</button>{% endif %}
           {% if source.zim_download %}<button class="button" type="button" data-zim-download{% if source.installed_verified %} hidden{% endif %}{% if source.mutation_blocked or source.installed_verified %} disabled{% endif %}>Download</button>{% endif %}
           {% if source.zim_download %}
           <button class="button danger-action" type="button" data-zim-delete hidden>Delete installed archive</button>
@@ -512,7 +546,7 @@
           <button class="button" type="button" data-zim-control="cancel-keep" hidden>Cancel · keep partial</button>
           <button class="button danger-action" type="button" data-zim-control="cancel" hidden>Cancel · discard partial</button>
           {% endif %}
-          {% if document and url_managed and source.installed_verified %}
+          {% if document and (discovery.get("method") == "head" or not discovery and url_managed) and source.installed_verified %}
           <button class="button" type="button" data-document-update-check>Check publisher metadata</button>
           {% endif %}
           {% if document %}
@@ -890,6 +924,56 @@
       }
       input('source_url').addEventListener('input', detectFormat);
       format.addEventListener('change', () => { manualFormat = true; });
+      const endpointTest = document.getElementById('test-update-endpoint');
+      const endpointFeedback = document.getElementById('update-endpoint-feedback');
+      let editorGeneration = 0;
+      function discoveryOptions() {
+        const method = input('update_method');
+        const endpoint = input('update_endpoint');
+        for (const option of method.options) {
+          option.disabled = (option.value === 'kiwix' && format.value !== 'zim') ||
+            (option.value === 'head' && !['pdf', 'epub'].includes(format.value));
+        }
+        if (method.selectedOptions[0]?.disabled) method.value = '';
+        const manual = method.value === 'manual';
+        endpoint.disabled = manual;
+        input('update_periodic').options[1].disabled = manual;
+        if (manual) {
+          endpoint.value = '';
+          if (input('update_periodic').value === 'yes') input('update_periodic').value = 'no';
+        }
+        endpoint.placeholder = method.value === 'kiwix' || (!method.value && format.value === 'zim')
+          ? 'https://opds.library.kiwix.org/catalog/v2/entries'
+          : (input('source_url').value || 'https://publisher.org/document');
+        endpointTest.disabled = manual;
+        endpointFeedback.textContent = '';
+        editorGeneration++;
+      }
+      for (const field of [format, uploadFile, input('source_url'), input('update_method'), input('update_endpoint')]) {
+        field.addEventListener('input', discoveryOptions);
+        field.addEventListener('change', discoveryOptions);
+      }
+      endpointTest.addEventListener('click', async () => {
+        const generation = editorGeneration;
+        endpointTest.disabled = true;
+        endpointFeedback.textContent = 'Checking endpoint metadata…';
+        try {
+          const fields = Object.fromEntries(['format','source_url','update_method','update_endpoint','update_periodic']
+            .map(name => [name, input(name).value]));
+          const response = await fetch('/api/update-endpoint-test', {
+            method: 'POST',
+            headers: {...(window.axiomCsrfHeaders?.() || {}), 'Content-Type': 'application/json'},
+            body: JSON.stringify(fields)
+          });
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.error || 'Endpoint test failed');
+          if (generation === editorGeneration) endpointFeedback.textContent = result.evidence;
+        } catch (error) {
+          if (generation === editorGeneration) endpointFeedback.textContent = error.message;
+        } finally {
+          if (generation === editorGeneration) endpointTest.disabled = false;
+        }
+      });
       function generateId() {
         const base = input('title').value.normalize('NFKD').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50).replace(/-$/,'') || 'source';
         const used = new Set(Array.from(document.querySelectorAll('.source-card'), card => card.dataset.sourceId));
@@ -932,6 +1016,8 @@
             field.value = value;
           }
         }
+        if (!card) input('update_periodic').value = 'no';
+        discoveryOptions();
         dialog.showModal();
         input('title').focus();
       }
@@ -1028,7 +1114,7 @@
         try {
           if (form.dataset.operation === 'add' && file) {
             if (!file.size || file.size > 16 * 1024 * 1024) throw new Error('Choose a PDF or EPUB up to 16 MiB');
-            const metadata = Object.fromEntries(Object.entries(fields).filter(([k]) => ['title','description','author','publisher','edition','language','source_url','license'].includes(k)));
+            const metadata = Object.fromEntries(Object.entries(fields).filter(([k]) => ['title','description','author','publisher','edition','language','source_url','license','update_method','update_endpoint','update_periodic'].includes(k)));
             const headers = {...window.axiomCsrfHeaders(), 'Content-Type':format.value === 'epub' ? 'application/epub+zip' : 'application/pdf', 'X-Document-Format':format.value, 'X-Source-ID':source_id,
               'X-Catalog-Revision':String(revision), 'X-PDF-Add':'1',
               'X-PDF-Metadata':encodeURIComponent(JSON.stringify(metadata))};
@@ -1038,7 +1124,7 @@
             if (!response.ok || !result.installed_verified) throw acquisitionError(response, result, 'Document upload was not confirmed');
             reloadSources();
           } else if (form.dataset.operation === 'add' && format.value === 'epub' && fields.source_url) {
-            const metadata = Object.fromEntries(Object.entries(fields).filter(([k]) => ['title','description','author','publisher','edition','language','source_url','license'].includes(k)));
+            const metadata = Object.fromEntries(Object.entries(fields).filter(([k]) => ['title','description','author','publisher','edition','language','source_url','license','update_method','update_endpoint','update_periodic'].includes(k)));
             const response = await acquisitionFetch('/api/action', {method:'POST', headers:{...((typeof window !== 'undefined' && window.axiomCsrfHeaders?.()) || {}),'Content-Type':'application/json'},
               body:JSON.stringify({source_id, action:'epub-add-download', revision, fields:metadata, auto_title:automaticTitle})});
             const result = await response.json().catch(() => ({}));
@@ -1152,7 +1238,7 @@
             ? 'Publisher representation changed. A newer verified document edition is not established.'
             : result.state === 'representation_unchanged'
             ? 'Publisher representation matches the captured installed validator.'
-            : 'Unable to determine whether the publisher document changed.';
+            : (result.evidence || 'Unable to determine whether the publisher document changed.');
         } catch (error) {
           feedback.textContent = error.message || 'Publisher metadata unavailable.';
         } finally {
@@ -1585,6 +1671,25 @@
             const updateBadge = card.querySelector('[data-field="update-status"]');
             const updateDetails = card.querySelector('[data-field="update-details"]');
             const update = source?.update_check;
+            const evidence = card.querySelector('[data-field="discovery-evidence"]');
+            if (evidence) {
+              const description = {
+                update_available: 'Newer edition listed with verification evidence',
+                up_to_date: 'Installed edition matches publisher metadata',
+                no_newer_edition_listed: 'No newer edition listed',
+                older_candidate: 'Publisher lists an older edition',
+                representation_changed: 'Publisher representation changed',
+                representation_unchanged: 'Publisher representation unchanged',
+                unable_to_determine: 'Unable to determine update status'
+              };
+              evidence.textContent = update ? [
+                description[update.state], update.evidence,
+                update.checked_at ? 'Last check ' + new Date(update.checked_at * 1000).toLocaleString() : '',
+                update.candidate_edition ? 'Candidate ' + update.candidate_edition : '',
+                update.candidate_sha256 ? 'SHA-256 ' + update.candidate_sha256 : ''
+              ].filter(Boolean).join(' · ') : (source?.discovery?.method &&
+                source.discovery.method !== 'manual' ? 'No update check recorded' : '');
+            }
             const hasUpdate = update?.state === "update_available";
             if (updateBadge) updateBadge.hidden = !hasUpdate;
             if (updateDetails) {

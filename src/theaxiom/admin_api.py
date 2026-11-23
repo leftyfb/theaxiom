@@ -10,6 +10,7 @@ import os
 import re
 import subprocess
 import threading
+import time
 from contextlib import ExitStack
 from urllib.parse import parse_qs, urlsplit, unquote
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -43,6 +44,9 @@ zim_jobs = importlib.import_module(f"{__package__}.zim_jobs" if __package__ else
 zim_source = importlib.import_module(f"{__package__}.zim_source" if __package__ else "theaxiom.zim_source")
 zim_catalog = importlib.import_module(f"{__package__}.zim_catalog" if __package__ else "theaxiom.zim_catalog")
 zim_refresh = importlib.import_module(f"{__package__}.zim_refresh" if __package__ else "theaxiom.zim_refresh")
+ENDPOINT_TEST_LOCK = threading.Lock()
+ENDPOINT_TEST_NEXT = 0.0
+update_discovery_config = importlib.import_module(f"{__package__}.update_discovery_config" if __package__ else "theaxiom.update_discovery_config")
 update_check_store = importlib.import_module(f"{__package__}.update_check_store" if __package__ else "theaxiom.update_check_store")
 kiwix_update_discovery = importlib.import_module(f"{__package__}.kiwix_update_discovery" if __package__ else "theaxiom.kiwix_update_discovery")
 library_search = importlib.import_module(f"{__package__}.search" if __package__ else "theaxiom.search")
@@ -891,6 +895,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             sid = record["source_id"]
             busy = source_busy(snapshot, sid)
             update_check = None
+            discovery = update_discovery_config.settings(record["configuration"])
             state = None
             if sid in publication.ROUTES:
                 state = publication.status(matched, sid)
@@ -908,8 +913,9 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                         else publication.verified(matched, sid))
             if (verified and (self._pdf_record(record) or self._epub_record(record))
                     and isinstance(artifacts.get(sid), dict)
-                    and record["configuration"].get("source_url")):
-                update_check = update_check_store.load(sid, artifacts[sid]["sha256"])
+                    and discovery["method"] == "head"):
+                update_check = update_check_store.load(sid, update_discovery_config.cache_identity(
+                    record["configuration"], artifacts[sid]["sha256"]))
             job = jobs.get(sid)
             if lifecycles[sid].get("zim_download"):
                 try:
@@ -984,7 +990,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     replacement = {"state": "unavailable", "error": "Replacement status unavailable"}
             sources.append(dict(record, **lifecycles[sid], acquisition=job, replacement=replacement, replacement_available=replacement_available,
                                 legacy_pinned=(sid in legacy_pins and record["configuration"].get("format") == "zim"),
-                                update_check=update_check,
+                                update_check=update_check if discovery["method"] != "manual" else None,
+                                discovery=discovery,
                                 installed_verified=verified, publication=state, mutation_blocked=busy,
                                 publication_filter=publication_filter, download_filter=download_filter))
         return dict(catalog, sources=sources, acquisition_stale=snapshot["stale"])
@@ -1017,6 +1024,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self) -> None:  # noqa: N802 - http.server convention
+        global ENDPOINT_TEST_NEXT
         if not self._guard(post=True):
             return
         if self.path == "/api/admin/login":
@@ -1088,6 +1096,34 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 return
             ADMIN_SESSIONS.clear()  # revoke browser sessions after credential rotation
             self._send_json(200, {"changed": True})
+        elif self.path == "/api/update-endpoint-test":
+            if not self.headers.get("Origin"):
+                self._send_json(403, {"error": "same-origin request required"})
+                return
+            data = self._read_body()
+            try:
+                fields = {"format", "source_url"} | update_discovery_config.FIELDS
+                SOURCE_CATALOG._validate_fields(data, fields, required={"format"})
+                selected = update_discovery_config.settings(data)
+                if selected["method"] == "manual":
+                    self._send_json(200, update_discovery_config.probe_endpoint(selected))
+                    return
+                if not ENDPOINT_TEST_LOCK.acquire(blocking=False):
+                    self._send_json(429, {"error": "Another endpoint test is in progress"})
+                    return
+                try:
+                    now = time.monotonic()
+                    if now < ENDPOINT_TEST_NEXT:
+                        self._send_json(429, {"error": "Wait a few seconds before testing another endpoint"})
+                        return
+                    ENDPOINT_TEST_NEXT = now + 3
+                    result = update_discovery_config.probe_endpoint(selected)
+                finally:
+                    ENDPOINT_TEST_LOCK.release()
+            except (catalog_store.CatalogError, ValueError) as exc:
+                self._send_json(400, {"error": str(exc)})
+                return
+            self._send_json(200, result)
         elif self.path == "/api/update-check":
             # Explicit metadata-only request. No archive transfer, activation,
             # publication mutation or untrusted caller-provided URL.
@@ -1111,6 +1147,9 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 return
             sid = data["source_id"]
             record = next((item for item in catalog["sources"] if item["source_id"] == sid), None)
+            if record and update_discovery_config.settings(record["configuration"])["method"] == "manual":
+                self._send_json(400, {"error": "source does not support update checks"})
+                return
             if record and sid in publication.ROUTES:
                 lifecycle = select_lifecycle(sid, record["configuration"])
                 artifact = lifecycle.get("artifact")
@@ -1379,9 +1418,10 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 if len(metadata[0]) > 8192:
                     raise ValueError
                 fields = json.loads(unquote(metadata[0], errors="strict"))
-                SOURCE_CATALOG._validate_fields(fields, catalog_store.PROFILE_FIELDS | {"source_url", "license"},
+                SOURCE_CATALOG._validate_fields(fields, catalog_store.PROFILE_FIELDS | {"source_url", "license"} | update_discovery_config.FIELDS,
                                                 required={"title"})
                 fields["format"] = requested_format
+                update_discovery_config.settings(fields)
                 if fields.get("source_url") and not pdf_source.valid_source_url(fields["source_url"]):
                     raise ValueError
             except (ValueError, UnicodeError):
@@ -1472,11 +1512,12 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 if type(data["auto_title"]) is not bool:
                     raise ValueError("invalid automatic title flag")
                 fields = dict(data["fields"]) if isinstance(data["fields"], dict) else None
-                SOURCE_CATALOG._validate_fields(fields, catalog_store.PROFILE_FIELDS | {"source_url", "license"},
+                SOURCE_CATALOG._validate_fields(fields, catalog_store.PROFILE_FIELDS | {"source_url", "license"} | update_discovery_config.FIELDS,
                                                 required={"title", "source_url"})
                 if not pdf_source.valid_source_url(fields["source_url"]):
                     raise ValueError("A direct HTTPS EPUB URL is required")
                 fields["format"] = "epub"
+                update_discovery_config.settings(fields)
             except (ValueError, TypeError):
                 self._send_json(400, {"error": "invalid new EPUB source metadata"})
                 return
@@ -1686,7 +1727,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             return
         if operation in ("remove", "add"):
             raise catalog_store.RevisionConflict("unpublish source before removing or re-adding it")
-        guarded_fields = ARTIFACT_FIELDS if sid in publication.ROUTES else catalog_store.CONFIG_FIELDS
+        guarded_fields = ARTIFACT_FIELDS if sid in publication.ROUTES else catalog_store.ARTIFACT_CONFIG_FIELDS
         if isinstance(fields, dict) and fields.keys() & guarded_fields:
             catalog = SOURCE_CATALOG.get()
             if catalog["revision"] != revision:

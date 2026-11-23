@@ -13,12 +13,13 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from . import source_catalog
+from . import source_catalog, update_discovery_config
 
 SCHEMA_VERSION = 2
 PROFILE_FIELDS = {"title", "description", "publisher", "edition", "language", "author"}
 CANDIDATE_FIELDS = {"source_url", "expected_size_bytes", "sha256", "provenance", "license"}
-CONFIG_FIELDS = CANDIDATE_FIELDS | {"format"}
+ARTIFACT_CONFIG_FIELDS = CANDIDATE_FIELDS | {"format"}
+CONFIG_FIELDS = ARTIFACT_CONFIG_FIELDS | update_discovery_config.FIELDS
 V1_FIELDS = PROFILE_FIELDS | CANDIDATE_FIELDS
 EDITABLE = PROFILE_FIELDS | CONFIG_FIELDS
 HEADER_FIELDS = {"schema_version", "revision", "updated_at"}
@@ -248,6 +249,11 @@ class CatalogStore:
             ids.add(sid)
             self._validate_fields(record["profile"], PROFILE_FIELDS, required={"title"})
             self._validate_fields(record["configuration"], CONFIG_FIELDS, required={"format"})
+            if update_discovery_config.FIELDS & record["configuration"].keys():
+                try:
+                    update_discovery_config.settings(record["configuration"])
+                except ValueError as exc:
+                    raise CatalogError(str(exc)) from exc
         if "groups" in state:
             self._validate_groups(state["groups"], ids)
 

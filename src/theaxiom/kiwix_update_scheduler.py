@@ -13,7 +13,7 @@ from pathlib import Path
 import sys
 
 from . import (catalog_store, document_update_discovery, kiwix_update_discovery,
-               publication, storage_settings)
+               publication, storage_settings, update_discovery_config)
 
 DEFAULT_MAX_CHECKS = 10
 MAX_CHECKS = 20
@@ -34,8 +34,7 @@ def check_records(records, *, max_checks=DEFAULT_MAX_CHECKS, start_index=0, chec
         and isinstance(record.get("source_id"), str)
         and isinstance(record.get("configuration"), dict)
         and record["configuration"].get("format") in supported
-        and (record["configuration"].get("format") == "zim"
-             or record["configuration"].get("source_url"))
+        and update_discovery_config.settings(record["configuration"])["periodic"]
     }
     eligible = sorted(by_id)
     results = []

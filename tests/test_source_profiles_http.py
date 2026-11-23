@@ -739,3 +739,36 @@ def test_fema_and_wikipedia_have_consistent_update_check_controls(app):
         assert element is not None
         assert "Check for updates" in element
         assert 'data-zim-update-check' in element
+
+
+def test_update_discovery_configuration_and_endpoint_diagnostics(app, monkeypatch):
+    request, _ = app
+    cfg = admin_api.update_discovery_config
+    current = request("/api/sources")
+    before = source(current)
+    assert before["discovery"] == {"method": "kiwix", "endpoint": cfg.OPDS, "periodic": True}
+    saved = mutate(request, current, "edit", {"update_periodic": "no"})
+    after = source(request("/api/sources"))
+    assert not after["discovery"]["periodic"]
+    for field in catalog_store.ARTIFACT_CONFIG_FIELDS:
+        assert after["configuration"].get(field) == before["configuration"].get(field)
+    assert after["publication"] == before["publication"]
+    mutate(request, saved, "edit", {"update_endpoint": "https://publisher.org/catalog"}, status=400)
+
+    probe = Mock(return_value={"reachable": True, "etag": '"private-value"'})
+    monkeypatch.setattr(cfg.pdf_transport, "probe_document_metadata", probe)
+    monkeypatch.setattr(admin_api, "ENDPOINT_TEST_NEXT", 0.0)
+    payload = {"format": "pdf", "update_method": "head",
+               "update_endpoint": "https://publisher.org/metadata"}
+    for url in ("http://publisher.org/metadata", "https://127.0.0.1/path",
+                "https://user:password@publisher.org/path", "https://publisher.org/path?secret=1"):
+        request("/api/update-endpoint-test", dict(payload, update_endpoint=url), status=400)
+    request("/api/update-endpoint-test", payload, origin="", status=403)
+    probe.assert_not_called()
+    result = request("/api/update-endpoint-test", payload)
+    assert result["state"] == "reachable"
+    assert result["checked_at"]
+    assert "private-value" not in str(result)
+    request("/api/update-endpoint-test", payload, status=429)
+    probe.assert_called_once_with(payload["update_endpoint"])
+    assert request("/api/sources")["revision"] == saved["revision"]

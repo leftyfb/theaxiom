@@ -148,3 +148,15 @@ def test_update_check_systemd_units_are_metadata_only_and_daily():
     assert "Persistent=true" in timer
     assert "Unit=theaxiom-update-check.service" in timer
     assert "WantedBy=timers.target" in timer
+
+
+def test_periodic_opt_out_and_manual_adapters_never_probe():
+    records = [{"source_id": "opt-out", "configuration": {
+                    "format": "zim", "update_periodic": "no"}},
+               {"source_id": "manual", "configuration": {
+                    "format": "zim", "update_method": "manual"}},
+               {"source_id": "opt-in", "configuration": {
+                    "format": "pdf", "update_method": "head", "update_periodic": "yes",
+                    "update_endpoint": "https://publisher.org/metadata"}}]
+    assert scheduler.check_records(records, checker=lambda sid: {"state": "up_to_date"}) == [
+        {"source_id": "opt-in", "state": "up_to_date"}]

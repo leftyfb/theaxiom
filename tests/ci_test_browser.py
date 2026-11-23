@@ -119,7 +119,19 @@ def exercise(browser, base, name, viewport, artifacts):
         title = "Browser Regression " + name
         sid = "browser-regression-" + name
         page.locator("#catalog-title").fill(title)
-        page.locator("#catalog-format").select_option("unspecified")
+        page.locator("#catalog-format").select_option("pdf")
+        page.locator("#catalog-url").fill("https://publisher.org/download.pdf")
+        page.locator("#catalog-update-method").select_option("head")
+        page.locator("#catalog-update-endpoint").fill("https://publisher.org/metadata")
+        page.locator("#catalog-update-periodic").select_option("yes")
+        with page.expect_response(lambda r: r.url.endswith("/api/update-endpoint-test") and r.status == 200):
+            page.locator("#test-update-endpoint").click()
+        expect(page.locator("#update-endpoint-feedback")).to_contain_text("strong ETag")
+        page.locator("#catalog-update-endpoint").fill("https://127.0.0.1/private")
+        with page.expect_response(lambda r: r.url.endswith("/api/update-endpoint-test") and r.status == 400):
+            page.locator("#test-update-endpoint").click()
+        expect(page.locator("#update-endpoint-feedback")).to_contain_text("plain HTTPS")
+        page.locator("#catalog-update-endpoint").fill("https://publisher.org/metadata")
         # The application intentionally reloads after a catalog mutation.
         # Wait for that navigation, not just an already-present DOM element.
         with page.expect_navigation(wait_until="domcontentloaded"):
@@ -157,6 +169,10 @@ def exercise(browser, base, name, viewport, artifacts):
         page.keyboard.press("Enter")
         expect(page.locator("#source-dialog")).to_be_visible()
         expect(page.locator("#catalog-title")).to_have_value(title)
+        expect(page.locator("#catalog-url")).to_have_value("https://publisher.org/download.pdf")
+        expect(page.locator("#catalog-update-endpoint")).to_have_value("https://publisher.org/metadata")
+        expect(page.locator("#catalog-update-method")).to_have_value("head")
+        expect(page.locator("#catalog-update-periodic")).to_have_value("yes")
         page.locator("#catalog-description").fill("Verified through real browser UI")
         # The application intentionally reloads after a catalog mutation.
         # Wait for that navigation, not just an already-present DOM element.
@@ -382,7 +398,10 @@ def main():
                                      "THEAXIOM_STORAGE_SETTINGS": str(root / "storage.json")}):
             with patch.object(admin_api, "SOURCE_CATALOG",
                               catalog_store.CatalogStore(root / "sources.json")):
-                with patch.object(admin_api, "ADMIN_SESSIONS", admin_sessions.Sessions()):
+                with (patch.object(admin_api, "ADMIN_SESSIONS", admin_sessions.Sessions()),
+                      patch.object(admin_api.update_discovery_config.pdf_transport,
+                                   "probe_document_metadata",
+                                   return_value={"reachable": True, "etag": '"fixture"'})):
                     credential = root / "credentials"
                     PasswordStore.initialize(credential, "browser-only-fixture-password")
                     server = admin_api.ThreadingHTTPServer(("127.0.0.1", 0), admin_api.AdminAPIHandler)
@@ -397,7 +416,7 @@ def main():
                     worker.start()
                     try:
                         with sync_playwright() as playwright:
-                            browser = playwright.chromium.launch(headless=True)
+                            browser = playwright.chromium.launch(headless=True, executable_path=os.getenv("AXIOM_TEST_CHROMIUM"))
                             try:
                                 for name, viewport in (
                                     ("desktop", {"width": 1366, "height": 900}),

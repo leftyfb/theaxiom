@@ -215,10 +215,10 @@ def installed(artifact, *, verify=True):
             yield stream
 
 
-def ready(artifact):
+def ready(artifact, *, verify=True):
     if artifact:
         try:
-            with installed(artifact):
+            with installed(artifact, verify=verify):
                 return True
         except (OSError, ValueError):
             pass
