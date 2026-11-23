@@ -46,7 +46,27 @@ def test_changed_installed_digest_never_reuses_old_update_evidence(location):
 def test_expired_or_future_check_cannot_claim_update(location):
     store.save("wikipedia", SHA, NEW, now=1000)
     assert store.load("wikipedia", SHA, now=999)["state"] == "unable_to_determine"
-    assert store.load("wikipedia", SHA, now=1000 + store.MAX_AGE + 1)["state"] == "unable_to_determine"
+    stale = store.load("wikipedia", SHA, now=1000 + store.MAX_AGE + 1)
+    assert stale["state"] == "unable_to_determine" and stale["stale"]
+    assert stale["last_successful_check_at"] == 1000
+    assert stale["last_known_candidate_edition"] == NEW["candidate_edition"]
+    assert "candidate_url" not in stale and "checked_at" not in stale
+
+
+def test_failed_checks_preserve_last_success_until_reconnection(location):
+    store.save("wikipedia", SHA, NEW, now=1000)
+    failure = {"state": "unable_to_determine", "evidence": "publisher unreachable"}
+    store.save("wikipedia", SHA, failure, now=2000)
+    store.save("wikipedia", SHA, failure, now=3000)
+    result = store.load("wikipedia", SHA, now=3001)
+    assert result == dict(failure, checked_at=3000, last_successful_check_at=1000,
+                          last_known_candidate_edition=NEW["candidate_edition"])
+    assert "last_successful_check_at" not in store.load("wikipedia", "b" * 64, now=3001)
+    store.save("wikipedia", SHA, NEW, now=4000)
+    current = store.load("wikipedia", SHA, now=4001)
+    assert current["candidate_url"] == NEW["candidate_url"]
+    assert current["last_successful_check_at"] == 4000
+    assert "last_known_candidate_edition" not in current
 
 
 @pytest.mark.parametrize("invalid", [

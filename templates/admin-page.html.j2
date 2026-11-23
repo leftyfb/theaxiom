@@ -1864,7 +1864,8 @@
                 representation_unchanged: 'Publisher representation unchanged',
                 unable_to_determine: 'Unable to check for updates'
               };
-              evidence.textContent = update ? (update.state === 'update_available' ? '' : description[update.state] || '') :
+              evidence.textContent = update ? (update.stale ? 'Last update check is stale' :
+                update.state === 'update_available' ? '' : description[update.state] || '') :
                 (source?.discovery?.method && source.discovery.method !== 'manual' ? 'No update check recorded' : '');
             }
             const technical = card.querySelector('[data-field="update-evidence"]');
@@ -1872,6 +1873,9 @@
               technical.textContent = update ? [
                 update.evidence,
                 update.checked_at ? 'Last check ' + new Date(update.checked_at * 1000).toLocaleString() : '',
+                update.last_successful_check_at ?
+                  'Last successful check ' + new Date(update.last_successful_check_at * 1000).toLocaleString() : '',
+                update.last_known_candidate_edition ? 'Last known candidate ' + update.last_known_candidate_edition : '',
                 update.candidate_edition ? 'Candidate ' + update.candidate_edition : '',
                 update.candidate_sha256 ? 'SHA-256 ' + update.candidate_sha256 : ''
               ].filter(Boolean).join(' · ') : '';

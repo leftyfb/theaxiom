@@ -5,6 +5,7 @@ digest; changing active content invalidates a prior update notification.
 """
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -69,12 +70,7 @@ def _validated(source_id: str, installed_sha256: str, checked_at: float, result:
     return blob
 
 
-def save(source_id: str, installed_sha256: str, result: dict, *, now=None):
-    """Atomically save one checked result; no update or download action."""
-    stamp = time.time() if now is None else now
-    data = _validated(source_id, installed_sha256, stamp, result)
-    target = record_path(source_id)
-    target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+def _write(target, data):
     if target.is_symlink():
         raise ValueError("Unsafe update-check record")
     fd, temporary = tempfile.mkstemp(prefix=".update-check-", dir=target.parent)
@@ -85,28 +81,18 @@ def save(source_id: str, installed_sha256: str, result: dict, *, now=None):
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, target)
-        directory_fd = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
     finally:
         Path(temporary).unlink(missing_ok=True)
 
 
-def load(source_id: str, installed_sha256: str, *, now=None) -> dict:
-    """Return an uncertain state if evidence is absent, corrupt, old or rebound."""
-    unknown = {"state": "unable_to_determine", "evidence": "no current check evidence"}
+def _read(target, source_id, installed_sha256):
     try:
-        target = record_path(source_id)
-        if not _digest(installed_sha256):
-            return unknown
-        fd = os.open(target, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        fd = os.open(target, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
         try:
             info = os.fstat(fd)
             if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
                     or info.st_size > MAX_RECORD or info.st_mode & 0o077):
-                return unknown
+                return None
             with os.fdopen(fd, "rb", closefd=False) as stream:
                 payload = stream.read(MAX_RECORD + 1)
         finally:
@@ -116,12 +102,63 @@ def load(source_id: str, installed_sha256: str, *, now=None) -> dict:
                 "source_id", "installed_sha256", "checked_at", "result"}
                 or record["source_id"] != source_id
                 or record["installed_sha256"] != installed_sha256):
-            return unknown
+            return None
         _validated(source_id, installed_sha256, record["checked_at"], record["result"])
-        present = time.time() if now is None else now
-        if (type(present) not in (int, float) or present < record["checked_at"]
-                or present - record["checked_at"] > MAX_AGE):
-            return unknown
-        return dict(record["result"], checked_at=record["checked_at"])
-    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+        return record
+    except (OSError, ValueError, TypeError, KeyError):
+        return None
+
+
+def _history_path(target):
+    return target.with_suffix(".last-success.json")
+
+
+def save(source_id: str, installed_sha256: str, result: dict, *, now=None):
+    """Save the result and retain the last successful check on failure."""
+    stamp = time.time() if now is None else now
+    data = _validated(source_id, installed_sha256, stamp, result)
+    target = record_path(source_id)
+    target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    directory_fd = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        fcntl.flock(directory_fd, fcntl.LOCK_EX)
+        previous = _read(target, source_id, installed_sha256)
+        if previous and previous["checked_at"] > stamp:
+            return
+        if (result["state"] == "unable_to_determine" and previous
+                and previous["result"]["state"] != "unable_to_determine"):
+            _write(_history_path(target), _validated(source_id, installed_sha256,
+                                                   previous["checked_at"], previous["result"]))
+            os.fsync(directory_fd)
+        _write(target, data)
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+
+
+def load(source_id: str, installed_sha256: str, *, now=None) -> dict:
+    """Return actionable evidence only from a current successful check."""
+    unknown = {"state": "unable_to_determine", "evidence": "no current check evidence"}
+    try:
+        target = record_path(source_id)
+    except ValueError:
         return unknown
+    if not _digest(installed_sha256):
+        return unknown
+    record = _read(target, source_id, installed_sha256)
+    present = time.time() if now is None else now
+    if not record or type(present) not in (int, float) or not present >= record["checked_at"]:
+        return unknown
+    stamp, result = record["checked_at"], record["result"]
+    current = dict(result, checked_at=stamp) if present - stamp <= MAX_AGE else dict(
+        unknown, evidence="last update check is stale", stale=True)
+    success = record
+    if result["state"] == "unable_to_determine":
+        success = _read(_history_path(target), source_id, installed_sha256)
+    if (success and success["checked_at"] <= stamp
+            and success["result"]["state"] != "unable_to_determine"):
+        current["last_successful_check_at"] = success["checked_at"]
+        edition = success["result"].get("candidate_edition")
+        if edition and current["state"] == "unable_to_determine":
+            current["last_known_candidate_edition"] = edition
+    return current
