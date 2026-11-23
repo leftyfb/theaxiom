@@ -8,8 +8,9 @@ permissions:
   contents: read
 jobs:
   tests:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Never run untrusted pull requests on the persistent tux runner.
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || fromJSON('["self-hosted","Linux","X64","axiom-ci"]') }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -24,8 +25,13 @@ jobs:
       - name: Install Chromium browser regression dependencies
         run: |
           python -m pip install 'playwright>=1.50,<2'
-          python -m playwright install --with-deps chromium
-      - name: Install isolated Kiwix smoke dependencies
+          if [[ "$RUNNER_ENVIRONMENT" == "github-hosted" ]]; then
+            python -m playwright install --with-deps chromium
+          else
+            python -m playwright install chromium
+          fi
+      - name: Install isolated Kiwix smoke dependencies (GitHub-hosted only)
+        if: ${{ runner.environment == 'github-hosted' }}
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq kiwix-tools zim-tools nginx
@@ -64,7 +70,7 @@ jobs:
   report:
     needs: tests
     if: ${{ always() && github.repository == 'leftyfb/theaxiom' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, axiom-ci]
     timeout-minutes: 5
     steps:
       - name: Retrieve test output
