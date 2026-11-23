@@ -403,6 +403,9 @@
     <p class="source-note" id="source-update-summary" role="status"{% if not update_summary %} hidden{% endif %}>{{ update_summary }}</p>
     <div class="source-search-row">
       <button class="button" type="button" id="source-add">Add Source</button>
+      {% if starter_pdfs_available %}
+      <button class="button" type="button" id="starter-pdfs">Add EPA and CDC sources</button>
+      {% endif %}
       <button class="button" type="button" id="source-guide-open">Content source guide</button>
       <button class="button" type="button" id="selection-file-open">Library selections</button>
       <button class="button" type="button" id="upstream-catalog-open">Browse Kiwix catalog</button>
@@ -1714,6 +1717,23 @@
         }
         reloadSources();
       }
+      document.getElementById('starter-pdfs')?.addEventListener('click', async event => {
+        const button = event.currentTarget;
+        button.disabled = true;
+        try {
+          const response = await fetch('/api/starter-pdfs', {
+            method: 'POST',
+            headers: {...window.axiomCsrfHeaders(), 'Content-Type': 'application/json'},
+            body: JSON.stringify({revision})
+          });
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.error || 'Could not add starter sources.');
+          reloadSources();
+        } catch (error) {
+          feedback.textContent = error.message;
+          button.disabled = false;
+        }
+      });
       document.getElementById('source-add').addEventListener('click', () => openForm('add'));
       cancelSave.addEventListener('click', () => { if (!formPosting) dialog.close(); });
       dialog.addEventListener('cancel', event => { if (formPosting) event.preventDefault(); });

@@ -431,6 +431,31 @@ class CatalogStore:
                 os.close(fd)
 
 
+    def add_starter_pdfs(self, revision):
+        """Add missing preconfigured documents in a single catalog revision."""
+        if type(revision) is not int or revision < 0:
+            raise CatalogError("revision precondition required")
+        with LOCK:
+            fd = self._file_lock()
+            try:
+                state = self._read()
+                if state["revision"] != revision:
+                    raise RevisionConflict("catalog revision changed")
+                ids = {row["source_id"] for row in state["sources"]}
+                added = [sid for sid in source_catalog.STARTER_PDFS if sid not in ids]
+                if added:
+                    for sid in added:
+                        fields = source_catalog.STARTER_PDFS[sid]
+                        self._validate_id(sid)
+                        self._validate_fields(fields, EDITABLE, required={"title"})
+                        state["sources"].append(self._record(sid, fields))
+                    state["revision"] += 1
+                    state["updated_at"] = datetime.now(timezone.utc).isoformat()
+                    self._atomic_write(self._validated_payload(state))
+                return {"revision": state["revision"], "added": added}
+            finally:
+                os.close(fd)
+
     def set_library_layout(self, revision, layout):
         if type(revision) is not int or revision < 0:
             raise CatalogError("revision precondition required")

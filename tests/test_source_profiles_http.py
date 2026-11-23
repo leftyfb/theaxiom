@@ -1244,3 +1244,36 @@ def test_batch_restarts_zim_from_retained_bytes(app, monkeypatch):
                storage=json.dumps(admin_api.storage_settings.load_settings()))
     assert admin_api._execute_batch_job(job, lambda: False, threading.Event()) == ("completed", "")
     start.assert_called_once_with("fixture", config, resume=True, restart=False)
+
+
+def test_add_starter_pdfs_creates_downloadable_profiles_without_queueing(app, monkeypatch):
+    request, _ = app
+    catalog = request("/api/sources")
+    revision = catalog["revision"]
+    fetch = Mock(side_effect=AssertionError("Adding profiles must not fetch content"))
+    monkeypatch.setattr(admin_api.pdf_transport, "download", fetch)
+    request("/api/starter-pdfs", {"revision": revision}, status=403, origin="")
+    request("/api/starter-pdfs", {"revision": revision + 1}, status=409)
+    assert 'id="starter-pdfs"' in request("/admin/sources")
+    entries = admin_api.source_catalog.STARTER_PDFS
+    result = request("/api/starter-pdfs", {"revision": revision})
+    assert result == {"revision": revision + 1, "added": list(entries)}
+    catalog = request("/api/sources")
+    assert 'id="starter-pdfs"' not in request("/admin/sources")
+    for sid, expected in entries.items():
+        row = source(catalog, sid)
+        assert row["configuration"]["source_url"] == expected["source_url"]
+        assert row["configuration"]["sha256"] == expected["sha256"]
+        assert not row["publication"]["published"]
+    preview = request("/api/acquisition-preview", {
+        "revision": catalog["revision"], "source_ids": list(entries),
+    })
+    assert [row["transfer_bytes"] for row in preview["sources"]] == [754723, 282412]
+    sid = next(iter(entries))
+    edited = mutate(request, catalog, "edit", {"title": "My EPA reference"}, sid=sid)
+    assert request("/api/starter-pdfs", {"revision": edited["revision"]}) == {
+        "revision": edited["revision"], "added": [],
+    }
+    assert source(request("/api/sources"), sid)["profile"]["title"] == "My EPA reference"
+    assert request("/api/acquisition-batch") == {"jobs": []}
+    fetch.assert_not_called()

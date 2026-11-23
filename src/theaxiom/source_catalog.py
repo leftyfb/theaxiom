@@ -282,3 +282,32 @@ def seed_catalog_manifest():
 
 def planned_sources():
     return deepcopy(PLANNED_SOURCES)
+
+
+# Explicitly added by an administrator. Keep these separate from the seed list
+# so upgrading never rewrites a planned source or an operator's existing entry.
+STARTER_PDFS = {
+    "epa-emergency-drinking-water": {
+        "format": "pdf",
+        "title": "EPA — Emergency Disinfection of Drinking Water",
+        "description": "Emergency drinking-water treatment guidance from the EPA Office of Water.",
+        "publisher": "U.S. Environmental Protection Agency",
+        "edition": "September 2017 (EPA 816-F-15-003)",
+        "language": "eng",
+        "source_url": "https://www.epa.gov/sites/default/files/2017-09/documents/emergency_disinfection_of_drinking_water_sept2017.pdf",
+        "expected_size_bytes": "754723",
+        "sha256": "f404083d00decedc267bf4265eda776bb250ccfe18c1f7b19152aa006ff727c5",
+        "provenance": "Original EPA publication. Size and SHA-256 measured from the EPA download.",
+    },
+    "cdc-wash-your-hands": {
+        "format": "pdf",
+        "title": "CDC — Wash Your Hands",
+        "description": "CDC handwashing fact sheet for water, sanitation and hygiene emergencies.",
+        "publisher": "Centers for Disease Control and Prevention",
+        "language": "eng",
+        "source_url": "https://www.cdc.gov/water-emergency/media/pdfs/factsheet-wash-your-hands.pdf",
+        "expected_size_bytes": "282412",
+        "sha256": "afd3dbf6a5ac9e3e40c6d9ed4d3e00d0e6493a468db7c02c4f2aadbe9d394a03",
+        "provenance": "Original CDC publication. Size and SHA-256 measured from the CDC download.",
+    },
+}
