@@ -68,10 +68,32 @@ ACQUISITION_DISABLED = "acquisition disabled pending storage safety integration"
 source_catalog = importlib.import_module(f"{__package__}.source_catalog" if __package__ else "theaxiom.source_catalog")
 WIKIPEDIA_SOURCE = source_catalog.WIKIPEDIA_SOURCE
 
-# Map of every resolvable source_id -> its trusted manifest entry.
-TRUSTED_SOURCES: dict[str, dict[str, Any]] = {
-    WIKIPEDIA_SOURCE["source_id"]: WIKIPEDIA_SOURCE,
-}
+def trusted_source_manifests(entries) -> dict[str, dict[str, Any]]:
+    """Select immutable, fully pinned acquisition definitions by capability.
+
+    Seed profiles without a verified size and checksum remain editable
+    candidates, never trusted acquisition manifests.
+    """
+    result = {}
+    for entry in entries:
+        if not isinstance(entry, dict) or entry.get("kind") != "zim":
+            continue
+        sid, filename, digest = (entry.get("source_id"), entry.get("filename"), entry.get("sha256"))
+        size, url = entry.get("bytes"), entry.get("source_url")
+        if (not isinstance(sid, str) or not catalog_store.ID_RE.fullmatch(sid)
+                or not isinstance(filename, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,195}\.zim", filename)
+                or not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest)
+                or type(size) is not int or size < 96
+                or not isinstance(url, str) or not url.startswith("https://")):
+            continue
+        result[sid] = {key: value for key, value in entry.items() if key != "availability"}
+    return result
+
+
+# Immutable packaged acquisition pins are selected by capability, not title.
+TRUSTED_SOURCES: dict[str, dict[str, Any]] = trusted_source_manifests(
+    source_catalog.builtin_sources()
+)
 
 
 def resolve_source(source_id: str) -> dict[str, Any] | None:
