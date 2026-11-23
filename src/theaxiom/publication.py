@@ -104,7 +104,7 @@ def valid_book_id(book_id):
         if entry.get("kind") != "zim":
             continue
         filename, digest, size = (entry.get("filename"), entry.get("sha256"), entry.get("bytes"))
-        if (not isinstance(filename, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,195}\\.zim", filename)
+        if (not isinstance(filename, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,195}\.zim", filename)
                 or not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest)
                 or type(size) is not int or size < 96):
             continue
