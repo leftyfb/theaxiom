@@ -91,15 +91,26 @@ def reachable(route):
 GENERIC_BOOK_ID_RE = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.[a-f0-9]{64}\Z")
 
 
-# The pre-existing, separately verified Wikipedia archive predates digest-suffixed
-# generic filenames. Only its exact trusted filename stem is an exception.
+# Earlier verified installations may have publisher-named (rather than
+# digest-suffixed) ZIMs. Their exact allowlisted names are trusted data, not
+# special runtime behavior attached to a publisher or source ID.
 def valid_book_id(book_id):
     if not isinstance(book_id, str):
         return False
     if GENERIC_BOOK_ID_RE.fullmatch(book_id):
         return True
-    from .source_catalog import WIKIPEDIA_SOURCE
-    return book_id == Path(WIKIPEDIA_SOURCE["filename"]).stem
+    from . import source_catalog
+    for entry in source_catalog.builtin_sources():
+        if entry.get("kind") != "zim":
+            continue
+        filename, digest, size = (entry.get("filename"), entry.get("sha256"), entry.get("bytes"))
+        if (not isinstance(filename, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,195}\\.zim", filename)
+                or not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest)
+                or type(size) is not int or size < 96):
+            continue
+        if book_id == Path(filename).stem:
+            return True
+    return False
 
 
 def reader_location(route, book_id=None):
