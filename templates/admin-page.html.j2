@@ -430,6 +430,7 @@
       <input id="selection-file" type="file" accept=".json,application/json">
       <p id="selection-file-feedback" role="status"></p>
       <ul id="selection-file-matches"></ul>
+      <button class="button" type="button" id="selection-file-apply" disabled>Select matching sources</button>
       <form method="dialog"><button class="button">Close</button></form>
     </dialog>
     {% set groups = (catalog|default({})).groups|default([]) %}
@@ -843,6 +844,8 @@
       const selectionFile = document.getElementById('selection-file');
       const selectionFeedback = document.getElementById('selection-file-feedback');
       const selectionMatches = document.getElementById('selection-file-matches');
+      const selectionApply = document.getElementById('selection-file-apply');
+      let matchedSelection = [];
       async function selectionRequest(payload) {
         const response = await fetch('/api/library-selection', {
           method: 'POST',
@@ -858,6 +861,8 @@
         const file = selectionFile.files[0];
         selectionFile.value = '';
         selectionMatches.replaceChildren();
+        matchedSelection = [];
+        selectionApply.disabled = true;
         if (!file) return;
         selectionFile.disabled = true;
         selectionFeedback.textContent = 'Checking this catalog…';
@@ -872,11 +877,27 @@
             selectionMatches.append(row);
           }
           selectionFeedback.textContent = 'Reviewed ' + result.sources.length + ' source choices.';
+          if (result.revision !== revision) {
+            selectionFeedback.textContent += ' The catalog changed. Reload before selecting matches.';
+            return;
+          }
+          matchedSelection = result.sources.filter(item => item.state === 'match').map(item => item.source_id);
+          selectionApply.disabled = !matchedSelection.length;
         } catch (error) {
           selectionFeedback.textContent = error.message;
         } finally {
           selectionFile.disabled = false;
         }
+      });
+      selectionApply.addEventListener('click', () => {
+        if (bulkBusy || !matchedSelection.length) return;
+        const matches = new Set(matchedSelection);
+        for (const checkbox of groupChecks) checkbox.checked = matches.has(checkbox.value);
+        selecting = true;
+        selectionMode();
+        selectionDialog.close();
+        selectMode.focus();
+        feedback.textContent = 'Selected ' + matchedSelection.length + ' matching sources. Review storage to plan an acquisition.';
       });
       document.getElementById('selection-export').addEventListener('click', async () => {
         try {

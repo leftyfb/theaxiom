@@ -1392,7 +1392,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 if "source_ids" in data:
                     result = {"manifest": library_selection.export_selection(known, data["source_ids"])}
                 else:
-                    result = {"sources": library_selection.preview_selection(known, data["manifest"])}
+                    result = {"revision": catalog["revision"],
+                              "sources": library_selection.preview_selection(known, data["manifest"])}
             except ValueError as exc:
                 self._send_json(400, {"error": str(exc)})
                 return

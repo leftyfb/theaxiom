@@ -272,12 +272,15 @@ def exercise(browser, base, name, viewport, artifacts):
         with page.expect_download() as download:
             page.get_by_role("button", name="Export selected sources").click()
         manifest = download.value.path().read_bytes()
+        check.uncheck()
         page.get_by_role("button", name="Preview selection file").click()
         page.locator("#selection-file").set_input_files({
             "name": "selection.json", "mimeType": "application/json", "buffer": manifest,
         })
         expect(page.locator("#selection-file-matches")).to_contain_text("Matches this catalog")
-        page.locator("#selection-file-dialog").get_by_role("button", name="Close").click()
+        expect(check).not_to_be_checked()
+        page.get_by_role("button", name="Select matching sources").click()
+        expect(check).to_be_checked()
         page.route("**/api/upstream-kiwix-catalog", lambda route: route.fulfill(json={
             "cached": True, "stale": True, "checked_at": 1000,
             "entries": [{"title": "Offline reference", "edition": "2026-11", "variant": "maxi"}],

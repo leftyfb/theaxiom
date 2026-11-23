@@ -807,7 +807,9 @@ def test_portable_selection_round_trip_discloses_only_selected_public_metadata(a
     assert exported == {"version": 1, "sources": [{
         "source_id": "selection-fixture", "format": "zim", "language": "en", "edition": "2026-11",
     }]}
-    assert request(endpoint, {"manifest": exported})["sources"] == [{
+    preview = request(endpoint, {"manifest": exported})
+    assert preview["revision"] == catalog["revision"]
+    assert preview["sources"] == [{
         "source_id": "selection-fixture", "state": "match", "title": "Selection fixture",
         "license": "Fixture terms",
     }]
