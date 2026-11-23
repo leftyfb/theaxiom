@@ -338,10 +338,6 @@ def activate_candidate(sid, config):
             replacement = dict(source_id=sid, state="completed", active=False,
                                verified=True, configuration=configuration,
                                artifact=candidate["artifact"])
-            # Adoption provenance is lifecycle evidence, not a one-shot flag:
-            # retain it when the adopted installation is normally replaced.
-            if "adopted_from_legacy" in live:
-                replacement["adopted_from_legacy"] = live["adopted_from_legacy"]
             if not installed(replacement, configuration):
                 raise ValueError("Replacement archive is missing or invalid")
             # Preserve the complete original serving record for rollback.
@@ -401,8 +397,6 @@ def recover_candidate_transition(sid):
             replacement = dict(source_id=sid, state="completed", active=False,
                                verified=True, configuration=candidate["configuration"],
                                artifact=candidate["artifact"])
-            if "adopted_from_legacy" in previous:
-                replacement["adopted_from_legacy"] = previous["adopted_from_legacy"]
             current = read(sid)
             if candidate["state"] == "activated":
                 if current == replacement:

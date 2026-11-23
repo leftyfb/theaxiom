@@ -5,7 +5,6 @@ Never connects to Vancouver or opens a production archive.
 """
 import os
 from pathlib import Path
-import re
 import tempfile
 import threading
 from types import SimpleNamespace
@@ -13,7 +12,7 @@ from unittest.mock import patch
 
 from playwright.sync_api import sync_playwright, expect
 
-from theaxiom import admin_api, admin_sessions, catalog_store, publication, zim_catalog
+from theaxiom import admin_api, admin_sessions, catalog_store
 from theaxiom.admin_security import PasswordStore, ServerConfig
 
 
@@ -413,44 +412,6 @@ def exercise(browser, base, name, viewport, artifacts):
         context.close()
 
 
-def exercise_wikipedia_viewer_shim(browser, base):
-    """Run the adopted Wikipedia bookmark through the real HTTP handler."""
-    legacy_book = publication.ROUTES["wikipedia-en"]["book_id"]
-    managed_book = "wikipedia-en." + "a" * 64
-    record = {"source_id": "wikipedia-en", "configuration": {"format": "zim"}}
-    catalog = SimpleNamespace(get=lambda: {"sources": [record], "revision": 0})
-    context = browser.new_context()
-    page = context.new_page()
-    page.set_default_timeout(10000)
-    errors = []
-    page.on("pageerror", lambda error: errors.append(str(error)))
-    try:
-        with patch.object(admin_api, "SOURCE_CATALOG", catalog), \
-             patch.object(admin_api.AdminAPIHandler, "_publication_snapshot",
-                          return_value={"stale": False, "acquisitions": []}), \
-             patch.object(publication, "managed_installation", return_value=True), \
-             patch.object(zim_catalog, "status", return_value={"published": True}), \
-             patch.object(zim_catalog, "source_content_name", return_value=managed_book):
-            old_url = (base + "/wikipedia/viewer?article=Water&query=offline"
-                       + "#" + legacy_book + "/Water")
-            with page.expect_response(
-                lambda response: response.url.startswith(base + "/wikipedia/viewer")
-            ) as initial:
-                page.goto(old_url, wait_until="commit")
-            response = initial.value
-            assert response.status == 200
-            csp = response.headers.get("content-security-policy", "")
-            body = response.text()
-            nonce_match = re.search(r'<script nonce="([^"]+)">', body)
-            assert nonce_match and ("script-src 'nonce-" + nonce_match.group(1) + "'") in csp
-            expect(page).to_have_url(
-                base + "/zim/viewer?article=Water&query=offline#"
-                + managed_book + "/Water")
-            assert not errors, errors
-    finally:
-        context.close()
-
-
 def exercise_history_poll(browser, viewport):
     """Use the real source-card DOM and poller with two independent timelines."""
     from test_admin_page_template import profile, render
@@ -530,7 +491,6 @@ def main():
                         with sync_playwright() as playwright:
                             browser = playwright.chromium.launch(headless=True, executable_path=os.getenv("AXIOM_TEST_CHROMIUM"))
                             try:
-                                exercise_wikipedia_viewer_shim(browser, f"http://{host}:{port}")
                                 for name, viewport in (
                                     ("desktop", {"width": 1366, "height": 900}),
                                     ("mobile", {"width": 390, "height": 844}),

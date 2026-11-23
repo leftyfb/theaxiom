@@ -8,7 +8,6 @@ from io import BytesIO
 import importlib
 import os
 import re
-import secrets
 import subprocess
 import threading
 import time
@@ -44,7 +43,6 @@ document_update_discovery = importlib.import_module(f"{__package__}.document_upd
 zim_jobs = importlib.import_module(f"{__package__}.zim_jobs" if __package__ else "theaxiom.zim_jobs")
 zim_source = importlib.import_module(f"{__package__}.zim_source" if __package__ else "theaxiom.zim_source")
 zim_catalog = importlib.import_module(f"{__package__}.zim_catalog" if __package__ else "theaxiom.zim_catalog")
-legacy_alias = importlib.import_module(f"{__package__}.legacy_alias" if __package__ else "theaxiom.legacy_alias")
 zim_refresh = importlib.import_module(f"{__package__}.zim_refresh" if __package__ else "theaxiom.zim_refresh")
 ENDPOINT_TEST_LOCK = threading.Lock()
 ENDPOINT_TEST_NEXT = 0.0
@@ -66,7 +64,6 @@ ADMIN_SESSIONS = admin_sessions.Sessions()
 PDFJS_ROOT = Path("/opt/pdfjs/current")
 PDFJS_PREFIX = "/api/pdfjs/"
 ZIM_READER_ROUTE = re.compile(r'/read/zim/([a-z0-9-]{1,63})\Z')
-LEGACY_WIKIPEDIA_ROUTE = re.compile(r'/wikipedia/(?:viewer|search|content/.+)\Z')
 PDFJS_ASSET = re.compile(r"/api/pdfjs/(?:build|web|cmaps|standard_fonts|wasm|iccs|image_decoders|locale)/[A-Za-z0-9_./-]+\Z")
 
 ACTION_LABELS = {"download": "Download", "redownload": "Re-download", "update": "Update"}
@@ -375,8 +372,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                          or self.path.split("?", 1)[0] in {"/", "/index.html", "/search"}
                          or pdf_source.ROUTE.fullmatch(self.path) or epub_source.ROUTE.fullmatch(self.path)
                          or ZIM_READER_ROUTE.fullmatch(self.path) or PDFJS_ASSET.fullmatch(self.path)
-                         or self.path == "/internal/publication/zim"
-                         or LEGACY_WIKIPEDIA_ROUTE.fullmatch(urlsplit(self.path).path)):
+                         or self.path == "/internal/publication/zim"):
             return True
 
         # The login submission is public, but still passes all content-type,
@@ -618,49 +614,6 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             except (OSError, ValueError, catalog_store.CatalogError):
                 allowed = False
             self.send_response(204 if allowed else 403)
-            self.send_header("Content-Length", "0")
-            self.end_headers()
-        elif LEGACY_WIKIPEDIA_ROUTE.fullmatch(urlsplit(self.path).path):
-            source_id = "wikipedia-en"
-            route = publication.ROUTES.get(source_id)
-            managed = False
-            record = None
-            try:
-                snapshot = self._publication_snapshot()
-                records = SOURCE_CATALOG.get()["sources"]
-                record = next((r for r in records if r["source_id"] == source_id), None)
-                managed = publication.managed_installation(source_id)
-                state = (zim_catalog.status(record, records) if managed and record
-                         else None)
-                published = (bool(state and state["published"]) if managed
-                             else publication.allowed(snapshot, source_id))
-                location = legacy_alias.resolve_wikipedia(
-                    urlsplit(self.path).path, urlsplit(self.path).query,
-                    records=record, route=route, published=published,
-                    managed=managed, zim_catalog=zim_catalog)
-            except (OSError, ValueError, catalog_store.CatalogError, KeyError, TypeError):
-                location = None
-            if location is None:
-                self._send_json(403, {"error": "collection unavailable"})
-                return
-            if (managed and urlsplit(self.path).path == "/wikipedia/viewer"):
-                legacy_book = route.get("book_id") if route else None
-                managed_book = zim_catalog.source_content_name(record)
-                nonce = secrets.token_urlsafe(24)
-                body = legacy_alias.viewer_redirect_document(
-                    legacy_book, managed_book, nonce=nonce).encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.send_header("Cache-Control", "no-store")
-                self.send_header("Content-Security-Policy",
-                                 f"default-src 'none'; script-src 'nonce-{nonce}'; "
-                                 "base-uri 'none'; frame-ancestors 'none'")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
-                return
-            self.send_response(302)
-            self.send_header("Location", location)
             self.send_header("Content-Length", "0")
             self.end_headers()
         elif (compat := next(((sid, route) for sid, route in publication.ROUTES.items()

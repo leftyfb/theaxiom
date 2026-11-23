@@ -42,27 +42,11 @@ ROUTES = legacy_reader_routes()
 
 
 def managed_installation(source_id):
-    """Return whether a source has crossed into the normal ZIM lifecycle.
-
-    Adoption deliberately uses the same durable completed job as a normal
-    acquisition. Until that record is present, the legacy service remains
-    the only eligible publication path.
-    """
+    """Return whether a compatibility source has been explicitly adopted."""
     if source_id not in ROUTES:
         return False
-    try:
-        from . import zim_jobs
-        job = zim_jobs.read(source_id)
-        # Legacy routes may cross into the managed lifecycle only through the
-        # explicit adoption transition.  A completed job by itself is not
-        # evidence of that transition.
-        adopted = job.get("adopted_from_legacy") if job else None
-        return bool(isinstance(adopted, dict)
-                    and job and job.get("state") == "completed"
-                    and job.get("verified") is True
-                    and job.get("active") is False)
-    except (OSError, ValueError, KeyError, TypeError):
-        return False
+    from . import zim_adoption
+    return source_id == zim_adoption.SOURCE_ID and zim_adoption.managed()
 
 
 def legacy_only(source_id):

@@ -96,14 +96,18 @@ def verified_books(records, enabled=None):
                 digest = artifact["sha256"]
                 size = artifact["bytes"]
                 filename = artifact["filename"]
+                adopted = zim_jobs.adopted_filename(job, artifact)
                 if (not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest)
                         or type(size) is not int or size < 96
-                        or (filename != f"{sid}.{digest}.zim" and not zim_jobs.adopted_filename(job, artifact))):
+                        or (filename != f"{sid}.{digest}.zim" and not adopted)):
                     continue
                 # O_NOFOLLOW and verified mount, ownership, size and installed-file
                 # mode checks live in the existing storage adapter.
                 try:
                     with pdf_source._file(directory, mount, filename, size) as stream:
+                        if (adopted and zim_jobs.archive_identity(os.fstat(stream.fileno()))
+                                != job["adopted_from_legacy"]["identity"]):
+                            continue
                         book_uuid = archive_uuid(stream)
                 except (OSError, ValueError):
                     continue

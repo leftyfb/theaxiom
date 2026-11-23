@@ -19,6 +19,8 @@ PINNED_BYTES = 127418087648
 PINNED_SHA256 = "34162d18b9f96f494eac48a73a309c72e0bc95d85f76be405d0f5de795854aa6"
 SAFE_MODE_MASK = 0o022
 MARKER_MAX_BYTES = 16 * 1024
+
+
 class AdoptionError(ValueError):
     """An adoption precondition or durable transition is unsafe."""
 
@@ -68,10 +70,31 @@ def _read_json(path: Path) -> dict[str, Any]:
     return value
 
 
-def adopt(legacy_path: str | Path, config: dict, journal_path: str | Path) -> dict:
+def journal_path() -> Path:
+    return zim_jobs.directory() / f"{SOURCE_ID}.adoption.json"
+
+
+def managed() -> bool:
+    """Keep the source managed after subsequent ordinary ZIM jobs."""
+    try:
+        record = _read_json(journal_path())
+        job = record["job"]
+        if (job["source_id"] != SOURCE_ID
+                or job["artifact"]["sha256"] != PINNED_SHA256
+                or job["artifact"]["filename"] != PINNED_FILENAME):
+            return False
+        if record["state"] == "completed":
+            return True
+        return (record["state"] in {"prepared", "rolling_back"}
+                and zim_jobs.read(SOURCE_ID) == job)
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+
+def adopt(legacy_path: str | Path, config: dict) -> dict:
 
     legacy = Path(legacy_path)
-    journal = Path(journal_path)
+    journal = journal_path()
     settings = zim_jobs.storage_settings.load_settings()
     if (not settings["storage_root"] or not settings["storage_mount"]
             or legacy != Path(settings["storage_root"]) / "library" / "zim" / PINNED_FILENAME):
@@ -123,8 +146,8 @@ def adopt(legacy_path: str | Path, config: dict, journal_path: str | Path) -> di
     return record
 
 
-def rollback(journal_path: str | Path) -> dict:
-    journal = Path(journal_path)
+def rollback() -> dict:
+    journal = journal_path()
     with zim_jobs.LOCK, zim_jobs.worker_lock():
         record = _read_json(journal)
         job = record.get("job")
@@ -134,7 +157,8 @@ def rollback(journal_path: str | Path) -> dict:
                 or not isinstance(job.get("adopted_from_legacy"), dict)):
             raise AdoptionError("journal is not an in-place adoption record")
         current = zim_jobs.read(SOURCE_ID)
-        if zim_jobs.read_candidate(SOURCE_ID) or (current is not None and current != job):
+        if (zim_jobs.read_candidate(SOURCE_ID) or (current is not None and current != job)
+                or (record["state"] == "completed" and current is None)):
             raise AdoptionError("managed acquisition state changed")
         record["state"] = "rolling_back"
         _json_atomic(journal, record)
@@ -156,16 +180,14 @@ def main():
     sub = parser.add_subparsers(dest="command", required=True)
     a = sub.add_parser("adopt")
     a.add_argument("legacy_path")
-    a.add_argument("journal_path")
     a.add_argument("source_url")
-    r = sub.add_parser("rollback")
-    r.add_argument("journal_path")
+    sub.add_parser("rollback")
     args = parser.parse_args()
     try:
         if args.command == "adopt":
-            result = adopt(args.legacy_path, {"format": "zim", "source_url": args.source_url}, args.journal_path)
+            result = adopt(args.legacy_path, {"format": "zim", "source_url": args.source_url})
         else:
-            result = rollback(args.journal_path)
+            result = rollback()
     except (OSError, ValueError) as exc:
         parser.error(str(exc))
     print(result["state"])
