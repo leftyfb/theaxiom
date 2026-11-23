@@ -302,6 +302,7 @@ def exercise(browser, base, name, viewport, artifacts):
         page.get_by_role("button", name="Refresh listings").click()
         page.get_by_role("button", name="Inspect publisher checksum for 2026-11 maxi").click()
         expect(page.locator("#upstream-catalog-results")).to_contain_text("Publisher SHA-256 " + "a" * 64)
+        assert page.locator("#upstream-catalog-dialog").evaluate("(dialog) => dialog.scrollWidth <= dialog.clientWidth + 1"), name
         page.locator("#upstream-catalog-dialog").get_by_role("button", name="Close").click()
         check.focus()
         page.keyboard.press("Space")

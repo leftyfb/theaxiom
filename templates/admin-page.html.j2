@@ -125,8 +125,10 @@
     .group-select { display:flex; align-items:center; gap:.35rem; font-size:.8rem; color:var(--muted); }
     .group-select[hidden], [hidden] { display:none !important; }
     .group-select input { width:1.2rem; height:1.2rem; accent-color:var(--green); }
-    #source-dialog, #source-guide { width: min(42rem, calc(100% - 2rem)); max-height: calc(100% - 2rem); overflow: auto; border: 1px solid var(--line); border-radius: .85rem; padding: clamp(1rem, 4vw, 1.75rem); color: var(--dark); background: var(--paper); }
-    #source-dialog::backdrop, #source-guide::backdrop { background: rgba(18,60,50,.55); }
+    #source-dialog, #source-guide, #upstream-catalog-dialog, #selection-file-dialog { width: min(42rem, calc(100% - 2rem)); max-height: calc(100% - 2rem); overflow: auto; border: 1px solid var(--line); border-radius: .85rem; padding: clamp(1rem, 4vw, 1.75rem); color: var(--dark); background: var(--paper); }
+    #source-dialog::backdrop, #source-guide::backdrop, #upstream-catalog-dialog::backdrop, #selection-file-dialog::backdrop { background: rgba(18,60,50,.55); }
+    #upstream-catalog-results, #selection-file-matches { overflow-wrap: anywhere; }
+    #selection-file { max-width: 100%; }
     #source-dialog h3 { margin: 0; font-size: 1.4rem; }
     .editor-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 1rem; margin: 1rem 0; }
     #source-form fieldset { min-inline-size: 0; border: 1px solid #aac5b7; border-radius: .4rem; }
