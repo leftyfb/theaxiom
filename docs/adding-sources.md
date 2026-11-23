@@ -28,7 +28,7 @@ The same guide is available offline from Administration → Sources → Content 
   
 ## 4. Acquire and verify
 
-  **ZIM:** The existing verified Wikipedia archive is supported. New ZIM profiles currently require a matching trusted acquisition manifest; arbitrary remote downloads are not yet enabled.
+  **ZIM:** Wikipedia, Ready.gov and custom archives use the same ZIM controls. For URL acquisition, configure an eligible HTTPS ZIM profile and use its dedicated download/verification workflow. Publication requires a verified installed artifact and the shared Kiwix reader; merely saving a URL, checksum or shipped seed does not establish trust. The legacy action API remains disabled. Existing archives and bookmarked reader routes are preserved during upgrades; content is never downloaded or published simply because a seed is present.
 
 
   **PDF:** Use Download from URL for a configured HTTPS PDF link (up to three independently validated HTTPS redirects; query strings and private addresses remain unsupported), or Upload PDF to choose a file from your computer. Both support up to 16 MiB, compute missing size and SHA-256, and record provenance. A URL is optional for uploads. When publishing a PDF without a documented license, confirm you have permission to make it available to library users. This acknowledgement is not independent verification of publisher rights. Local or explicitly configured NFS storage is supported; the expected mount target and export must match.

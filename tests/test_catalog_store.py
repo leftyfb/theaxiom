@@ -342,7 +342,7 @@ class CatalogStoreTests(unittest.TestCase):
             self.store.mutate_group("delete", "tags", "one", state["revision"] - 1)
         self.assertEqual(self.path.read_bytes(), before)
 
-    def test_ready_gov_seed_and_exact_placeholder_upgrade(self):
+    def test_ready_gov_seed_and_existing_placeholder_never_auto_upgrade(self):
         expected = self.store._seed_record(source_catalog.READY_GOV_SOURCE)
         initial = self.store.get()
         self.assertEqual(next(s for s in initial["sources"] if s["source_id"] == "fema-ready"), expected)
@@ -356,10 +356,12 @@ class CatalogStoreTests(unittest.TestCase):
         saved["sources"] = [old if row["source_id"] == "fema-ready" else row for row in saved["sources"]]
         saved["groups"][0]["source_ids"] = ["fema-ready"]
         self.path.write_text(json.dumps(saved))
+        before = self.path.read_bytes()
         updated = self.store.get()
-        self.assertEqual(updated["revision"], initial["revision"] + 1)
-        self.assertEqual(next(s for s in updated["sources"] if s["source_id"] == "fema-ready"), expected)
+        self.assertEqual(updated["revision"], initial["revision"])
+        self.assertEqual(next(s for s in updated["sources"] if s["source_id"] == "fema-ready"), old)
         self.assertEqual(updated["groups"][0]["source_ids"], ["fema-ready"])
+        self.assertEqual(self.path.read_bytes(), before)
         self.assertEqual(self.store.get(), updated)
         removed = self.store.mutate("remove", "fema-ready", {}, updated["revision"])
         self.assertEqual(self.store.get(), removed)

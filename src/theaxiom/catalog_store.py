@@ -135,9 +135,10 @@ class CatalogStore:
                 self._validate_collection(state)
                 if not any("seeded" in record for record in state["sources"] if isinstance(record, dict)):
                     self._validate_v2(state)
-                    if state.get("starter_groups_initialized") is True:
-                        if not self._refresh_ready_gov_placeholder(state):
-                            return state
+                    # Existing catalogs are authoritative. Shipped seed changes
+                    # never alter operator records, even if they still match
+                    # a prior packaged default.
+                    return state
                 else:
                     state = self._convert_draft_v2(state)
             elif state["schema_version"] == 1:
@@ -154,21 +155,6 @@ class CatalogStore:
         if initialize:
             self._atomic_write(payload)
         return state
-
-    def _refresh_ready_gov_placeholder(self, state):
-        # Upgrade only the exact old seed. Do not overwrite operator edits,
-        # recreate removed sources, or touch assignments or installed artifacts.
-        old = self._record("fema-ready", {
-            "title": "FEMA / Ready.gov",
-            "description": "emergency preparedness library",
-        })
-        for index, record in enumerate(state["sources"]):
-            if record == old:
-                state["sources"][index] = self._seed_record(source_catalog.READY_GOV_SOURCE)
-                state["revision"] += 1
-                state["updated_at"] = datetime.now(timezone.utc).isoformat()
-                return True
-        return False
 
     @staticmethod
     def _default_groups():
