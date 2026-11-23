@@ -170,9 +170,21 @@ class CatalogStore:
         changed = False
         for record in state["sources"]:
             sid = record["source_id"]
-            if record == defaults.get(sid):
-                self._apply_fields(record, source_catalog.CONFIGURED_PDFS[sid])
-                changed = True
+            default = defaults.get(sid)
+            config = record["configuration"]
+            if (default is None or config["format"] not in {"unspecified", "pdf"}
+                    or any(config.get(key) for key in ("source_url", "expected_size_bytes", "sha256"))):
+                continue
+            fields = {
+                key: value for key, value in source_catalog.CONFIGURED_PDFS[sid].items()
+                if key == "format"
+                or (key in PROFILE_FIELDS and (
+                    key not in record["profile"] or record["profile"][key] == default["profile"].get(key)
+                ))
+                or (key not in PROFILE_FIELDS and not config.get(key))
+            }
+            self._apply_fields(record, fields)
+            changed = True
         return changed
 
     @staticmethod

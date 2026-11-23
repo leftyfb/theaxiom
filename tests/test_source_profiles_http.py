@@ -1275,7 +1275,7 @@ def test_existing_source_placeholders_are_configured_without_downloads(app, monk
     fetch.assert_not_called()
 
 
-def test_configured_defaults_preserve_edited_or_removed_placeholders(app):
+def test_configured_defaults_fill_blank_download_settings_preserving_edits(app):
     import json
 
     request, _ = app
@@ -1288,11 +1288,28 @@ def test_configured_defaults_preserve_edited_or_removed_placeholders(app):
                  if entry["source_id"] == "cdc")
     edited = store._seed_record(entry)
     edited["profile"]["title"] = "My custom CDC profile"
+    edited["configuration"].update(format="pdf", source_url="", expected_size_bytes="", sha256="",
+                                   provenance="My notes")
     state["sources"].append(edited)
     store.path.write_text(json.dumps(state))
 
     upgraded = request("/api/sources")
-    assert upgraded["revision"] == catalog["revision"]
+    assert upgraded["revision"] == catalog["revision"] + 1
     assert not any(row["source_id"] == "epa-water" for row in upgraded["sources"])
-    assert source(upgraded, "cdc")["configuration"]["format"] == "unspecified"
+    cdc = source(upgraded, "cdc")
+    assert cdc["configuration"]["format"] == "pdf"
+    assert cdc["configuration"]["source_url"] == admin_api.source_catalog.CONFIGURED_PDFS["cdc"]["source_url"]
+    assert cdc["configuration"]["provenance"] == "My notes"
     assert source(upgraded, "cdc")["profile"]["title"] == "My custom CDC profile"
+
+
+def test_configured_defaults_leave_custom_download_pin_intact(app):
+    request, _ = app
+    catalog = request("/api/sources")
+    custom = {"format": "pdf", "source_url": "https://example.org/handwashing.pdf",
+              "expected_size_bytes": "", "sha256": ""}
+    saved = mutate(request, catalog, "edit", custom, sid="cdc")
+    loaded = request("/api/sources")
+    assert loaded["revision"] == saved["revision"]
+    config = source(loaded, "cdc")["configuration"]
+    assert all(config[key] == value for key, value in custom.items())
