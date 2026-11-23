@@ -289,6 +289,11 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         if len(hosts) != 1 or not (security.valid_public_host(hosts[0]) if config.proxied else hosts[0].lower() in config.allowed_hosts):
             self._send_json(400, {"error": "invalid host"})
             return False
+        # Reject cross-origin browser writes before any authentication
+        # negotiation: a 403 is unambiguous and never triggers a Basic modal.
+        if post and self.headers.get("Sec-Fetch-Site") in {"cross-site", "same-site"}:
+            self._send_json(403, {"error": "cross-origin request rejected"})
+            return False
         public_paths = set(PUBLIC_ICON_PATHS) | {"/", "/index.html", "/health", "/health/",
                         "/internal/publication/wikipedia-en", "/read/wikipedia-en", "/api/pdf-reader.mjs"}
         if not post and (self.path in public_paths or self.path == "/admin/login"
