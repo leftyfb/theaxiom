@@ -572,15 +572,17 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             self.send_response(204 if allowed else 403)
             self.send_header("Content-Length", "0")
             self.end_headers()
-        elif self.path == "/read/wikipedia-en":
-            source_id = "wikipedia-en"
+        elif (compat := next(((sid, route) for sid, route in publication.ROUTES.items()
+                              if self.path == route["entry_path"]), None)) is not None:
+            source_id, route = compat
             if not publication.allowed(self._publication_snapshot(), source_id):
                 self._send_json(403, {"error": "collection unavailable"})
                 return
-            # Resolve Wikipedia by its trusted filename in the shared OPDS catalog.
-            # Never choose the first book: it may be a different published ZIM.
+            # Historical bookmarks resolve their exact independently verified
+            # book through shared OPDS, never the first available ZIM.
             location = publication.reader_location(
-                zim_catalog.GENERIC_READER, Path(WIKIPEDIA_SOURCE["filename"]).stem)
+                {"path": route["reader_path"], "port": route["port"]},
+                route["book_id"])
             if location is None:
                 self._send_json(503, {"error": "reader entry unavailable"})
                 return
@@ -588,8 +590,10 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             self.send_header("Location", location)
             self.send_header("Content-Length", "0")
             self.end_headers()
-        elif self.path == "/internal/publication/wikipedia-en":
-            self.send_response(204 if publication.allowed(self._publication_snapshot(), "wikipedia-en") else 403)
+        elif (self.path.startswith("/internal/publication/") and
+              self.path.removeprefix("/internal/publication/") in publication.ROUTES):
+            source_id = self.path.removeprefix("/internal/publication/")
+            self.send_response(204 if publication.allowed(self._publication_snapshot(), source_id) else 403)
             self.send_header("Content-Length", "0")
             self.end_headers()
         elif self.path == "/api/publication":
