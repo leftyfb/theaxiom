@@ -1,3 +1,4 @@
+import json
 from unittest.mock import Mock
 
 import pytest
@@ -50,6 +51,51 @@ def test_exact_query_falls_back_to_last_publication_listings(tmp_path, monkeypat
     assert catalog.refresh("another", "eng")["unavailable"]
 
 
+def test_cache_keeps_distinct_queries_and_bounds_eviction(tmp_path, monkeypatch):
+    path = tmp_path / "metadata"
+    monkeypatch.setattr(catalog, "_path", lambda: path)
+    monkeypatch.setattr(catalog, "CACHE_SLOTS", 2)
+    clock = Mock(return_value=1000)
+    monkeypatch.setattr(catalog.time, "time", clock)
+    fetch = Mock(return_value=FEED)
+    monkeypatch.setattr(catalog.kiwix_metadata_transport, "fetch_metadata", fetch)
+
+    def refresh(language):
+        monkeypatch.setattr(catalog, "_next_refresh", 0)
+        return catalog.refresh("reference_eng", language)
+
+    assert refresh("eng")["checked_at"] == 1000
+    clock.return_value = 1001
+    assert refresh("fra")["checked_at"] == 1001
+    fetch.side_effect = OSError("offline")
+    assert refresh("eng")["cached"]
+    assert refresh("fra")["cached"]
+    assert refresh("deu")["unavailable"]
+
+    fetch.side_effect = None
+    clock.return_value = 1002
+    assert refresh("deu")["checked_at"] == 1002
+    fetch.side_effect = OSError("offline")
+    assert refresh("eng")["unavailable"]
+    assert refresh("fra")["cached"]
+    assert refresh("deu")["cached"]
+    assert len(list(tmp_path.iterdir())) == 2
+
+
+def test_cache_reads_previous_single_file_during_upgrade(tmp_path, monkeypatch):
+    path = tmp_path / "metadata"
+    monkeypatch.setattr(catalog, "_path", lambda: path)
+    monkeypatch.setattr(catalog.time, "time", lambda: 1000)
+    monkeypatch.setattr(catalog, "_next_refresh", 0)
+    previous = {"version": 1, "family": "reference_eng", "language": "eng", "checked_at": 999}
+    path.write_bytes(json.dumps(previous).encode() + b"\n" + FEED)
+    path.chmod(0o600)
+    fetch = Mock(side_effect=OSError("offline"))
+    monkeypatch.setattr(catalog.kiwix_metadata_transport, "fetch_metadata", fetch)
+    result = catalog.refresh("reference_eng", "eng")
+    assert result["cached"] and result["checked_at"] == 999
+
+
 def test_invalid_response_never_becomes_cached(tmp_path, monkeypatch):
     path = tmp_path / "metadata"
     monkeypatch.setattr(catalog, "_path", lambda: path)
@@ -60,11 +106,11 @@ def test_invalid_response_never_becomes_cached(tmp_path, monkeypatch):
         catalog.refresh("https://unknown.example", "eng")
     fetch.assert_not_called()
     assert catalog.refresh("reference_eng", "eng")["unavailable"]
-    assert not path.exists()
+    assert list(tmp_path.iterdir()) == []
     monkeypatch.setattr(catalog, "_next_refresh", 0)
     fetch.return_value = FEED.decode().encode("utf-16")
     assert catalog.refresh("reference_eng", "eng")["unavailable"]
-    assert not path.exists()
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_inspect_edition_reads_only_cached_exact_listing_and_publisher_metalink(tmp_path, monkeypatch):

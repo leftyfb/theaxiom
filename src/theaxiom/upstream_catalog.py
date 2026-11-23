@@ -14,6 +14,7 @@ from . import kiwix_metadata_transport, kiwix_opds, storage_settings, zim_source
 
 PAGE_SIZE = 25
 MAX_HEADER = 512
+CACHE_SLOTS = 8
 STALE_AFTER = 48 * 60 * 60
 _LOCK = threading.Lock()
 _next_refresh = 0.0
@@ -48,8 +49,18 @@ def _entries(raw, family):
     return [choices[key] for key in sorted(choices, reverse=True)][:PAGE_SIZE]
 
 
+def _slots():
+    legacy = _path()
+    return tuple(legacy.with_name(f"{legacy.name}.{number}") for number in range(CACHE_SLOTS))
+
+
 def _save(raw, header):
-    target = _path()
+    targets = [(slot, _read_slot(slot)) for slot in _slots()]
+    query = header["family"], header["language"]
+    matching = next((slot for slot, value in targets
+                     if value and (value["family"], value["language"]) == query), None)
+    vacant = next((slot for slot, value in targets if value is None), None)
+    target = matching or vacant or min(targets, key=lambda item: item[1]["checked_at"])[0]
     target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(prefix=".upstream-kiwix-", dir=target.parent)
     try:
@@ -67,9 +78,10 @@ def _save(raw, header):
         Path(temporary).unlink(missing_ok=True)
 
 
-def _read_cache(family, language):
+def _read_slot(path, query=None):
+    """Read the header alone, or the complete page for an exact query."""
     try:
-        fd = os.open(_path(), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         with os.fdopen(fd, "rb") as file:
             info = os.fstat(file.fileno())
             if (not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077 or info.st_nlink != 1 or
@@ -77,12 +89,33 @@ def _read_cache(family, language):
                 return None
             header = json.loads(file.readline(MAX_HEADER))
             recorded = header["checked_at"]
-            if (header["version"] != 1 or header["family"] != family or header["language"] != language or
-                    type(recorded) not in (int, float) or not 0 < recorded <= time.time()):
+            if (header["version"] != 1 or not isinstance(header["family"], str)
+                    or not isinstance(header["language"], str)
+                    or type(recorded) not in (int, float) or not 0 < recorded <= time.time()):
                 return None
-            return file.read(kiwix_opds.MAX_BYTES + 1), recorded
+            if query is None:
+                return header
+            if (header["family"], header["language"]) == query:
+                body = file.read(kiwix_opds.MAX_BYTES + 1)
+                if 0 < len(body) <= kiwix_opds.MAX_BYTES:
+                    return body, recorded
+            return None
     except (OSError, ValueError, KeyError, TypeError):
         return None
+
+
+def _read_cache(family, language):
+    query = family, language
+    matches = []
+    for path in (*_slots(), _path()):
+        header = _read_slot(path)
+        if header and (header["family"], header["language"]) == query:
+            matches.append((header["checked_at"], path))
+    for _, path in sorted(matches, key=lambda item: item[0], reverse=True):
+        record = _read_slot(path, query)
+        if record:
+            return record
+    return None
 
 
 def refresh(family, language):
