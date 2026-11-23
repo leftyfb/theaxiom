@@ -191,7 +191,7 @@ def test_opds_readiness_rejects_network_failure_and_closes_connection():
     with patch.object(zim_reader_probe.http.client, "HTTPConnection") as factory:
         connection = factory.return_value
         connection.request.side_effect = TimeoutError("private-network-target")
-        with pytest.raises(TimeoutError):
+        with pytest.raises(zim_reader_probe.ReaderUnavailable, match="Kiwix reader not ready"):
             zim_reader_probe.listed_book_ids()
         connection.close.assert_called_once()
         assert zim_reader_probe._failure_category(
