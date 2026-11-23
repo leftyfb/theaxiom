@@ -1683,19 +1683,38 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         return
 
 
+def configured_external_monitor_entry():
+    """Find a single configured pre-ledger ZIM requiring external monitoring.
+
+    This compatibility monitor is optional and never re-adds a removed seed,
+    reads an archive, downloads content, or changes publication state.
+    """
+    try:
+        configured = {record["source_id"] for record in SOURCE_CATALOG.get()["sources"]}
+    except (OSError, catalog_store.CatalogError):
+        return None
+    entries = [entry for sid, entry in zim_catalog.legacy_pinned_entries().items()
+               if sid in configured]
+    # One sampler only: never spawn extra potentially stalled NFS workers.
+    return entries[0] if len(entries) == 1 else None
+
+
 def main() -> None:
     """Start the admin API server."""
     config = security.load_config()
     server = ThreadingHTTPServer((config.host, config.port), AdminAPIHandler)
     server.axiom_config = config
-    server.acquisition_monitor = monitoring.Monitor(WIKIPEDIA_SOURCE)
-    server.acquisition_monitor.start()
+    legacy = configured_external_monitor_entry()
+    server.acquisition_monitor = monitoring.Monitor(legacy) if legacy else None
+    if server.acquisition_monitor:
+        server.acquisition_monitor.start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
-        server.acquisition_monitor.stop.set()
+        if server.acquisition_monitor:
+            server.acquisition_monitor.stop.set()
         server.server_close()
 
 
