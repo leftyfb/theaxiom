@@ -497,54 +497,49 @@ def discard_candidate(sid, config):
 
 
 
-def delete_installed(sid):
-    """Explicitly delete an unpublished installed ZIM, never a candidate or shared path.
+@contextmanager
+def downloaded_zim(sid):
+    """Hold the acquisition locks and exact managed archive open for deletion."""
+    from . import publication
+    with publication.LOCK, LOCK, worker_lock():
+        if read_candidate(sid) is not None:
+            raise ValueError("Retire the replacement candidate before deleting installed content")
+        job = read(sid)
+        if not job or job.get("state") != "completed" or job.get("active") is not False:
+            raise ValueError("No inactive completed ZIM installation to delete")
+        artifact = installed(job, job["configuration"])
+        if not artifact:
+            raise ValueError("Installed ZIM is missing or invalid; deletion refused")
+        name, size = artifact["filename"], artifact["bytes"]
+        with pdf_source._directory("library", writing=True, format_name="zim") as (directory, mount, _):
+            with pdf_source._file(directory, mount, name, size) as stream:
+                if adopted_filename(job, artifact) and archive_identity(os.fstat(stream.fileno())) != job["adopted_from_legacy"]["identity"]:
+                    raise ValueError("Adopted archive changed; deletion refused")
+                yield directory, [(name, stream, size)]
 
-    Refuse pending replacement state and any active acquisition. The archive is
-    unlinked by directory descriptor only after its managed name, size, inode
-    type and single-link ownership have been verified.
-    """
-    import stat
+
+def forget_deleted_installation(sid):
+    target = path_for(sid)
+    target.unlink()
+    fd = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def delete_installed(sid):
+    """Compatibility action for explicitly deleting one unpublished ZIM."""
     from . import publication
     with publication.LOCK:
-        with LOCK:
-            with worker_lock():
-                if publication.load().get(sid, False):
-                    raise ValueError("Unpublish the source before deleting installed content")
-                if read_candidate(sid) is not None:
-                    raise ValueError("Retire the replacement candidate before deleting installed content")
-                job = read(sid)
-                if not job or job.get("state") != "completed" or job.get("active") is not False:
-                    raise ValueError("No inactive completed ZIM installation to delete")
-                artifact = installed(job, job["configuration"])
-                if not artifact:
-                    raise ValueError("Installed ZIM is missing or invalid; deletion refused")
-                filename = artifact["filename"]
-                if filename != f"{sid}.{artifact['sha256']}.zim":
-                    raise ValueError("Invalid managed ZIM filename")
-                with pdf_source._directory("library", writing=True, format_name="zim") as (fd, _, _):
-                    file_fd = os.open(filename, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=fd)
-                    try:
-                        info = os.fstat(file_fd)
-                        if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
-                                or info.st_size != artifact["bytes"]):
-                            raise ValueError("Installed archive is not an exclusive regular file")
-                        # Do not follow a path substituted after validation.
-                        current = os.stat(filename, dir_fd=fd, follow_symlinks=False)
-                        if (current.st_ino, current.st_dev) != (info.st_ino, info.st_dev):
-                            raise ValueError("Installed archive changed; deletion refused")
-                        os.unlink(filename, dir_fd=fd)
-                        os.fsync(fd)
-                    finally:
-                        os.close(file_fd)
-                target = path_for(sid)
-                target.unlink()
-                dfd = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY)
-                try:
-                    os.fsync(dfd)
-                finally:
-                    os.close(dfd)
-                return {"accepted": True, "source_id": sid, "state": "deleted"}
+        if publication.load().get(sid, False):
+            raise ValueError("Unpublish the source before deleting installed content")
+        with downloaded_zim(sid) as (directory, files):
+            (name, stream, _), = files
+            pdf_source.unlink_managed_file(directory, stream, name)
+            forget_deleted_installation(sid)
+            os.fsync(directory)
+    return {"accepted": True, "source_id": sid, "state": "deleted"}
 
 
 def read(sid):

@@ -88,7 +88,7 @@ def refuse_action(request, catalog, status, sid=SID, action="download", **extra)
 
 
 def card(page, sid=SID):
-    return next((item for item in re.findall(r'<details class="source-card"[^>]*>.*?</details>', page, re.S)
+    return next((item for item in re.findall(r'<details class="source-card"[^>]*>.*?</details></div>', page, re.S)
                  if f'data-source-id="{sid}"' in item), None)
 
 

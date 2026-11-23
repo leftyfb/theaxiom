@@ -1,5 +1,5 @@
 """PDF lifecycle adapter for local and explicitly configured NFS storage. Catalog URLs are provenance, never fetched."""
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 import hashlib
 import os
 from pathlib import Path
@@ -167,6 +167,40 @@ def preview_installed_sizes(source_ids, format_name):
     except (OSError, ValueError):
         return {}
     return sizes
+
+
+def unlink_managed_file(directory, stream, name):
+    """Delete only the same exclusive file that was opened safely."""
+    opened = os.fstat(stream.fileno())
+    current = os.stat(name, dir_fd=directory, follow_symlinks=False)
+    if (current.st_nlink != 1 or current.st_dev != opened.st_dev
+            or current.st_ino != opened.st_ino or current.st_size != opened.st_size):
+        raise ValueError("Managed file changed or is shared; deletion refused")
+    os.unlink(name, dir_fd=directory)
+
+
+@contextmanager
+def downloaded_documents(sid, kind):
+    """Hold descriptors for this source's current and retained document files."""
+    if not catalog_store.ID_RE.fullmatch(sid) or kind not in {"pdf", "epub"}:
+        raise ValueError("Invalid managed document source")
+    pattern = re.compile(re.escape(sid) + r"\.[a-f0-9]{64}\." + kind)
+    with _directory("library", writing=True, format_name=kind) as (directory, mount, _), ExitStack() as opened:
+        files = []
+        with os.scandir(directory) as entries:
+            for index, entry in enumerate(entries):
+                if index >= 10_000 or len(files) >= 100:
+                    raise ValueError("Too many files to safely review this deletion")
+                if not pattern.fullmatch(entry.name):
+                    continue
+                size = entry.stat(follow_symlinks=False).st_size
+                if not 0 < size <= MAX_BYTES:
+                    raise ValueError("Unexpected downloaded document size")
+                stream = opened.enter_context(_file(directory, mount, entry.name, size))
+                files.append((entry.name, stream, size))
+        if not files:
+            raise ValueError("No downloaded files to delete")
+        yield directory, sorted(files, key=lambda row: row[0])
 
 
 def _verify(stream, artifact, destination=None):

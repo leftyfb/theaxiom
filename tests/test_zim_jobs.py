@@ -1634,3 +1634,33 @@ def test_interrupted_promotion_recovers_only_verified_library_and_staging_links(
     elif condition in {"shared-staging", "other-link"}:
         assert link.read_bytes() == data
         assert final.stat().st_nlink == 2
+
+
+from test_source_profiles_http import app as download_app, mutate, source  # noqa: E402,F401
+
+
+def test_delete_published_zim_from_source_action(download_app, disk, monkeypatch):
+    from theaxiom import publication, zim_refresh
+
+    request, _ = download_app
+    sid = "fixture-zim"
+    content = fixture_bytes()
+    catalog = request("/api/sources")
+    catalog = mutate(request, catalog, "add", dict(title="Fixture ZIM", **CONFIG), sid=sid)
+    artifact = zim_source.install_stream(sid, CONFIG, BytesIO(content))
+    zim_jobs.save(dict(source_id=sid, state="completed", active=False, verified=True,
+                       configuration=zim_jobs.identity(CONFIG), artifact=artifact))
+    archive = disk / "library/zim" / artifact["filename"]
+    publication.save(sid, True)
+    refresh = []
+    monkeypatch.setattr(zim_refresh, "schedule", lambda loader: refresh.append(loader()))
+    payload = dict(action="delete-downloaded-files", source_id=sid, revision=catalog["revision"])
+    with zim_jobs.worker_lock():
+        request("/api/action", payload, status=409)
+    plan = request("/api/action", payload)
+    assert plan["published"] and archive.exists() and publication.load()[sid]
+    assert request("/api/action", dict(payload, confirmation=plan["confirmation"]))["deleted"] == 1
+    assert not archive.exists() and zim_jobs.read(sid) is None
+    assert not publication.load().get(sid)
+    assert source(request("/api/sources"), sid)["configuration"] == source(catalog, sid)["configuration"]
+    assert len(refresh) == 1

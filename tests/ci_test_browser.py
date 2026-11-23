@@ -377,7 +377,9 @@ def exercise(browser, base, name, viewport, artifacts):
         # an already-open card before interacting with its Remove button.
         if not card.evaluate("(element) => element.open"):
             card.locator("summary.source-header").click()
-        expect(card.locator("[data-catalog-remove]")).to_be_visible()
+        expect(card.locator("[data-catalog-remove]")).to_be_hidden()
+        card.get_by_text("More actions", exact=True).click()
+        expect(card.get_by_role("button", name="Remove source")).to_be_visible()
         remove_source = card.locator("[data-catalog-remove]")
         remove_source.focus()
         expect(remove_source).to_be_focused()
@@ -391,6 +393,7 @@ def exercise(browser, base, name, viewport, artifacts):
         expect(card).to_be_visible()
         if not card.evaluate("(element) => element.open"):
             card.locator("summary.source-header").click()
+        card.get_by_text("More actions", exact=True).click()
         remove_source = card.locator("[data-catalog-remove]")
         remove_source.focus()
         page.once("dialog", lambda dialog: dialog.accept())

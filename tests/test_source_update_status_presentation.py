@@ -22,7 +22,7 @@ class SourceUpdateStatusPresentationTests(unittest.TestCase):
 
     def test_manual_zim_check_reuses_persistent_status(self):
         start = self.template.index("document.querySelectorAll('[data-zim-update-check], [data-document-update-check]')")
-        end = self.template.index("document.querySelectorAll('[data-zim-delete]')", start)
+        end = self.template.index("document.querySelectorAll('[data-delete-downloads]')", start)
         handler = self.template[start:end]
         self.assertIn("card.querySelector('[data-field=\"discovery-evidence\"]')", handler)
         self.assertIn("feedback.textContent = 'Checking…'", handler)

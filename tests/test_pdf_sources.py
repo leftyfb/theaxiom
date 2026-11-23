@@ -577,3 +577,57 @@ def test_preview_counts_safe_retained_document_editions(disk, format_name):
         "empty": 0,
         "unsafe": None,
     }
+
+
+@pytest.mark.parametrize("kind", ["pdf", "epub"])
+def test_delete_downloaded_documents_preserves_profile_and_unpublishes_first(pdf_app, disk, monkeypatch, kind):
+    from io import BytesIO
+    from theaxiom import epub_source, publication
+    from test_epub_sources import book
+
+    request, _ = pdf_app
+    _, pdf_library = disk
+    (pdf_library.parent.parent / "staging").mkdir(exist_ok=True)
+    body = book() if kind == "epub" else document()
+    install = epub_source.install_stream if kind == "epub" else pdf_source.install_stream
+    downloaded = install(SID, BytesIO(body))
+    artifact = downloaded[0] if kind == "epub" else downloaded
+    records = request("/api/sources")
+    records = mutate(request, records, "add", {
+        **fields(body), "format": kind, "source_url": f"https://example.org/guide.{kind}",
+    }, sid=SID)
+    directory = pdf_library.parent / kind
+    target = directory / artifact["filename"]
+    retained = directory / f"{SID}.{'b' * 64}.{kind}"
+    retained.write_bytes(body)
+    retained.chmod(0o600)
+    other = directory / f"other.{'b' * 64}.{kind}"
+    other.write_bytes(body)
+    publication.save(SID, True)
+    data = dict(action="delete-downloaded-files", source_id=SID, revision=records["revision"])
+
+    shared = directory / "second-link"
+    os.link(target, shared)
+    request("/api/action", data, status=409)
+    assert publication.load()[SID] and target.exists() and shared.exists()
+    shared.unlink()
+
+    plan = request("/api/action", data)
+    assert plan["published"]
+    assert {row["filename"] for row in plan["files"]} == {target.name, retained.name}
+    request("/api/action", dict(data, confirmation="a" * 64), status=409)
+    assert publication.load()[SID] and target.exists()
+    unlink = pdf_source.unlink_managed_file
+
+    def verify_unpublished(*args):
+        assert not publication.load().get(SID)
+        unlink(*args)
+
+    monkeypatch.setattr(pdf_source, "unlink_managed_file", verify_unpublished)
+    assert request("/api/action", dict(data, confirmation=plan["confirmation"]))["deleted"] == 2
+    assert not target.exists() and not retained.exists() and other.exists()
+    result = request("/api/sources")
+    assert source(result, SID)["configuration"] == source(records, SID)["configuration"]
+    assert not source(result, SID)["installed_verified"]
+    install(SID, BytesIO(body))
+    assert target.exists()

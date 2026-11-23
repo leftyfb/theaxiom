@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from io import BytesIO
 import importlib
@@ -1843,6 +1844,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                             if publication.load().get(sid, False):
                                 publication.save(sid, False)
                                 unpublished = True
+                                if self._zim_record(existing):
+                                    zim_refresh.schedule(lambda: SOURCE_CATALOG.get()["sources"])
                         except (OSError, ValueError) as exc:
                             raise catalog_store.RevisionConflict("could not unpublish source; removal refused") from exc
                     elif isinstance(sid, str) and (sid in publication.ROUTES or is_pdf):
@@ -1975,6 +1978,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             data = self._read_body()
             if data.get("action") in {"zim-download", "zim-resume", "zim-pause", "zim-cancel", "zim-cancel-keep", "zim-restart", "zim-retry", "zim-revalidate", "zim-replacement-prepare", "zim-replacement-discard", "zim-replacement-activate", "zim-replacement-rollback", "zim-replacement-download", "zim-replacement-cancel", "zim-delete-installed"}:
                 self._start_zim(data)
+            elif data.get("action") == "delete-downloaded-files":
+                self._delete_downloaded_files(data)
             elif data.get("action") == "import":
                 self._import_pdf(data)
             elif data.get("action") in {"pdf-download", "epub-download", "epub-add-download"}:
@@ -2224,6 +2229,74 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             except OSError:
                 self._send_json(503, {"error": "PDF storage or catalog I/O failed"})
                 return
+        self._send_json(200, result)
+
+    def _delete_downloaded_files(self, data):
+        sid = data.get("source_id")
+        preview = "confirmation" not in data
+        if (set(data) != ({"source_id", "action", "revision"} if preview else
+                          {"source_id", "action", "revision", "confirmation"})
+                or not isinstance(sid, str) or not catalog_store.ID_RE.fullmatch(sid)
+                or not self._valid_revision(data["revision"])
+                or not preview and (not isinstance(data["confirmation"], str)
+                                    or not re.fullmatch("[a-f0-9]{64}", data["confirmation"]))):
+            self._send_json(400, {"error": "Invalid file deletion request"})
+            return
+        if not self.headers.get("Origin"):
+            self._send_json(403, {"error": "same-origin request required"})
+            return
+
+        unpublished = False
+        removed = 0
+        try:
+            with publication.LOCK:
+                catalog = SOURCE_CATALOG.get()
+                if data["revision"] != catalog["revision"]:
+                    raise ValueError("Catalog changed; review the source again")
+                record = next((item for item in catalog["sources"] if item["source_id"] == sid), None)
+                if not record or publication.legacy_only(sid):
+                    raise ValueError("Source has no managed installation")
+                kind = record["configuration"]["format"]
+                if kind not in {"zim", "pdf", "epub"}:
+                    raise ValueError("Source has no supported downloaded files")
+                if any(job["source_id"] == sid and job["state"] in acquisition_queue.PENDING
+                       for job in acquisition_queue.status()):
+                    raise ValueError("Finish or cancel this source’s batch download first")
+                files = zim_jobs.downloaded_zim(sid) if kind == "zim" else pdf_source.downloaded_documents(sid, kind)
+                with files as (directory, opened):
+                    enabled = publication.load().get(sid, False)
+                    listed = [dict(filename=name, bytes=size) for name, _, size in opened]
+                    identities = [zim_jobs.archive_identity(os.fstat(stream.fileno())) for _, stream, _ in opened]
+                    encoded = json.dumps([sid, kind, enabled, listed, identities], sort_keys=True).encode()
+                    token = hashlib.sha256(encoded).hexdigest()
+                    if preview:
+                        result = dict(files=listed, published=enabled, confirmation=token)
+                    else:
+                        if data["confirmation"] != token:
+                            raise ValueError("Files or publication changed; review the deletion again")
+                        if enabled:
+                            publication.save(sid, False)
+                            unpublished = True
+                        try:
+                            for name, stream, _ in opened:
+                                pdf_source.unlink_managed_file(directory, stream, name)
+                                removed += 1
+                            if kind == "zim":
+                                zim_jobs.forget_deleted_installation(sid)
+                            os.fsync(directory)
+                        finally:
+                            if kind == "zim" and (unpublished or removed):
+                                zim_refresh.schedule(lambda: SOURCE_CATALOG.get()["sources"])
+                        result = dict(deleted=removed)
+        except (BlockingIOError, ValueError, OSError, sqlite3.Error, catalog_store.CatalogError) as exc:
+            reason = (str(exc) if isinstance(exc, ValueError) else
+                      "Another acquisition is active" if isinstance(exc, BlockingIOError) else
+                      "Catalog, queue or storage operation failed")
+            if unpublished or removed:
+                prefix = "Source unpublished. " if unpublished else ""
+                reason = f"{prefix}Deletion incomplete after removing {removed} file(s). {reason}"
+            self._send_json(409, {"error": reason})
+            return
         self._send_json(200, result)
 
     def _start_zim(self, data):

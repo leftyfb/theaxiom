@@ -91,6 +91,9 @@
     .source-metadata div { display:flex; gap:.35rem; }
     .source-metadata dt { font-weight:650; }
     .source-metadata dd { margin:0; overflow-wrap:anywhere; }
+    .source-more-actions summary { cursor:pointer; color:var(--green); font-weight:650; padding:.5rem; }
+    .source-more-actions[open] { flex-basis:100%; }
+    .source-more-actions { border:1px solid var(--line); border-radius:.5rem; padding:0 .35rem; }
     .source-technical { margin-top:.6rem; font-size:.9rem; }
     .source-technical summary { cursor:pointer; color:var(--green); font-weight:650; }
     .source-technical .storage-status { gap:.25rem .6rem; margin:.5rem 0; }
@@ -648,7 +651,6 @@
           {% endif %}
           {% if source.zim_download %}<button class="button" type="button" data-zim-download{% if source.installed_verified %} hidden{% endif %}{% if source.mutation_blocked or source.installed_verified %} disabled{% endif %}>Download</button>{% endif %}
           {% if source.zim_download %}
-          <button class="button danger-action" type="button" data-zim-delete hidden>Delete installed archive</button>
           <button class="button" type="button" data-zim-replacement="prepare" hidden>Prepare replacement</button>
           <button class="button" type="button" data-zim-replacement="download" hidden>Download replacement</button>
           <button class="button" type="button" data-zim-replacement="cancel" hidden>Cancel replacement · keep partial</button>
@@ -679,7 +681,16 @@
           <a class="button" data-field="publication-browse" href="{{ pub.entry_path }}"{% if not pub.published %} hidden{% endif %}>Browse</a>
           {% endif %}
           <button class="button" type="button" data-catalog-edit="{{ source.source_id }}"{% if source.mutation_blocked or pub.error %} disabled{% endif %}>Edit</button>
-          <button class="button danger-action" type="button" data-catalog-remove="{{ source.source_id }}"{% if source.mutation_blocked or pub.error %} disabled{% endif %}>Remove</button>
+          <details class="source-more-actions">
+            <summary>More actions</summary>
+            <div class="source-actions">
+              {% if document or source.zim_download %}
+              <button class="button danger-action" type="button" data-delete-downloads{% if not document and not source.installed_verified %} hidden{% endif %}{% if source.mutation_blocked or pub.error or source.replacement %} disabled{% endif %}>Delete downloaded files</button>
+              {% endif %}
+              <button class="button danger-action" type="button" data-catalog-remove="{{ source.source_id }}"{% if source.mutation_blocked or pub.error %} disabled{% endif %}>Remove source</button>
+            </div>
+            {% if document or source.zim_download %}<p class="source-note" data-delete-feedback role="status"></p>{% endif %}
+          </details>
         </div>
         {% if source.zim_download or source.legacy_pinned %}<p class="source-note" data-zim-feedback role="status" aria-live="polite"></p>{% endif %}
         {% if document %}
@@ -1760,24 +1771,34 @@
           button.disabled = false;
         }
       }));
-      document.querySelectorAll('[data-zim-delete]').forEach(button => button.addEventListener('click', async () => {
-        if (button.disabled || !window.confirm('Permanently delete this installed ZIM archive? This cannot be undone. Unpublish and retire any replacement first.')) return;
+      document.querySelectorAll('[data-delete-downloads]').forEach(button => button.addEventListener('click', async () => {
+        if (button.disabled) return;
         const card = button.closest('.source-card');
-        card.dataset.zimDeletePosting = 'true';
-        button.disabled = true;
-        const feedback = card.querySelector('[data-zim-replacement-status]');
-        try {
-          const response = await acquisitionFetch('/api/action', {method:'POST',
-            headers:{...((typeof window !== 'undefined' && window.axiomCsrfHeaders?.()) || {}),'Content-Type':'application/json'},
-            body:JSON.stringify({source_id:card.dataset.sourceId, action:'zim-delete-installed', revision, confirm_restart:true})});
+        const feedback = card.querySelector('[data-delete-feedback]');
+        const payload = {source_id: card.dataset.sourceId, action: 'delete-downloaded-files', revision};
+        async function request(data) {
+          const response = await acquisitionFetch('/api/action', {method: 'POST',
+            headers: {...window.axiomCsrfHeaders(), 'Content-Type':'application/json'},
+            body: JSON.stringify(data)});
           const result = await response.json().catch(() => ({}));
-          if (!response.ok) throw acquisitionError(response, result, 'Archive deletion failed');
-          feedback.textContent = 'Installed archive deleted';
-          await refresh();
-        } catch(error) {
+          if (!response.ok) throw acquisitionError(response, result, 'File deletion failed');
+          return result;
+        }
+        card.dataset.deletePosting = 'true';
+        button.disabled = true;
+        feedback.textContent = '';
+        try {
+          const plan = await request(payload);
+          const files = plan.files.map(file => file.filename + ' (' + previewSize(file.bytes) + ')');
+          const message = (plan.published ? 'This source will be unpublished first.\n\n' : '') +
+            'Permanently delete these downloaded files? The source profile will be kept.\n\n' + files.join('\n');
+          if (!window.confirm(message)) return;
+          await request({...payload, confirmation: plan.confirmation});
+          feedback.textContent = 'Downloaded files deleted.';
+        } catch (error) {
           feedback.textContent = error.message;
         } finally {
-          delete card.dataset.zimDeletePosting;
+          delete card.dataset.deletePosting;
           button.disabled = false;
         }
       }));
@@ -2067,10 +2088,10 @@
               (op === 'pause' && !['queued','downloading','verifying'].includes(state));
           }
         }
-        const deleteButton = card.querySelector('[data-zim-delete]');
+        const deleteButton = card.querySelector('[data-delete-downloads]');
         if (deleteButton) {
-          deleteButton.hidden = !source?.installed_verified || !!source?.publication?.enabled || !!source?.replacement;
-          deleteButton.disabled = !!source?.mutation_blocked || card.dataset.zimDeletePosting === 'true';
+          deleteButton.hidden = card.dataset.filterFormat === 'zim' && !source?.installed_verified;
+          deleteButton.disabled = blocked || !!source?.replacement || card.dataset.deletePosting === 'true';
         }
         const replacement = source?.replacement;
         const replacementState = replacement?.state || '';
