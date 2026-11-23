@@ -121,7 +121,7 @@ def test_scheduled_pinned_zim_uses_verified_generic_seed_gate(monkeypatch):
 
 
 def test_scheduled_pinned_zim_does_not_assume_installed_verification(monkeypatch):
-    from theaxiom import admin_api, kiwix_update_discovery, publication, zim_catalog
+    from theaxiom import acquisition_monitor, admin_api, kiwix_update_discovery, publication
     sid = next(iter(publication.ROUTES))
     record = {"source_id": sid, "configuration": {"format": "zim"}}
     monkeypatch.setattr(admin_api, "select_lifecycle",
