@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import tempfile
 import threading
+import time
 import zipfile
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -86,6 +87,23 @@ def exercise(browser, base, viewport_name, viewport, artifact_dir):
     try:
         epub = base + "/api/library/epub/reader-epub"
         pdf = base + "/api/library/pdf/reader-pdf"
+        for word, path, caption in (
+            ("beta", "/api/library/pdf/reader-pdf#page=2", "Fixture PDF · Page 2"),
+            ("isolated chapter", "/api/library/epub/reader-epub/chapter/1", "Fixture EPUB · Chapter 2"),
+        ):
+            from urllib.parse import urlencode
+            page.goto(base + "/search?" + urlencode({"q": word}))
+            link = page.get_by_role("link", name=caption, exact=True)
+            deadline = time.monotonic() + 25
+            while not link.count() and time.monotonic() < deadline:
+                page.wait_for_timeout(250)
+                page.reload()
+            expect(link).to_have_attribute("href", path)
+            link.click()
+            if word == "beta":
+                expect(page.locator("#page")).to_have_value("2")
+            else:
+                expect(page.locator("#chapter-content")).to_contain_text("Second isolated chapter")
         # Real document is served only after fixture publication, not merely catalog registration.
         page.goto(epub)
         page.keyboard.press("Tab")

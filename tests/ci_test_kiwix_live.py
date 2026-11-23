@@ -389,6 +389,12 @@ def main():
                     direct_process.communicate(timeout=5)
             assert not search_failures, f"native Kiwix search crashes: {search_failures!r}"
             assert selected_search_status == 200, f"native library search HTTP {selected_search_status}"
+            from theaxiom import search
+            route = {"book_id": expected, "path": f"/zim/content/{expected}/",
+                     "port": port, "deadline": time.monotonic() + 5}
+            matches = search.search_kiwix(route, "offline")
+            assert matches and all(result.href.startswith(route["path"]) for result in matches), matches
+            assert not search.search_kiwix(route, "zzzzneverpresentzzzz")
             # Real Chromium follows articles in a tiny fixture, not production
             # Wikipedia/Ready.gov. Search is tested via native Kiwix HTTP as above.
             from playwright.sync_api import sync_playwright, expect

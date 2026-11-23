@@ -301,5 +301,6 @@ try {
     wasmUrl:asset+"wasm/", useWorkerFetch:true, maxImageSize:16000000}).promise;
   $("total").textContent = "of " + pdf.numPages;
   $("page").max = pdf.numPages;
-  await show(1);
+  const start = /^#page=([0-9]{1,4})$/.exec(location.hash);
+  await show(start ? Number(start[1]) : 1);
 } catch { message("Offline PDF viewer unavailable. Use Download PDF or contact the administrator."); }

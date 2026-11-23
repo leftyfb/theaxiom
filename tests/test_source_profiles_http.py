@@ -772,3 +772,33 @@ def test_update_discovery_configuration_and_endpoint_diagnostics(app, monkeypatc
     request("/api/update-endpoint-test", payload, status=429)
     probe.assert_called_once_with(payload["update_endpoint"])
     assert request("/api/sources")["revision"] == saved["revision"]
+
+
+def test_public_search_groups_two_published_zims_and_hides_unpublished(app, monkeypatch):
+    from theaxiom import search, zim_catalog
+    request, _ = app
+    legacy = publication.ROUTES[SID]["book_id"]
+    second = "second-book." + "a" * 64
+    publication.save(SID, True)
+    publication.save("second-book", True)
+    monkeypatch.setattr(admin_api.AdminAPIHandler, "_public_library", lambda self: ([
+        {"source_id": SID, "name": "Encyclopedia", "category": "Kiwix"},
+        {"source_id": "second-book", "name": "Emergency reference", "category": "Kiwix"},
+    ], []))
+
+    def acknowledged(records):
+        enabled = publication.load()
+        return {book: sid for book, sid in ((legacy, SID), (second, "second-book"))
+                if enabled.get(sid)}
+
+    def adapter(route, query):
+        assert query == "water"
+        return [search.Result(route["name"] + " article", route["path"] + "water")]
+
+    monkeypatch.setattr(zim_catalog, "acknowledged_reader_books", acknowledged)
+    monkeypatch.setattr(search, "KIWIX_ADAPTER", search.Adapter(search.KIWIX_CAPABILITY, adapter))
+    page = request("/search?q=water")
+    assert f'href="/zim/content/{legacy}/water"' in page
+    assert f'href="/zim/content/{second}/water"' in page
+    publication.save("second-book", False)
+    assert "Emergency reference article" not in request("/search?q=water")

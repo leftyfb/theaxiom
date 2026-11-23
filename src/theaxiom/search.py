@@ -1,13 +1,20 @@
 """Offline search coordination. Adapters only receive trusted published routes."""
 from dataclasses import dataclass
+from html.parser import HTMLParser
+import http.client
 from typing import Callable
-from urllib.parse import urlsplit, unquote
+from urllib.parse import urlencode, urlsplit, unquote
 import threading
+import time
+import xml.etree.ElementTree as ET
 
-from . import publication
+from . import document_search, publication
 
 MAX_QUERY = 160
 MAX_RESULTS = 20
+MAX_RSS_BYTES = 256 * 1024
+MAX_SEARCH_SECONDS = 6
+KIWIX_CAPABILITY = "Kiwix full-text search"
 _SEARCH_SLOTS = threading.BoundedSemaphore(4)
 
 
@@ -21,7 +28,7 @@ class Result:
 @dataclass(frozen=True)
 class Adapter:
     capability: str
-    search: Callable[[dict, str], list[Result]]
+    search: Callable[[dict, str], list[Result] | tuple[list[Result], bool]]
 
 
 ADAPTERS: dict[str, Adapter] = {}
@@ -39,6 +46,15 @@ def valid_link(href: str, route: dict) -> bool:
     try:
         parsed = urlsplit(href)
         decoded = unquote(parsed.path)
+        prefix = route["path"]
+        if route.get("kind") == "pdf":
+            return (not parsed.scheme and not parsed.netloc and not parsed.query and parsed.path == prefix
+                    and parsed.fragment.startswith("page=") and parsed.fragment[5:].isascii()
+                    and parsed.fragment[5:].isdigit())
+        if route.get("kind") == "epub":
+            suffix = parsed.path.removeprefix(prefix + "/chapter/")
+            return (not parsed.scheme and not parsed.netloc and not parsed.query and not parsed.fragment
+                    and suffix.isascii() and suffix.isdigit())
         return (not parsed.scheme and not parsed.netloc
                 and parsed.path.startswith(route["path"])
                 and decoded.startswith(route["path"])
@@ -49,7 +65,7 @@ def valid_link(href: str, route: dict) -> bool:
         return False
 
 
-def search(query: str, snapshot: Callable[[], dict], *, source_ids=None) -> list[dict]:
+def search(query: str, snapshot: Callable[[], dict], *, source_ids=None, targets=None, allowed=None) -> list[dict]:
     query = validate_query(query)
     if not query:
         return []
@@ -57,27 +73,112 @@ def search(query: str, snapshot: Callable[[], dict], *, source_ids=None) -> list
         raise RuntimeError("Search is busy; try again")
     try:
         groups = []
-        for source_id, route in publication.ROUTES.items():
+        deadline = time.monotonic() + MAX_SEARCH_SECONDS
+        if targets is None:
+            targets = {sid: (route, ADAPTERS.get(sid)) for sid, route in publication.ROUTES.items()}
+        check = allowed or (lambda sid, route: publication.allowed(snapshot(), sid))
+        for source_id, (route, adapter) in targets.items():
             if source_ids is not None and source_id not in source_ids:
                 continue
-            if not publication.allowed(snapshot(), source_id):
+            if not check(source_id, route):
                 continue
-            adapter = ADAPTERS.get(source_id)
             results = []
             status = "unsupported"
             if adapter:
                 try:
-                    candidates = adapter.search(route, query)
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError("Search time budget used")
+                    answer = adapter.search(dict(route, deadline=deadline), query)
+                    candidates, partial = answer if isinstance(answer, tuple) else (answer, False)
                     results = [Result(r.title[:300], r.href, r.snippet[:600])
                                for r in candidates[:MAX_RESULTS]
                                if r.title and valid_link(r.href, route)]
-                    status = "ok"
+                    status = "partial" if partial else "ok"
+                except document_search.IndexPending:
+                    status = "indexing"
+                except document_search.NoText:
+                    status = "no_text"
                 except (OSError, ValueError, RuntimeError):
                     status = "unavailable"
-            if publication.allowed(snapshot(), source_id):
-                groups.append(dict(source_id=source_id, name=route["name"],
-                                   capability=adapter.capability if adapter else "",
-                                   status=status, results=results))
-        return groups
+            groups.append(dict(source_id=source_id, name=route["name"],
+                               capability=adapter.capability if adapter else "",
+                               status=status, results=results))
+        return [group for group in groups
+                if check(group["source_id"], targets[group["source_id"]][0])]
     finally:
         _SEARCH_SLOTS.release()
+
+
+
+class _SnippetText(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.parts = []
+
+    def handle_data(self, data):
+        self.parts.append(data)
+
+
+def parse_kiwix_results(data, route):
+    """Read a bounded RSS response without trusting result URLs or markup."""
+    if len(data) > MAX_RSS_BYTES or b"\x00" in data or b"<!" in data.upper().replace(b"<![CDATA[", b""):
+        raise ValueError("Invalid Kiwix search feed")
+    try:
+        root = ET.fromstring(data.decode("utf-8"))
+    except (ET.ParseError, UnicodeError) as exc:
+        raise ValueError("Invalid Kiwix search feed") from exc
+    channel = root.find("channel")
+    if root.tag != "rss" or channel is None:
+        raise ValueError("Invalid Kiwix search feed")
+    results = []
+    seen = set()
+    for item in channel.findall("item"):
+        title = (item.findtext("title") or "").strip()
+        href = item.findtext("link") or ""
+        if not title or len(href) > 2048 or not valid_link(href, route) or href in seen:
+            continue
+        parts = urlsplit(href)
+        if parts.query or parts.fragment or parts.path == route["path"]:
+            continue
+        snippet = _SnippetText()
+        snippet.feed("".join(item.find("description").itertext())[:2400]
+                     if item.find("description") is not None else "")
+        snippet.close()
+        results.append(Result(title[:300], href, " ".join(" ".join(snippet.parts).split())[:600]))
+        seen.add(href)
+        if len(results) == MAX_RESULTS:
+            break
+    return results
+
+
+def search_kiwix(route, query):
+    """Query one verified book's existing index on the local Kiwix listener."""
+    book = route["book_id"]
+    if not publication.valid_book_id(book) or route["path"] != f"/zim/content/{book}/":
+        raise ValueError("Invalid Kiwix search target")
+    deadline = min(route["deadline"], time.monotonic() + 2)
+    params = urlencode({"books.name": book, "pattern": query, "format": "xml", "pageLength": MAX_RESULTS})
+    connection = http.client.HTTPConnection("127.0.0.1", route["port"], timeout=max(0.001, deadline - time.monotonic()))
+    try:
+        connection.request("GET", "/zim/search?" + params, headers={"Accept": "application/rss+xml"})
+        with connection.getresponse() as response:
+            if response.status != 200:
+                raise ValueError("Kiwix search unavailable")
+            body = bytearray()
+            while len(body) <= MAX_RSS_BYTES:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("Kiwix search timed out")
+                chunk = response.read1(min(8192, MAX_RSS_BYTES + 1 - len(body)))
+                if not chunk:
+                    return parse_kiwix_results(bytes(body), route)
+                body.extend(chunk)
+            raise ValueError("Kiwix search feed exceeds byte limit")
+    except http.client.HTTPException as exc:
+        raise ValueError("Kiwix search unavailable") from exc
+    finally:
+        connection.close()
+
+
+KIWIX_ADAPTER = Adapter(KIWIX_CAPABILITY, search_kiwix)
+
+DOCUMENT_ADAPTER = Adapter("Document text search", document_search.search_document)

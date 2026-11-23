@@ -15,7 +15,10 @@
 {% for group in groups %}<section><h2>{{ group.name }}</h2>
 {% if group.status == "unsupported" %}<p>Search is not yet supported for this collection.</p>
 {% elif group.status == "unavailable" %}<p>Search is temporarily unavailable for this collection.</p>
+{% elif group.status == "indexing" %}<p>Search index is being prepared. Try this search again shortly.</p>
+{% elif group.status == "no_text" %}<p>No searchable text was found. Image-only pages require OCR.</p>
 {% else %}<p class="muted">{{ group.capability }} · Up to 20 results</p>
+{% if group.status == "partial" %}<p>Results cover the indexed portion of this document.</p>{% endif %}
 {% if group.results %}<ol>{% for result in group.results %}<li><a href="{{ result.href }}">{{ result.title }}</a>{% if result.snippet %}<p>{{ result.snippet }}</p>{% endif %}</li>{% endfor %}</ol>{% else %}<p>No matching results.</p>{% endif %}
 {% endif %}</section>{% endfor %}{% endif %}
 </main></body></html>

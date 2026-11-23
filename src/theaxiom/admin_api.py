@@ -539,13 +539,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     eligible.intersection_update(group["source_ids"] if group else [])
                 sources = [source for source in sources if source["source_id"] in eligible]
                 if search_page and query:
-                    results = library_search.search(query, self._publication_snapshot, source_ids=eligible)
-                    for source in sources:
-                        if source["category"] in {"PDF", "EPUB"} and query.casefold() in (
-                                source["name"] + " " + source["description"]).casefold():
-                            results.append(dict(source_id=source["source_id"], name=source["name"],
-                                                status="ok", capability=source["category"] + " title and description",
-                                                results=[dict(title=source["name"], href=source["entry_path"], snippet="")]))
+                    results = self._search_published_content(query, sources)
             except (ValueError, UnicodeError):
                 error, code = "Invalid search or filter request.", 400
             except RuntimeError:
@@ -686,6 +680,73 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         for record in catalog["sources"]:
             if self._zim_record(record):
                 yield record, zim_catalog.status(record, catalog["sources"])
+
+    def _search_published_content(self, query, sources):
+        names = {source["source_id"]: source["name"] for source in sources
+                 if source["category"] not in {"PDF", "EPUB"}}
+
+        def acknowledged():
+            try:
+                return zim_catalog.acknowledged_reader_books(SOURCE_CATALOG.get()["sources"])
+            except (OSError, ValueError):
+                return {}
+
+        targets = {
+            sid: (dict(name=names[sid], path=f"/zim/content/{book}/",
+                       book_id=book, port=zim_catalog.GENERIC_READER["port"]), library_search.KIWIX_ADAPTER)
+            for book, sid in acknowledged().items() if sid in names
+        }
+        missing = {sid: (dict(name=name, book_id=None), None)
+                   for sid, name in names.items() if sid not in targets and sid in publication.ROUTES}
+        targets.update(missing)
+
+        def current_documents():
+            try:
+                with publication.LOCK:
+                    enabled = publication.load()
+                    return {
+                        record["source_id"]: record["configuration"]
+                        for record in SOURCE_CATALOG.get()["sources"]
+                        if enabled.get(record["source_id"])
+                        and (self._pdf_record(record) or self._epub_record(record))
+                    }
+            except (OSError, ValueError):
+                return {}
+
+        configs = current_documents()
+        for source in sources:
+            sid = source["source_id"]
+            config = configs.get(sid)
+            if not config:
+                continue
+            kind = config["format"]
+            adapter = pdf_source if kind == "pdf" else epub_source
+            try:
+                artifact = adapter.pin(sid, config)
+            except ValueError:
+                continue
+            targets[sid] = (dict(name=source["name"], kind=kind, artifact=artifact,
+                                 path=source["entry_path"]), library_search.DOCUMENT_ADAPTER)
+
+        def allowed(sid, route):
+            if "artifact" in route:
+                config = current_documents().get(sid)
+                adapter = pdf_source if route["kind"] == "pdf" else epub_source
+                try:
+                    return (config is not None and adapter.pin(sid, config) == route["artifact"]
+                            and adapter.ready(route["artifact"], verify=False))
+                except ValueError:
+                    return False
+            if route["book_id"] is None:
+                return publication.allowed(self._publication_snapshot(), sid)
+            return (acknowledged().get(route["book_id"]) == sid
+                    and (sid not in publication.ROUTES or publication.allowed(self._publication_snapshot(), sid)))
+
+        results = library_search.search(query, self._publication_snapshot, targets=targets, allowed=allowed)
+        for group in results:
+            if group["source_id"] in missing:
+                group.update(status="unavailable", capability=library_search.KIWIX_CAPABILITY)
+        return results
 
     def _public_library(self):
         """Return only published sources and groups containing those sources."""
@@ -1326,6 +1387,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 # Never restart a reader from HTTP. Generate the new private
                 # manifest and wait for independently monitored Kiwix OPDS.
                 zim_refresh.schedule(lambda: SOURCE_CATALOG.get()["sources"])
+            if is_document and enabled:
+                library_search.document_search.schedule(artifact, "epub" if is_epub else "pdf")
             self._send_json(200, {"enabled": enabled})
         elif self.path.rstrip("/") == "/api/storage-settings":
             data = self._read_body()
