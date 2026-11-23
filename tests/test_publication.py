@@ -63,3 +63,19 @@ def test_legacy_pinned_zim_ids_are_validated_from_seed_data_not_source_name():
                     dict(synthetic, filename="../publisher_archive_en_2026-11.zim")):
         with patch.object(source_catalog, "builtin_sources", return_value=[invalid]):
             assert not publication.valid_book_id("publisher_archive_en_2026-11")
+
+
+def test_legacy_reader_reachability_depends_on_declared_book_not_source_id():
+    from theaxiom import source_catalog
+    pinned = dict(source_catalog.WIKIPEDIA_SOURCE, source_id="other-book",
+                  filename="second_archived_zim_2026-11.zim", sha256="b" * 64,
+                  bytes=4096)
+    route = {"path": "/legacy-other/", "reader_path": "/zim/", "port": 8081,
+             "book_id": "second_archived_zim_2026-11"}
+    with patch.object(source_catalog, "builtin_sources", return_value=[pinned]):
+        with patch.object(publication, "reader_location", return_value="/zim/viewer#second_archived_zim_2026-11/") as locate:
+            assert publication.reachable(route)
+            locate.assert_called_once_with({"path": "/zim/", "port": 8081},
+                                           "second_archived_zim_2026-11")
+        with patch.object(publication, "reader_location", return_value=None):
+            assert not publication.reachable(route)
