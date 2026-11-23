@@ -79,3 +79,24 @@ def test_legacy_reader_reachability_depends_on_declared_book_not_source_id():
                                            "second_archived_zim_2026-11")
         with patch.object(publication, "reader_location", return_value=None):
             assert not publication.reachable(route)
+
+
+
+def test_compatibility_routes_derive_from_capabilities_without_source_id_branches():
+    from theaxiom import source_catalog
+    old = source_catalog.WIKIPEDIA_SOURCE
+    second = dict(old, source_id="other-legacy",
+                  filename="other_en_all_2026-11.zim", sha256="c" * 64)
+    routes = {"other-legacy": {"path": "/old-other/", "entry_path": "/read/other-legacy",
+                               "name": "Other", "category": "Reference",
+                               "description": "Archived source", "symbol": "O",
+                               "language": "English"}}
+    with (patch.object(source_catalog, "builtin_sources", return_value=[old, second]),
+          patch.object(source_catalog, "LEGACY_ACQUISITION_UNITS",
+                       {"other-legacy": "acquire-other-zim.service"}),
+          patch.object(source_catalog, "LEGACY_READER_ROUTES", routes)):
+        generated = publication.legacy_reader_routes()
+    assert set(generated) == {"other-legacy"}
+    assert generated["other-legacy"]["book_id"] == "other_en_all_2026-11"
+    assert generated["other-legacy"]["reader_path"] == "/zim/"
+    assert generated["other-legacy"]["entry_path"] == "/read/other-legacy"
