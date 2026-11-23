@@ -44,6 +44,17 @@ LEGACY_ACQUISITION_UNITS = {
     "wikipedia-en": "acquire-wikipedia-zim.service",
 }
 
+LEGACY_READER_ROUTES = {
+    # Compatibility bookmark and presentation metadata for pre-ledger archives.
+    # Ordinary new ZIMs use the shared /read/zim/<source-id> route.
+    "wikipedia-en": {
+        "path": "/wikipedia/", "entry_path": "/read/wikipedia-en",
+        "name": "Wikipedia", "category": "Encyclopedia",
+        "description": "Explore millions of articles, illustrations and reference material without an internet connection.",
+        "symbol": "W", "language": "English",
+    },
+}
+
 PLANNED_SOURCES = [
     {
         "source_id": "wikivoyage",
