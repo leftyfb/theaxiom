@@ -861,6 +861,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         artifacts = {sid: life["artifact"] for sid, life in lifecycles.items()}
         matched = self._matched_snapshot(snapshot, artifacts)
         jobs = {job["source_id"]: job for job in matched["acquisitions"]}
+        legacy_pins = zim_catalog.legacy_pinned_entries()
         sources = []
         for record in catalog["sources"]:
             sid = record["source_id"]
@@ -958,6 +959,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 except (ValueError, OSError):
                     replacement = {"state": "unavailable", "error": "Replacement status unavailable"}
             sources.append(dict(record, **lifecycles[sid], acquisition=job, replacement=replacement, replacement_available=replacement_available,
+                                legacy_pinned=(sid in legacy_pins and record["configuration"].get("format") == "zim"),
                                 update_check=update_check,
                                 installed_verified=verified, publication=state, mutation_blocked=busy,
                                 publication_filter=publication_filter, download_filter=download_filter))
