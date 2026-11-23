@@ -777,6 +777,41 @@ def test_update_discovery_configuration_and_endpoint_diagnostics(app, monkeypatc
     assert request("/api/sources")["revision"] == saved["revision"]
 
 
+def test_acquisition_preview_uses_recorded_sizes_without_starting_jobs(app, monkeypatch):
+    request, _ = app
+    catalog = request("/api/sources")
+    definitions = [
+        ("replace-me", {"format": "zim", "source_url": "https://example.org/new.zim", "expected_size_bytes": "400"}),
+        ("unknown-size", {"format": "zim", "source_url": "https://example.org/unknown.zim"}),
+        ("document", {"format": "pdf", "source_url": "https://example.org/file.pdf"}),
+    ]
+    for sid, fields in definitions:
+        catalog = mutate(request, catalog, "add", dict(fields, title=sid), sid=sid)
+    jobs = admin_api.zim_jobs
+    old = jobs.identity({"format": "zim", "source_url": "https://example.org/old.zim"})
+    installed = dict(source_id="replace-me", state="completed", configuration=old, verified=True,
+                     artifact={"bytes": 200})
+    jobs.save(installed)
+    forbidden = Mock(side_effect=AssertionError("preview must not start or reconcile acquisition"))
+    monkeypatch.setattr(jobs, "status", forbidden)
+    monkeypatch.setattr(jobs, "start", forbidden)
+    monkeypatch.setattr(jobs, "installed", forbidden)
+    payload = {"revision": catalog["revision"], "source_ids": [sid for sid, _ in definitions]}
+    request("/api/acquisition-preview", payload, status=403, origin="")
+    request("/api/acquisition-preview", payload | {"revision": 0}, status=409)
+    request("/api/acquisition-preview", payload | {"source_ids": ["replace-me", "replace-me"]}, status=400)
+    request("/api/acquisition-preview", payload | {"source_ids": ["missing"]}, status=400)
+    planned, unknown, document = request("/api/acquisition-preview", payload)["sources"]
+    assert planned == {"state": "estimated", "source_id": "replace-me", "title": "replace-me",
+                       "installed_bytes": 200, "transfer_bytes": 400, "staging_bytes": 400,
+                       "peak_bytes": 600}
+    assert unknown["transfer_bytes"] is None and unknown["peak_bytes"] is None
+    assert document["state"] == "unsupported"
+    assert jobs.read("replace-me") == installed
+    assert admin_api.SOURCE_CATALOG.get()["revision"] == catalog["revision"]
+    forbidden.assert_not_called()
+
+
 def test_public_layout_order_groups_reset_and_publication_boundary(app, monkeypatch):
     request, _ = app
     catalog = request("/api/sources")

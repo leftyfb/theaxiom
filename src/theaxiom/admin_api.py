@@ -1328,6 +1328,41 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     result = document_update_discovery.check_installed_document(record)
                 diagnostic.update(result)
             self._send_json(200, dict(source_id=sid, **result))
+        elif self.path == "/api/acquisition-preview":
+            if not self.headers.get("Origin"):
+                self._send_json(403, {"error": "same-origin request required"})
+                return
+            data = self._read_body()
+            ids = data.get("source_ids")
+            if (data.keys() != {"revision", "source_ids"} or not self._valid_revision(data.get("revision"))
+                    or not isinstance(ids, list) or not 1 <= len(ids) <= catalog_store.MAX_ENTRIES
+                    or any(not isinstance(sid, str) or not catalog_store.ID_RE.fullmatch(sid) for sid in ids)
+                    or len(set(ids)) != len(ids)):
+                self._send_json(400, {"error": "invalid acquisition selection"})
+                return
+            try:
+                catalog = SOURCE_CATALOG.get()
+            except (catalog_store.CatalogError, OSError):
+                self._send_json(503, {"error": "source catalog unavailable"})
+                return
+            if data["revision"] != catalog["revision"]:
+                self._send_json(409, {"error": "catalog revision changed"})
+                return
+            records = {record["source_id"]: record for record in catalog["sources"]}
+            if any(sid not in records for sid in ids):
+                self._send_json(400, {"error": "unknown selected source"})
+                return
+            rows = []
+            for sid in ids:
+                record = records[sid]
+                estimate = {"state": "unsupported"}
+                if self._zim_record(record):
+                    try:
+                        estimate = zim_jobs.preview_acquisition(sid, record["configuration"])
+                    except (OSError, ValueError, KeyError, TypeError):
+                        estimate = {"state": "unavailable"}
+                rows.append(dict(estimate, title=record["profile"]["title"], source_id=sid))
+            self._send_json(200, {"sources": rows})
         elif self.path == "/api/library-layout":
             if not self.headers.get("Origin"):
                 self._send_json(403, {"error": "same-origin request required"})

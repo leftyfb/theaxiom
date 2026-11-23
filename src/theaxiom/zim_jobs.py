@@ -739,6 +739,31 @@ def identity(config):
             "sha256": digest or ""}
 
 
+def preview_acquisition(sid, config):
+    """Estimate a full ZIM transfer from catalog intent and recorded jobs only."""
+    configured = identity(config)
+    job = read(sid)
+    replacement = read_candidate(sid)
+    artifact = (job.get("artifact") if job and job["state"] == "completed"
+                and job.get("verified") is True else None)
+    recorded = artifact.get("bytes") if isinstance(artifact, dict) else None
+    if type(recorded) is not int or not 0 < recorded <= zim_source.MAX_BYTES:
+        recorded = 0 if job is None else None
+    if replacement and replacement["state"] in {"verified", "activated", "rolled_back"}:
+        # A retained verified replacement may consume space independently.
+        return dict(state="review_replacement", installed_bytes=recorded)
+    intended = replacement["configuration"] if replacement else configured
+    if recorded and not replacement and job["configuration"] == intended:
+        return dict(state="installed", installed_bytes=recorded, transfer_bytes=0,
+                    staging_bytes=0, peak_bytes=recorded)
+    transfer = int(intended["expected_size_bytes"]) if intended["expected_size_bytes"] else None
+    # The ZIM worker promotes its staged inode by hard link. Full staging
+    # accounts for a transfer even when a reusable partial could reduce it.
+    return dict(state="estimated", installed_bytes=recorded, transfer_bytes=transfer,
+                staging_bytes=transfer,
+                peak_bytes=recorded + transfer if recorded is not None and transfer is not None else None)
+
+
 def matches(job, config):
     try:
         return job is not None and job["configuration"] == identity(config)

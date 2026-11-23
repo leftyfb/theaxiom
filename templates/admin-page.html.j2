@@ -516,6 +516,12 @@
         <button class="button" type="button" id="bulk-publish" disabled>Publish</button>
         <button class="button" type="button" id="bulk-unpublish" disabled>Unpublish</button>
         <button class="button" type="button" id="bulk-remove">Remove sources</button>
+        <button class="button" type="button" id="bulk-preview">Preview ZIM storage</button>
+      </div>
+      <div id="bulk-preview-result" hidden>
+        <p class="source-note">Estimates cover the selected ZIMs. They include full staging and any recorded installed editions. Other files and available space are outside this estimate.</p>
+        <p id="bulk-preview-summary" role="status"></p>
+        <ul id="bulk-preview-sources"></ul>
       </div>
     </section>
     <details class="group-panel" id="group-panel" hidden>
@@ -761,6 +767,55 @@
       let selecting = selectMode.getAttribute('aria-pressed') === 'true';
       let bulkBusy = false;
       const selectedIds = () => selecting ? groupChecks.filter(item => item.checked).map(item => item.value) : [];
+      const preview = document.getElementById('bulk-preview-result');
+      const previewSummary = document.getElementById('bulk-preview-summary');
+      const previewSources = document.getElementById('bulk-preview-sources');
+      let previewIds = '';
+      function previewSize(bytes) {
+        if (!Number.isSafeInteger(bytes) || bytes < 0) return 'unknown';
+        if (bytes < 1048576) return bytes.toLocaleString() + ' B';
+        if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MiB';
+        return (bytes / 1073741824).toFixed(2) + ' GiB';
+      }
+      const previewFields = [
+        ['Transfer', 'transfer_bytes'], ['Installed', 'installed_bytes'],
+        ['Staging', 'staging_bytes'], ['Peak', 'peak_bytes']
+      ];
+      document.getElementById('bulk-preview').addEventListener('click', async () => {
+        const ids = selectedIds();
+        const selection = ids.join(',');
+        previewIds = selection;
+        preview.hidden = false;
+        previewSummary.textContent = 'Calculating estimates…';
+        previewSources.replaceChildren();
+        try {
+          const response = await fetch('/api/acquisition-preview', {
+            method: 'POST',
+            headers: {...(window.axiomCsrfHeaders?.() || {}), 'Content-Type':'application/json'},
+            body: JSON.stringify({revision, source_ids: ids})
+          });
+          const result = await response.json();
+          if (previewIds !== selection) return;
+          if (!response.ok) throw new Error(result.error || 'Storage preview unavailable.');
+          const estimates = result.sources.filter(source => source.state !== 'unsupported');
+          previewSummary.textContent = estimates.length ? previewFields.map(([label, field]) => {
+            const known = estimates.map(source => source[field]).filter(Number.isSafeInteger);
+            const unknown = estimates.length - known.length;
+            return label + ' ' + previewSize(known.reduce((sum, bytes) => sum + bytes, 0)) +
+              (unknown ? ' + ' + unknown + ' unknown' : '');
+          }).join(' · ') : 'No supported ZIM sources selected.';
+          for (const source of result.sources) {
+            const row = document.createElement('li');
+            const notes = {unsupported: 'Outside the ZIM preview', unavailable: 'Estimate unavailable',
+              review_replacement: 'Review retained replacement before estimating', installed: 'Already recorded as installed'};
+            row.textContent = source.title + ' · ' + (notes[source.state] ||
+              previewFields.map(([label, field]) => label + ' ' + previewSize(source[field])).join(' · '));
+            previewSources.append(row);
+          }
+        } catch (error) {
+          if (previewIds === selection) previewSummary.textContent = error.message;
+        }
+      });
       function selectionMode() {
         selectMode.textContent = selecting ? 'Cancel selection' : 'Select';
         selectMode.setAttribute('aria-pressed', String(selecting));
@@ -790,6 +845,10 @@
       }
       function groupControls() {
         const kind = groupKind.value, ids = selectedIds();
+        if (previewIds !== ids.join(',')) {
+          previewIds = '';
+          preview.hidden = true;
+        }
         const visible = visibleChecks();
         const checkedVisible = visible.filter(item => item.checked).length;
         const hiddenSelected = ids.length - checkedVisible;
