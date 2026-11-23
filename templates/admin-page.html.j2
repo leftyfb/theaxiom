@@ -403,9 +403,26 @@
       <button class="button" type="button" id="source-add">Add Source</button>
       <button class="button" type="button" id="source-guide-open">Content source guide</button>
       <button class="button" type="button" id="selection-file-open">Preview selection file</button>
+      <button class="button" type="button" id="upstream-catalog-open">Browse Kiwix catalog</button>
       <input id="source-filter-search" type="search" aria-label="Search source names" placeholder="Search sources…" maxlength="512">
     </div>
     <p id="catalog-feedback" role="status" aria-live="polite"></p>
+    <dialog id="upstream-catalog-dialog" aria-labelledby="upstream-catalog-title">
+      <h3 id="upstream-catalog-title">Browse Kiwix catalog</h3>
+      <p class="source-note">Shows one page of publisher listings. Editions and rights are publisher metadata.</p>
+      <form id="upstream-catalog-form">
+        <div class="editor-grid">
+          <div><label for="upstream-family">Kiwix family</label>
+            <input id="upstream-family" required maxlength="120" placeholder="wikipedia_en_all" autocapitalize="none"></div>
+          <div><label for="upstream-language">Three-letter language code</label>
+            <input id="upstream-language" required maxlength="3" pattern="[a-z]{3}" value="eng" autocapitalize="none"></div>
+        </div>
+        <button class="button" type="submit">Refresh listings</button>
+      </form>
+      <p id="upstream-catalog-feedback" role="status"></p>
+      <ul id="upstream-catalog-results"></ul>
+      <form method="dialog"><button class="button">Close</button></form>
+    </dialog>
     <dialog id="selection-file-dialog" aria-labelledby="selection-file-title">
       <h3 id="selection-file-title">Preview a library selection</h3>
       <p class="source-note">Check which source choices match this catalog. Source settings and content stay as they are.</p>
@@ -779,6 +796,49 @@
       let selecting = selectMode.getAttribute('aria-pressed') === 'true';
       let bulkBusy = false;
       const selectedIds = () => selecting ? groupChecks.filter(item => item.checked).map(item => item.value) : [];
+      const upstreamDialog = document.getElementById('upstream-catalog-dialog');
+      const upstreamForm = document.getElementById('upstream-catalog-form');
+      const upstreamFeedback = document.getElementById('upstream-catalog-feedback');
+      const upstreamResults = document.getElementById('upstream-catalog-results');
+      document.getElementById('upstream-catalog-open').addEventListener('click', () => upstreamDialog.showModal());
+      upstreamForm.addEventListener('submit', async event => {
+        event.preventDefault();
+        const submit = upstreamForm.querySelector('[type="submit"]');
+        if (submit.disabled) return;
+        submit.disabled = true;
+        upstreamResults.replaceChildren();
+        upstreamFeedback.textContent = 'Checking the publisher catalog…';
+        try {
+          const response = await fetch('/api/upstream-kiwix-catalog', {
+            method: 'POST',
+            headers: {...(window.axiomCsrfHeaders?.() || {}), 'Content-Type':'application/json'},
+            body: JSON.stringify({family: document.getElementById('upstream-family').value.trim(),
+              language: document.getElementById('upstream-language').value})
+          });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || 'Publisher catalog unavailable.');
+          if (data.unavailable) {
+            upstreamFeedback.textContent = 'Publisher catalog unavailable for this query. Try refreshing later.';
+            return;
+          }
+          const checked = new Date(data.checked_at * 1000).toLocaleString();
+          const source = data.cached ? (data.stale ? 'Older cached listings from ' : 'Cached listings from ') :
+            'Publisher listings checked ';
+          upstreamFeedback.textContent = source + checked + '. ' + data.entries.length + ' matching editions.' +
+            (data.cache_unavailable ? ' Offline cache unavailable.' : '');
+          for (const entry of data.entries) {
+            const row = document.createElement('li');
+            row.textContent = [entry.title, entry.edition, entry.variant,
+              entry.advertised_size ? 'Advertised bytes ' + entry.advertised_size : 'Size not listed',
+              entry.rights || 'Rights not listed'].filter(Boolean).join(' · ');
+            upstreamResults.append(row);
+          }
+        } catch (error) {
+          upstreamFeedback.textContent = error.message;
+        } finally {
+          submit.disabled = false;
+        }
+      });
       const selectionDialog = document.getElementById('selection-file-dialog');
       const selectionFile = document.getElementById('selection-file');
       const selectionFeedback = document.getElementById('selection-file-feedback');

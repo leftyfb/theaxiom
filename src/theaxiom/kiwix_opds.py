@@ -18,7 +18,7 @@ DOWNLOAD_HOSTS = frozenset({
 })
 
 
-def parse_acquisition_feed(raw: bytes) -> list[dict[str, str]]:
+def parse_acquisition_feed(raw: bytes, *, include_catalog_metadata=False) -> list[dict[str, str]]:
     """Extract bounded catalog references; no output is an approved update.
 
     Return a list of publisher-advertised references only. Metalink links
@@ -70,14 +70,24 @@ def parse_acquisition_feed(raw: bytes) -> list[dict[str, str]]:
                 kind = "direct"
             else:
                 continue
-            output.append({
+            result = {
                 "entry_id": entry_id.strip(),
                 "title": title.strip(),
                 "acquisition_url": href,
                 "acquisition_kind": kind,
                 # A feed link alone never establishes an artifact digest.
                 "verification": "unverified",
-            })
+            }
+            if include_catalog_metadata:
+                rights = (entry.findtext(ATOM + "rights") or "").strip()
+                length = link.get("length", "")
+                if rights and len(rights) <= 512:
+                    result["rights"] = rights
+                if kind == "direct" and length.isascii() and length.isdecimal() and len(length) <= 19:
+                    size = int(length)
+                    if 96 <= size <= 2**63 - 1:
+                        result["advertised_size"] = length
+            output.append(result)
     return output
 
 

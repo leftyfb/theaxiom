@@ -777,6 +777,21 @@ def test_update_discovery_configuration_and_endpoint_diagnostics(app, monkeypatc
     assert request("/api/sources")["revision"] == saved["revision"]
 
 
+def test_upstream_catalog_refresh_uses_only_filtered_metadata(app, monkeypatch):
+    request, _ = app
+    module = admin_api.upstream_catalog
+    refresh = Mock(return_value={"entries": [], "cached": True, "checked_at": 1000})
+    monkeypatch.setattr(module, "refresh", refresh)
+    before = request("/api/sources")["revision"]
+    payload = {"family": "wikipedia_en_all", "language": "eng"}
+    request("/api/upstream-kiwix-catalog", payload, origin="", status=403)
+    request("/api/upstream-kiwix-catalog", payload | {"url": "https://unknown.example/"}, status=400)
+    refresh.assert_not_called()
+    assert request("/api/upstream-kiwix-catalog", payload)["cached"]
+    refresh.assert_called_once_with("wikipedia_en_all", "eng")
+    assert request("/api/sources")["revision"] == before
+
+
 def test_portable_selection_round_trip_discloses_only_selected_public_metadata(app):
     request, _ = app
     catalog = request("/api/sources")

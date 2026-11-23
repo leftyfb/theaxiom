@@ -52,6 +52,7 @@ update_check_store = importlib.import_module(f"{__package__}.update_check_store"
 kiwix_update_discovery = importlib.import_module(f"{__package__}.kiwix_update_discovery" if __package__ else "theaxiom.kiwix_update_discovery")
 library_search = importlib.import_module(f"{__package__}.search" if __package__ else "theaxiom.search")
 library_selection = importlib.import_module(f"{__package__}.library_selection" if __package__ else "theaxiom.library_selection")
+upstream_catalog = importlib.import_module(f"{__package__}.upstream_catalog" if __package__ else "theaxiom.upstream_catalog")
 BIND_HOST = "127.0.0.1"
 BIND_PORT = 8080
 ADMIN_TEMPLATE_DIR = Path(__file__).resolve().parents[2] / "templates"
@@ -1355,6 +1356,20 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     result = document_update_discovery.check_installed_document(record)
                 diagnostic.update(result)
             self._send_json(200, dict(source_id=sid, **result))
+        elif self.path == "/api/upstream-kiwix-catalog":
+            if not self.headers.get("Origin"):
+                self._send_json(403, {"error": "same-origin request required"})
+                return
+            data = self._read_body()
+            if data.keys() != {"family", "language"}:
+                self._send_json(400, {"error": "provide a Kiwix family and language"})
+                return
+            try:
+                result = upstream_catalog.refresh(data["family"], data["language"])
+            except ValueError as exc:
+                self._send_json(400, {"error": str(exc)})
+                return
+            self._send_json(200, result)
         elif self.path == "/api/library-selection":
             if not self.headers.get("Origin"):
                 self._send_json(403, {"error": "same-origin request required"})

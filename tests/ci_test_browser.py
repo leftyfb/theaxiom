@@ -278,6 +278,16 @@ def exercise(browser, base, name, viewport, artifacts):
         })
         expect(page.locator("#selection-file-matches")).to_contain_text("Matches this catalog")
         page.locator("#selection-file-dialog").get_by_role("button", name="Close").click()
+        page.route("**/api/upstream-kiwix-catalog", lambda route: route.fulfill(json={
+            "cached": True, "stale": True, "checked_at": 1000,
+            "entries": [{"title": "Offline reference", "edition": "2026-11", "variant": "maxi"}],
+        }))
+        page.get_by_role("button", name="Browse Kiwix catalog").click()
+        page.get_by_label("Kiwix family").fill("reference_eng")
+        page.get_by_role("button", name="Refresh listings").click()
+        expect(page.locator("#upstream-catalog-feedback")).to_contain_text("Older cached listings")
+        expect(page.locator("#upstream-catalog-results")).to_contain_text("Offline reference")
+        page.locator("#upstream-catalog-dialog").get_by_role("button", name="Close").click()
         check.focus()
         page.keyboard.press("Space")
         expect(check).not_to_be_checked()
