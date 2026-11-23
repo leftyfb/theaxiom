@@ -306,6 +306,19 @@ class HTTPAuthTests(unittest.TestCase):
         self.assertNotIn("WWW-Authenticate", headers)
         self.assertIn(b"sign in required", body)
 
+    def test_loopback_fixture_without_password_still_accepts_origin_posts(self):
+        """The unproxied local-only test backend has no credential store."""
+        self.server.axiom_config = ServerConfig(
+            "127.0.0.1", self.port, frozenset({self.host}))
+        headers = {"Origin": "http://" + self.host,
+                   "Content-Type": "application/json"}
+        code, response_headers, _ = self.request(
+            "/api/admin/logout", "POST", headers=headers, body="{}")
+        # Without configured credentials logout is intentionally unavailable,
+        # but the authorization guard must not replace its response with 401.
+        self.assertNotEqual(code, 401)
+        self.assertNotIn("WWW-Authenticate", response_headers)
+
     def test_origin_only_api_clients_preserve_basic_without_browser_popup(self):
         """Origin alone is not proof of a browser when Basic is explicit."""
         origin = {"Origin": "http://" + self.host}
