@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import os
+import re
 import stat
 import subprocess
 import threading
@@ -21,10 +22,10 @@ def command(*args):
                           timeout=3).stdout
 
 
-def unit_state():
+def unit_state(unit_name=UNIT):
     fields = "LoadState,ActiveState,SubState,Result,ExecMainStatus,InvocationID,ControlGroup"
     return dict(line.split("=", 1) for line in command(
-        "systemctl", "show", UNIT, "--property=" + fields
+        "systemctl", "show", unit_name, "--property=" + fields
     ).splitlines() if "=" in line)
 
 
@@ -121,7 +122,7 @@ def metadata(root, relative, mount, mounts):
     return info
 
 
-def success_evidence(unit, entry, final, final_path):
+def success_evidence(unit, entry, final, final_path, unit_name=UNIT):
     # Only current invocation evidence, never an arbitrary historical success.
     invocation = unit.get("InvocationID", "")
     if len(invocation) != 32 or any(c not in "0123456789abcdef" for c in invocation):
@@ -129,7 +130,7 @@ def success_evidence(unit, entry, final, final_path):
     try:
         import json
         records = command("journalctl", "--no-pager", "-o", "json", "-n", "30",
-                          "-u", UNIT, "_SYSTEMD_INVOCATION_ID=" + invocation)
+                          "-u", unit_name, "_SYSTEMD_INVOCATION_ID=" + invocation)
         expected = f"VERIFIED_AND_PROMOTED path={final_path} bytes={entry['bytes']} sha256={entry['sha256']}"
         for line in records.splitlines():
             record = json.loads(line)
@@ -150,7 +151,12 @@ def collect(entry):
               "downloaded_bytes": None, "state": "unknown", "verified": False,
               "detail": "", "active": False}
     try:
-        unit = unit_state()
+        from . import source_catalog
+        unit_name = source_catalog.LEGACY_ACQUISITION_UNITS.get(entry["source_id"], UNIT)
+        if (not isinstance(unit_name, str) or not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_.@-]{0,119}\.service", unit_name)
+                or ".." in unit_name):
+            return dict(result, detail="External acquisition unit unavailable")
+        unit = unit_state() if unit_name == UNIT else unit_state(unit_name)
         state, sub = unit.get("ActiveState"), unit.get("SubState")
         active = state in {"activating", "active", "deactivating"}
         result["active"] = active
@@ -178,7 +184,7 @@ def collect(entry):
         final = metadata(root, Path("library/zim") / name, mount, mounts)
         if storage._covering(root, storage.read_mounts()) != mount:
             return dict(result, detail="Mount changed during sampling")
-        if unit_state() != unit:
+        if (unit_state() if unit_name == UNIT else unit_state(unit_name)) != unit:
             return dict(result, detail="Service changed during sampling")
         total = entry["bytes"]
         if any(x is not None and x.st_size > total for x in (partial, staged, final)):
@@ -212,7 +218,9 @@ def collect(entry):
         if state == "failed" or unit.get("Result") not in {"success", ""}:
             return dict(result, state="failed", detail="Acquisition service reported failure")
         if final:
-            if unit.get("ExecMainStatus") == "0" and success_evidence(unit, entry, final, final_path):
+            valid = (success_evidence(unit, entry, final, final_path) if unit_name == UNIT
+                     else success_evidence(unit, entry, final, final_path, unit_name))
+            if unit.get("ExecMainStatus") == "0" and valid:
                 return dict(result, state="completed", verified=True,
                             detail="Successful acquisition service verification")
             return dict(result, detail="Published file present; verification evidence unavailable")
