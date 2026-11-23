@@ -270,6 +270,8 @@ def exercise(browser, base, name, viewport, artifacts):
         page.get_by_role("button", name="Preview storage").click()
         expect(page.locator("#bulk-preview-summary")).to_contain_text("Installed and peak sizes unknown")
         expect(page.locator("#bulk-preview-capacity")).to_have_text("Current storage capacity is unavailable.")
+        page.get_by_role("button", name="Export ZIM verification manifest").click()
+        expect(page.locator("#catalog-feedback")).to_contain_text("Choose only installed, verified ZIM sources")
         with page.expect_download() as download:
             page.get_by_role("button", name="Export selected sources").click()
         manifest = download.value.path().read_bytes()

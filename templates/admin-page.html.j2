@@ -563,6 +563,7 @@
         <button class="button" type="button" id="bulk-remove">Remove sources</button>
         <button class="button" type="button" id="bulk-preview">Preview storage</button>
         <button class="button" type="button" id="selection-export">Export selected sources</button>
+        <button class="button" type="button" id="transfer-export">Export ZIM verification manifest</button>
       </div>
       <div id="bulk-preview-result" hidden>
         <p class="source-note">Capacity is a snapshot of free space after the configured reserve. PDF and EPUB estimates use the configured download sizes.</p>
@@ -1033,19 +1034,23 @@
         selectMode.focus();
         feedback.textContent = 'Selected ' + matchedSelection.length + ' matching sources. Review storage to plan an acquisition.';
       });
-      document.getElementById('selection-export').addEventListener('click', async () => {
+      async function exportSelection(transfer) {
         try {
-          const manifest = (await selectionRequest({revision, source_ids: selectedIds()})).manifest;
+          const payload = {revision, source_ids: selectedIds()};
+          if (transfer) payload.transfer_manifest = true;
+          const manifest = (await selectionRequest(payload)).manifest;
           const url = URL.createObjectURL(new Blob([JSON.stringify(manifest)], {type:'application/json'}));
           const link = document.createElement('a');
           link.href = url;
-          link.download = 'axiom-library-selection.json';
+          link.download = transfer ? 'axiom-transfer-manifest.json' : 'axiom-library-selection.json';
           link.click();
           window.setTimeout(() => URL.revokeObjectURL(url), 1000);
         } catch (error) {
           feedback.textContent = error.message;
         }
-      });
+      }
+      document.getElementById('selection-export').addEventListener('click', () => exportSelection(false));
+      document.getElementById('transfer-export').addEventListener('click', () => exportSelection(true));
       const preview = document.getElementById('bulk-preview-result');
       const previewSummary = document.getElementById('bulk-preview-summary');
       const previewCapacity = document.getElementById('bulk-preview-capacity');

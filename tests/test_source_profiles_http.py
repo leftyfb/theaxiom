@@ -851,6 +851,59 @@ def test_portable_selection_round_trip_discloses_only_selected_public_metadata(a
     start.assert_not_called()
 
 
+def test_export_local_transfer_manifest_checks_verified_zim_without_copying(app, tmp_path, monkeypatch):
+    import hashlib
+
+    request, _ = app
+    sid = "transfer-fixture"
+    url = "https://example.org/library.zim"
+    catalog = request("/api/sources")
+    catalog = mutate(request, catalog, "add", {
+        "title": "Portable reference", "format": "zim", "language": "eng", "edition": "2026-01",
+        "source_url": url, "license": "Test license", "provenance": "Test publisher record",
+    }, sid=sid)
+    library = tmp_path / "library" / "zim"
+    library.mkdir(parents=True)
+    mount = admin_api.storage._covering(tmp_path, admin_api.storage.read_mounts())
+    monkeypatch.setattr(admin_api.pdf_source, "LOCAL_FILESYSTEMS", {mount["type"]})
+    storage_settings.save_settings(dict(storage_settings.DEFAULT_SETTINGS, storage_root=str(tmp_path)))
+    contents = b"synthetic transfer fixture"
+    digest = hashlib.sha256(contents).hexdigest()
+    filename = f"{sid}.{digest}.zim"
+    archive = library / filename
+    archive.write_bytes(contents)
+    archive.chmod(0o600)
+    jobs = admin_api.zim_jobs
+    config = source(catalog, sid)["configuration"]
+    job = dict(source_id=sid, state="completed", configuration=jobs.identity(config), verified=True,
+               artifact=dict(filename=filename, sha256=digest, bytes=len(contents), source_url=url))
+    jobs.save(job)
+    route = "/api/library-selection"
+    payload = {"revision": catalog["revision"], "source_ids": [sid], "transfer_manifest": True}
+    request(route, payload, origin="", status=403)
+    request(route, payload | {"revision": 0}, status=409)
+    request(route, payload | {"source_ids": [sid, sid]}, status=400)
+    request(route, payload | {"transfer_manifest": "true"}, status=400)
+    before = archive.stat()
+    assert request(route, payload)["manifest"] == {
+        "version": 1, "kind": "axiom-local-transfer", "artifacts": [{
+            "source_id": sid, "format": "zim", "language": "eng", "edition": "2026-01",
+            "title": "Portable reference", "filename": filename, "bytes": len(contents),
+            "sha256": digest, "license": "Test license", "provenance": "Test publisher record",
+        }],
+    }
+    assert archive.stat().st_mtime_ns == before.st_mtime_ns
+    assert jobs.read(sid) == job
+    assert request("/api/sources")["revision"] == catalog["revision"]
+    jobs.save(job | {"verified": False})
+    assert "Verified installation unavailable" in request(route, payload, status=400)["error"]
+    jobs.save(job)
+    separate = library / "separate.zim"
+    archive.rename(separate)
+    archive.symlink_to(separate)
+    assert "Verified installation unavailable" in request(route, payload, status=400)["error"]
+
+
 def test_selection_presets_report_missing_planned_and_bounded_configured_sources(app):
     request, _ = app
     catalog = request("/api/sources")

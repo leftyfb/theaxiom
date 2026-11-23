@@ -52,6 +52,7 @@ update_check_store = importlib.import_module(f"{__package__}.update_check_store"
 kiwix_update_discovery = importlib.import_module(f"{__package__}.kiwix_update_discovery" if __package__ else "theaxiom.kiwix_update_discovery")
 library_search = importlib.import_module(f"{__package__}.search" if __package__ else "theaxiom.search")
 library_selection = importlib.import_module(f"{__package__}.library_selection" if __package__ else "theaxiom.library_selection")
+local_transfer = importlib.import_module(f"{__package__}.local_transfer" if __package__ else "theaxiom.local_transfer")
 upstream_catalog = importlib.import_module(f"{__package__}.upstream_catalog" if __package__ else "theaxiom.upstream_catalog")
 BIND_HOST = "127.0.0.1"
 BIND_PORT = 8080
@@ -1414,7 +1415,9 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 self._send_json(403, {"error": "same-origin request required"})
                 return
             data = self._read_body()
-            if data.keys() not in ({"revision", "source_ids"}, {"manifest"}, {"preset"}) or (
+            if data.keys() not in ({"revision", "source_ids"}, {"revision", "source_ids", "transfer_manifest"},
+                                   {"manifest"}, {"preset"}) or (
+                    "transfer_manifest" in data and data["transfer_manifest"] is not True) or (
                     "source_ids" in data and not self._valid_revision(data["revision"])):
                 self._send_json(400, {"error": "invalid selection request"})
                 return
@@ -1429,7 +1432,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             known = {record["source_id"]: record for record in catalog["sources"]}
             try:
                 if "source_ids" in data:
-                    result = {"manifest": library_selection.export_selection(known, data["source_ids"])}
+                    exporter = local_transfer.export_manifest if data.get("transfer_manifest") else library_selection.export_selection
+                    result = {"manifest": exporter(known, data["source_ids"])}
                 else:
                     matches = (library_selection.preview_preset(known, data["preset"]) if "preset" in data
                                else library_selection.preview_selection(known, data["manifest"]))

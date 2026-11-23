@@ -57,3 +57,7 @@ Public library visitors can filter published sources by category, collection and
 ## 8. Filter administration sources
 
 The Sources page defaults to published first, verified downloaded second, and all other sources last, alphabetical within each group. Combine independent publication and download filters with title, format and grouping filters. Unknown/unverified storage status is distinct from confirmed absence. Refresh order explicitly after live status changes; filter selections persist between reloads. Bulk selection includes visible cards only when using Select visible sources; the selected count identifies hidden selections before assignment.
+
+## 9. Export ZIM verification records
+
+In Administration → Sources, select installed, verified ZIMs and choose **Export ZIM verification manifest**. The JSON records the local archive filename, byte count, recorded SHA-256, edition, and catalog provenance and license notes. It is a metadata export. Archive copying and import verification are separate steps.
