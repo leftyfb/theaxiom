@@ -96,6 +96,33 @@ class ReleaseRevisionTests(unittest.TestCase):
             })
 
 
+class ExternalMonitorSelectionTests(unittest.TestCase):
+    def test_configured_external_monitor_is_selected_by_capability(self):
+        from theaxiom import source_catalog
+        pinned = dict(source_catalog.WIKIPEDIA_SOURCE, source_id="another-legacy")
+        with (patch.object(admin_api.SOURCE_CATALOG, "get",
+                           return_value={"sources": [{"source_id": "another-legacy"}]}),
+              patch.object(admin_api.zim_catalog, "legacy_pinned_entries",
+                           return_value={"another-legacy": pinned})):
+            self.assertEqual(admin_api.configured_external_monitor_entry(), pinned)
+        with (patch.object(admin_api.SOURCE_CATALOG, "get",
+                           return_value={"sources": [{"source_id": "unrelated"}]}),
+              patch.object(admin_api.zim_catalog, "legacy_pinned_entries",
+                           return_value={"another-legacy": pinned})):
+            self.assertIsNone(admin_api.configured_external_monitor_entry())
+
+    def test_multiple_legacy_monitors_fail_closed_without_parallel_nfs_sampling(self):
+        from theaxiom import source_catalog
+        seed = source_catalog.WIKIPEDIA_SOURCE
+        with (patch.object(admin_api.SOURCE_CATALOG, "get",
+                           return_value={"sources": [{"source_id": "first"},
+                                                     {"source_id": "second"}]}),
+              patch.object(admin_api.zim_catalog, "legacy_pinned_entries",
+                           return_value={"first": dict(seed, source_id="first"),
+                                         "second": dict(seed, source_id="second")})):
+            self.assertIsNone(admin_api.configured_external_monitor_entry())
+
+
 class HTTPAuthTests(unittest.TestCase):
     def setUp(self):
         self.server = admin_api.ThreadingHTTPServer(("127.0.0.1", 0), admin_api.AdminAPIHandler)
