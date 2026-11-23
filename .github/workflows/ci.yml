@@ -6,6 +6,10 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+# Keep only the newest push per branch; PRs have separate groups.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 jobs:
   tests:
     # Never run untrusted pull requests on the persistent tux runner.
