@@ -267,8 +267,9 @@ def exercise(browser, base, name, viewport, artifacts):
         expect(page.locator("#group-count")).to_contain_text("1 selected")
         expect(page.locator("#bulk-publish")).to_be_disabled()
         expect(page.locator("#bulk-unpublish")).to_be_disabled()
-        page.get_by_role("button", name="Preview ZIM storage").click()
-        expect(page.locator("#bulk-preview-summary")).to_have_text("No supported ZIM sources selected.")
+        page.get_by_role("button", name="Preview storage").click()
+        expect(page.locator("#bulk-preview-summary")).to_contain_text("Installed and peak sizes unknown")
+        expect(page.locator("#bulk-preview-capacity")).to_be_empty()
         with page.expect_download() as download:
             page.get_by_role("button", name="Export selected sources").click()
         manifest = download.value.path().read_bytes()
@@ -278,7 +279,7 @@ def exercise(browser, base, name, viewport, artifacts):
             "name": "selection.json", "mimeType": "application/json", "buffer": manifest,
         })
         expect(page.locator("#selection-file-matches")).to_contain_text("Matches this catalog")
-        expect(page.locator("#selection-storage-summary")).to_have_text("No matching ZIM sources to estimate.")
+        expect(page.locator("#selection-storage-summary")).to_contain_text("Installed and peak sizes unknown")
         expect(check).not_to_be_checked()
         page.get_by_role("button", name="Select matching sources").click()
         expect(check).to_be_checked()

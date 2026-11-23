@@ -822,7 +822,7 @@ def test_portable_selection_round_trip_discloses_only_selected_public_metadata(a
         "license": "Fixture terms",
     }]
     assert preview["storage"] == {
-        "sources": [{"source_id": "selection-fixture", "title": "Selection fixture", "state": "estimated",
+        "sources": [{"source_id": "selection-fixture", "title": "Selection fixture", "state": "estimated", "format": "zim",
                      "transfer_bytes": 400, "installed_bytes": 0, "staging_bytes": 400, "peak_bytes": 400}],
         "capacity": {"state": "fits", "reserve_bytes": 100, "free_bytes": 500, "available_bytes": 400},
     }
@@ -857,7 +857,11 @@ def test_acquisition_preview_uses_recorded_sizes_without_starting_jobs(app, monk
     definitions = [
         ("replace-me", {"format": "zim", "source_url": "https://example.org/new.zim", "expected_size_bytes": "400"}),
         ("unknown-size", {"format": "zim", "source_url": "https://example.org/unknown.zim"}),
-        ("document", {"format": "pdf", "source_url": "https://example.org/file.pdf"}),
+        ("document", {"format": "pdf", "source_url": "https://example.org/file.pdf", "expected_size_bytes": "900"}),
+        ("unknown-epub", {"format": "epub", "source_url": "https://example.org/book.epub"}),
+        ("upload-epub", {"format": "epub"}),
+        ("oversized-pdf", {"format": "pdf", "source_url": "https://example.org/large.pdf", "expected_size_bytes": "99999999"}),
+        ("unusable-url", {"format": "pdf", "source_url": "http://example.org/plain.pdf"}),
     ]
     for sid, fields in definitions:
         catalog = mutate(request, catalog, "add", dict(fields, title=sid), sid=sid)
@@ -880,12 +884,20 @@ def test_acquisition_preview_uses_recorded_sizes_without_starting_jobs(app, monk
     request("/api/acquisition-preview", payload | {"source_ids": ["replace-me", "replace-me"]}, status=400)
     request("/api/acquisition-preview", payload | {"source_ids": ["missing"]}, status=400)
     result = request("/api/acquisition-preview", payload)
-    planned, unknown, document = result["sources"]
-    assert planned == {"state": "estimated", "source_id": "replace-me", "title": "replace-me",
+    planned, unknown, document, unknown_epub, upload, oversized, invalid = result["sources"]
+    assert planned == {"state": "estimated", "source_id": "replace-me", "title": "replace-me", "format": "zim",
                        "installed_bytes": 200, "transfer_bytes": 400, "staging_bytes": 400,
                        "peak_bytes": 600}
     assert unknown["transfer_bytes"] is None and unknown["peak_bytes"] is None
-    assert document["state"] == "unsupported"
+    assert document == {"source_id": "document", "title": "document", "format": "pdf", "state": "estimated",
+                        "transfer_bytes": 900, "staging_bytes": 900, "installed_bytes": None, "peak_bytes": None}
+    assert unknown_epub["format"] == "epub" and unknown_epub["staging_bytes"] is None
+    assert [upload["state"], oversized["state"], invalid["state"]] == [
+        "upload_required", "over_size_limit", "invalid_download_url"]
+    probe.reset_mock()
+    documents_only = payload | {"source_ids": ["document", "unknown-epub"]}
+    assert request("/api/acquisition-preview", documents_only)["capacity"] == {"state": "not_applicable"}
+    probe.assert_not_called()
     assert result["capacity"] == {"state": "uncertain", "free_bytes": 500, "reserve_bytes": 100,
                                   "available_bytes": 400}
     sized = payload | {"source_ids": ["replace-me"]}

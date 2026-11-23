@@ -397,6 +397,21 @@ def _preview_capacity(rows):
             "available_bytes": available}
 
 
+def _preview_document_acquisition(configuration, *, byte_limit):
+    # Candidate metadata does not prove the document is present or verified.
+    url = configuration.get("source_url", "")
+    if not url:
+        return {"state": "upload_required"}
+    if not pdf_source.valid_source_url(url):
+        return {"state": "invalid_download_url"}
+    size = configuration.get("expected_size_bytes", "")
+    if size and int(size) > byte_limit:
+        return {"state": "over_size_limit"}
+    requested = int(size) if size else None
+    return {"state": "estimated", "transfer_bytes": requested, "staging_bytes": requested,
+            "installed_bytes": None, "peak_bytes": None}
+
+
 class AdminAPIHandler(BaseHTTPRequestHandler):
     """Minimal HTTP handler for the admin API."""
 
@@ -794,15 +809,21 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         rows = []
         for sid in ids:
             record = records[sid]
+            configuration = record["configuration"]
+            format_name = configuration["format"]
             estimate = {"state": "unsupported"}
             if self._zim_record(record):
                 try:
                     estimate = zim_jobs.preview_acquisition(
-                        sid, record["configuration"], exact_selection=exact_selection)
+                        sid, configuration, exact_selection=exact_selection)
                 except (OSError, ValueError, KeyError, TypeError):
                     estimate = {"state": "unavailable"}
-            rows.append(dict(estimate, title=record["profile"]["title"], source_id=sid))
-        return {"sources": rows, "capacity": _preview_capacity(rows)}
+            elif self._pdf_record(record) or self._epub_record(record):
+                limit = pdf_source.MAX_BYTES if format_name == "pdf" else epub_source.MAX_BYTES
+                estimate = _preview_document_acquisition(configuration, byte_limit=limit)
+            rows.append(dict(estimate, title=record["profile"]["title"], source_id=sid, format=format_name))
+        return {"sources": rows,
+                "capacity": _preview_capacity([row for row in rows if row["format"] == "zim"])}
 
     def _zim_publications(self, catalog=None):
         catalog = catalog or SOURCE_CATALOG.get()

@@ -548,11 +548,11 @@
         <button class="button" type="button" id="bulk-publish" disabled>Publish</button>
         <button class="button" type="button" id="bulk-unpublish" disabled>Unpublish</button>
         <button class="button" type="button" id="bulk-remove">Remove sources</button>
-        <button class="button" type="button" id="bulk-preview">Preview ZIM storage</button>
+        <button class="button" type="button" id="bulk-preview">Preview storage</button>
         <button class="button" type="button" id="selection-export">Export selected sources</button>
       </div>
       <div id="bulk-preview-result" hidden>
-        <p class="source-note">Estimates cover the selected ZIMs. They include full staging and any recorded installed editions.</p>
+        <p class="source-note">Storage capacity and recorded installed sizes are available for ZIMs. PDF and EPUB estimates use the configured download sizes.</p>
         <p id="bulk-preview-summary" role="status"></p>
         <p id="bulk-preview-capacity" role="status"></p>
         <ul id="bulk-preview-sources"></ul>
@@ -945,11 +945,7 @@
           matchedSelection = result.sources.filter(item => item.state === 'match').map(item => item.source_id);
           selectionApply.disabled = !matchedSelection.length;
           if (matchedSelection.length) {
-            const estimates = result.storage.sources.filter(source => source.state !== 'unsupported');
-            selectionStorage.textContent = estimates.length ?
-              'Matching ZIMs · ' + estimateSummary(estimates) +
-                (estimates.length < matchedSelection.length ? ' · Other matching formats are outside the storage estimate.' : '') :
-              'No matching ZIM sources to estimate.';
+            selectionStorage.textContent = formatEstimates(result.storage.sources);
             selectionCapacity.textContent = capacitySummary(result.storage.capacity);
           }
         } catch (error) {
@@ -996,18 +992,34 @@
         ['Transfer', 'transfer_bytes'], ['Installed', 'installed_bytes'],
         ['Staging', 'staging_bytes'], ['Peak', 'peak_bytes']
       ];
-      function estimateSummary(estimates) {
-        return previewFields.map(([label, field]) => {
+      function estimateSummary(estimates, fields = previewFields) {
+        return fields.map(([label, field]) => {
           const known = estimates.map(source => source[field]).filter(Number.isSafeInteger);
           const unknown = estimates.length - known.length;
           return label + ' ' + previewSize(known.reduce((sum, bytes) => sum + bytes, 0)) +
             (unknown ? ' + ' + unknown + ' unknown' : '');
         }).join(' · ');
       }
+      function formatEstimates(sources) {
+        const zim = sources.filter(source => source.format === 'zim' && source.state !== 'unsupported');
+        const documents = sources.filter(source => ['pdf', 'epub'].includes(source.format) && source.state !== 'unsupported');
+        const estimates = [];
+        if (zim.length) estimates.push('ZIM · ' + estimateSummary(zim));
+        if (documents.length) {
+          const configured = documents.filter(source => source.state === 'estimated');
+          if (configured.length) {
+            const fields = previewFields.filter(([, field]) => field === 'transfer_bytes' || field === 'staging_bytes');
+            estimates.push('PDF and EPUB · ' + estimateSummary(configured, fields) + ' · Installed and peak sizes unknown');
+          }
+          const unavailable = documents.length - configured.length;
+          if (unavailable) estimates.push(unavailable + ' PDF or EPUB source(s) lack a usable download configuration');
+        }
+        return estimates.join(' · ') || 'No supported sources to estimate.';
+      }
       function capacitySummary(capacity) {
         const result = {
-          fits: 'Estimated staging fits.',
-          insufficient: 'Insufficient space for the staging estimate and configured reserve.',
+          fits: 'Estimated ZIM staging fits.',
+          insufficient: 'Insufficient space for the ZIM staging estimate and configured reserve.',
           uncertain: 'Some staging sizes are unknown.',
           pending: 'Storage capacity check still pending. Preview again to refresh.',
           unavailable: 'Current storage capacity is unavailable.'
@@ -1045,12 +1057,13 @@
             result = await requestPreview();
             if (!current()) return;
           }
-          const estimates = result.sources.filter(source => source.state !== 'unsupported');
-          previewSummary.textContent = estimates.length ? estimateSummary(estimates) : 'No supported ZIM sources selected.';
+          previewSummary.textContent = formatEstimates(result.sources);
           previewCapacity.textContent = capacitySummary(result.capacity);
           for (const source of result.sources) {
             const row = document.createElement('li');
-            const notes = {unsupported: 'Outside the ZIM preview', unavailable: 'Estimate unavailable',
+            const notes = {unsupported: 'Outside the storage preview', unavailable: 'Estimate unavailable',
+              upload_required: 'Choose a local file to upload', invalid_download_url: 'Requires a direct HTTPS download URL',
+              over_size_limit: 'Configured size exceeds the document download limit',
               review_replacement: 'Review the replacement before estimating', installed: 'Already recorded as installed'};
             row.textContent = source.title + ' · ' + (notes[source.state] ||
               previewFields.map(([label, field]) => label + ' ' + previewSize(source[field])).join(' · '));
