@@ -19,6 +19,10 @@ ATOM = "{http://www.w3.org/2005/Atom}"
 MAX_RESPONSE = 256 * 1024
 
 
+class ReaderUnavailable(ValueError):
+    """The loopback reader could not provide an HTTP response."""
+
+
 def listed_book_ids(*, port=None):
     """Return a bounded set of strictly local OPDS content IDs."""
     connection = http.client.HTTPConnection("127.0.0.1", port if port is not None else zim_catalog.GENERIC_READER["port"], timeout=2)
@@ -26,7 +30,7 @@ def listed_book_ids(*, port=None):
         connection.request("GET", "/zim/catalog/v2/entries?count=101")
         response = connection.getresponse()
         if response.status != 200:
-            raise ValueError("Kiwix reader not ready")
+            raise ReaderUnavailable("Kiwix reader not ready")
         data = response.read(MAX_RESPONSE + 1)
         if len(data) > MAX_RESPONSE or b"<!DOCTYPE" in data.upper() or b"<!ENTITY" in data.upper():
             raise ValueError("Invalid Kiwix catalog response")
@@ -52,6 +56,8 @@ def listed_book_ids(*, port=None):
                 raise ValueError("Duplicate Kiwix book ID")
             result.add(name)
         return result
+    except (OSError, http.client.RemoteDisconnected) as exc:
+        raise ReaderUnavailable("Kiwix reader not ready") from exc
     except (ET.ParseError, http.client.HTTPException, UnicodeError) as exc:
         raise ValueError("Could not validate Kiwix OPDS catalog") from exc
     finally:

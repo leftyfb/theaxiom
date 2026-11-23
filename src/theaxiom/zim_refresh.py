@@ -4,6 +4,7 @@ Only the separately installed loopback Kiwix sidecar may serve archives.
 Publication is fail-closed while its OPDS state catches up. This module
 never starts, stops or reloads a service and never changes storage modes.
 """
+import logging
 import threading
 import time
 
@@ -11,10 +12,12 @@ from . import publication, zim_catalog, zim_reader_probe
 
 RETRIES = 40
 INTERVAL = 0.5
+LOGGER = logging.getLogger(__name__)
 
 
 def reconcile(load_records, *, attempts=RETRIES, interval=INTERVAL):
     """Refresh the manifest and acknowledge only the exact loaded book set."""
+    failure = "readiness-validation-failed"
     for attempt in range(attempts):
         try:
             with publication.LOCK:
@@ -28,16 +31,28 @@ def reconcile(load_records, *, attempts=RETRIES, interval=INTERVAL):
                 if current != expected:
                     zim_catalog.write_manifest(records)
                 if b"<book " not in expected:
+                    zim_catalog.activation_failure = None
                     return True  # nothing can be served; old marker is invalid
                 # Publication status is currently gated until this succeeds.
-                zim_reader_probe.acknowledge(records)
+                try:
+                    zim_reader_probe.acknowledge(records)
+                except zim_reader_probe.ReaderUnavailable:
+                    zim_catalog.activation_failure = (expected, "Kiwix service unavailable")
+                    raise
+                except (OSError, ValueError):
+                    zim_catalog.activation_failure = (
+                        (expected, "Kiwix activation timed out") if attempt + 1 == attempts else None
+                    )
+                    raise
+                zim_catalog.activation_failure = None
                 return True
-        except (OSError, ValueError, TypeError, KeyError):
+        except (OSError, ValueError, TypeError, KeyError) as exc:
             # A missing sidecar or a pending Kiwix --monitorLibrary reload is
             # expected during setup. Never bypass publication readiness.
-            pass
+            failure = zim_reader_probe._failure_category(exc)
         if attempt + 1 < attempts:
             time.sleep(interval)
+    LOGGER.warning("Kiwix publication reconciliation timed out attempts=%d reason=%s", attempts, failure)
     return False
 
 

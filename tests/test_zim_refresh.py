@@ -96,3 +96,28 @@ def test_replacement_schedule_routes_to_guarded_recovery_thread():
     assert worker.call_args.args == (loader,)
     assert worker.call_args.kwargs["source_id"] == "ready"
     assert worker.call_args.kwargs["configuration"] == config
+
+
+def test_reconciliation_reports_outage_timeout_and_recovery(tmp_path, monkeypatch, caplog):
+    catalog = zim_refresh.zim_catalog
+    probe = zim_refresh.zim_reader_probe
+    target = tmp_path / "library.xml"
+    expected = b"<library><book id='ready'/></library>"
+    target.write_bytes(expected)
+    monkeypatch.setattr(catalog, "activation_failure", None)
+    monkeypatch.setattr(catalog, "render_xml", lambda records: expected)
+    monkeypatch.setattr(catalog, "manifest_path", lambda: target)
+    acknowledge = Mock(side_effect=[
+        probe.ReaderUnavailable("Kiwix reader not ready"),
+        ValueError("untrusted detail with a credential"),
+        None,
+    ])
+    monkeypatch.setattr(probe, "acknowledge", acknowledge)
+    assert not zim_refresh.reconcile(list, attempts=1)
+    assert catalog.activation_failure == (expected, "Kiwix service unavailable")
+    assert not zim_refresh.reconcile(list, attempts=1)
+    assert catalog.activation_failure == (expected, "Kiwix activation timed out")
+    assert "credential" not in caplog.text
+    assert "attempts=1 reason=readiness-validation-failed" in caplog.text
+    assert zim_refresh.reconcile(list, attempts=1)
+    assert catalog.activation_failure is None

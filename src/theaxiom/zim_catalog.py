@@ -332,6 +332,10 @@ def generic_reader():
 GENERIC_READER = generic_reader()
 
 
+# A reconciliation diagnostic is advisory and tied to one exact manifest.
+activation_failure = None
+
+
 def status(record, records):
     """User-visible publication state for a generic, acquired ZIM."""
     sid = record["source_id"]
@@ -359,9 +363,14 @@ def status(record, records):
         location = (publication.reader_location(GENERIC_READER, source_content_name(record))
                     if acknowledged else None)
         ready = bool(location)
+        diagnostic = activation_failure
+        activation_reason = (
+            diagnostic[1] if enabled and verified and rights and not acknowledged
+            and diagnostic and diagnostic[0] == render_xml(records) else ""
+        )
         reason = ("Confirm permission to share this archive" if verified and not rights
                   else "Download and verify the archive before publishing" if enabled and not verified
-                  else "Waiting for Kiwix to acknowledge the current library catalog" if enabled and not acknowledged
+                  else (activation_reason or "Waiting for Kiwix to acknowledge the current library catalog") if enabled and not acknowledged
                   else "Kiwix reader entry could not be resolved" if enabled and not ready
                   else "")
         return dict(result, enabled=enabled, verified=verified, serving=bool(ready),
