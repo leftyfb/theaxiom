@@ -644,12 +644,15 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             search_page = self.path.split("?", 1)[0] == "/search"
             sources, groups, results, selected = [], [], [], {}
             query, error, code = "", "", 200
+            search_source, search_number, start_base = "", 1, 1
             try:
                 if len(self.path) > 4096:
                     raise ValueError("Request too long")
                 params = parse_qs(urlsplit(self.path).query, keep_blank_values=True,
-                                  max_num_fields=4, errors="strict")
+                                  max_num_fields=7 if search_page else 4, errors="strict")
                 allowed = {"category", "collection", "tag", "q"}
+                if search_page:
+                    allowed.update({"source", "page", "base"})
                 if set(params) - allowed or any(len(values) != 1 for values in params.values()):
                     raise ValueError("Invalid filters")
                 query = library_search.validate_query(params.get("q", [""])[0])
@@ -657,6 +660,18 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                             if params.get(kind, [""])[0]}
                 if any(not catalog_store.ID_RE.fullmatch(gid) for gid in selected.values()):
                     raise ValueError("Invalid filter ID")
+                if search_page:
+                    search_source = params.get("source", [""])[0]
+                    raw_page = params.get("page", ["1"])[0]
+                    raw_base = params.get("base", ["1"])[0]
+                    if ("source" in params and not catalog_store.ID_RE.fullmatch(search_source)
+                            or ("page" in params or "base" in params) and not search_source
+                            or raw_base not in {"0", "1"}
+                            or not re.fullmatch(r"[1-9][0-9]{0,4}", raw_page)
+                            or int(raw_page) > library_search.MAX_PAGE):
+                        raise ValueError("Invalid search page")
+                    search_number = int(raw_page)
+                    start_base = int(raw_base)
                 sources, groups = self._public_library()
                 eligible = {source["source_id"] for source in sources}
                 for kind, gid in selected.items():
@@ -664,8 +679,10 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     group = next((g for g in groups if g["kind"] == plural and g["group_id"] == gid), None)
                     eligible.intersection_update(group["source_ids"] if group else [])
                 sources = [source for source in sources if source["source_id"] in eligible]
+                if search_source:
+                    sources = [source for source in sources if source["source_id"] == search_source]
                 if search_page and query:
-                    results = self._search_published_content(query, sources)
+                    results = self._search_published_content(query, sources, page=search_number, start_base=start_base)
             except (ValueError, UnicodeError):
                 error, code = "Invalid search or filter request.", 400
             except RuntimeError:
@@ -680,9 +697,11 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     sections[None] = sections.pop(None)
             body = environment.get_template("search.html.j2" if search_page else "library.html.j2").render(
                 sources=sources, groups=results, filter_groups=groups, selected=selected,
-                query=query, error=error, sections=sections).encode("utf-8")
+                query=query, error=error, sections=sections, search_source=search_source).encode("utf-8")
             self.send_response(code)
             self.send_header("Content-Type", "text/html; charset=utf-8")
+            if search_page:
+                self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -847,7 +866,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             if self._zim_record(record):
                 yield record, zim_catalog.status(record, catalog["sources"])
 
-    def _search_published_content(self, query, sources):
+    def _search_published_content(self, query, sources, *, page=1, start_base=1):
         names = {source["source_id"]: source["name"] for source in sources
                  if source["category"] not in {"PDF", "EPUB"}}
 
@@ -908,7 +927,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             return (acknowledged().get(route["book_id"]) == sid
                     and (sid not in publication.ROUTES or publication.allowed(self._publication_snapshot(), sid)))
 
-        results = library_search.search(query, self._publication_snapshot, targets=targets, allowed=allowed)
+        results = library_search.search(query, self._publication_snapshot, targets=targets, allowed=allowed,
+                                        page=page, start_base=start_base)
         for group in results:
             if group["source_id"] in missing:
                 group.update(status="unavailable", capability=library_search.KIWIX_CAPABILITY)

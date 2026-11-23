@@ -107,7 +107,7 @@ def schedule(artifact, kind):
 
 
 def search_document(route, query):
-    from .search import MAX_RESULTS, Result
+    from .search import MAX_RESULTS, Page, Result
 
     artifact, kind = route["artifact"], route["kind"]
     data = _load(artifact)
@@ -119,18 +119,22 @@ def search_document(route, query):
     if not data["sections"]:
         raise NoText
     matches = []
+    skip = route.get("offset", 0)
     needle = query.casefold()
     for number, content in data["sections"]:
         offset = content.casefold().find(needle)
         if offset < 0:
             continue
+        if skip:
+            skip -= 1
+            continue
+        if len(matches) == MAX_RESULTS:
+            return Page(matches, has_more=True, partial=data["partial"])
         href = route["path"] + (f"#page={number}" if kind == "pdf" else f"/chapter/{number - 1}")
         snippet = content[max(0, offset - 70):offset + len(query) + 100]
         label = "Page" if kind == "pdf" else "Chapter"
         matches.append(Result(f"{route['name']} · {label} {number}", href, snippet))
-        if len(matches) == MAX_RESULTS:
-            break
-    return matches, data["partial"]
+    return Page(matches, partial=data["partial"])
 
 
 def _sections(data, kind):

@@ -392,9 +392,9 @@ def main():
             from theaxiom import search
             route = {"book_id": expected, "path": f"/zim/content/{expected}/",
                      "port": port, "deadline": time.monotonic() + 5}
-            matches = search.search_kiwix(route, "offline")
+            matches = search.search_kiwix(route, "offline").results
             assert matches and all(result.href.startswith(route["path"]) for result in matches), matches
-            assert not search.search_kiwix(route, "zzzzneverpresentzzzz")
+            assert not search.search_kiwix(route, "zzzzneverpresentzzzz").results
             # Real Chromium follows articles in a tiny fixture, not production
             # Wikipedia/Ready.gov. Search is tested via native Kiwix HTTP as above.
             from playwright.sync_api import sync_playwright, expect

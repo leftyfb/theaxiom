@@ -346,7 +346,7 @@ def test_public_group_filters_hide_unpublished_members(app):
     request("/?category=reference&category=other", status=400)
     request("/?tag=../bad", status=400)
     search_page = request("/search?q=water&tag=mixed")
-    assert "No matching results." in search_page
+    assert "No matching results." not in search_page
     assert "Results may be incomplete." in search_page
     assert '<h2 id="source-wikipedia-en">' not in search_page
     assert "Wikipedia" not in request("/search?q=water&tag=missing")
@@ -1129,3 +1129,41 @@ def test_storage_preferences_block_unresolved_acquisition(app, monkeypatch, tmp_
     assert "resolve the acquisition" in request("/api/storage-settings", changed, status=409)["error"]
     monkeypatch.setattr(admin_api.zim_jobs, "read", lambda sid: None)
     assert request("/api/storage-settings", changed) == changed
+
+
+def test_public_search_paginates_only_selected_published_source(app, monkeypatch):
+    from html import unescape
+
+    request, _ = app
+    handler = admin_api.AdminAPIHandler
+    sources = [{"source_id": sid, "name": sid} for sid in ("reference", "guide")]
+    groups = [dict(kind="tags", group_id="safety", name="Safety",
+                   source_ids=["reference", "guide", "private"])]
+    monkeypatch.setattr(handler, "_public_library", lambda self: (sources, groups))
+    calls = []
+
+    def search(self, query, eligible, *, page, start_base):
+        calls.append((query, [source["source_id"] for source in eligible], page, start_base))
+        return [
+            dict(source_id=source["source_id"], name=source["name"], status="ok",
+                 results=[dict(title=f"Hit on page {page}", href="/article")],
+                 has_more=page == 1, page=page, start_base=0)
+            for source in eligible
+        ]
+
+    monkeypatch.setattr(handler, "_search_published_content", search)
+    first, headers = request("/search?q=food%26water&tag=safety", raw=True)
+    assert headers["Cache-Control"] == "no-store"
+    links = re.findall(r'rel="next" href="([^"]+)"', first.decode())
+    assert len(links) == 2
+    second = request(unescape(links[0]))
+    assert "Hit on page 2" in second
+    assert 'start="21"' in second
+    assert 'rel="prev"' in second and 'rel="next"' not in second
+    assert calls == [("food&water", ["reference", "guide"], 1, 1),
+                     ("food&water", ["reference"], 2, 0)]
+    assert "No published collections" in request("/search?q=water&source=private&page=2")
+    assert calls[-1][1] == []
+    request("/search?q=water&page=2", status=400)
+    request("/search?q=water&source=reference&page=0", status=400)
+    request("/search?q=water&source=reference&page=2&base=3", status=400)

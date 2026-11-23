@@ -19,20 +19,45 @@
 <p role="alert">{{ error }}</p>
 {% elif query %}
 {% set matched = groups|selectattr("results")|list %}
-{% set incomplete = groups|selectattr("status", "in", ["unavailable", "indexing", "partial", "unsupported"])|list %}
+{% set incomplete = groups|selectattr("status", "in", ["timeout", "unavailable", "indexing", "partial", "unsupported", "no_text"])|list %}
 <p>Results for “{{ query }}”</p>
-{% if not matched %}<p>{% if not sources %}No published collections are available to search.{% else %}No matching results.{% endif %}</p>{% endif %}
-{% if incomplete %}<p class="muted">Some content couldn’t be searched. Results may be incomplete.</p>{% endif %}
-{% for group in matched %}
+{% if search_source %}
+<p><a href="/search?{{ dict(selected, q=query)|urlencode }}">Search all selected sources</a></p>
+{% endif %}
+{% if not matched and not incomplete %}
+<p>{% if not sources %}No published collections are available to search.{% elif search_source %}No matching results on this page.{% else %}No matching results.{% endif %}</p>
+{% endif %}
+{% if incomplete %}
+<p role="status">Some content couldn’t be searched. Results may be incomplete.</p>
+<ul>
+{% for group in incomplete %}
+<li>{{ group.name }} — {{ {"timeout": "Search timed out", "unavailable": "Search unavailable", "indexing": "Indexing in progress", "partial": "Only part of the source is indexed", "unsupported": "Search unsupported", "no_text": "No searchable text"}[group.status] }}</li>
+{% endfor %}
+</ul>
+{% endif %}
+{% for group in groups if group.results or group.has_more or group.page|default(1) > 1 %}
 <section aria-labelledby="source-{{ group.source_id }}">
 <h2 id="source-{{ group.source_id }}">{{ group.name }}</h2>
-<ol>{{ result_items(group.results[:5]) }}</ol>
+{% set page = group.page|default(1) %}
+{% set first = (page - 1) * 20 + 1 %}
+<ol start="{{ first }}">{{ result_items(group.results[:5]) }}</ol>
 {% if group.results|length > 5 %}
 {% set remaining = group.results|length - 5 %}
 <details class="more-results">
 <summary><span class="more-label">Show {{ remaining }} more from {{ group.name }}</span><span class="less-label">Show fewer from {{ group.name }}</span></summary>
-<ol start="6">{{ result_items(group.results[5:]) }}</ol>
+<ol start="{{ first + 5 }}">{{ result_items(group.results[5:]) }}</ol>
 </details>
+{% endif %}
+{% if page > 1 or group.has_more %}
+<nav aria-label="Pages for {{ group.name }}">
+{% if page > 1 %}
+<a rel="prev" href="/search?{{ dict(selected, q=query, source=group.source_id, page=page-1, base=group.start_base)|urlencode }}">Previous page</a>
+{% endif %}
+<span>Page {{ page }}</span>
+{% if group.has_more %}
+<a rel="next" href="/search?{{ dict(selected, q=query, source=group.source_id, page=page+1, base=group.start_base)|urlencode }}">Next page</a>
+{% endif %}
+</nav>
 {% endif %}
 </section>
 {% endfor %}

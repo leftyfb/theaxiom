@@ -191,7 +191,7 @@ def test_epub_public_reader_and_revocation(epub_app, disk):
     request("/api/publication", pub, status=409)
     request("/api/publication", dict(pub, acknowledge_rights=True))
     assert "Open EPUB" in request("/")
-    assert "No matching results." in request("/search?q=My+book")
+    assert 'id="source-fixture-book"' not in request("/search?q=My+book")
     page, headers = request(base, raw=True)
     assert b"Safe chapter" in page and b"Table of contents" in page
     assert b"https://example.org" not in page and b"<script>" not in page

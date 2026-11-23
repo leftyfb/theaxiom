@@ -12,8 +12,10 @@ from . import document_search, publication
 
 MAX_QUERY = 160
 MAX_RESULTS = 20
-MAX_RSS_BYTES = 256 * 1024
-MAX_SEARCH_SECONDS = 6
+MAX_RSS_BYTES = 512 * 1024
+MAX_SEARCH_SECONDS = 20
+KIWIX_SEARCH_SECONDS = 8
+MAX_PAGE = 50_000
 KIWIX_CAPABILITY = "Kiwix full-text search"
 _SEARCH_SLOTS = threading.BoundedSemaphore(4)
 
@@ -26,9 +28,17 @@ class Result:
 
 
 @dataclass(frozen=True)
+class Page:
+    results: list[Result]
+    has_more: bool = False
+    partial: bool = False
+    start_base: int = 1
+
+
+@dataclass(frozen=True)
 class Adapter:
     capability: str
-    search: Callable[[dict, str], list[Result] | tuple[list[Result], bool]]
+    search: Callable[[dict, str], list[Result] | Page]
 
 
 ADAPTERS: dict[str, Adapter] = {}
@@ -65,7 +75,7 @@ def valid_link(href: str, route: dict) -> bool:
         return False
 
 
-def search(query: str, snapshot: Callable[[], dict], *, source_ids=None, targets=None, allowed=None) -> list[dict]:
+def search(query: str, snapshot: Callable[[], dict], *, source_ids=None, targets=None, allowed=None, page=1, start_base=1) -> list[dict]:
     query = validate_query(query)
     if not query:
         return []
@@ -84,25 +94,34 @@ def search(query: str, snapshot: Callable[[], dict], *, source_ids=None, targets
                 continue
             results = []
             status = "unsupported"
+            has_more = False
+            result_base = start_base
             if adapter:
                 try:
                     if time.monotonic() >= deadline:
                         raise TimeoutError("Search time budget used")
-                    answer = adapter.search(dict(route, deadline=deadline), query)
-                    candidates, partial = answer if isinstance(answer, tuple) else (answer, False)
+                    answer = adapter.search(
+                        dict(route, deadline=deadline, offset=(page - 1) * MAX_RESULTS,
+                             start_base=start_base), query)
+                    answer = answer if isinstance(answer, Page) else Page(answer)
                     results = [Result(r.title[:300], r.href, r.snippet[:600])
-                               for r in candidates[:MAX_RESULTS]
+                               for r in answer.results[:MAX_RESULTS]
                                if r.title and valid_link(r.href, route)]
-                    status = "partial" if partial else "ok"
+                    status = "partial" if answer.partial else "ok"
+                    has_more = answer.has_more and page < MAX_PAGE
+                    result_base = answer.start_base
                 except document_search.IndexPending:
                     status = "indexing"
                 except document_search.NoText:
                     status = "no_text"
+                except TimeoutError:
+                    status = "timeout"
                 except (OSError, ValueError, RuntimeError):
                     status = "unavailable"
             groups.append(dict(source_id=source_id, name=route["name"],
                                capability=adapter.capability if adapter else "",
-                               status=status, results=results))
+                               status=status, results=results, page=page, has_more=has_more,
+                               start_base=result_base))
         return [group for group in groups
                 if check(group["source_id"], targets[group["source_id"]][0])]
     finally:
@@ -132,7 +151,8 @@ def parse_kiwix_results(data, route):
         raise ValueError("Invalid Kiwix search feed")
     results = []
     seen = set()
-    for item in channel.findall("item"):
+    items = channel.findall("item")
+    for item in items[:MAX_RESULTS]:
         title = (item.findtext("title") or "").strip()
         href = item.findtext("link") or ""
         if not title or len(href) > 2048 or not valid_link(href, route) or href in seen:
@@ -146,9 +166,14 @@ def parse_kiwix_results(data, route):
         snippet.close()
         results.append(Result(title[:300], href, " ".join(" ".join(snippet.parts).split())[:600]))
         seen.add(href)
-        if len(results) == MAX_RESULTS:
-            break
-    return results
+    # The first page uses Kiwix's default start so its RSS identifies the
+    # indexing convention. Carry it with navigation to avoid another query.
+    start_base = route.get("start_base", 1)
+    if not route.get("offset"):
+        start = channel.findtext("{http://a9.com/-/spec/opensearch/1.1/}startIndex")
+        if start in {"0", "1"}:
+            start_base = int(start)
+    return Page(results, has_more=len(items) > MAX_RESULTS, start_base=start_base)
 
 
 def search_kiwix(route, query):
@@ -156,11 +181,14 @@ def search_kiwix(route, query):
     book = route["book_id"]
     if not publication.valid_book_id(book) or route["path"] != f"/zim/content/{book}/":
         raise ValueError("Invalid Kiwix search target")
-    deadline = min(route["deadline"], time.monotonic() + 2)
-    params = urlencode({"books.name": book, "pattern": query, "format": "xml", "pageLength": MAX_RESULTS})
+    deadline = min(route["deadline"], time.monotonic() + KIWIX_SEARCH_SECONDS)
+    params = {"books.name": book, "pattern": query, "format": "xml",
+              "pageLength": MAX_RESULTS + 1}
+    if route.get("offset"):
+        params["start"] = route["offset"] + route.get("start_base", 1)
     connection = http.client.HTTPConnection("127.0.0.1", route["port"], timeout=max(0.001, deadline - time.monotonic()))
     try:
-        connection.request("GET", "/zim/search?" + params, headers={"Accept": "application/rss+xml"})
+        connection.request("GET", "/zim/search?" + urlencode(params), headers={"Accept": "application/rss+xml"})
         with connection.getresponse() as response:
             if response.status != 200:
                 raise ValueError("Kiwix search unavailable")

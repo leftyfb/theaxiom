@@ -1,4 +1,6 @@
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlsplit
+
 import pytest
 
 from theaxiom import search
@@ -58,7 +60,7 @@ def test_kiwix_rss_scopes_links_and_strips_snippet_markup():
         '<item><title>Traversal</title><link>/zim/content/approved/%2e%2e/private</link></item>'
         '<item><title>Query</title><link>/zim/content/approved/Water?redirect=1</link></item>'
     )
-    assert search.parse_kiwix_results(f"<rss><channel>{items}</channel></rss>".encode(), route) == [
+    assert search.parse_kiwix_results(f"<rss><channel>{items}</channel></rss>".encode(), route).results == [
         search.Result("Water & health", "/zim/content/approved/Water%20quality", "Drink safe water.")
     ]
     for data in (b"<html/>", b"<!DOCTYPE rss><rss><channel/></rss>", b"x" * (search.MAX_RSS_BYTES + 1)):
@@ -106,6 +108,93 @@ def test_document_index_matches_text_and_rejects_stale_digest(tmp_path, monkeypa
                                 "sections": [[3, "Safe drinking water"]], "partial": False}))
     path.chmod(0o600)
     route = dict(name="Guide", kind="pdf", path="/api/library/pdf/guide", artifact=artifact)
-    assert document_search.search_document(route, "water") == (
-        [search.Result("Guide · Page 3", "/api/library/pdf/guide#page=3", "Safe drinking water")], False)
+    assert document_search.search_document(route, "water") == search.Page(
+        [search.Result("Guide · Page 3", "/api/library/pdf/guide#page=3", "Safe drinking water")])
     assert document_search._load(dict(artifact, sha256="b" * 64)) is None
+
+
+@pytest.mark.parametrize("query", ["water", "food", "clothes", "cambridge", "  café & tea?  "])
+@pytest.mark.parametrize("base", [0, 1])
+def test_kiwix_search_pages_and_escapes_query(query, base, monkeypatch):
+    from io import BytesIO
+
+    book = "fixture." + "a" * 64
+    path = f"/zim/content/{book}/"
+    calls = []
+
+    class Response(BytesIO):
+        status = 200
+
+    class Connection:
+        def __init__(self, host, port, timeout):
+            assert host == "127.0.0.1" and port == 8081
+            assert 2 < timeout <= search.KIWIX_SEARCH_SECONDS
+
+        def request(self, method, url, headers):
+            params = parse_qs(urlsplit(url).query)
+            assert method == "GET" and urlsplit(url).path == "/zim/search"
+            assert params["books.name"] == [book]
+            assert params["pattern"] == [query.strip()]
+            assert params["format"] == ["xml"]
+            start = int(params.get("start", [base])[0])
+            offset = start - base
+            limit = int(params["pageLength"][0])
+            calls.append((start, limit))
+            items = "".join(
+                f"<item><title>Hit {n}</title><link>{path}{n}</link></item>"
+                for n in range(offset, min(offset + limit, 22))
+            )
+            self.body = Response(
+                f'<rss xmlns:o="http://a9.com/-/spec/opensearch/1.1/"><channel>'
+                f'<o:startIndex>{start}</o:startIndex>{items}</channel></rss>'.encode()
+            )
+
+        def getresponse(self):
+            return self.body
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(search.http.client, "HTTPConnection", Connection)
+    route = dict(name="Reference", path=path, book_id=book, port=8081)
+    targets = {"reference": (route, search.KIWIX_ADAPTER)}
+    first, = search.search(query, dict, targets=targets, allowed=lambda *_: True)
+    second, = search.search(query, dict, targets=targets, allowed=lambda *_: True,
+                            page=2, start_base=first["start_base"])
+    assert calls == [(base, 21), (20 + base, 21)]
+    assert first["has_more"] and first["page"] == 1
+    assert [hit.title for hit in first["results"]] == [f"Hit {n}" for n in range(20)]
+    assert not second["has_more"] and second["page"] == 2
+    assert [hit.title for hit in second["results"]] == ["Hit 20", "Hit 21"]
+
+
+@pytest.mark.parametrize("kind", ["pdf", "epub"])
+def test_document_search_pages_only_matches(kind, monkeypatch):
+    from theaxiom import document_search
+
+    sections = [(n, "cambridge" if n % 2 else "unrelated") for n in range(1, 44)]
+    monkeypatch.setattr(document_search, "_load",
+                        lambda artifact: dict(sections=sections, partial=True))
+    route = dict(kind=kind, name="Document", artifact={}, path="/document")
+    first = document_search.search_document(route, "cambridge")
+    second = document_search.search_document(dict(route, offset=20), "cambridge")
+    assert len(first.results) == 20 and first.has_more and first.partial
+    assert len(second.results) == 2 and not second.has_more and second.partial
+    suffix = "#page=41" if kind == "pdf" else "/chapter/40"
+    assert second.results[0].href == "/document" + suffix
+
+
+def test_timeout_does_not_hide_other_sources():
+    def timed_out(route, query):
+        raise TimeoutError
+
+    def successful(route, query):
+        return [search.Result("Cambridge", "/fixture/article")]
+
+    targets = {
+        "slow": (ROUTE, search.Adapter("Kiwix", timed_out)),
+        "fast": (ROUTE, search.Adapter("Kiwix", successful)),
+    }
+    slow, fast = search.search("cambridge", dict, targets=targets, allowed=lambda *_: True)
+    assert slow["status"] == "timeout" and not slow["results"]
+    assert fast["status"] == "ok" and len(fast["results"]) == 1
