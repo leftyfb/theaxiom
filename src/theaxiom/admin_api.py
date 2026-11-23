@@ -8,6 +8,7 @@ from io import BytesIO
 import importlib
 import os
 import re
+import secrets
 import subprocess
 import threading
 import time
@@ -622,6 +623,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         elif LEGACY_WIKIPEDIA_ROUTE.fullmatch(urlsplit(self.path).path):
             source_id = "wikipedia-en"
             route = publication.ROUTES.get(source_id)
+            managed = False
+            record = None
             try:
                 snapshot = self._publication_snapshot()
                 records = SOURCE_CATALOG.get()["sources"]
@@ -639,6 +642,22 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 location = None
             if location is None:
                 self._send_json(403, {"error": "collection unavailable"})
+                return
+            if (managed and urlsplit(self.path).path == "/wikipedia/viewer"):
+                legacy_book = route.get("book_id") if route else None
+                managed_book = zim_catalog.source_content_name(record)
+                nonce = secrets.token_urlsafe(24)
+                body = legacy_alias.viewer_redirect_document(
+                    legacy_book, managed_book, nonce=nonce).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Security-Policy",
+                                 f"default-src 'none'; script-src 'nonce-{nonce}'; "
+                                 "base-uri 'none'; frame-ancestors 'none'")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
                 return
             self.send_response(302)
             self.send_header("Location", location)

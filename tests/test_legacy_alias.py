@@ -35,6 +35,35 @@ def test_adopted_aliases_resolve_against_installed_managed_artifact():
     assert resolve("/wikipedia/viewer", "foo=bar", managed=True) == "/zim/viewer?foo=bar"
 
 
+def test_viewer_fragment_translates_legacy_book_to_managed_book():
+    assert legacy_alias.translate_viewer_fragment(
+        "#" + LEGACY_BOOK + "/Main_Page", LEGACY_BOOK, MANAGED_BOOK
+    ) == "#" + MANAGED_BOOK + "/Main_Page"
+    assert legacy_alias.translate_viewer_fragment(
+        "#other-book/Main_Page", LEGACY_BOOK, MANAGED_BOOK
+    ) == "#other-book/Main_Page"
+
+
+def test_viewer_redirect_document_rewrites_hash_before_managed_viewer():
+    body = legacy_alias.viewer_redirect_document(LEGACY_BOOK, MANAGED_BOOK, nonce="test-nonce")
+    assert '<script nonce="test-nonce">' in body
+    assert "location.hash" in body
+    assert "location.replace('/zim/viewer'+location.search+hash)" in body
+    assert LEGACY_BOOK in body and MANAGED_BOOK in body
+
+
+def test_book_qualified_content_links_drop_stale_book_component():
+    assert resolve("/wikipedia/content/" + LEGACY_BOOK + "/Main_Page", managed=True) == (
+        "/zim/content/" + MANAGED_BOOK + "/Main_Page"
+    )
+
+
+def test_search_has_one_canonical_native_book_selector():
+    assert resolve("/wikipedia/search", "books.name=stale&q=climate&books.name=other", managed=True) == (
+        "/zim/search?books.name=" + MANAGED_BOOK + "&q=climate"
+    )
+
+
 def test_unpublished_alias_is_denied_before_or_after_adoption():
     assert resolve("/wikipedia/viewer", published=False) is None
     assert resolve("/wikipedia/content/Main_Page", managed=True, published=False) is None
