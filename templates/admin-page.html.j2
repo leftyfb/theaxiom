@@ -422,6 +422,14 @@
         <button class="button" type="submit">Refresh listings</button>
       </form>
       <p id="upstream-catalog-feedback" role="status"></p>
+      <fieldset id="upstream-filters" class="editor-grid" hidden>
+        <legend>Filter these listings</legend>
+        <div><label for="upstream-edition">Edition</label><select id="upstream-edition"></select></div>
+        <div><label for="upstream-max-size">Maximum advertised size (MiB)</label>
+          <input id="upstream-max-size" type="number" min="1" max="1048576" step="any" inputmode="decimal"></div>
+        <label class="editor-wide membership-option"><input id="upstream-unknown-size" type="checkbox" checked disabled> Include listings with unknown sizes</label>
+      </fieldset>
+      <p id="upstream-filter-count" role="status" hidden></p>
       <ul id="upstream-catalog-results"></ul>
       <form method="dialog"><button class="button">Close</button></form>
     </dialog>
@@ -810,6 +818,29 @@
       const upstreamForm = document.getElementById('upstream-catalog-form');
       const upstreamFeedback = document.getElementById('upstream-catalog-feedback');
       const upstreamResults = document.getElementById('upstream-catalog-results');
+      const upstreamFilters = document.getElementById('upstream-filters');
+      const upstreamEdition = document.getElementById('upstream-edition');
+      const upstreamMaxSize = document.getElementById('upstream-max-size');
+      const upstreamUnknownSize = document.getElementById('upstream-unknown-size');
+      const upstreamFilterCount = document.getElementById('upstream-filter-count');
+      function filterUpstreamListings() {
+        const max = upstreamMaxSize.valueAsNumber;
+        const limited = Number.isFinite(max) && upstreamMaxSize.validity.valid;
+        upstreamUnknownSize.disabled = !limited;
+        let visible = 0;
+        for (const row of upstreamResults.children) {
+          const advertised = Number(row.dataset.bytes);
+          const fits = !limited || (advertised > 0 ? advertised <= max * 1048576 : upstreamUnknownSize.checked);
+          row.hidden = !fits || (!!upstreamEdition.value && row.dataset.edition !== upstreamEdition.value);
+          if (!row.hidden) visible++;
+        }
+        upstreamFilterCount.textContent = upstreamMaxSize.validity.valid ?
+          visible + ' of ' + upstreamResults.children.length + ' editions shown.' :
+          'Enter a maximum size from 1 to 1,048,576 MiB.';
+      }
+      upstreamEdition.addEventListener('change', filterUpstreamListings);
+      upstreamMaxSize.addEventListener('input', filterUpstreamListings);
+      upstreamUnknownSize.addEventListener('change', filterUpstreamListings);
       document.getElementById('upstream-catalog-open').addEventListener('click', () => upstreamDialog.showModal());
       async function requestUpstream(payload) {
         const response = await fetch('/api/upstream-kiwix-catalog', {
@@ -827,6 +858,7 @@
         if (submit.disabled) return;
         submit.disabled = true;
         upstreamResults.replaceChildren();
+        upstreamFilters.hidden = upstreamFilterCount.hidden = true;
         upstreamFeedback.textContent = 'Checking the publisher catalog…';
         try {
           const query = {family: document.getElementById('upstream-family').value.trim(),
@@ -843,6 +875,8 @@
             (data.cache_unavailable ? ' Offline cache unavailable.' : '');
           for (const entry of data.entries) {
             const row = document.createElement('li');
+            row.dataset.edition = entry.edition;
+            row.dataset.bytes = entry.advertised_size || '';
             row.textContent = [entry.title, entry.edition, entry.variant,
               entry.advertised_size ? 'Advertised bytes ' + entry.advertised_size : 'Size not listed',
               entry.rights || 'Rights not listed'].filter(Boolean).join(' · ');
@@ -891,6 +925,13 @@
               row.append(' ', inspect, ' ', draftButton, result);
             }
             upstreamResults.append(row);
+          }
+          if (data.entries.length) {
+            const editions = [...new Set(data.entries.map(entry => entry.edition))];
+            upstreamEdition.replaceChildren(new Option('All editions', ''),
+              ...editions.map(edition => new Option(edition, edition)));
+            upstreamFilters.hidden = upstreamFilterCount.hidden = false;
+            filterUpstreamListings();
           }
         } catch (error) {
           upstreamFeedback.textContent = error.message;

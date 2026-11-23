@@ -299,7 +299,11 @@ def exercise(browser, base, name, viewport, artifacts):
                 stale = payload["family"] == "reference_eng"
                 route.fulfill(json={"cached": stale, "stale": stale, "checked_at": 1000,
                     "entries": [{"title": "Offline reference", "edition": "2026-11", "variant": "maxi",
-                                 "publisher_checksum_listed": True}]})
+                                 "publisher_checksum_listed": True},
+                                {"title": "Compact reference", "edition": "2026-10", "variant": "mini",
+                                 "advertised_size": "1048576"},
+                                {"title": "Large reference", "edition": "2026-09", "variant": "maxi",
+                                 "advertised_size": "3145728"}]})
 
         page.route("**/api/upstream-kiwix-catalog", publisher_catalog)
         page.get_by_role("button", name="Browse Kiwix catalog").click()
@@ -310,6 +314,18 @@ def exercise(browser, base, name, viewport, artifacts):
         expect(page.get_by_role("button", name="Inspect publisher checksum for 2026-11 maxi")).to_have_count(0)
         page.get_by_label("Kiwix family").fill("recent_eng")
         page.get_by_role("button", name="Refresh listings").click()
+        upstream = page.locator("#upstream-catalog-dialog")
+        visible_listings = upstream.locator("li:visible")
+        expect(visible_listings).to_have_count(3)
+        upstream.get_by_label("Maximum advertised size (MiB)").fill("2")
+        expect(visible_listings).to_have_count(2)
+        upstream.get_by_label("Include listings with unknown sizes").uncheck()
+        expect(visible_listings).to_have_text(["Compact reference · 2026-10 · mini · Advertised bytes 1048576 · Rights not listed"])
+        upstream.get_by_label("Edition", exact=True).select_option("2026-09")
+        expect(upstream.locator("#upstream-filter-count")).to_have_text("0 of 3 editions shown.")
+        upstream.get_by_label("Maximum advertised size (MiB)").fill("")
+        expect(visible_listings).to_contain_text("Large reference")
+        upstream.get_by_label("Edition", exact=True).select_option("")
         page.get_by_role("button", name="Inspect publisher checksum for 2026-11 maxi").click()
         expect(page.locator("#upstream-catalog-results")).to_contain_text("Publisher SHA-256 " + "a" * 64)
         assert page.locator("#upstream-catalog-dialog").evaluate("(dialog) => dialog.scrollWidth <= dialog.clientWidth + 1"), name
