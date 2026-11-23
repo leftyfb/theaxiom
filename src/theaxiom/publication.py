@@ -14,6 +14,7 @@ from . import catalog_store, storage_settings
 LOCK = threading.RLock()
 # Trusted deployment configuration, not administrator-supplied URLs.
 ROUTES = {"wikipedia-en": {"path": "/wikipedia/", "port": 8081, "entry_path": "/read/wikipedia-en",
+    "reader_path": "/zim/", "book_id": "wikipedia_en_all_maxi_2026-08",
     "name": "Wikipedia", "category": "Encyclopedia",
     "description": "Explore millions of articles, illustrations and reference material without an internet connection.",
     "symbol": "W", "language": "English"}}
@@ -68,14 +69,16 @@ def verified(snapshot, source_id):
 def reachable(route):
     connection = http.client.HTTPConnection("127.0.0.1", route["port"], timeout=1)
     try:
-        # The legacy Wikipedia route now shares the generic /zim/ reader.
-        # Check its exact book in OPDS rather than probing the retired
-        # /wikipedia/ endpoint (or accepting a different published ZIM).
-        if route is ROUTES["wikipedia-en"]:
-            from .source_catalog import WIKIPEDIA_SOURCE
+        # Publisher-named legacy routes declare a pinned book ID as data.
+        # Verify the exact book through the shared Kiwix OPDS endpoint;
+        # source IDs and publisher names never select a special code path.
+        if route.get("book_id") is not None:
+            book_id = route["book_id"]
+            if not valid_book_id(book_id):
+                return False
             return reader_location(
-                {"path": "/zim/", "port": route["port"]},
-                Path(WIKIPEDIA_SOURCE["filename"]).stem,
+                {"path": route.get("reader_path", "/zim/"), "port": route["port"]},
+                book_id,
             ) is not None
         connection.request("GET", route["path"])
         response = connection.getresponse()
