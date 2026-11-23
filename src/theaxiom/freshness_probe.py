@@ -263,7 +263,7 @@ def classify_document_origin(
     installed: dict[str, Any] | None,
     response: dict[str, Any] | None,
 ) -> dict[str, str]:
-    """Interpret a guarded HEAD result against installed *capture-time* evidence.
+    """Interpret a guarded metadata result against installed *capture-time* evidence.
 
     Only the strong ETag recorded with the already verified installed
     artifact is comparable. A changed ETag means representation changed,
@@ -285,6 +285,6 @@ def classify_document_origin(
     if response.get("status") == 304:
         return {"state": "representation_unchanged",
                 "evidence": "publisher returned HTTP 304 for installed strong ETag"}
-    if response.get("status") != 200:
+    if response.get("status") not in (200, 206):
         return unknown
     return classify_remote_revision(installed, response)

@@ -86,3 +86,19 @@ def test_separate_endpoint_does_not_reuse_installed_validator(monkeypatch):
     assert result["state"] == "unable_to_determine"
     assert "exact URL" in result["evidence"]
     assert save.call_args.args[1] != DIGEST
+
+
+@pytest.mark.parametrize("status, reachable, state", [
+    (206, True, "representation_changed"),
+    (403, False, "unable_to_determine"),
+])
+def test_range_fallback_result_describes_publisher_response(monkeypatch, status, reachable, state):
+    monkeypatch.setattr(discovery.pdf_source, "pin", lambda *args: ARTIFACT)
+    monkeypatch.setattr(discovery.pdf_source, "ready", lambda *args: True)
+    monkeypatch.setattr(discovery.document_origin_evidence, "load", lambda *args: ETAG)
+    result = discovery.check_installed_document(
+        {"source_id": SID, "configuration": {"format": "pdf", "source_url": URL}},
+        probe=lambda *args, **kwargs: dict(source_url=URL, head_status=403, status=status,
+                                           reachable=reachable, etag='"new-version"'), persist=False)
+    assert result["state"] == state
+    assert result["evidence"].startswith(f"HEAD returned HTTP 403; conditional range GET returned HTTP {status}.")

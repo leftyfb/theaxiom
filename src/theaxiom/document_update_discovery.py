@@ -59,8 +59,15 @@ def check_installed_document(record, *, probe=None, persist=True):
                 "verified": True, "source_url": url,
                 "sha256": digest, "etag": etag,
             }, response)
+            status = response.get("status")
+            if response.get("head_status"):
+                prefix = f'HEAD returned HTTP {response["head_status"]}; conditional range GET returned HTTP {status}. '
+                result["evidence"] = prefix + (result["evidence"] if response.get("reachable")
+                                               else "Publisher metadata unavailable.")
+            elif not response.get("reachable") and type(status) is int:
+                result["evidence"] = f"Publisher HEAD returned HTTP {status}; update status is unknown."
         except (OSError, ValueError):
-            result = dict(UNKNOWN, evidence="Publisher HEAD failed HTTPS, public address, response, or timeout checks")
+            result = dict(UNKNOWN, evidence="Publisher metadata request failed HTTPS, public address, response, or timeout checks")
         if persist:
             update_check_store.save(sid, cache_id, result)
         return result

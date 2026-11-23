@@ -699,7 +699,7 @@
         <details class="source-technical">
           <summary>Technical details</summary>
           {% if discovery %}
-          <p class="source-note">Update discovery: {{ {'head': 'HTTPS HEAD / ETag', 'kiwix': 'Kiwix OPDS / Metalink', 'manual': 'Manual update discovery'}.get(discovery.method, 'Unknown') }} · Periodic checks {{ 'enabled' if discovery.periodic else 'disabled' }}</p>
+          <p class="source-note">Update discovery: {{ {'head': 'HTTPS / ETag', 'kiwix': 'Kiwix OPDS / Metalink', 'manual': 'Manual update discovery'}.get(discovery.method, 'Unknown') }} · Periodic checks {{ 'enabled' if discovery.periodic else 'disabled' }}</p>
           {% endif %}
           <p class="source-note" data-field="update-evidence">
             {% if source.update_check %}{{ source.update_check.evidence }}{% endif %}

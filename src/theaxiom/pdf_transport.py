@@ -207,7 +207,7 @@ def download(source_id, url, *, expected_size=None, expected_sha256=None, captur
 
 
 def probe_document_metadata(url, *, if_none_match=None, total_seconds=15):
-    """HEAD-only metadata probe; never read or download a document body.
+    """Read document headers without consuming a response body.
 
     Reuse the same pinned TLS/public DNS protections as document acquisition.
     Redirects are deliberately refused: following publisher-provided URLs
@@ -227,19 +227,33 @@ def probe_document_metadata(url, *, if_none_match=None, total_seconds=15):
     deadline = time.monotonic() + total_seconds
     addresses = _public_addresses(parsed.hostname)
     _remaining(deadline)
-    connection = _PinnedHTTPS(parsed.hostname, addresses[0], deadline)
+    headers = {"Accept-Encoding": "identity", "Connection": "close",
+               "User-Agent": "The-Axiom document metadata check"}
+    if if_none_match is not None:
+        headers["If-None-Match"] = if_none_match
+    result = _document_metadata_request(url, parsed, addresses[0], deadline, "HEAD", headers)
+    if if_none_match and result["status"] in (403, 405, 501):
+        # A publisher may serve GET while declining HEAD. Keep the same URL,
+        # pinned address, validator and time budget. Never read the response body.
+        head_status = result["status"]
+        result = _document_metadata_request(
+            url, parsed, addresses[0], deadline, "GET", dict(headers, Range="bytes=0-0"))
+        result["head_status"] = head_status
+    return result
+
+
+def _document_metadata_request(url, parsed, address, deadline, method, headers):
+    _remaining(deadline)
+    connection = _PinnedHTTPS(parsed.hostname, address, deadline)
     try:
-        headers = {"Accept-Encoding": "identity", "Connection": "close",
-                   "User-Agent": "The-Axiom document metadata check"}
-        if if_none_match is not None:
-            headers["If-None-Match"] = if_none_match
-        connection.request("HEAD", parsed.path, headers=headers)
+        connection.request(method, parsed.path, headers=headers)
         response = connection.getresponse()
         try:
             _remaining(deadline)
             # Never follow even an HTTPS redirect: the configured publisher
             # and its exact URL are part of the installed source identity.
-            if response.status not in (200, 304):
+            expected = (200, 304) if method == "HEAD" else (206, 304)
+            if response.status not in expected:
                 return {"source_url": url, "reachable": False,
                         "status": response.status, "etag": "",
                         "last_modified": "", "content_length": "",
@@ -247,7 +261,7 @@ def probe_document_metadata(url, *, if_none_match=None, total_seconds=15):
             if response.getheader("Content-Encoding") not in (None, "identity"):
                 raise ValueError("Encoded metadata response refused")
             if response.headers.get_all("Transfer-Encoding", []):
-                raise ValueError("Unexpected transfer framing on HEAD")
+                raise ValueError("Unexpected transfer framing on metadata response")
             etags = response.headers.get_all("ETag", [])
             modified = response.headers.get_all("Last-Modified", [])
             lengths = response.headers.get_all("Content-Length", [])
@@ -265,7 +279,14 @@ def probe_document_metadata(url, *, if_none_match=None, total_seconds=15):
                         or len(lengths[0]) > 20):
                     raise ValueError("Invalid document metadata length")
                 size = lengths[0]
-            if response.status == 304 and not if_none_match:
+            if response.status == 206:
+                ranges = response.headers.get_all("Content-Range", [])
+                content_range = (re.fullmatch(r"bytes 0-0/([1-9][0-9]{0,19})", ranges[0])
+                                 if len(ranges) == 1 else None)
+                if not content_range or size != "1":
+                    raise ValueError("Unexpected document probe range")
+                size = content_range[1]
+            if response.status == 304 and "If-None-Match" not in headers:
                 raise ValueError("Unsolicited conditional response")
             return {"source_url": url, "reachable": True, "status": response.status,
                     "etag": etag, "last_modified": last_modified,

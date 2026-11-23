@@ -1,4 +1,4 @@
-"""Offline HEAD-only metadata security/validator regression tests."""
+"""Offline document metadata security/validator regression tests."""
 from email.message import Message
 import socket
 
@@ -28,7 +28,8 @@ class HeadResponse:
         self.closed = True
 
 
-def mock_head(monkeypatch, response):
+def mock_head(monkeypatch, *responses):
+    replies = iter(responses)
     calls = []
     monkeypatch.setattr(pdf_transport, "_public_addresses", lambda host: [
         (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, (host, 443)),
@@ -38,10 +39,9 @@ def mock_head(monkeypatch, response):
             assert address[-1] == (host, 443)
         def request(self, method, path, headers):
             calls.append((method, path, headers))
-            assert method == "HEAD"
             assert path == "/guide.pdf"
         def getresponse(self):
-            return response
+            return next(replies)
         def close(self):
             calls.append(("close",))
     monkeypatch.setattr(pdf_transport, "_PinnedHTTPS", Connection)
@@ -135,3 +135,36 @@ def test_private_dns_rejected_before_connect(monkeypatch):
                         lambda *args: pytest.fail("Private DNS reached TLS"))
     with pytest.raises(ValueError, match="non-public"):
         pdf_transport.probe_document_metadata("https://publisher.org/guide.pdf")
+
+
+@pytest.mark.parametrize("status, headers, reachable", [
+    (304, [], True),
+    (206, [("Content-Length", "1"), ("Content-Range", "bytes 0-0/1234"),
+           ("ETag", '"release-2"')], True),
+    (200, [("Content-Length", "1234")], False),
+    (403, [], False),
+    (302, [("Location", "https://different.example/guide.pdf")], False),
+])
+def test_denied_head_tries_one_conditional_range_without_reading_body(monkeypatch, status, headers, reachable):
+    head, ranged = HeadResponse(403), HeadResponse(status, headers)
+    calls = mock_head(monkeypatch, head, ranged)
+    result = pdf_transport.probe_document_metadata("https://publisher.org/guide.pdf",
+                                                    if_none_match='"release-1"')
+    assert result["head_status"] == 403 and result["status"] == status
+    assert result["reachable"] is reachable
+    assert [call[0] for call in calls] == ["HEAD", "close", "GET", "close"]
+    assert calls[2][2]["Range"] == "bytes=0-0"
+    assert calls[2][2]["If-None-Match"] == '"release-1"'
+    assert head.closed and ranged.closed
+    if status == 206:
+        assert result["content_length"] == "1234"
+        assert result["etag"] == '"release-2"'
+
+
+def test_denied_head_refuses_a_malformed_partial_response(monkeypatch):
+    ranged = HeadResponse(206, [("Content-Range", "bytes 0-1/1234"), ("Content-Length", "2")])
+    mock_head(monkeypatch, HeadResponse(405), ranged)
+    with pytest.raises(ValueError, match="Unexpected document probe range"):
+        pdf_transport.probe_document_metadata("https://publisher.org/guide.pdf",
+                                              if_none_match='"release-1"')
+    assert ranged.closed
