@@ -853,7 +853,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             snapshot = self._publication_snapshot()
             sources = []
             for sid, route in publication.ROUTES.items():
-                if sid in records and publication.status(snapshot, sid)["published"]:
+                if sid in records and publication.legacy_only(sid) and publication.status(snapshot, sid)["published"]:
                     profile = records[sid]["profile"]
                     sources.append(dict(route, source_id=sid, name=profile["title"]))
             for record, state in self._pdf_publications():
@@ -1034,8 +1034,10 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
 
     def _publication_snapshot(self):
         try:
-            lifecycles = self._lifecycles(SOURCE_CATALOG.get())
-            return self._matched_snapshot(self._snapshot(), {sid: life["artifact"] for sid, life in lifecycles.items()})
+            catalog = SOURCE_CATALOG.get()
+            lifecycles = self._lifecycles(catalog)
+            snapshot = self._matched_snapshot(self._snapshot(), {sid: life["artifact"] for sid, life in lifecycles.items()})
+            return dict(snapshot, sources=catalog["sources"])
         except (catalog_store.CatalogError, OSError):
             return {"acquisitions": [], "stale": True}
 
