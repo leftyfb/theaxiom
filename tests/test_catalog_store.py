@@ -342,6 +342,29 @@ class CatalogStoreTests(unittest.TestCase):
             self.store.mutate_group("delete", "tags", "one", state["revision"] - 1)
         self.assertEqual(self.path.read_bytes(), before)
 
+    def test_versioned_seed_catalog_is_only_imported_on_fresh_install(self):
+        manifest = source_catalog.seed_catalog_manifest()
+        self.assertEqual(manifest["version"], source_catalog.SEED_CATALOG_VERSION)
+        self.assertIsInstance(manifest["version"], int)
+        self.assertGreater(manifest["version"], 0)
+        self.assertEqual(manifest["sources"], source_catalog.builtin_sources())
+        manifest["sources"][0]["title"] = "Modified detached seed"
+        self.assertNotEqual(manifest["sources"], source_catalog.builtin_sources())
+
+        state = self.store.get()
+        state = self.store.mutate("edit", "fema-ready", {"title": "Operator FEMA"}, state["revision"])
+        state = self.store.mutate("remove", "wikipedia-en", {}, state["revision"])
+        before = self.path.read_bytes()
+        upgraded_seeds = [
+            {"source_id": "fema-ready", "kind": "zim", "title": "New software default"},
+            {"source_id": "new-default", "kind": "pdf", "title": "New suggested PDF"},
+        ]
+        with mock.patch.object(source_catalog, "builtin_sources", return_value=upgraded_seeds):
+            self.assertEqual(self.store.get(), state)
+            self.assertEqual(self.path.read_bytes(), before)
+        self.assertNotIn("new-default", {item["source_id"] for item in state["sources"]})
+        self.assertNotIn("wikipedia-en", {item["source_id"] for item in state["sources"]})
+
     def test_ready_gov_seed_and_existing_placeholder_never_auto_upgrade(self):
         expected = self.store._seed_record(source_catalog.READY_GOV_SOURCE)
         initial = self.store.get()

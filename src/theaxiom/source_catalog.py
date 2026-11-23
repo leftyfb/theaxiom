@@ -2,6 +2,11 @@
 from typing import Any
 from copy import deepcopy
 
+# Increment only for an intentional, reviewed change to packaged starter data.
+# This version is informational: startup never applies a new seed version to
+# an existing mutable catalog without an explicit operator migration.
+SEED_CATALOG_VERSION = 1
+
 WIKIPEDIA_SOURCE: dict[str, Any] = {
     "source_id": "wikipedia-en",
     "title": "Wikipedia English All Maxi (2026-08)",
@@ -270,6 +275,10 @@ PLANNED_SOURCES = [
 def builtin_sources():
     """Return independent copies; stable IDs survive application upgrades."""
     return [dict(deepcopy(WIKIPEDIA_SOURCE), availability="supported"), deepcopy(READY_GOV_SOURCE)] + deepcopy(PLANNED_SOURCES)
+
+def seed_catalog_manifest():
+    """Return a versioned, detached catalog of proposed starter profiles."""
+    return {"version": SEED_CATALOG_VERSION, "sources": builtin_sources()}
 
 def planned_sources():
     return deepcopy(PLANNED_SOURCES)
