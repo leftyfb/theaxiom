@@ -1236,6 +1236,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         body = template.render(
             admin_page=page,
             catalog=self._source_profiles(catalog_snapshot) if page == "sources" else catalog_snapshot if page == "groupings" else None,
+            selection_presets={key: value[0] for key, value in library_selection.PRESETS.items()},
             editable_fields=sorted(catalog_store.EDITABLE),
             action_labels=ACTION_LABELS,
             password_change_enabled=bool(getattr(getattr(self.server, "axiom_config", None), "store", None)),
@@ -1411,7 +1412,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 self._send_json(403, {"error": "same-origin request required"})
                 return
             data = self._read_body()
-            if data.keys() not in ({"revision", "source_ids"}, {"manifest"}) or (
+            if data.keys() not in ({"revision", "source_ids"}, {"manifest"}, {"preset"}) or (
                     "source_ids" in data and not self._valid_revision(data["revision"])):
                 self._send_json(400, {"error": "invalid selection request"})
                 return
@@ -1428,7 +1429,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 if "source_ids" in data:
                     result = {"manifest": library_selection.export_selection(known, data["source_ids"])}
                 else:
-                    matches = library_selection.preview_selection(known, data["manifest"])
+                    matches = (library_selection.preview_preset(known, data["preset"]) if "preset" in data
+                               else library_selection.preview_selection(known, data["manifest"]))
                     ids = [source["source_id"] for source in matches if source["state"] == "match"]
                     result = {"revision": catalog["revision"], "sources": matches,
                               "storage": self._acquisition_preview(known, ids, exact_selection=True)}

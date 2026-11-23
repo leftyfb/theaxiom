@@ -404,7 +404,7 @@
     <div class="source-search-row">
       <button class="button" type="button" id="source-add">Add Source</button>
       <button class="button" type="button" id="source-guide-open">Content source guide</button>
-      <button class="button" type="button" id="selection-file-open">Preview selection file</button>
+      <button class="button" type="button" id="selection-file-open">Library selections</button>
       <button class="button" type="button" id="upstream-catalog-open">Browse Kiwix catalog</button>
       <input id="source-filter-search" type="search" aria-label="Search source names" placeholder="Search sources…" maxlength="512">
     </div>
@@ -427,7 +427,12 @@
     </dialog>
     <dialog id="selection-file-dialog" aria-labelledby="selection-file-title">
       <h3 id="selection-file-title">Preview a library selection</h3>
-      <p class="source-note">Check which source choices match this catalog. Source settings and content stay as they are.</p>
+      <p class="source-note">Review a starter preset or selection file against your catalog.</p>
+      <label for="selection-preset">Starter preset</label>
+      <select id="selection-preset">
+        <option value="">Choose a preset</option>
+        {% for key, name in (selection_presets|default({})).items() %}<option value="{{ key }}">{{ name }}</option>{% endfor %}
+      </select>
       <label for="selection-file">Library selection JSON</label>
       <input id="selection-file" type="file" accept=".json,application/json">
       <p id="selection-file-feedback" role="status"></p>
@@ -895,6 +900,7 @@
       });
       const selectionDialog = document.getElementById('selection-file-dialog');
       const selectionFile = document.getElementById('selection-file');
+      const selectionPreset = document.getElementById('selection-preset');
       const selectionFeedback = document.getElementById('selection-file-feedback');
       const selectionMatches = document.getElementById('selection-file-matches');
       const selectionApply = document.getElementById('selection-file-apply');
@@ -912,32 +918,49 @@
         return data;
       }
       document.getElementById('selection-file-open').addEventListener('click', () => selectionDialog.showModal());
-      selectionFile.addEventListener('change', async () => {
+      selectionFile.addEventListener('change', () => {
         const file = selectionFile.files[0];
         selectionFile.value = '';
+        if (!file) return;
+        selectionPreset.value = '';
+        reviewSelection(async () => {
+          if (file.size > 15000) throw new Error('Selection file is too large.');
+          return {manifest: JSON.parse(await file.text())};
+        });
+      });
+      selectionPreset.addEventListener('change', () => {
+        const preset = selectionPreset.value;
+        reviewSelection(() => preset ? {preset} : null);
+      });
+      async function reviewSelection(getPayload) {
         selectionMatches.replaceChildren();
         selectionStorage.textContent = selectionCapacity.textContent = '';
         matchedSelection = [];
         selectionApply.disabled = true;
-        if (!file) return;
-        selectionFile.disabled = true;
+        selectionFile.disabled = selectionPreset.disabled = true;
         selectionFeedback.textContent = 'Checking this catalog…';
         try {
-          if (file.size > 15000) throw new Error('Selection file is too large.');
-          const payload = {manifest: JSON.parse(await file.text())};
+          const payload = await getPayload();
+          if (!payload) {
+            selectionFeedback.textContent = '';
+            return;
+          }
           let result = await selectionRequest(payload);
           if (result.storage.capacity.state === 'pending') {
             await new Promise(resolve => window.setTimeout(resolve, 600));
             result = await selectionRequest(payload);
           }
-          const labels = {match: 'Matches this catalog', different: 'Edition, language, or format differs', missing: 'Source ID absent from this catalog'};
+          const labels = {match: 'Matches this catalog', different: 'Edition, language, or format differs',
+            missing: 'Source ID absent from this catalog', planned: 'No supported format configured'};
+          if (payload.preset) labels.match = 'Configured source';
           for (const item of result.sources) {
             const row = document.createElement('li');
-            row.textContent = (item.title || item.source_id) + ' · ' + labels[item.state] +
-              (item.license ? ' · License: ' + item.license : '');
+            row.textContent = [item.title || item.source_id, labels[item.state], item.language, item.edition,
+              item.license ? 'License: ' + item.license : 'Rights not recorded'].filter(Boolean).join(' · ');
             selectionMatches.append(row);
           }
-          selectionFeedback.textContent = 'Reviewed ' + result.sources.length + ' source choices.';
+          selectionFeedback.textContent = result.sources.length ? 'Reviewed ' + result.sources.length + ' source choices.' :
+            'No sources with a configured size within the lightweight limit.';
           if (result.revision !== revision) {
             selectionFeedback.textContent += ' The catalog changed. Reload before selecting matches.';
             return;
@@ -951,9 +974,9 @@
         } catch (error) {
           selectionFeedback.textContent = error.message;
         } finally {
-          selectionFile.disabled = false;
+          selectionFile.disabled = selectionPreset.disabled = false;
         }
-      });
+      }
       selectionApply.addEventListener('click', () => {
         if (bulkBusy || !matchedSelection.length) return;
         const matches = new Set(matchedSelection);

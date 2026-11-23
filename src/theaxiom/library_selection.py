@@ -1,12 +1,20 @@
 """Portable source choices with read-only matching against a local catalog."""
 import json
 
-from . import catalog_store
+from . import catalog_store, source_catalog
 
 VERSION = 1
 MAX_BYTES = 15000  # Leave room for the admin API request envelope.
 FIELDS = {"source_id", "format", "language", "edition"}
 FORMATS = {"zim", "pdf", "epub", "unspecified"}
+LIGHTWEIGHT_LIMIT = 64 * 1024 * 1024
+PRESETS = {
+    "emergency": ("Emergency", ("fema-ready", "epa-water", "noaa", "amateur-radio")),
+    "medical": ("Medical", ("cdc", "red-cross", "hesperian")),
+    "education": ("Education", ("wikibooks", "wikiversity", "openstax", "kolibri")),
+    "technical": ("Technical", ("linux-docs", "ifixit", "practical-action", "stack-exchange")),
+    "lightweight": ("Lightweight (up to 64 MiB each)", ()),
+}
 
 
 def _validate_entries(entries):
@@ -61,3 +69,29 @@ def preview_selection(known, manifest):
                         "title": local["profile"]["title"],
                         "license": local["configuration"].get("license", "")})
     return matches
+
+
+def preview_preset(known, preset):
+    if not isinstance(preset, str) or preset not in PRESETS:
+        raise ValueError("Unknown library preset")
+    _, ids = PRESETS[preset]
+    if preset == "lightweight":
+        ids = []
+        for sid, record in known.items():
+            config = record["configuration"]
+            size = config.get("expected_size_bytes", "")
+            if (config["format"] in FORMATS - {"unspecified"} and size
+                    and 0 < int(size) <= LIGHTWEIGHT_LIMIT):
+                ids.append(sid)
+    packaged_titles = {source["source_id"]: source["title"] for source in source_catalog.builtin_sources()}
+    rows = []
+    for sid in ids:
+        record = known.get(sid)
+        if record is None:
+            rows.append({"source_id": sid, "title": packaged_titles.get(sid, sid), "state": "missing"})
+            continue
+        choice = _choice(record)
+        rows.append(dict(choice, title=record["profile"]["title"],
+                         state="match" if choice["format"] in FORMATS - {"unspecified"} else "planned",
+                         license=record["configuration"].get("license", "")))
+    return rows

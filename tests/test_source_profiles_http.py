@@ -851,6 +851,34 @@ def test_portable_selection_round_trip_discloses_only_selected_public_metadata(a
     start.assert_not_called()
 
 
+def test_selection_presets_report_missing_planned_and_bounded_configured_sources(app):
+    request, _ = app
+    catalog = request("/api/sources")
+    catalog = mutate(request, catalog, "remove", sid="noaa")
+    catalog = mutate(request, catalog, "add", {
+        "title": "Compact guide", "format": "pdf", "expected_size_bytes": "1024",
+        "source_url": "https://example.org/compact.pdf", "license": "Fixture terms",
+    }, sid="compact-guide")
+    route = "/api/library-selection"
+    request(route, {"preset": "emergency"}, origin="", status=403)
+    request(route, {"preset": ["medical"]}, status=400)
+    request(route, {"preset": "unlisted"}, status=400)
+    emergency = request(route, {"preset": "emergency"})
+    assert emergency["revision"] == catalog["revision"]
+    assert [(item["source_id"], item["state"]) for item in emergency["sources"]] == [
+        ("fema-ready", "match"), ("epa-water", "planned"), ("noaa", "missing"),
+        ("amateur-radio", "planned"),
+    ]
+    assert [row["source_id"] for row in emergency["storage"]["sources"]] == ["fema-ready"]
+    lightweight = request(route, {"preset": "lightweight"})
+    assert lightweight["sources"] == [{
+        "source_id": "compact-guide", "title": "Compact guide", "state": "match",
+        "edition": "", "language": "", "format": "pdf", "license": "Fixture terms",
+    }]
+    assert lightweight["storage"]["sources"][0]["transfer_bytes"] == 1024
+    assert request("/api/sources")["revision"] == catalog["revision"]
+
+
 def test_acquisition_preview_uses_recorded_sizes_without_starting_jobs(app, monkeypatch):
     request, _ = app
     catalog = request("/api/sources")

@@ -274,7 +274,10 @@ def exercise(browser, base, name, viewport, artifacts):
             page.get_by_role("button", name="Export selected sources").click()
         manifest = download.value.path().read_bytes()
         check.uncheck()
-        page.get_by_role("button", name="Preview selection file").click()
+        page.get_by_role("button", name="Library selections").click()
+        page.get_by_label("Starter preset").select_option("medical")
+        expect(page.locator("#selection-file-matches")).to_contain_text("No supported format configured")
+        expect(page.get_by_role("button", name="Select matching sources")).to_be_disabled()
         page.locator("#selection-file").set_input_files({
             "name": "selection.json", "mimeType": "application/json", "buffer": manifest,
         })
