@@ -159,7 +159,7 @@ def discard_partial(source_id):
 
 def download_resumable(source_id, config, *, offset=0, validator=None,
                        progress=lambda current, total, metadata: None,
-                       stopped=lambda: False, promote_lock=None, promoting=lambda: None,
+                       stopped=lambda: False, promote_lock=None, promoting=lambda artifact, identity: None,
                        staging_id=None):
     """Persist source-scoped staged bytes and validate any resumed response before appending.
 
@@ -311,8 +311,9 @@ def _verify_and_promote(fd, staging, library, name, source_id, url, count,
         pinned = os.fstat(fd)
         if pinned.st_size != count or pinned.st_nlink != 1:
             raise ValueError("Staged ZIM changed during final verification")
-        promoting()
         filename = source_id + "." + digest + ".zim"
+        artifact = {"filename": filename, "source_url": url, "bytes": count, "sha256": digest}
+        promoting(artifact, promotion_identity(pinned))
         os.link(name, filename, src_dir_fd=staging, dst_dir_fd=library, follow_symlinks=False)
         linked = os.stat(filename, dir_fd=library, follow_symlinks=False)
         if ((linked.st_dev, linked.st_ino, linked.st_size) !=
@@ -323,11 +324,15 @@ def _verify_and_promote(fd, staging, library, name, source_id, url, count,
         os.fsync(library)
         os.unlink(name, dir_fd=staging)
         os.fsync(staging)
-        return {"filename": filename, "source_url": url, "bytes": count, "sha256": digest}
+        return artifact
+
+
+def promotion_identity(info):
+    return [info.st_dev, info.st_ino, info.st_mtime_ns]
 
 
 def revalidate_retained(source_id, config, *, expected_bytes, progress=lambda current, total, metadata: None,
-                        stopped=lambda: False, promote_lock=None, promoting=lambda: None):
+                        stopped=lambda: False, promote_lock=None, promoting=lambda artifact, identity: None):
     """Verify an already complete retained staged ZIM, never contacting the network.
 
     Refuse unknown lengths: a prefix can have a valid header but is not a

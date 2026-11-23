@@ -1559,14 +1559,14 @@
           }
           const state = source?.acquisition?.state || '';
           const hasPartial = Number(source?.acquisition?.downloaded_bytes || 0) > 0;
-          const running = ['queued','downloading','verifying','pausing','cancelling'].includes(state);
+          const running = ['queued','downloading','verifying','pausing','cancelling','publishing'].includes(state);
           const recoverable = ['paused','interrupted','failed'].includes(state) && hasPartial;
           const expected = Number(source?.acquisition?.expected_bytes);
           const complete = Number.isSafeInteger(expected) && expected >= 96 &&
             Number(source?.acquisition?.downloaded_bytes) === expected;
           const canRevalidate = recoverable && complete && source?.acquisition?.retained === true;
           const canResume = recoverable && !complete;
-          const canCancel = running || recoverable;
+          const canCancel = (running && state !== 'publishing') || recoverable;
           const canRestart = ['paused','interrupted','failed','cancelled'].includes(state) && !hasPartial;
           const retries = source?.acquisition?.retry_count ?? (source?.acquisition?.attempt_history || []).filter(a => a.operation === 'retry').length;
           const canRetry = state === 'failed' && retries < 3 &&

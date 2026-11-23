@@ -297,7 +297,10 @@ def build_acquisition_args(source_id: str) -> list[str] | None:
 
 def _public_acquisition(job):
     """Only expose recorded outcomes and timestamps from the attempt journal."""
-    if job is None or "attempt_history" not in job:
+    if job is None:
+        return None
+    job = {key: value for key, value in job.items() if key != "promotion_intent"}
+    if "attempt_history" not in job:
         return job
     history = job["attempt_history"]
     if not isinstance(history, list):

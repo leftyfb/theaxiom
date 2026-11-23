@@ -3,6 +3,7 @@ from contextlib import contextmanager
 import fcntl
 import json
 import os
+import re
 from pathlib import Path
 import tempfile
 import threading
@@ -605,6 +606,52 @@ def worker_lock():
         os.close(fd)
 
 
+def _promoted_artifact(job):
+    """Verify metadata for the exact inode certified by the interrupted worker."""
+    try:
+        intent = job["promotion_intent"]
+        artifact = intent["artifact"]
+        url, size, digest = zim_source.candidate(job["configuration"])
+        name = artifact["filename"]
+        checksum = artifact["sha256"]
+        length = artifact["bytes"]
+        if (not re.fullmatch("[a-f0-9]{64}", checksum)
+                or name != f'{job["source_id"]}.{checksum}.zim'
+                or artifact["source_url"] != url or (digest and checksum != digest)
+                or type(length) is not int or not 96 <= length <= zim_source.MAX_BYTES
+                or (size and length != size)):
+            return None
+        with pdf_source._directory("library", format_name="zim") as (fd, mount, _):
+            # A crash before staging was unlinked leaves two links. _file
+            # rejects that case, retaining both paths for operator review.
+            with pdf_source._file(fd, mount, name, length) as stream:
+                if zim_source.promotion_identity(os.fstat(stream.fileno())) != intent["identity"]:
+                    return None
+            os.fsync(fd)
+        return artifact
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def _finish_orphaned_promotion(job, guard):
+    try:
+        artifact = _promoted_artifact(job)
+        with LOCK:
+            job.pop("promotion_intent", None)
+            if artifact:
+                job.update(state="completed", verified=True, artifact=artifact,
+                           downloaded_bytes=artifact["bytes"], expected_bytes=artifact["bytes"],
+                           detail="Recovered previously verified acquisition.")
+            else:
+                job.update(state="interrupted", verified=False,
+                           detail="Promotion interrupted; review the library and retained files before restarting.")
+            job.update(active=False, sampled_at=time.time())
+            _record_attempt(job)
+            save(job)
+    finally:
+        guard.__exit__(None, None, None)
+
+
 def status(sid):
     # Resolve an interrupted, durable replacement transition before exposing
     # the serving job to the catalog or admin API.
@@ -617,6 +664,19 @@ def status(sid):
             pass
     with LOCK:
         job = read(sid)
+        if job and job["state"] == "publishing" and "promotion_intent" in job:
+            guard = worker_lock()
+            try:
+                guard.__enter__()
+            except BlockingIOError:
+                return job
+            try:
+                threading.Thread(target=_finish_orphaned_promotion, args=(job, guard),
+                                 daemon=True, name="zim-promotion-recovery").start()
+            except BaseException:
+                guard.__exit__(None, None, None)
+                raise
+            return job
         if job and job["state"] in ACTIVE:
             try:
                 with worker_lock():
@@ -702,6 +762,8 @@ def start(sid, config, *, resume=False, restart=False, retry=False):
             # archive before a replacement had been verified and activated.
             if old and old.get("state") == "completed":
                 raise ValueError("Archive already installed; replacement is not yet supported.")
+            if old and old.get("state") == "publishing" and "promotion_intent" in old:
+                raise ValueError("A previous promotion is unresolved; check acquisition status before restarting.")
             if retry:
                 if not old or old["state"] != "failed" or not matches(old, config):
                     raise ValueError("Retry requires a matching failed ZIM job")
@@ -880,8 +942,9 @@ def _run(job, guard, signal, offset, validator, *, local=False):
             if job["state"] not in {"pausing", "cancelling"}:
                 job.update(state="verifying" if local else "downloading", sampled_at=time.time())
                 save(job)
-        def promoting():
-            job.update(state="publishing", sampled_at=time.time())
+        def promoting(artifact, identity):
+            job.update(state="publishing", sampled_at=time.time(),
+                       promotion_intent={"artifact": artifact, "identity": identity})
             save(job)
 
         if local:
@@ -894,6 +957,7 @@ def _run(job, guard, signal, offset, validator, *, local=False):
                 sid, job["configuration"], offset=offset,
                 validator=validator, progress=progress, stopped=signal.is_set,
                 promote_lock=LOCK, promoting=promoting)
+        job.pop("promotion_intent", None)
         job.update(state="completed", active=False, verified=True, artifact=artifact,
                    downloaded_bytes=artifact["bytes"], expected_bytes=artifact["bytes"], sampled_at=time.time())
     except zim_source.TransferStopped:

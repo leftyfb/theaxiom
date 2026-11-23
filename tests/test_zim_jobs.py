@@ -11,7 +11,7 @@ from test_zim_source import CONFIG, disk, fixture_bytes
 
 def join_worker():
     for thread in threading.enumerate():
-        if thread.name in {"zim-acquisition", "zim-local-revalidation"}:
+        if thread.name in {"zim-acquisition", "zim-local-revalidation", "zim-promotion-recovery"}:
             thread.join(5)
             assert not thread.is_alive()
 
@@ -1574,3 +1574,42 @@ def test_invalid_rollback_reason_never_changes_serving_archive(disk, reason):
         zim_jobs.rollback_candidate("ready", changed, reason=reason)
     assert zim_jobs.read("ready") == activated
     assert zim_jobs.read_candidate("ready")["state"] == "activated"
+
+
+@pytest.mark.parametrize("condition", ["intact", "different-inode", "staging-link"])
+def test_interrupted_promotion_recovers_only_exact_single_link(disk, condition):
+    data = fixture_bytes()
+    artifact = zim_source.install_stream("ready", CONFIG, BytesIO(data))
+    final = disk / "library/zim" / artifact["filename"]
+    identity = zim_source.promotion_identity(final.stat())
+    if condition == "different-inode":
+        other = final.with_suffix(".other")
+        other.write_bytes(data)
+        other.chmod(0o600)
+        other.replace(final)
+    elif condition == "staging-link":
+        (disk / "staging/zim" / zim_source.partial_name("ready")).hardlink_to(final)
+    job = dict(source_id="ready", state="publishing", active=True,
+               configuration=zim_jobs.identity(CONFIG),
+               promotion_intent={"artifact": artifact, "identity": identity},
+               attempt_history=[{"started_at": 1700000000}])
+    zim_jobs.save(job)
+    with patch.object(zim_source, "download_resumable", side_effect=AssertionError("download")):
+        with pytest.raises(ValueError, match="previous promotion is unresolved"):
+            zim_jobs.start("ready", CONFIG)
+        assert zim_jobs.status("ready")["state"] == "publishing"
+        join_worker()
+    outcome = zim_jobs.read("ready")
+    assert outcome["active"] is False
+    assert "promotion_intent" not in outcome
+    assert final.read_bytes() == data
+    if condition == "intact":
+        assert outcome["state"] == "completed"
+        assert zim_jobs.installed(outcome, CONFIG) == artifact
+        assert outcome["attempt_history"][-1]["state"] == "completed"
+    else:
+        assert outcome["state"] == "interrupted"
+        assert outcome["verified"] is False
+        assert "review" in outcome["detail"]
+    if condition == "staging-link":
+        assert final.stat().st_nlink == 2
