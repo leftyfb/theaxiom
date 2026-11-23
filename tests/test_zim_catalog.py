@@ -272,3 +272,19 @@ def test_replacement_lifecycle_updates_manifest_only_on_activation(disk):
     zim_jobs.rollback_candidate("ready", updated)
     assert zim_catalog.verified_books([rec], {"ready": True})[0]["path"] == old_path
     assert zim_catalog.source_content_name(rec) == old["filename"][:-4]
+
+
+
+def test_legacy_pinned_capability_selected_by_metadata_not_wikipedia_id(monkeypatch):
+    from theaxiom import source_catalog
+    original = source_catalog.WIKIPEDIA_SOURCE
+    second = dict(original, source_id="archive-two",
+                  filename="archive_two_en_all_2026-11.zim",
+                  sha256="b" * 64, bytes=8192)
+    untrusted = dict(second, source_id="untrusted", sha256="")
+    unmarked = dict(second, source_id="no-legacy", legacy_acquisition=None)
+    monkeypatch.setattr(source_catalog, "builtin_sources",
+                        lambda: [original, second, untrusted, unmarked])
+    entries = zim_catalog.legacy_pinned_entries()
+    assert set(entries) == {"wikipedia-en", "archive-two"}
+    assert entries["archive-two"]["filename"] == second["filename"]
