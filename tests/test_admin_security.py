@@ -488,16 +488,15 @@ class BrandingAssetTests(unittest.TestCase):
                       (icons / "theaxiom-backend.conf").read_text())
 
 
-    def test_deployment_backend_snippets_preserve_session_cookie(self):
-        """All shipped Nginx snippets must agree on browser session forwarding."""
+    def test_active_nginx_backend_preserves_browser_session_cookie(self):
+        """The canonical included runtime snippet forwards the session cookie."""
         root = Path(__file__).resolve().parents[1]
-        expected = 'proxy_set_header Cookie "theaxiom_session=$cookie_theaxiom_session";'
-        for path in ("templates/theaxiom-backend.conf",
-                     "deploy/nginx/theaxiom-backend.conf"):
-            with self.subTest(path=path):
-                snippet = (root / path).read_text()
-                self.assertIn(expected, snippet)
-                self.assertNotIn('proxy_set_header Cookie "";', snippet)
+        site = (root / "deploy/nginx/theaxiom.conf").read_text()
+        snippet_path = "templates/theaxiom-backend.conf"
+        self.assertIn("include /opt/theaxiom/app/" + snippet_path + ";", site)
+        snippet = (root / snippet_path).read_text()
+        self.assertIn('proxy_set_header Cookie "theaxiom_session=$cookie_theaxiom_session";', snippet)
+        self.assertNotIn('proxy_set_header Cookie "";', snippet)
 
     def test_proxied_hosts_allow_lan_and_tailscale_names(self):
         from theaxiom.admin_security import valid_public_host
