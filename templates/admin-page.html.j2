@@ -1683,6 +1683,10 @@
       }
       async function json(url, options) {
         const response = await fetch(url, {...options, cache: 'no-store'});
+        if (response.status === 401) {
+          window.location.assign('/admin/login');
+          throw new Error('Administrator session expired. Sign in again.');
+        }
         const body = await response.json();
         if (!response.ok) throw new Error(body.error || 'Request failed (' + response.status + ')');
         return body;
