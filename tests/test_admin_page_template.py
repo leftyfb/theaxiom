@@ -311,7 +311,7 @@ def test_compact_card_and_acquisition_feedback():
     primary, more = card.split('<details class="source-more-actions">', 1)
     assert primary.count('class="source-actions"') == 1
     assert "Remove source" not in primary
-    assert "<summary>More actions</summary>" in more
+    assert '<summary class="button">More actions</summary>' in more
     assert "Delete downloaded files" in more
     assert "Remove source" in more
     assert "Download from the configured HTTPS URL or upload a PDF from your computer." not in card

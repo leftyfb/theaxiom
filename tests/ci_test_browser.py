@@ -378,7 +378,15 @@ def exercise(browser, base, name, viewport, artifacts):
         if not card.evaluate("(element) => element.open"):
             card.locator("summary.source-header").click()
         expect(card.locator("[data-catalog-remove]")).to_be_hidden()
-        card.get_by_text("More actions", exact=True).click()
+        more_actions = card.get_by_text("More actions", exact=True)
+        menu_box = more_actions.bounding_box()
+        edit_box = card.locator("[data-catalog-edit]").bounding_box()
+        assert menu_box and edit_box
+        assert abs(menu_box["height"] - edit_box["height"]) < 1
+        if name == "desktop":
+            assert menu_box["height"] == 36
+            assert abs(menu_box["y"] - edit_box["y"]) < 1
+        more_actions.click()
         expect(card.get_by_role("button", name="Remove source")).to_be_visible()
         remove_source = card.locator("[data-catalog-remove]")
         remove_source.focus()

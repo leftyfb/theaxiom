@@ -83,17 +83,21 @@
     .source-card [hidden] { display: none !important; }
     .source-live:not(:has(> :not([hidden]))) { display: none; }
     .source-live { margin-top: .4rem; }
-    .source-expanded .source-actions { margin-top: .45rem; }
-    .source-expanded .source-actions .button { padding: .35rem .65rem; }
+    .source-expanded .source-actions { align-items: flex-start; gap: .4rem; margin-top: .45rem; }
+    .source-expanded .source-actions .button { box-sizing: border-box; min-height: 36px; padding: .25rem .6rem; font-size: .9rem; line-height: 1.25; }
+    @media (pointer: coarse) { .source-expanded .source-actions .button { min-height: 44px; } }
     .source-actions .danger-action { color: #a12820; border-color: #d7aaa5; }
     .source-expanded .source-note:empty, #source-form-feedback:empty, [data-pdf-feedback]:empty { display: none; }
     .source-metadata { display:flex; flex-wrap:wrap; gap:.3rem 1rem; margin:.6rem 0; font-size:.9rem; }
     .source-metadata div { display:flex; gap:.35rem; }
     .source-metadata dt { font-weight:650; }
     .source-metadata dd { margin:0; overflow-wrap:anywhere; }
-    .source-more-actions summary { cursor:pointer; color:var(--green); font-weight:650; padding:.5rem; }
-    .source-more-actions[open] { flex-basis:100%; }
-    .source-more-actions { border:1px solid var(--line); border-radius:.5rem; padding:0 .35rem; }
+    .source-card .source-more-actions { margin: 0; padding: 0; border: 0; }
+    .source-more-actions[open] { flex-basis: 100%; }
+    .source-more-actions > summary { gap: .35rem; }
+    .source-more-actions > summary::-webkit-details-marker { display: none; }
+    .source-more-actions > summary::before { content: '▸' / ''; }
+    .source-more-actions[open] > summary::before { content: '▾' / ''; }
     .source-technical { margin-top:.6rem; font-size:.9rem; }
     .source-technical summary { cursor:pointer; color:var(--green); font-weight:650; }
     .source-technical .storage-status { gap:.25rem .6rem; margin:.5rem 0; }
@@ -682,7 +686,7 @@
           {% endif %}
           <button class="button" type="button" data-catalog-edit="{{ source.source_id }}"{% if source.mutation_blocked or pub.error %} disabled{% endif %}>Edit</button>
           <details class="source-more-actions">
-            <summary>More actions</summary>
+            <summary class="button">More actions</summary>
             <div class="source-actions">
               {% if document or source.zim_download %}
               <button class="button danger-action" type="button" data-delete-downloads{% if not document and not source.installed_verified %} hidden{% endif %}{% if source.mutation_blocked or pub.error or source.replacement %} disabled{% endif %}>Delete downloaded files</button>
