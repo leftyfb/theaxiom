@@ -529,10 +529,10 @@ def test_explicit_kiwix_update_check_requires_same_origin_and_catalog_identity(a
         dict(payload, revision=0), status=409)["error"]
     assert "not support" in request("/api/update-check",
         dict(payload, source_id="missing"), status=400)["error"]
-    # Pinned Wikipedia uses a separate verification-gated, read-only
+    # Pinned legacy acquisition uses a separate verification-gated, read-only
     # checker. Mock it rather than making a live publisher HTTP request.
     pinned_calls = []
-    monkeypatch.setattr(admin_api.kiwix_update_discovery, "refresh_pinned_wikipedia",
+    monkeypatch.setattr(admin_api.kiwix_update_discovery, "refresh_pinned_seed",
         lambda record, artifact, *, verified: (
             pinned_calls.append((record["source_id"], verified))
             or {"state": "no_newer_edition_listed"}))
@@ -679,7 +679,7 @@ def test_verified_pinned_wikipedia_update_check_dispatches_read_only(app, monkey
         return {"state": "no_newer_edition_listed", "installed_edition": "2026-08"}
 
     monkeypatch.setattr(admin_api.kiwix_update_discovery,
-                        "refresh_pinned_wikipedia", fake_check)
+                        "refresh_pinned_seed", fake_check)
     payload = dict(source_id="wikipedia-en", revision=catalog["revision"])
     assert request("/api/update-check", payload)["state"] == "no_newer_edition_listed"
     assert calls == [("wikipedia-en", PIN["sha256"], True)]
