@@ -306,6 +306,19 @@ class HTTPAuthTests(unittest.TestCase):
         self.assertNotIn("WWW-Authenticate", headers)
         self.assertIn(b"sign in required", body)
 
+    def test_legacy_reader_auth_paths_derive_from_registry(self):
+        from theaxiom import publication
+        route = {"entry_path": "/read/another-legacy", "reader_path": "/zim/",
+                 "port": 8081, "book_id": "other_en_all_2026-11",
+                 "path": "/old-other/"}
+        with patch.dict(publication.ROUTES, {"another-legacy": route}):
+            for path in (route["entry_path"], "/internal/publication/another-legacy"):
+                with self.subTest(path=path):
+                    code, response_headers, _ = self.request(path)
+                    self.assertEqual(code, 403)
+                    self.assertNotIn("WWW-Authenticate", response_headers)
+
+
     def test_cross_site_post_rejected_without_basic_challenge(self):
         for site in ("cross-site", "same-site"):
             with self.subTest(site=site):
