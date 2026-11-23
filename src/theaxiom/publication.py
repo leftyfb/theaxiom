@@ -12,12 +12,33 @@ from pathlib import Path
 from . import catalog_store, storage_settings, source_catalog
 
 LOCK = threading.RLock()
-# Trusted deployment configuration, not administrator-supplied URLs.
-ROUTES = {"wikipedia-en": {"path": "/wikipedia/", "port": 8081, "entry_path": "/read/wikipedia-en",
-    "reader_path": "/zim/", "book_id": Path(source_catalog.WIKIPEDIA_SOURCE["filename"]).stem,
-    "name": "Wikipedia", "category": "Encyclopedia",
-    "description": "Explore millions of articles, illustrations and reference material without an internet connection.",
-    "symbol": "W", "language": "English"}}
+# Compatibility reader metadata comes from immutable migration definitions,
+# not from a source identity branch or mutable administrator profile.
+def legacy_reader_routes():
+    seeds = {entry["source_id"]: entry for entry in source_catalog.builtin_sources()}
+    routes = {}
+    for sid, config in source_catalog.LEGACY_READER_ROUTES.items():
+        seed = seeds.get(sid)
+        if (sid not in source_catalog.LEGACY_ACQUISITION_UNITS
+                or not seed or seed.get("kind") != "zim"
+                or not isinstance(seed.get("filename"), str)
+                or not valid_book_id_from_seed(seed)):
+            continue
+        routes[sid] = {**config, "port": 8081, "reader_path": "/zim/",
+                       "book_id": Path(seed["filename"]).stem}
+    return routes
+
+
+def valid_book_id_from_seed(seed):
+    filename = seed.get("filename")
+    return bool(isinstance(filename, str) and
+                re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,195}\.zim", filename)
+                and isinstance(seed.get("sha256"), str)
+                and re.fullmatch(r"[a-f0-9]{64}", seed["sha256"])
+                and type(seed.get("bytes")) is int and seed["bytes"] >= 96)
+
+
+ROUTES = legacy_reader_routes()
 
 
 def state_path():
