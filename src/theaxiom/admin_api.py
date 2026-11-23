@@ -328,7 +328,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                            # when no explicit Authorization header is supplied.
                            or (not auth and (bool(self.headers.get("Origin"))
                                              or bool(self.headers.get("Referer")))))
-        basic = (not browser_request and len(auth) <= 1 and
+        basic = ((config.store is None or not browser_request) and len(auth) <= 1 and
                  not (config.store is None and hosts[0].lower() not in local_hosts)
                  and config.authorized(auth[0] if auth else None))
         if not basic and (not auth or browser_request) and config.store is not None:
