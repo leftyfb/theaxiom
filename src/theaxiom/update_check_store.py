@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import fcntl
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -18,6 +19,7 @@ from . import storage_settings
 
 MAX_RECORD = 4096
 MAX_AGE = 48 * 60 * 60
+LOG = logging.getLogger(__name__)
 STATES = frozenset({"update_available", "up_to_date", "older_candidate",
                     "unable_to_determine", "no_newer_edition_listed", "representation_changed",
                     "representation_unchanged"})
@@ -127,9 +129,13 @@ def save(source_id: str, installed_sha256: str, result: dict, *, now=None):
             return
         if (result["state"] == "unable_to_determine" and previous
                 and previous["result"]["state"] != "unable_to_determine"):
-            _write(_history_path(target), _validated(source_id, installed_sha256,
-                                                   previous["checked_at"], previous["result"]))
-            os.fsync(directory_fd)
+            try:
+                _write(_history_path(target), _validated(source_id, installed_sha256,
+                                                       previous["checked_at"], previous["result"]))
+                os.fsync(directory_fd)
+            except (OSError, ValueError):
+                # Saving the current failure takes precedence over historical display.
+                LOG.warning("Unable to retain last successful update-check evidence")
         _write(target, data)
         os.fsync(directory_fd)
     finally:

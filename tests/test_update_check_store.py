@@ -69,6 +69,17 @@ def test_failed_checks_preserve_last_success_until_reconnection(location):
     assert "last_known_candidate_edition" not in current
 
 
+def test_unwritable_history_does_not_keep_old_candidate_actionable(location, tmp_path):
+    store.save("wikipedia", SHA, NEW, now=1000)
+    outside = tmp_path / "outside.json"
+    outside.write_text("unchanged")
+    (location / "wikipedia.last-success.json").symlink_to(outside)
+    store.save("wikipedia", SHA, {"state": "unable_to_determine"}, now=2000)
+    current = store.load("wikipedia", SHA, now=2001)
+    assert current == {"state": "unable_to_determine", "checked_at": 2000}
+    assert outside.read_text() == "unchanged"
+
+
 @pytest.mark.parametrize("invalid", [
     {"state": "update_available", "evidence": "missing digest",
      "candidate_url": "https://download.kiwix.org/a.zim"},
