@@ -32,7 +32,6 @@ def check_records(records, *, max_checks=DEFAULT_MAX_CHECKS, start_index=0, chec
         record["source_id"]: record for record in records
         if isinstance(record, dict)
         and isinstance(record.get("source_id"), str)
-        and record["source_id"] not in publication.ROUTES
         and isinstance(record.get("configuration"), dict)
         and record["configuration"].get("format") in supported
         and (record["configuration"].get("format") == "zim"
@@ -46,6 +45,15 @@ def check_records(records, *, max_checks=DEFAULT_MAX_CHECKS, start_index=0, chec
         try:
             if checker is not None:
                 outcome = checker(sid)
+            elif sid in publication.ROUTES and by_id[sid]["configuration"]["format"] == "zim":
+                # Match the same independently verified immutable artifact and
+                # pinned-seed gate used by the authenticated manual check.
+                from . import admin_api, zim_catalog
+                record = by_id[sid]
+                artifact = admin_api.select_lifecycle(sid, record["configuration"]).get("artifact")
+                verified = bool(zim_catalog.status(record, records).get("verified"))
+                outcome = kiwix_update_discovery.refresh_pinned_seed(
+                    record, artifact, verified=verified)
             elif by_id[sid]["configuration"]["format"] == "zim":
                 outcome = kiwix_update_discovery.refresh_checked_source(sid)
             else:
