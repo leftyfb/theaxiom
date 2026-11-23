@@ -313,6 +313,15 @@ def exercise(browser, base, name, viewport, artifacts):
         page.get_by_role("button", name="Cancel Fixture download").click()
         expect(page.locator("#acquisition-queue-jobs")).to_contain_text("Fixture download · Cancelled")
         page.unroute("**/api/acquisition-batch", batch_downloads)
+        def stale_sources(route):
+            response = route.fetch().json()
+            response["revision"] += 1
+            route.fulfill(json=response)
+
+        page.route("**/api/sources", stale_sources, times=1)
+        expect(page.get_by_role("button", name="Reload sources")).to_be_visible(timeout=10000)
+        page.get_by_role("button", name="Reload sources").click()
+        expect(page.locator('[data-group-select][value="' + sid + '"]')).to_be_checked()
         page.get_by_role("button", name="Export ZIM verification manifest").click()
         expect(page.locator("#catalog-feedback")).to_contain_text("Choose only installed, verified ZIM sources")
         with page.expect_download() as download:

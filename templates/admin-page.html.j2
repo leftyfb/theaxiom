@@ -774,6 +774,7 @@
           });
           document.querySelectorAll("[data-group-select]").forEach(item => { item.checked = (saved.selected || []).includes(item.value); });
           document.getElementById("group-panel").open = !!saved.groupsOpen;
+          document.getElementById("acquisition-queue").open = !!saved.queueOpen;
           document.getElementById("source-select-mode").setAttribute("aria-pressed", String(!!saved.selecting));
           requestAnimationFrame(() => window.scrollTo(0, saved.scroll));
         }
@@ -785,6 +786,7 @@
             scroll: window.scrollY,
             selected: Array.from(document.querySelectorAll("[data-group-select]:checked"), item => item.value),
             groupsOpen: document.getElementById("group-panel").open,
+            queueOpen: document.getElementById("acquisition-queue").open,
             selecting: document.getElementById("source-select-mode").getAttribute("aria-pressed") === "true",
             filters: window.axiomSourceFilters?.values()
           }));
@@ -1010,6 +1012,22 @@
       const queueSummary = document.getElementById('acquisition-queue-summary');
       const queueJobs = document.getElementById('acquisition-queue-jobs');
       let queueView = '';
+      let batchJobIds = [];
+      let completedBatch = false;
+      window.axiomHandleStaleSources = () => {
+        if (completedBatch && !bulkBusy && !formPosting && !document.querySelector('dialog[open]')) {
+          reloadSources();
+          return;
+        }
+        if (feedback.querySelector('[data-reload-sources]')) return;
+        const reload = document.createElement('button');
+        reload.type = 'button';
+        reload.className = 'button';
+        reload.dataset.reloadSources = 'true';
+        reload.textContent = 'Reload sources';
+        reload.addEventListener('click', reloadSources);
+        feedback.replaceChildren('Source profiles changed. ', reload);
+      };
       const queueStates = {
         queued: 'Queued', running: 'Running', completed: 'Completed', failed: 'Failed',
         cancelled: 'Cancelled', interrupted: 'Interrupted'
@@ -1030,6 +1048,12 @@
           if (!response.ok) return;
           const {jobs} = await response.json();
           if (!Array.isArray(jobs)) return;
+          if (batchJobIds.length) {
+            const watchedJobs = jobs.filter(job => batchJobIds.includes(job.id));
+            completedBatch = watchedJobs.length === batchJobIds.length &&
+              watchedJobs.every(job => !['queued', 'running'].includes(job.state)) &&
+              watchedJobs.some(job => job.state === 'completed');
+          }
           const view = JSON.stringify(jobs);
           if (view === queueView) return;
           queueView = view;
@@ -1075,7 +1099,9 @@
         if (!window.confirm('Queue ' + ids.length + (ids.length === 1 ? ' download?' : ' downloads?'))) return;
         queueButton.disabled = true;
         try {
-          await batchRequest({revision: previewRevision, source_ids: ids, confirm: true});
+          const result = await batchRequest({revision: previewRevision, source_ids: ids, confirm: true});
+          batchJobIds = result.job_ids;
+          completedBatch = false;
           queueButton.hidden = true;
           queueFeedback.textContent = 'Downloads queued.';
           await loadQueue();
@@ -2136,7 +2162,7 @@
           if (!response.ok) throw new Error('Status unavailable');
           const data = await response.json();
           if (data.revision !== revision) {
-            document.getElementById('catalog-feedback').textContent = 'Source profiles changed. Reload to see the latest catalog.';
+            window.axiomHandleStaleSources?.();
             throw new Error('Catalog revision changed');
           }
           showUpdateSummary(data.update_summary || '');
