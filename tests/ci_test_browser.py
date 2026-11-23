@@ -342,6 +342,27 @@ def exercise(browser, base, name, viewport, artifacts):
         page.go_back()
         page.goto(base + "/admin/settings")
         expect(page).to_have_url(base + "/admin/login")
+        # #99: The Sources background poll must recover from a revoked/expired
+        # session via the branded login, without requiring a browser restart.
+        # Clear only the isolated in-memory fixture sessions: no production
+        # credentials, archives or stored source profiles are touched.
+        page.goto(base + "/admin/login")
+        page.locator("#username").fill("admin")
+        page.locator("#password").fill("browser-only-fixture-password")
+        page.locator("#submit").click()
+        expect(page).to_have_url(base + "/admin")
+        page.goto(base + "/admin/sources")
+        expect(page.locator("h1")).to_contain_text("Manage offline sources")
+        admin_api.ADMIN_SESSIONS.clear()
+        # The real 2-second Sources poll detects the 401 and redirects;
+        # an HTTP Basic challenge would instead halt this navigation.
+        expect(page).to_have_url(base + "/admin/login", timeout=12000)
+        expect(page.locator("#username")).to_be_visible()
+        page.go_back()
+        # A cached admin document may briefly reappear via history, but
+        # subsequent navigation must still enforce the revoked session.
+        page.goto(base + "/admin/groupings")
+        expect(page).to_have_url(base + "/admin/login")
         assert not errors, f"{name} uncaught browser JavaScript errors: {errors}"
         print(f"PASS {name}: login, navigation, guide, filters, add/edit, selection, overflow, logout")
     except Exception:
