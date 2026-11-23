@@ -343,6 +343,32 @@ def _public_zim_replacement(candidate):
     return result | zim_jobs.current_checksum(candidate)
 
 
+def _source_update_summary(sources):
+    """Summarize cached metadata for verified sources on the admin landing page."""
+    available = 0
+    attention = 0
+    for source in sources:
+        discovery = source["discovery"]
+        if not source["installed_verified"] or discovery["method"] == "manual":
+            continue
+        result = source["update_check"] or {}
+        state = result.get("state")
+        if state == "update_available":
+            available += 1
+        elif (state == "representation_changed" or
+              (state in (None, "unable_to_determine")
+               and (discovery["periodic"] or result.get("checked_at")))):
+            attention += 1
+    messages = []
+    if available:
+        messages.append("1 source has an update available" if available == 1
+                        else f"{available} sources have updates available")
+    if attention:
+        messages.append("1 source needs update review" if attention == 1
+                        else f"{attention} sources need update review")
+    return " · ".join(messages)
+
+
 class AdminAPIHandler(BaseHTTPRequestHandler):
     """Minimal HTTP handler for the admin API."""
 
@@ -1129,7 +1155,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                                 discovery=discovery,
                                 installed_verified=verified, publication=state, mutation_blocked=busy,
                                 publication_filter=publication_filter, download_filter=download_filter))
-        return dict(catalog, sources=sources, acquisition_stale=snapshot["stale"])
+        return dict(catalog, sources=sources, acquisition_stale=snapshot["stale"],
+                    update_summary=_source_update_summary(sources))
 
     def _send_admin_page(self, page: str = "sources") -> None:
         """Render exactly the persisted source profiles."""

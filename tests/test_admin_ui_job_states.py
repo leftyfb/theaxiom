@@ -18,7 +18,8 @@ const card = {dataset:{sourceId:'wikipedia-en'}, querySelector(selector) {
 }};
 const requests = [];
 let next;
-global.document = {querySelectorAll: () => [card], getElementById: () => ({})};
+global.document = {querySelectorAll: () => [card], getElementById: id =>
+  id === 'source-update-summary' ? (fields[id] ??= {}) : ({})};
 global.window = {setTimeout(fn, ms) {if(ms===2000) next=fn; return 1;}, clearTimeout(){}};
 global.fetch = async (url, options) => {
   requests.push({url, method:options.method || 'GET'});
@@ -102,6 +103,15 @@ def test_replacement_checksum_percent_is_separate_from_transfer_completion():
     assert "pass 2 of 2" in state
     assert "24.0% read (digest not yet confirmed)" in state
     assert "100.0%" not in state
+
+
+def test_admin_update_summary_refreshes_and_clears_after_poll_failure():
+    sample = job("completed")
+    sample["update_summary"] = "1 source has an update available"
+    first, failure = run_ui([sample, None])["states"]
+    assert first["source-update-summary"]["textContent"] == sample["update_summary"]
+    assert not first["source-update-summary"]["hidden"]
+    assert failure["source-update-summary"]["hidden"]
 
 
 def test_publication_refresh_updates_summary_and_controls():

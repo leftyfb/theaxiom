@@ -154,6 +154,25 @@ def test_only_recent_active_native_checksum_samples_are_public():
             assert "checksum_bytes" not in project(sample | {"checksum_sampled_at": 80})
 
 
+def test_update_summary_uses_verified_installed_sources_and_cached_evidence():
+    def source(state=None, *, verified=True, method="kiwix", periodic=False, checked=False):
+        result = {"state": state} if state else None
+        if checked:
+            result["checked_at"] = 100
+        return {"discovery": {"method": method, "periodic": periodic},
+                "installed_verified": verified, "update_check": result}
+
+    assert not admin_api._source_update_summary([
+        source("update_available", verified=False), source("update_available", method="manual"),
+        source("unable_to_determine"), source("no_newer_edition_listed", periodic=True),
+    ])
+    assert admin_api._source_update_summary([source("update_available")]) == "1 source has an update available"
+    assert admin_api._source_update_summary([
+        source("representation_changed", method="head"), source(periodic=True),
+        source("unable_to_determine", checked=True),
+    ]) == "3 sources need update review"
+
+
 def test_acquisition_history_exposes_only_finished_outcomes_and_timestamps():
     first = {"state": "completed", "finished_at": 1700000000, "etag": "private-validator"}
     latest = {"state": "failed", "finished_at": 1700000100, "operation": "retry",

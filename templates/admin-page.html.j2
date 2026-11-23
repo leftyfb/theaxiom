@@ -397,6 +397,8 @@
     </script>
     {% else %}
     <h1>Manage offline sources</h1>
+    {% set update_summary = catalog.update_summary|default("") %}
+    <p class="source-note" id="source-update-summary" role="status"{% if not update_summary %} hidden{% endif %}>{{ update_summary }}</p>
     <div class="source-search-row">
       <button class="button" type="button" id="source-add">Add Source</button>
       <button class="button" type="button" id="source-guide-open">Content source guide</button>
@@ -1549,6 +1551,12 @@
       const cards = Array.from(document.querySelectorAll('.source-card[data-source-id]'));
       if (!cards.length) return;
       const revision = {{ (catalog|default({})).revision|default(none)|tojson }};
+      const updateSummary = document.getElementById('source-update-summary');
+      const showUpdateSummary = text => {
+        if (!updateSummary) return;
+        if (updateSummary.textContent !== text) updateSummary.textContent = text;
+        updateSummary.hidden = !text;
+      };
       const labels = {queued: 'Queued', downloading: 'Downloading', verifying: 'Verifying checksum',
         publishing: 'Promoting / verifying final file', completed: 'Acquisition completed',
         retrying: 'Waiting to retry', failed: 'Failed', interrupted: 'Interrupted',
@@ -1752,6 +1760,7 @@
             document.getElementById('catalog-feedback').textContent = 'Source profiles changed. Reload to see the latest catalog.';
             throw new Error('Catalog revision changed');
           }
+          showUpdateSummary(data.update_summary || '');
           const sources = new Map(data.sources.map(source => [source.source_id, source]));
           cards.forEach(card => {
             const source = sources.get(card.dataset.sourceId);
@@ -1835,6 +1844,7 @@
           });
           window.axiomSourceFilters?.apply(false);
         } catch (_) {
+          showUpdateSummary('');
           cards.forEach(card => {
             if (card.querySelector('[data-action="download"]') || card.querySelector('[data-zim-download]')) render(card, null, true, true);
             else card.querySelector('[data-field="status"]').textContent = 'Status unavailable';
