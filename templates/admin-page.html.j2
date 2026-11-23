@@ -2236,8 +2236,7 @@
                 representation_unchanged: 'Publisher representation unchanged',
                 unable_to_determine: 'Unable to check for updates'
               };
-              if (card.dataset.zimCheckPosting === 'true') return;
-              evidence.textContent = update ? (update.stale ? 'Last update check is stale' :
+              if (card.dataset.zimCheckPosting !== 'true') evidence.textContent = update ? (update.stale ? 'Last update check is stale' :
                 update.state === 'update_available' ? '' : description[update.state] || '') :
                 (source?.discovery?.method && source.discovery.method !== 'manual' ? 'No update check recorded' : '');
             }
