@@ -207,7 +207,7 @@ def exercise(browser, base, name, viewport, artifacts):
         # Closed #78: independent search/format/publication/download filters,
         # reset, counts and stable alphabetical sorting without duplicates.
         page.locator("#source-filter-toggle").click()
-        page.locator("#source-filter-format").select_option("unspecified")
+        page.locator("#source-filter-format").select_option("pdf")
         expect(page.locator(".source-card[data-source-id='" + sid + "']")).to_be_visible()
         page.locator("#source-filter-download").select_option("downloaded")
         expect(page.locator(".source-card[data-source-id='" + sid + "']")).to_be_hidden()
