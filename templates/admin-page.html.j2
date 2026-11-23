@@ -944,18 +944,23 @@
       let previewIds = '', previewRequest = 0, previewRevision;
       function previewSize(bytes) {
         if (!Number.isSafeInteger(bytes) || bytes < 0) return 'unknown';
-        if (bytes < 1048576) return bytes.toLocaleString() + ' B';
-        if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MiB';
-        return (bytes / 1073741824).toFixed(2) + ' GiB';
+        const units = ['B', 'kB', 'MB', 'GB', 'TB', 'PB'];
+        let unit = 0;
+        while (bytes >= 1000 && unit < units.length - 1) {
+          bytes /= 1000;
+          unit++;
+        }
+        return bytes.toLocaleString(undefined, {maximumFractionDigits: 2}) + ' ' + units[unit];
       }
       const previewFields = [
         ['Transfer', 'transfer_bytes'], ['Installed', 'installed_bytes'],
         ['Staging', 'staging_bytes'], ['Peak', 'peak_bytes']
       ];
-      function estimateSummary(estimates, fields = previewFields) {
-        return fields.map(([label, field]) => {
+      function estimateSummary(estimates) {
+        return previewFields.map(([label, field]) => {
           const known = estimates.map(source => source[field]).filter(Number.isSafeInteger);
           const unknown = estimates.length - known.length;
+          if (!known.length) return label + ' unknown';
           return label + ' ' + previewSize(known.reduce((sum, bytes) => sum + bytes, 0)) +
             (unknown ? ' + ' + unknown + ' unknown' : '');
         }).join(' · ');
@@ -967,10 +972,7 @@
         if (zim.length) estimates.push('ZIM · ' + estimateSummary(zim));
         if (documents.length) {
           const configured = documents.filter(source => source.state === 'estimated');
-          if (configured.length) {
-            const fields = previewFields.filter(([, field]) => field === 'transfer_bytes' || field === 'staging_bytes');
-            estimates.push('PDF and EPUB · ' + estimateSummary(configured, fields) + ' · Installed and peak sizes unknown');
-          }
+          if (configured.length) estimates.push('PDF and EPUB · ' + estimateSummary(configured));
           const unavailable = documents.length - configured.length;
           if (unavailable) estimates.push(unavailable + ' PDF or EPUB source(s) lack a usable download configuration');
         }

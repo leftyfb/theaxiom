@@ -273,18 +273,21 @@ def exercise(browser, base, name, viewport, artifacts):
         expect(page.locator("#bulk-publish")).to_be_disabled()
         expect(page.locator("#bulk-unpublish")).to_be_disabled()
         page.get_by_role("button", name="Preview storage").click()
-        expect(page.locator("#bulk-preview-summary")).to_contain_text("Installed and peak sizes unknown")
+        expect(page.locator("#bulk-preview-summary")).to_contain_text("Installed unknown")
         expect(page.locator("#bulk-preview-capacity")).to_have_text("Current storage capacity is unavailable.")
 
         def bounded_preview(route):
             response = route.fetch().json()
             response["capacity"] = {"state": "fits_with_unknown_sizes", "available_bytes": 33554432,
                                     "reserve_bytes": 0, "staging_upper_bound_bytes": 16777216}
+            response["sources"][0].update(installed_bytes=1000, peak_bytes=1000000000)
             route.fulfill(json=response)
 
         page.route("**/api/acquisition-preview", bounded_preview)
         page.get_by_role("button", name="Preview storage").click()
-        expect(page.locator("#bulk-preview-capacity")).to_contain_text("Staging could use up to 16.0 MiB")
+        expect(page.locator("#bulk-preview-capacity")).to_contain_text("Staging could use up to 16.78 MB")
+        expect(page.locator("#bulk-preview-summary")).to_contain_text("Installed 1 kB")
+        expect(page.locator("#bulk-preview-summary")).to_contain_text("Peak 1 GB")
         page.unroute("**/api/acquisition-preview", bounded_preview)
         batch_jobs = []
         job_id = "a" * 32
@@ -306,7 +309,7 @@ def exercise(browser, base, name, viewport, artifacts):
         page.route("**/api/acquisition-batch", batch_downloads)
         page.once("dialog", lambda dialog: dialog.accept())
         page.get_by_role("button", name="Queue selected downloads").click()
-        expect(page.locator("#acquisition-queue-summary")).to_contain_text("16.0 MiB reserved")
+        expect(page.locator("#acquisition-queue-summary")).to_contain_text("16.78 MB reserved")
         page.get_by_role("button", name="Cancel Fixture download").click()
         expect(page.locator("#acquisition-queue-jobs")).to_contain_text("Fixture download · Cancelled")
         page.unroute("**/api/acquisition-batch", batch_downloads)
@@ -334,7 +337,7 @@ def exercise(browser, base, name, viewport, artifacts):
             "name": "selection.json", "mimeType": "application/json", "buffer": manifest,
         })
         expect(page.locator("#selection-file-matches")).to_contain_text("Matches this catalog · PDF")
-        expect(page.locator("#selection-storage-summary")).to_contain_text("Installed and peak sizes unknown")
+        expect(page.locator("#selection-storage-summary")).to_contain_text("Installed unknown")
         mismatch = json.loads(manifest)
         mismatch["sources"][0]["edition"] = "2025"
         page.locator("#selection-file").set_input_files({
