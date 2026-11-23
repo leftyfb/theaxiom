@@ -1,4 +1,6 @@
+import json
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 from theaxiom import acquisition_monitor as m
 from theaxiom.admin_api import WIKIPEDIA_SOURCE
@@ -54,6 +56,48 @@ class MonitorTests(unittest.TestCase):
     @patch.object(m, "command", return_value="")
     def test_missing_journal_evidence(self, _):
         self.assertFalse(m.success_evidence({"InvocationID": "a"*32}, WIKIPEDIA_SOURCE, None, "/unused"))
+
+    def test_pinned_invocation_evidence_returns_normalized_marker(self):
+        invocation = "a" * 32
+        unit = {"InvocationID": invocation, "ActiveState": "inactive",
+                "Result": "success", "ExecMainStatus": "0"}
+        final_stat = SimpleNamespace(st_mtime_ns=10_000_000_000, st_ctime_ns=10_000_000_000)
+        path = "/media/offline/library/zim/pinned.zim"
+        marker = (f"VERIFIED_AND_PROMOTED path={path} bytes={WIKIPEDIA_SOURCE['bytes']} "
+                  f"sha256={WIKIPEDIA_SOURCE['sha256']}")
+        with (patch.object(m, "unit_state", side_effect=[unit, unit]),
+              patch.object(m, "command", return_value=json.dumps(
+                  {"MESSAGE": marker, "__REALTIME_TIMESTAMP": "11000000"}) + "\n") as command):
+            evidence = m.pinned_invocation_evidence(
+                WIKIPEDIA_SOURCE, path, final_stat, unit)
+        self.assertEqual(evidence, {"timestamp": 11.0, "timestamp_ns": 11000000000,
+                                    "marker": marker, "invocation_id": invocation})
+        self.assertIn("-n", command.call_args.args)
+        self.assertIn("30", command.call_args.args)
+        self.assertIn("_SYSTEMD_INVOCATION_ID=" + invocation, command.call_args.args)
+
+    def test_pinned_invocation_evidence_requires_strictly_newer_timestamp(self):
+        invocation = "b" * 32
+        unit = {"InvocationID": invocation, "ActiveState": "inactive",
+                "Result": "success", "ExecMainStatus": "0"}
+        marker = ("VERIFIED_AND_PROMOTED path=/exact.zim bytes=7 sha256=" + "c" * 64)
+        final_stat = SimpleNamespace(st_mtime_ns=10_000_000_000, st_ctime_ns=10_000_000_000)
+        with (patch.object(m, "unit_state", side_effect=[unit, unit]),
+              patch.object(m, "command", return_value=json.dumps(
+                  {"MESSAGE": marker, "__REALTIME_TIMESTAMP": "10000000"}))):
+            self.assertIsNone(m.pinned_invocation_evidence(
+                {"bytes": 7, "sha256": "c" * 64}, "/exact.zim", final_stat, unit))
+
+    def test_pinned_invocation_evidence_rejects_unit_change_after_query(self):
+        invocation = "d" * 32
+        unit = {"InvocationID": invocation, "ActiveState": "inactive",
+                "Result": "success", "ExecMainStatus": "0"}
+        changed = dict(unit, InvocationID="e" * 32)
+        with (patch.object(m, "unit_state", side_effect=[unit, changed]),
+              patch.object(m, "command", return_value="")):
+            self.assertIsNone(m.pinned_invocation_evidence(
+                {"bytes": 1, "sha256": "f" * 64}, "/exact.zim",
+                SimpleNamespace(st_mtime_ns=1_000_000_000, st_ctime_ns=1_000_000_000), unit))
 
 
 class ChecksumProgressTests(unittest.TestCase):

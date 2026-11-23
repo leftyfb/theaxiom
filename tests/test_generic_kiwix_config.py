@@ -31,13 +31,13 @@ def test_nginx_kiwix_proxy_requires_internal_publication_for_all_paths():
     assert 'location ~ "^/read/zim/[a-z0-9-]{1,63}$"' in config
 
 
-def test_legacy_wikipedia_urls_redirect_to_shared_publication_gated_reader():
+def test_legacy_wikipedia_aliases_use_the_shared_publication_gated_reader():
     config = (ROOT / "deploy/nginx/theaxiom.conf").read_text()
-    assert "location = /wikipedia/viewer { return 302 /zim/viewer; }" in config
-    assert "rewrite ^/wikipedia/(.*)$ /zim/$1 redirect;" in config
+    assert "location ^~ /wikipedia/ {" in config
     assert "location ^~ /zim/ {" in config
     assert "auth_request /_publication_zim;" in config
     assert "proxy_pass http://127.0.0.1:8082;" not in config
+
 
 
 def test_shared_kiwix_viewer_has_library_return_for_all_zim_sources():

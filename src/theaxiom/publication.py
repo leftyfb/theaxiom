@@ -41,6 +41,33 @@ def valid_book_id_from_seed(seed):
 ROUTES = legacy_reader_routes()
 
 
+def managed_installation(source_id):
+    """Return whether a source has crossed into the normal ZIM lifecycle.
+
+    Adoption deliberately uses the same durable completed job as a normal
+    acquisition. Until that record is present, the legacy service remains
+    the only eligible publication path.
+    """
+    try:
+        from . import zim_jobs
+        job = zim_jobs.status(source_id)
+        # Legacy routes may cross into the managed lifecycle only through the
+        # explicit adoption transition.  A completed job by itself is not
+        # evidence of that transition.
+        adopted = job.get("adopted_from_legacy") if job else None
+        return bool(source_id in ROUTES and isinstance(adopted, dict)
+                    and job and job.get("state") == "completed"
+                    and job.get("verified") is True
+                    and job.get("active") is False
+                    and zim_jobs.installed(job, job["configuration"]))
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+
+def legacy_only(source_id):
+    return source_id in ROUTES and not managed_installation(source_id)
+
+
 def state_path():
     return storage_settings.SETTINGS_PATH.with_name("publication.json")
 
@@ -186,6 +213,17 @@ def reader_location(route, book_id=None):
 
 
 def status(snapshot, source_id, *, probe=True):
+    if source_id in ROUTES and managed_installation(source_id):
+        from . import zim_catalog
+        try:
+            record = next(r for r in snapshot.get("sources", [])
+                          if r.get("source_id") == source_id)
+            return zim_catalog.status(record, snapshot.get("sources", []))
+        except (OSError, ValueError, KeyError, TypeError, StopIteration):
+            return {"enabled": False, "verified": False, "serving": False,
+                    "published": False, "path": "/read/zim/" + source_id,
+                    "entry_path": "/read/zim/" + source_id,
+                    "error": "publication state unavailable"}
     route = ROUTES[source_id]
     try:
         enabled = load().get(source_id, False)
@@ -199,6 +237,14 @@ def status(snapshot, source_id, *, probe=True):
 
 
 def allowed(snapshot, source_id):
+    if source_id in ROUTES and managed_installation(source_id):
+        from . import zim_catalog
+        try:
+            record = next(r for r in snapshot.get("sources", [])
+                          if r.get("source_id") == source_id)
+            return bool(zim_catalog.status(record, snapshot.get("sources", []))["published"])
+        except (OSError, ValueError, KeyError, TypeError, StopIteration):
+            return False
     try:
         return source_id in ROUTES and load().get(source_id, False) and verified(snapshot, source_id)
     except (OSError, ValueError):

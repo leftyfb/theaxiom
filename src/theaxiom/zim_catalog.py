@@ -75,7 +75,7 @@ def verified_books(records, enabled=None):
     if not root:
         return []
     candidates = [record for record in records
-                  if record["source_id"] not in publication.ROUTES
+                  if not publication.legacy_only(record["source_id"])
                   and record["configuration"].get("format") == "zim"
                   and enabled.get(record["source_id"], False)]
     result = []
@@ -345,7 +345,7 @@ def status(record, records):
               "publication_reason": ""}
     try:
         config = record["configuration"]
-        if sid in publication.ROUTES or config.get("format") != "zim":
+        if publication.legacy_only(sid) or config.get("format") != "zim":
             return result
         enabled = publication.load().get(sid, False)
         job = zim_jobs.status(sid)

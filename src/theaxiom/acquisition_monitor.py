@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import os
 import re
 import stat
@@ -122,27 +123,57 @@ def metadata(root, relative, mount, mounts):
     return info
 
 
-def success_evidence(unit, entry, final, final_path, unit_name=UNIT):
-    # Only current invocation evidence, never an arbitrary historical success.
+def pinned_invocation_evidence(entry, final_path, final_stat, unit,
+                               unit_name=UNIT):
+    """Return bounded, current-invocation evidence for an exact artifact.
+
+    ``final_stat`` must be the stable result of an anchored ``fstat``.  The
+    journal query is deliberately capped at 30 records and is surrounded by
+    unit reads so a restart or a concurrent invocation cannot be mistaken for
+    evidence for the supplied file.
+    """
     invocation = unit.get("InvocationID", "")
-    if len(invocation) != 32 or any(c not in "0123456789abcdef" for c in invocation):
-        return False
+    if (len(invocation) != 32 or
+            any(c not in "0123456789abcdef" for c in invocation) or
+            unit.get("ActiveState") != "inactive" or
+            unit.get("Result") != "success" or
+            unit.get("ExecMainStatus") != "0"):
+        return None
     try:
-        import json
+        before = unit_state(unit_name)
+        if before != unit:
+            return None
         records = command("journalctl", "--no-pager", "-o", "json", "-n", "30",
                           "-u", unit_name, "_SYSTEMD_INVOCATION_ID=" + invocation)
-        expected = f"VERIFIED_AND_PROMOTED path={final_path} bytes={entry['bytes']} sha256={entry['sha256']}"
+        after = unit_state(unit_name)
+        if after != before:
+            return None
+        expected = (f"VERIFIED_AND_PROMOTED path={final_path} bytes={entry['bytes']} "
+                    f"sha256={entry['sha256']}")
+        legacy = f"Already verified: {final_path}"
+        newest_allowed_ns = max(final_stat.st_mtime_ns, final_stat.st_ctime_ns)
         for line in records.splitlines():
             record = json.loads(line)
-            message = record.get("MESSAGE")
-            stamp = int(record.get("__REALTIME_TIMESTAMP", "0"))
-            if stamp * 1000 >= max(final.st_mtime_ns, final.st_ctime_ns) and (
-                message == expected or message == f"Already verified: {final_path}"
-            ):
-                return True
-    except (OSError, ValueError, subprocess.SubprocessError):
-        pass
-    return False
+            if record.get("MESSAGE") not in {expected, legacy}:
+                continue
+            stamp_us = int(record["__REALTIME_TIMESTAMP"])
+            timestamp_ns = stamp_us * 1000
+            if timestamp_ns <= newest_allowed_ns:
+                continue
+            return {"timestamp": stamp_us / 1_000_000,
+                    "timestamp_ns": timestamp_ns,
+                    "marker": expected,
+                    "invocation_id": invocation}
+    except (KeyError, OSError, TypeError, ValueError, subprocess.SubprocessError):
+        return None
+    return None
+
+
+def success_evidence(unit, entry, final, final_path, unit_name=UNIT):
+    """Compatibility boolean for the normal monitor path."""
+    if final is None:
+        return False
+    return pinned_invocation_evidence(entry, final_path, final, unit, unit_name) is not None
 
 
 def collect(entry):

@@ -46,7 +46,7 @@ def check_records(records, *, max_checks=DEFAULT_MAX_CHECKS, start_index=0, chec
             try:
                 if checker is not None:
                     outcome = checker(sid)
-                elif sid in publication.ROUTES and by_id[sid]["configuration"]["format"] == "zim":
+                elif publication.legacy_only(sid) and by_id[sid]["configuration"]["format"] == "zim":
                     # Match the same independently verified immutable artifact and
                     # pinned-seed gate used by the authenticated manual check.
                     from . import acquisition_monitor, admin_api
