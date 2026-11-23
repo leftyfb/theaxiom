@@ -271,6 +271,17 @@ def exercise(browser, base, name, viewport, artifacts):
         page.get_by_role("button", name="Preview storage").click()
         expect(page.locator("#bulk-preview-summary")).to_contain_text("Installed and peak sizes unknown")
         expect(page.locator("#bulk-preview-capacity")).to_have_text("Current storage capacity is unavailable.")
+
+        def bounded_preview(route):
+            response = route.fetch().json()
+            response["capacity"] = {"state": "fits_with_unknown_sizes", "available_bytes": 33554432,
+                                    "reserve_bytes": 0, "staging_upper_bound_bytes": 16777216}
+            route.fulfill(json=response)
+
+        page.route("**/api/acquisition-preview", bounded_preview)
+        page.get_by_role("button", name="Preview storage").click()
+        expect(page.locator("#bulk-preview-capacity")).to_contain_text("Staging could use up to 16.0 MiB")
+        page.unroute("**/api/acquisition-preview", bounded_preview)
         page.get_by_role("button", name="Export ZIM verification manifest").click()
         expect(page.locator("#catalog-feedback")).to_contain_text("Choose only installed, verified ZIM sources")
         with page.expect_download() as download:

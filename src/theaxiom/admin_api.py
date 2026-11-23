@@ -392,13 +392,23 @@ def _preview_capacity(rows):
         return {"state": "unavailable"}
     reserve = settings["minimum_free_bytes"]
     known_staging = sum(size for size in staging if size is not None)
+    unknown_limits = [row.get("staging_limit_bytes") for row in eligible if row.get("staging_bytes") is None]
+    upper_bound = (known_staging + sum(unknown_limits)
+                   if unknown_limits and None not in unknown_limits else None)
     available = max(0, free - reserve)
     if free < reserve or known_staging > available:
         state = "insufficient"
+    elif not unknown_limits:
+        state = "fits"
+    elif upper_bound is not None and upper_bound <= available:
+        state = "fits_with_unknown_sizes"
     else:
-        state = "uncertain" if None in staging else "fits"
-    return {"state": state, "free_bytes": free, "reserve_bytes": reserve,
-            "available_bytes": available}
+        state = "uncertain"
+    result = {"state": state, "free_bytes": free, "reserve_bytes": reserve,
+              "available_bytes": available}
+    if upper_bound is not None:
+        result["staging_upper_bound_bytes"] = upper_bound
+    return result
 
 
 def _preview_document_acquisition(configuration, *, byte_limit):
@@ -412,8 +422,11 @@ def _preview_document_acquisition(configuration, *, byte_limit):
     if size and int(size) > byte_limit:
         return {"state": "over_size_limit"}
     requested = int(size) if size else None
-    return {"state": "estimated", "transfer_bytes": requested, "staging_bytes": requested,
-            "installed_bytes": None, "peak_bytes": None}
+    estimate = {"state": "estimated", "transfer_bytes": requested, "staging_bytes": requested,
+                "installed_bytes": None, "peak_bytes": None}
+    if requested is None:
+        estimate["staging_limit_bytes"] = byte_limit
+    return estimate
 
 
 class AdminAPIHandler(BaseHTTPRequestHandler):

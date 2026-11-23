@@ -1002,8 +1002,18 @@ def test_acquisition_preview_uses_recorded_sizes_without_starting_jobs(app, monk
     probe.reset_mock()
     documents_only = payload | {"source_ids": ["document", "unknown-epub"]}
     probe.return_value["free_bytes"] = 1000
-    assert request("/api/acquisition-preview", documents_only)["capacity"]["state"] == "uncertain"
+    bounded = 900 + admin_api.epub_source.MAX_BYTES
+    capacity = request("/api/acquisition-preview", documents_only)["capacity"]
+    assert capacity["state"] == "uncertain"
+    assert capacity["staging_upper_bound_bytes"] == bounded
     probe.assert_called_once_with(settings, formats=("epub", "pdf"))
+    probe.return_value["free_bytes"] = bounded + settings["minimum_free_bytes"]
+    capacity = request("/api/acquisition-preview", documents_only)["capacity"]
+    assert capacity["state"] == "fits_with_unknown_sizes"
+    assert capacity["staging_upper_bound_bytes"] == bounded
+    mixed = request("/api/acquisition-preview", payload)["capacity"]
+    assert mixed["state"] == "uncertain"
+    assert "staging_upper_bound_bytes" not in mixed
     probe.reset_mock()
     upload_only = payload | {"source_ids": ["upload-epub"]}
     assert request("/api/acquisition-preview", upload_only)["capacity"] == {"state": "not_applicable"}

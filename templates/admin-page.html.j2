@@ -1120,14 +1120,17 @@
       function capacitySummary(capacity) {
         const result = {
           fits: 'Estimated staging fits.',
+          fits_with_unknown_sizes: 'Estimated staging fits using the format limits for unknown document sizes.',
           insufficient: 'Insufficient space for the staging estimate and configured reserve.',
           uncertain: 'Some staging sizes are unknown.',
           pending: 'Storage capacity check still pending. Preview again to refresh.',
           unavailable: 'Current storage capacity is unavailable.'
         }[capacity.state] || '';
+        const upperBound = Number.isSafeInteger(capacity.staging_upper_bound_bytes) ?
+          ' Staging could use up to ' + previewSize(capacity.staging_upper_bound_bytes) + '.' : '';
         return Number.isSafeInteger(capacity.available_bytes) ?
           previewSize(capacity.available_bytes) + ' available for staging after the ' +
-            previewSize(capacity.reserve_bytes) + ' reserve. ' + result : result;
+            previewSize(capacity.reserve_bytes) + ' reserve. ' + result + upperBound : result;
       }
       function storagePlanNote(state) {
         return {
