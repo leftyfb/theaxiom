@@ -510,6 +510,17 @@ def test_zim_recovery_actions_dispatch_through_http(app, monkeypatch, action, me
     assert calls == [("fema-ready", True if method == "start" else keyword)]
 
 
+def test_storage_status_not_tied_to_default_wikipedia_archive_size(app, monkeypatch):
+    request, _ = app
+    calls = []
+    def inspect(settings, **kwargs):
+        calls.append(kwargs)
+        return {"ready": False, "error": "mount unavailable"}
+    monkeypatch.setattr(admin_api.storage, "inspect_storage", inspect)
+    assert request("/api/storage-status")["ready"] is False
+    assert calls == [{}]
+
+
 def test_explicit_kiwix_update_check_requires_same_origin_and_catalog_identity(app, monkeypatch):
     request, _ = app
     catalog = request("/api/sources")
