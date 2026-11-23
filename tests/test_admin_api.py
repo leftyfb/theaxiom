@@ -141,6 +141,19 @@ class ZimReplacementManifestRefreshContractTests(unittest.TestCase):
         self.assertLess(handler.index('zim_refresh.schedule('), handler.index('self._send_json(202, result)'))
 
 
+def test_only_recent_active_native_checksum_samples_are_public():
+    for project in (admin_api._public_acquisition, admin_api._public_zim_replacement):
+        sample = {"state": "verifying", "checksum_bytes": 100, "checksum_pass": 2,
+                  "checksum_passes": 2, "checksum_sampled_at": 99}
+        with patch.object(admin_api.time, "time", return_value=100):
+            visible = project(sample)
+            assert visible["checksum_bytes"] == 100
+            assert visible["checksum_pass"] == 2
+            assert "checksum_sampled_at" not in visible
+            assert "checksum_bytes" not in project(sample | {"state": "paused"})
+            assert "checksum_bytes" not in project(sample | {"checksum_sampled_at": 80})
+
+
 def test_acquisition_history_exposes_only_finished_outcomes_and_timestamps():
     first = {"state": "completed", "finished_at": 1700000000, "etag": "private-validator"}
     latest = {"state": "failed", "finished_at": 1700000100, "operation": "retry",

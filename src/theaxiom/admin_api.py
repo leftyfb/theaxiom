@@ -300,6 +300,12 @@ def _public_acquisition(job):
     if job is None:
         return None
     job = {key: value for key, value in job.items() if key not in {"promotion_intent", "adopted_from_legacy"}}
+    if "checksum_sampled_at" in job:
+        sample = zim_jobs.current_checksum(job)
+        job.pop("checksum_sampled_at")
+        for field in zim_jobs.CHECKSUM_FIELDS:
+            job.pop(field, None)
+        job.update(sample)
     if "attempt_history" not in job:
         return job
     history = job["attempt_history"]
@@ -331,9 +337,10 @@ def _public_zim_replacement(candidate):
     """Expose only replacement UI fields, never internal rollback records."""
     if candidate is None:
         return None
-    return {key: candidate[key] for key in (
+    result = {key: candidate[key] for key in (
         "state", "downloaded_bytes", "expected_bytes", "error"
     ) if key in candidate}
+    return result | zim_jobs.current_checksum(candidate)
 
 
 class AdminAPIHandler(BaseHTTPRequestHandler):

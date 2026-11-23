@@ -118,6 +118,8 @@ class ChecksumProgressTests(unittest.TestCase):
                 candidates = [(archive, archive.stat(), 1, 2)]
                 self.assertEqual(m.checksum_progress({}, candidates, 100, root),
                                  {"checksum_bytes": 81, "checksum_pass": 1, "checksum_passes": 2})
+                self.assertEqual(m.checksum_progress({}, [(archive, archive.stat(), 2, 2)], 100, root),
+                                 {"checksum_bytes": 81, "checksum_pass": 2, "checksum_passes": 2})
                 self.assertEqual(m.checksum_progress({}, candidates, 99, root), {})
                 (proc / "fdinfo" / "3").unlink()
                 self.assertEqual(m.checksum_progress({}, candidates, 100, root), {})

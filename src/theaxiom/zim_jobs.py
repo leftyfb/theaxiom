@@ -15,9 +15,26 @@ HISTORY_LIMIT = 12
 MAX_RETRIES = 3
 
 ACTIVE = {"queued", "downloading", "verifying", "pausing", "cancelling", "publishing"}
+CHECKSUM_FIELDS = ("checksum_bytes", "checksum_pass", "checksum_passes")
+CHECKSUM_SAMPLE_MAX_AGE = 10
 CONTROLS = {}
 CANDIDATE_CONTROLS = {}
 LOCK = threading.RLock()
+
+
+def _record_checksum(job, metadata):
+    job.update({field: metadata[field] for field in CHECKSUM_FIELDS})
+    job["checksum_sampled_at"] = time.time()
+
+
+def current_checksum(job):
+    """Project a recent verification sample without exposing its timestamp."""
+    sampled = job.get("checksum_sampled_at")
+    if (job.get("state") == "verifying" and type(sampled) in (int, float)
+            and 0 <= time.time() - sampled <= CHECKSUM_SAMPLE_MAX_AGE
+            and all(field in job for field in CHECKSUM_FIELDS)):
+        return {field: job[field] for field in CHECKSUM_FIELDS}
+    return {}
 
 
 def directory():
@@ -256,6 +273,8 @@ def _run_candidate(sid, configuration, guard, signal, offset, validator):
             if metadata.get("verifying") and candidate["state"] != "cancelling":
                 # A verification callback must not erase a pending stop request.
                 candidate["state"] = "verifying"
+                if "checksum_bytes" in metadata:
+                    _record_checksum(candidate, metadata)
             _save_candidate(candidate)
         last = now
 
@@ -974,6 +993,8 @@ def _run(job, guard, signal, offset, validator, *, local=False):
                 job["expected_bytes"] = total
             if metadata.get("verifying") and job["state"] not in {"pausing", "cancelling"}:
                 job["state"] = "verifying"
+                if "checksum_bytes" in metadata:
+                    _record_checksum(job, metadata)
             if now - last >= 1 or metadata.get("verifying") or current == offset:
                 job.update(downloaded_bytes=current, sampled_at=time.time(),
                            speed_bytes_per_second=max(0, current-offset) / max(1, now-begun))
@@ -985,6 +1006,9 @@ def _run(job, guard, signal, offset, validator, *, local=False):
         # queued. Never replace that durable request with "downloading".
         with LOCK:
             if job["state"] not in {"pausing", "cancelling"}:
+                job.pop("checksum_sampled_at", None)
+                for field in CHECKSUM_FIELDS:
+                    job.pop(field, None)
                 job.update(state="verifying" if local else "downloading", sampled_at=time.time())
                 save(job)
         def promoting(artifact, identity):

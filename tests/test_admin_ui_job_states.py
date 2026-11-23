@@ -93,6 +93,17 @@ def test_checksum_measured_pass_and_fallback():
     assert states[3]["verification"]["hidden"]
 
 
+def test_replacement_checksum_percent_is_separate_from_transfer_completion():
+    sample = job("completed")
+    sample["sources"][0]["replacement"] = dict(state="verifying", downloaded_bytes=100,
+                                               expected_bytes=100, checksum_bytes=24,
+                                               checksum_pass=2, checksum_passes=2)
+    state = run_ui([sample])["states"][0]["[data-zim-replacement-status]"]["textContent"]
+    assert "pass 2 of 2" in state
+    assert "24.0% read (digest not yet confirmed)" in state
+    assert "100.0%" not in state
+
+
 def test_publication_refresh_updates_summary_and_controls():
     sample = job("completed")
     sample["sources"][0]["publication"] = {"enabled": True, "serving": True, "published": True}

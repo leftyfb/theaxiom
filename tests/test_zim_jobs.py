@@ -267,12 +267,24 @@ def _retained_fixture(disk, payload, *, expected=None, state="failed"):
 def test_revalidate_complete_retained_zim_without_network(disk, monkeypatch):
     data = fixture_bytes()
     partial = _retained_fixture(disk, data)
+    saved = []
+    save = zim_jobs.save
+
+    def record_save(job):
+        saved.append(job.copy())
+        save(job)
+
+    monkeypatch.setattr(zim_jobs, "save", record_save)
     monkeypatch.setattr(zim_source.pdf_transport, "open_pdf",
                         lambda *args, **kwargs: pytest.fail("Offline revalidation used the network"))
     assert zim_jobs.revalidate("ready", CONFIG)["accepted"]
     join_worker()
     job = zim_jobs.status("ready")
     assert job["state"] == "completed" and job["verified"] is True
+    samples = [item for item in saved if item["state"] == "verifying" and "checksum_bytes" in item]
+    assert {item["checksum_pass"] for item in samples} == {1, 2}
+    assert samples[-1]["checksum_bytes"] == len(data)
+    assert samples[-1]["verified"] is False
     assert not partial.exists()
     assert zim_jobs.installed(job, CONFIG)["bytes"] == len(data)
     assert job["attempt_history"][-1]["operation"] == "revalidate"

@@ -3,6 +3,7 @@ import hashlib
 import os
 import re
 import struct
+import time
 from uuid import uuid4
 
 from . import catalog_store, pdf_source, pdf_transport, storage, storage_settings
@@ -272,19 +273,37 @@ def _verify_and_promote(fd, staging, library, name, source_id, url, count,
     """Verify a staged inode and promote it without copying archive bytes."""
     from contextlib import nullcontext
     check_mount()
-    progress(count, count, {"verifying": True})
+    last_report = 0.0
+
+    def report_checksum(position, pass_number, *, boundary=False):
+        nonlocal last_report
+        now = time.monotonic()
+        if boundary or now - last_report >= 1:
+            progress(count, count, {"verifying": True, "checksum_bytes": position,
+                                   "checksum_pass": pass_number, "checksum_passes": 2})
+            last_report = now
+
+    report_checksum(0, 1, boundary=True)
     with os.fdopen(os.dup(fd), "rb") as target:
         target.seek(0)
         sha = hashlib.sha256()
+        position = 0
         while block := target.read(CHUNK):
             if stopped():
                 raise TransferStopped()
             sha.update(block)
+            position += len(block)
+            if position < count:
+                report_checksum(position, 1)
+        if position != count:
+            raise ValueError("Staged ZIM changed during checksum verification")
+        report_checksum(count, 1, boundary=True)
         target.seek(0)
         check_header(target.read(80), count)
         md5 = hashlib.md5(usedforsecurity=False)
         target.seek(0)
         remaining = count - 16
+        report_checksum(0, 2, boundary=True)
         while remaining:
             if stopped():
                 raise TransferStopped()
@@ -293,7 +312,11 @@ def _verify_and_promote(fd, staging, library, name, source_id, url, count,
                 raise ValueError("Incomplete staged ZIM")
             md5.update(block)
             remaining -= len(block)
-        if md5.digest() != target.read(16):
+            report_checksum(count - 16 - remaining, 2)
+        footer = target.read(16)
+        if len(footer) == 16:
+            report_checksum(count, 2, boundary=True)
+        if md5.digest() != footer:
             raise ValueError("ZIM internal checksum mismatch")
         digest = sha.hexdigest()
         if expected_digest and digest != expected_digest:

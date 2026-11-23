@@ -1466,6 +1466,18 @@
         paused: 'Paused', pausing: 'Pausing', cancelling: 'Cancelling', cancelled: 'Cancelled',
         not_started: 'Not downloaded', unavailable: 'Service not installed', unknown: 'Status unknown'};
       const gib = bytes => (bytes / 1073741824).toFixed(2) + ' GiB';
+      function checksumSample(job) {
+        if (job?.state !== 'verifying' ||
+            !Number.isFinite(job.checksum_bytes) || job.checksum_bytes < 0 ||
+            !Number.isFinite(job.expected_bytes) || job.expected_bytes <= 0 ||
+            job.checksum_bytes > job.expected_bytes) return null;
+        const pass = Number.isInteger(job.checksum_pass) && Number.isInteger(job.checksum_passes) &&
+          job.checksum_pass > 0 && job.checksum_pass <= job.checksum_passes ?
+          ' pass ' + job.checksum_pass + ' of ' + job.checksum_passes : '';
+        return {percent: 100 * job.checksum_bytes / job.expected_bytes, pass};
+      }
+      const checksumLabel = sample => 'Checksum' + sample.pass + ' verification in progress — ' +
+        sample.percent.toFixed(1) + '% read (digest not yet confirmed).';
       function size(bytes) {
         if (!Number.isFinite(bytes) || bytes < 0) return 'Installed';
         const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
@@ -1501,23 +1513,14 @@
         const checking = !stale && (job?.state === 'verifying' || job?.state === 'publishing');
         const verify = field('verification');
         verify.hidden = !checking;
-        const measured = checking && job.state === 'verifying' &&
-          Number.isFinite(job.checksum_bytes) && job.checksum_bytes >= 0 &&
-          Number.isFinite(job.expected_bytes) && job.expected_bytes > 0 &&
-          job.checksum_bytes <= job.expected_bytes;
-        const pass = measured && Number.isInteger(job.checksum_pass) &&
-          Number.isInteger(job.checksum_passes) && job.checksum_pass > 0 &&
-          job.checksum_pass <= job.checksum_passes ?
-          ' pass ' + job.checksum_pass + ' of ' + job.checksum_passes : '';
-        if (measured) {
+        const sample = checking && checksumSample(job);
+        if (sample) {
           verify.max = 100;
-          verify.value = 100 * job.checksum_bytes / job.expected_bytes;
+          verify.value = sample.percent;
         } else {
           verify.removeAttribute('value');
         }
-        put('verification-label', checking ? (measured ?
-          'Checksum' + pass + ' verification in progress — ' + verify.value.toFixed(1) +
-          '% read (estimated; digest not yet confirmed).' :
+        put('verification-label', checking ? (sample ? checksumLabel(sample) :
           'Checksum / publishing in progress — percentage unavailable.') : '');
         const rate = !stale && job?.state === 'downloading' && job.speed_bytes_per_second > 0 ?
           (job.speed_bytes_per_second / 1048576).toFixed(2) + ' MiB/s' +
@@ -1596,10 +1599,14 @@
         if (replacementStatus) {
           const bytes = Number(replacement?.downloaded_bytes);
           const total = Number(replacement?.expected_bytes);
-          const percent = Number.isFinite(bytes) && Number.isFinite(total) && total > 0 ?
+          const percent = replacementState === 'downloading' &&
+            Number.isFinite(bytes) && Number.isFinite(total) && total > 0 ?
             ' · ' + (100 * bytes / total).toFixed(1) + '%' : '';
+          const sample = checksumSample(replacement);
+          const verification = replacementState === 'verifying' ?
+            ' · ' + (sample ? checksumLabel(sample) : 'Checksum percentage unavailable.') : '';
           replacementStatus.textContent = replacementState ?
-            'Replacement: ' + replacementState + percent + (replacement.error ? ' · ' + replacement.error : '') : '';
+            'Replacement: ' + replacementState + percent + verification + (replacement.error ? ' · ' + replacement.error : '') : '';
           for (const button of (card.querySelectorAll?.('[data-zim-replacement]') || [])) {
             const op = button.dataset.zimReplacement;
             button.hidden = op === 'prepare' ? !source?.replacement_available || !!replacement :

@@ -71,6 +71,29 @@ def test_url_only_install_records_actual_size_and_digest(disk):
     assert list((disk / "staging/zim").iterdir()) == []
 
 
+def test_checksum_reports_passes_and_full_read_before_digest_failure(disk):
+    data = fixture_bytes()
+    stage = disk / "staging/zim"
+    stage.mkdir()
+    partial = stage / zim_source.partial_name("ready")
+    partial.write_bytes(data[:-1] + bytes([data[-1] ^ 1]))
+    partial.chmod(0o600)
+    samples = []
+
+    with pytest.raises(ValueError, match="internal checksum mismatch"):
+        zim_source.revalidate_retained("ready", CONFIG, expected_bytes=len(data),
+                                      progress=lambda current, total, fields: samples.append(fields))
+
+    boundaries = [(sample["checksum_pass"], sample["checksum_bytes"]) for sample in samples
+                  if sample["checksum_bytes"] in (0, len(data))]
+    assert boundaries == [
+        (1, 0), (1, len(data)), (2, 0), (2, len(data)),
+    ]
+    assert all(sample["checksum_passes"] == 2 for sample in samples)
+    assert partial.exists()
+    assert not list((disk / "library/zim").iterdir())
+
+
 @pytest.mark.parametrize("changes,invalid", [
     ({"expected_size_bytes":"1"}, False),
     ({"sha256":"a"*64}, False),
