@@ -451,6 +451,32 @@ def test_pinned_wikipedia_requires_verified_immutable_installed_record(monkeypat
         )["state"] == "unable_to_determine"
 
 
+def test_any_fully_pinned_seed_can_reuse_legacy_update_identity(monkeypatch):
+    from theaxiom import source_catalog
+    original = source_catalog.WIKIPEDIA_SOURCE
+    second = dict(original, source_id="second-zim",
+                  filename="second_en_all_maxi_2026-11.zim",
+                  source_url="https://download.kiwix.org/zim/second/second_en_all_maxi_2026-11.zim",
+                  sha256="b" * 64, bytes=4096)
+    config = {"format": "zim", "source_url": second["source_url"],
+              "sha256": second["sha256"], "expected_size_bytes": str(second["bytes"])}
+    record = {"source_id": second["source_id"], "configuration": config}
+    artifact = {k: second[k] for k in ("filename", "source_url", "sha256", "bytes")}
+    monkeypatch.setattr(source_catalog, "builtin_sources", lambda: [original, second])
+    assert discovery.pinned_seed_identity(record, artifact, verified=True) == {
+        "verified": True, "sha256": second["sha256"],
+        "family": "second_en_all_maxi", "edition": "2026-11",
+        "source_url": second["source_url"], "language": "eng",
+        "variant": "maxi", "publisher": "kiwix",
+    }
+    assert discovery.pinned_seed_identity(record, artifact, verified=False) is None
+    assert discovery.pinned_seed_identity(
+        record, dict(artifact, bytes=4097), verified=True) is None
+    assert discovery.pinned_seed_identity(
+        dict(record, configuration=dict(config, sha256="a" * 64)),
+        artifact, verified=True) is None
+
+
 def test_journal_logs_catalog_counts_and_inconclusive_reason_without_remote_payload(monkeypatch):
     """Operator journal shows diagnostic stages, without echoing remote XML."""
     messages = []
