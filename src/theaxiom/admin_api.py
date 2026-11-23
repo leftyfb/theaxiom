@@ -154,7 +154,7 @@ def select_lifecycle(source_id, configuration):
         return dict(adapter=adapter, configuration_valid=artifact is not None, artifact=artifact,
                     pdf_download=pdf_source.valid_source_url(configuration.get("source_url", "")),
                     acquisition_reason=reason, actions={})
-    if adapter == "kiwix" and source_id not in publication.ROUTES:
+    if adapter == "kiwix" and not publication.legacy_only(source_id):
         try:
             zim_source.candidate(configuration)
         except ValueError as exc:
@@ -1317,7 +1317,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                         existing is None and isinstance(sid, str) and sid not in publication.ROUTES
                         and isinstance(fields, dict) and fields.get("format") in {"pdf", "epub"})
                     busy = not is_pdf and source_busy(self._snapshot(), sid)
-                    if isinstance(sid, str) and sid not in publication.ROUTES:
+                    if isinstance(sid, str) and not publication.legacy_only(sid):
                         local_job = zim_jobs.status(sid)
                         if local_job and local_job.get("active"):
                             busy = True
@@ -1337,9 +1337,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                                 unpublished = True
                         except (OSError, ValueError) as exc:
                             raise catalog_store.RevisionConflict("could not unpublish source; removal refused") from exc
-                    elif isinstance(sid, str) and (publication.legacy_only(sid) or is_pdf
-                                                   or (existing is not None and
-                                                       existing["configuration"].get("format") == "zim")):
+                    elif isinstance(sid, str) and (sid in publication.ROUTES or is_pdf):
                         self._guard_published_mutation(operation, sid, fields, revision)
                     try:
                         result = SOURCE_CATALOG.mutate(operation, sid, fields, revision, busy)

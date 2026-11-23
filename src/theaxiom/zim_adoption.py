@@ -99,10 +99,10 @@ def adopt(legacy_path: str | Path, config: dict) -> dict:
     if (not settings["storage_root"] or not settings["storage_mount"]
             or legacy != Path(settings["storage_root"]) / "library" / "zim" / PINNED_FILENAME):
         raise AdoptionError("archive must be the pinned filename on the configured mount")
-    if config.get("format") != "zim" or config.get("source_url") != PINNED_SOURCE_URL:
-        raise AdoptionError("adoption requires the exact pinned source URL")
     configuration = dict(format="zim", source_url=PINNED_SOURCE_URL,
                          expected_size_bytes=str(PINNED_BYTES), sha256=PINNED_SHA256)
+    if zim_jobs.identity(config) != configuration:
+        raise AdoptionError("saved source must match the installed archive pin")
     artifact = dict(filename=PINNED_FILENAME, source_url=PINNED_SOURCE_URL,
                     bytes=PINNED_BYTES, sha256=PINNED_SHA256)
     with zim_jobs.LOCK, zim_jobs.worker_lock():
@@ -180,12 +180,20 @@ def main():
     sub = parser.add_subparsers(dest="command", required=True)
     a = sub.add_parser("adopt")
     a.add_argument("legacy_path")
-    a.add_argument("source_url")
     sub.add_parser("rollback")
     args = parser.parse_args()
     try:
         if args.command == "adopt":
-            result = adopt(args.legacy_path, {"format": "zim", "source_url": args.source_url})
+            from . import admin_api, publication
+
+            record = next((item for item in admin_api.SOURCE_CATALOG.get()["sources"]
+                           if item["source_id"] == SOURCE_ID), None)
+            if record is None:
+                raise AdoptionError("saved Wikipedia source is missing")
+            config = record["configuration"]
+            if publication.load().get(SOURCE_ID) and not config.get("license", "").strip():
+                raise AdoptionError("published source has no saved license")
+            result = adopt(args.legacy_path, config)
         else:
             result = rollback()
     except (OSError, ValueError) as exc:

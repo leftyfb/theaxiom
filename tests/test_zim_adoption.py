@@ -3,7 +3,7 @@ import os
 
 import pytest
 
-from theaxiom import storage_settings, zim_adoption, zim_catalog, zim_jobs
+from theaxiom import admin_api, storage_settings, zim_adoption, zim_catalog, zim_jobs
 
 
 @pytest.fixture
@@ -45,7 +45,9 @@ def adoption_disk(tmp_path, monkeypatch):
 
 def adopt_fixture(disk):
     _, _, archive, _ = disk
-    return zim_adoption.adopt(archive, {"format": "zim", "source_url": zim_adoption.PINNED_SOURCE_URL})
+    return zim_adoption.adopt(archive, dict(
+        format="zim", source_url=zim_adoption.PINNED_SOURCE_URL,
+        expected_size_bytes=str(zim_adoption.PINNED_BYTES), sha256=zim_adoption.PINNED_SHA256))
 
 
 def test_adopt_and_rollback_in_place_on_shared_parent(adoption_disk):
@@ -58,6 +60,7 @@ def test_adopt_and_rollback_in_place_on_shared_parent(adoption_disk):
     job = zim_jobs.read("wikipedia-en")
     assert zim_jobs.installed(job, job["configuration"]) == job["artifact"]
     assert job["artifact"]["filename"] == archive.name
+    assert admin_api.select_lifecycle("wikipedia-en", job["configuration"])["zim_download"]
     assert zim_adoption.rollback()["state"] == "rolled_back"
     assert zim_adoption.rollback()["state"] == "rolled_back"
     assert zim_jobs.read("wikipedia-en") is None

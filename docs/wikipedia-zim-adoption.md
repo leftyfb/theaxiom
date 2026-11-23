@@ -36,8 +36,7 @@ sudo systemd-run --wait --pipe --collect \
   --property=WorkingDirectory=/opt/theaxiom/app \
   --property=EnvironmentFile=/etc/theaxiom/server.env \
   /opt/theaxiom/app/.venv/bin/python -m theaxiom.zim_adoption adopt \
-  /media/offline/library/zim/wikipedia_en_all_maxi_2026-08.zim \
-  https://download.kiwix.org/zim/wikipedia/wikipedia_en_all_maxi_2026-08.zim
+  /media/offline/library/zim/wikipedia_en_all_maxi_2026-08.zim
 ```
 
 A successful command prints `completed`. If interrupted after writing a
