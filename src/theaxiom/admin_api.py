@@ -313,10 +313,17 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         browser_admin_navigation = (not post and self.path.rstrip("/") in {
             "/admin", "/admin/sources", "/admin/settings", "/admin/groupings"
         } and "text/html" in self.headers.get("Accept", "").lower())
+        # Browser background fetches may omit Sec-Fetch-Mode (notably older
+        # clients and some proxied requests). Other browser-only headers must
+        # still prevent a Basic challenge after the session cookie expires.
         browser_request = (browser_admin_navigation or
                            self.headers.get("Sec-Fetch-Mode") in {
                                "navigate", "cors", "same-origin"
-                           })
+                           } or bool(self.headers.get("Sec-Fetch-Site"))
+                           or bool(self.headers.get("Sec-Fetch-Dest"))
+                           or bool(self.headers.get("Origin"))
+                           or bool(self.headers.get("Referer"))
+                           or bool(self.headers.get("Cookie")))
         basic = (not browser_request and len(auth) <= 1 and
                  not (config.store is None and hosts[0].lower() not in local_hosts)
                  and config.authorized(auth[0] if auth else None))
@@ -345,7 +352,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     return False
             # Browser fetches never receive a native Basic challenge; explicit
             # API clients can still discover/challenge the legacy Basic realm.
-            if self.headers.get("Sec-Fetch-Mode") in {"cors", "same-origin"}:
+            if browser_request:
                 self._send_json(401, {"error": "administrator sign in required"})
             else:
                 self.send_response(401)
