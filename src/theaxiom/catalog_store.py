@@ -137,8 +137,10 @@ class CatalogStore:
                     self._validate_v2(state)
                     # Existing catalogs are authoritative. Shipped seed changes
                     # never alter operator records, even if they still match
-                    # a prior packaged default.
-                    return state
+                    # a prior packaged default. Historical starter group
+                    # initialization still needs the one-time path below.
+                    if state.get("starter_groups_initialized") is True:
+                        return state
                 else:
                     state = self._convert_draft_v2(state)
             elif state["schema_version"] == 1:
