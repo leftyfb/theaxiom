@@ -790,6 +790,20 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         return (not publication.legacy_only(record["source_id"])
                 and record["configuration"].get("format") == "zim")
 
+    def _acquisition_preview(self, records, ids, *, exact_selection=False):
+        rows = []
+        for sid in ids:
+            record = records[sid]
+            estimate = {"state": "unsupported"}
+            if self._zim_record(record):
+                try:
+                    estimate = zim_jobs.preview_acquisition(
+                        sid, record["configuration"], exact_selection=exact_selection)
+                except (OSError, ValueError, KeyError, TypeError):
+                    estimate = {"state": "unavailable"}
+            rows.append(dict(estimate, title=record["profile"]["title"], source_id=sid))
+        return {"sources": rows, "capacity": _preview_capacity(rows)}
+
     def _zim_publications(self, catalog=None):
         catalog = catalog or SOURCE_CATALOG.get()
         for record in catalog["sources"]:
@@ -1393,8 +1407,10 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 if "source_ids" in data:
                     result = {"manifest": library_selection.export_selection(known, data["source_ids"])}
                 else:
-                    result = {"revision": catalog["revision"],
-                              "sources": library_selection.preview_selection(known, data["manifest"])}
+                    matches = library_selection.preview_selection(known, data["manifest"])
+                    ids = [source["source_id"] for source in matches if source["state"] == "match"]
+                    result = {"revision": catalog["revision"], "sources": matches,
+                              "storage": self._acquisition_preview(known, ids, exact_selection=True)}
             except ValueError as exc:
                 self._send_json(400, {"error": str(exc)})
                 return
@@ -1423,17 +1439,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             if any(sid not in records for sid in ids):
                 self._send_json(400, {"error": "unknown selected source"})
                 return
-            rows = []
-            for sid in ids:
-                record = records[sid]
-                estimate = {"state": "unsupported"}
-                if self._zim_record(record):
-                    try:
-                        estimate = zim_jobs.preview_acquisition(sid, record["configuration"])
-                    except (OSError, ValueError, KeyError, TypeError):
-                        estimate = {"state": "unavailable"}
-                rows.append(dict(estimate, title=record["profile"]["title"], source_id=sid))
-            self._send_json(200, {"sources": rows, "capacity": _preview_capacity(rows)})
+            self._send_json(200, self._acquisition_preview(records, ids))
         elif self.path == "/api/library-layout":
             if not self.headers.get("Origin"):
                 self._send_json(403, {"error": "same-origin request required"})

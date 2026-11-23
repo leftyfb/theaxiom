@@ -432,6 +432,8 @@
       <input id="selection-file" type="file" accept=".json,application/json">
       <p id="selection-file-feedback" role="status"></p>
       <ul id="selection-file-matches"></ul>
+      <p id="selection-storage-summary" role="status"></p>
+      <p id="selection-storage-capacity"></p>
       <button class="button" type="button" id="selection-file-apply" disabled>Select matching sources</button>
       <form method="dialog"><button class="button">Close</button></form>
     </dialog>
@@ -876,6 +878,8 @@
       const selectionFeedback = document.getElementById('selection-file-feedback');
       const selectionMatches = document.getElementById('selection-file-matches');
       const selectionApply = document.getElementById('selection-file-apply');
+      const selectionStorage = document.getElementById('selection-storage-summary');
+      const selectionCapacity = document.getElementById('selection-storage-capacity');
       let matchedSelection = [];
       async function selectionRequest(payload) {
         const response = await fetch('/api/library-selection', {
@@ -892,6 +896,7 @@
         const file = selectionFile.files[0];
         selectionFile.value = '';
         selectionMatches.replaceChildren();
+        selectionStorage.textContent = selectionCapacity.textContent = '';
         matchedSelection = [];
         selectionApply.disabled = true;
         if (!file) return;
@@ -899,7 +904,12 @@
         selectionFeedback.textContent = 'Checking this catalog…';
         try {
           if (file.size > 15000) throw new Error('Selection file is too large.');
-          const result = await selectionRequest({manifest: JSON.parse(await file.text())});
+          const payload = {manifest: JSON.parse(await file.text())};
+          let result = await selectionRequest(payload);
+          if (result.storage.capacity.state === 'pending') {
+            await new Promise(resolve => window.setTimeout(resolve, 600));
+            result = await selectionRequest(payload);
+          }
           const labels = {match: 'Matches this catalog', different: 'Edition, language, or format differs', missing: 'Source ID absent from this catalog'};
           for (const item of result.sources) {
             const row = document.createElement('li');
@@ -914,6 +924,14 @@
           }
           matchedSelection = result.sources.filter(item => item.state === 'match').map(item => item.source_id);
           selectionApply.disabled = !matchedSelection.length;
+          if (matchedSelection.length) {
+            const estimates = result.storage.sources.filter(source => source.state !== 'unsupported');
+            selectionStorage.textContent = estimates.length ?
+              'Matching ZIMs · ' + estimateSummary(estimates) +
+                (estimates.length < matchedSelection.length ? ' · Other matching formats are outside the storage estimate.' : '') :
+              'No matching ZIM sources to estimate.';
+            selectionCapacity.textContent = capacitySummary(result.storage.capacity);
+          }
         } catch (error) {
           selectionFeedback.textContent = error.message;
         } finally {
@@ -958,6 +976,26 @@
         ['Transfer', 'transfer_bytes'], ['Installed', 'installed_bytes'],
         ['Staging', 'staging_bytes'], ['Peak', 'peak_bytes']
       ];
+      function estimateSummary(estimates) {
+        return previewFields.map(([label, field]) => {
+          const known = estimates.map(source => source[field]).filter(Number.isSafeInteger);
+          const unknown = estimates.length - known.length;
+          return label + ' ' + previewSize(known.reduce((sum, bytes) => sum + bytes, 0)) +
+            (unknown ? ' + ' + unknown + ' unknown' : '');
+        }).join(' · ');
+      }
+      function capacitySummary(capacity) {
+        const result = {
+          fits: 'Estimated staging fits.',
+          insufficient: 'Insufficient space for the staging estimate and configured reserve.',
+          uncertain: 'Some staging sizes are unknown.',
+          pending: 'Storage capacity check still pending. Preview again to refresh.',
+          unavailable: 'Current storage capacity is unavailable.'
+        }[capacity.state] || '';
+        return Number.isSafeInteger(capacity.available_bytes) ?
+          previewSize(capacity.available_bytes) + ' available for staging after the ' +
+            previewSize(capacity.reserve_bytes) + ' reserve. ' + result : result;
+      }
       document.getElementById('bulk-preview').addEventListener('click', async () => {
         const ids = selectedIds();
         const selection = ids.join(',');
@@ -988,27 +1026,12 @@
             if (!current()) return;
           }
           const estimates = result.sources.filter(source => source.state !== 'unsupported');
-          previewSummary.textContent = estimates.length ? previewFields.map(([label, field]) => {
-            const known = estimates.map(source => source[field]).filter(Number.isSafeInteger);
-            const unknown = estimates.length - known.length;
-            return label + ' ' + previewSize(known.reduce((sum, bytes) => sum + bytes, 0)) +
-              (unknown ? ' + ' + unknown + ' unknown' : '');
-          }).join(' · ') : 'No supported ZIM sources selected.';
-          const capacity = result.capacity || {};
-          const capacityResult = {
-            fits: 'Estimated staging fits.',
-            insufficient: 'Insufficient space for the staging estimate and configured reserve.',
-            uncertain: 'Some staging sizes are unknown.',
-            pending: 'Storage capacity check still pending. Preview again to refresh.',
-            unavailable: 'Current storage capacity is unavailable.'
-          }[capacity.state] || '';
-          previewCapacity.textContent = Number.isSafeInteger(capacity.available_bytes) ?
-            previewSize(capacity.available_bytes) + ' available for staging after the ' +
-              previewSize(capacity.reserve_bytes) + ' reserve. ' + capacityResult : capacityResult;
+          previewSummary.textContent = estimates.length ? estimateSummary(estimates) : 'No supported ZIM sources selected.';
+          previewCapacity.textContent = capacitySummary(result.capacity);
           for (const source of result.sources) {
             const row = document.createElement('li');
             const notes = {unsupported: 'Outside the ZIM preview', unavailable: 'Estimate unavailable',
-              review_replacement: 'Review retained replacement before estimating', installed: 'Already recorded as installed'};
+              review_replacement: 'Review the replacement before estimating', installed: 'Already recorded as installed'};
             row.textContent = source.title + ' · ' + (notes[source.state] ||
               previewFields.map(([label, field]) => label + ' ' + previewSize(source[field])).join(' · '));
             previewSources.append(row);

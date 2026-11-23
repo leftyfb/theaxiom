@@ -739,7 +739,7 @@ def identity(config):
             "sha256": digest or ""}
 
 
-def preview_acquisition(sid, config):
+def preview_acquisition(sid, config, *, exact_selection=False):
     """Estimate a full ZIM transfer from catalog intent and recorded jobs only."""
     configured = identity(config)
     job = read(sid)
@@ -749,8 +749,9 @@ def preview_acquisition(sid, config):
     recorded = artifact.get("bytes") if isinstance(artifact, dict) else None
     if type(recorded) is not int or not 0 < recorded <= zim_source.MAX_BYTES:
         recorded = 0 if job is None else None
-    if replacement and replacement["state"] in {"verified", "activated", "rolled_back"}:
-        # A retained verified replacement may consume space independently.
+    if replacement and (replacement["state"] in {"verified", "activated", "rolled_back"}
+                        or (exact_selection and replacement["configuration"] != configured)):
+        # A replacement may consume independent space or target another edition.
         return dict(state="review_replacement", installed_bytes=recorded)
     intended = replacement["configuration"] if replacement else configured
     if recorded and not replacement and job["configuration"] == intended:

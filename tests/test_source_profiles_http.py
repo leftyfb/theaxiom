@@ -792,12 +792,13 @@ def test_upstream_catalog_refresh_uses_only_filtered_metadata(app, monkeypatch):
     assert request("/api/sources")["revision"] == before
 
 
-def test_portable_selection_round_trip_discloses_only_selected_public_metadata(app):
+def test_portable_selection_round_trip_discloses_only_selected_public_metadata(app, monkeypatch):
     request, _ = app
     catalog = request("/api/sources")
     catalog = mutate(request, catalog, "add", {
         "title": "Selection fixture", "format": "zim", "language": "en", "edition": "2026-11",
-        "source_url": "https://example.org/library.zim?private=secret", "license": "Fixture terms",
+        "source_url": "https://example.org/library.zim", "license": "Fixture terms",
+        "expected_size_bytes": "400",
     }, sid="selection-fixture")
     endpoint = "/api/library-selection"
     payload = {"revision": catalog["revision"], "source_ids": ["selection-fixture"]}
@@ -807,20 +808,47 @@ def test_portable_selection_round_trip_discloses_only_selected_public_metadata(a
     assert exported == {"version": 1, "sources": [{
         "source_id": "selection-fixture", "format": "zim", "language": "en", "edition": "2026-11",
     }]}
+    settings = storage_settings.DEFAULT_SETTINGS | {"minimum_free_bytes": 100}
+    monkeypatch.setattr(storage_settings, "load_settings", lambda: settings)
+    probe = Mock(return_value={"write_ready": True, "free_bytes": 500})
+    monkeypatch.setattr(admin_api.STORAGE_PROBE, "status", probe)
+    jobs = admin_api.zim_jobs
+    start = Mock(side_effect=AssertionError("selection preview must never start an acquisition"))
+    monkeypatch.setattr(jobs, "start", start)
     preview = request(endpoint, {"manifest": exported})
     assert preview["revision"] == catalog["revision"]
     assert preview["sources"] == [{
         "source_id": "selection-fixture", "state": "match", "title": "Selection fixture",
         "license": "Fixture terms",
     }]
+    assert preview["storage"] == {
+        "sources": [{"source_id": "selection-fixture", "title": "Selection fixture", "state": "estimated",
+                     "transfer_bytes": 400, "installed_bytes": 0, "staging_bytes": 400, "peak_bytes": 400}],
+        "capacity": {"state": "fits", "reserve_bytes": 100, "free_bytes": 500, "available_bytes": 400},
+    }
+    replacement = {
+        "state": "failed",
+        "configuration": jobs.identity({"format": "zim", "source_url": "https://example.org/other.zim",
+                                        "expected_size_bytes": "100"}),
+    }
+    monkeypatch.setattr(jobs, "read_candidate", lambda sid: replacement)
+    estimate = request(endpoint, {"manifest": exported})["storage"]
+    assert estimate["sources"][0]["state"] == "review_replacement"
+    assert "transfer_bytes" not in estimate["sources"][0]
+    assert estimate["capacity"]["state"] == "uncertain"
     entry = exported["sources"][0]
     for changes, state in (({"edition": "2026-10"}, "different"), ({"source_id": "missing"}, "missing")):
         manifest = exported | {"sources": [entry | changes]}
-        assert request(endpoint, {"manifest": manifest})["sources"][0]["state"] == state
+        probe.reset_mock()
+        estimate = request(endpoint, {"manifest": manifest})
+        assert estimate["sources"][0]["state"] == state
+        assert estimate["storage"] == {"sources": [], "capacity": {"state": "not_applicable"}}
+        probe.assert_not_called()
     for invalid in (exported | {"version": 2}, exported | {"sources": [entry, entry]},
                     exported | {"sources": [entry | {"source_url": "https://unknown.example/"}]}):
         request(endpoint, {"manifest": invalid}, status=400)
     assert request("/api/sources")["revision"] == catalog["revision"]
+    start.assert_not_called()
 
 
 def test_acquisition_preview_uses_recorded_sizes_without_starting_jobs(app, monkeypatch):

@@ -278,6 +278,7 @@ def exercise(browser, base, name, viewport, artifacts):
             "name": "selection.json", "mimeType": "application/json", "buffer": manifest,
         })
         expect(page.locator("#selection-file-matches")).to_contain_text("Matches this catalog")
+        expect(page.locator("#selection-storage-summary")).to_have_text("No matching ZIM sources to estimate.")
         expect(check).not_to_be_checked()
         page.get_by_role("button", name="Select matching sources").click()
         expect(check).to_be_checked()
