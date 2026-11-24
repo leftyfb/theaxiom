@@ -955,21 +955,21 @@ def test_public_layout_order_groups_reset_and_publication_boundary(app, monkeypa
     request("/api/library-layout", payload, status=409)
     page = request("/")
     assert page.index(second) < page.index(first) < page.index(later)
-    assert "<h3>Science &amp; Education</h3>" in page
-    assert "<h3>Other sources</h3>" in page
+    assert "<h2>Science &amp; Education</h2>" in page
+    assert "<h2>Other sources</h2>" in page
     assert page.index('id="library-search"') < page.index(second)
-    assert page.index('href="/#getting-started"') < page.index(second)
+    assert page.index('href="#getting-started"') < page.index(second)
     assert "Private reference" not in page
     filtered = request("/?category=" + group_id)
     assert second in filtered and first in filtered and later not in filtered
-    assert "<h3>Science &amp; Education</h3>" not in filtered
+    assert "<h2>Science &amp; Education</h2>" not in filtered
     assert "Private reference" not in filtered
     removed = mutate(request, saved, "remove", sid="private")
     assert removed["library_layout"]["source_order"] == ["fema-ready", SID]
     assert request("/api/library-layout", {"revision": removed["revision"], "layout": None})["layout"] is None
     reset_page = request("/")
     assert reset_page.index(first) < reset_page.index(second) < reset_page.index(later)
-    assert "<h3>Science &amp; Education</h3>" not in reset_page
+    assert "<h2>Science &amp; Education</h2>" not in reset_page
 
 
 def test_public_search_groups_two_published_zims_and_hides_unpublished(app, monkeypatch):
