@@ -888,6 +888,7 @@
       }
       function finishSourceAction(action) {
         if (lastSourceAction !== action) return;
+        action.completed = true;
         window.clearTimeout(filteredActionTimer);
         filteredActionTimer = window.setTimeout(() => {
           if (lastSourceAction !== action) return;
@@ -898,7 +899,7 @@
       function showFilteredAction() {
         const notice = document.getElementById('filtered-action-feedback');
         const {card, status} = lastSourceAction || {};
-        const message = card?.hidden && status();
+        const message = card && (card.hidden || lastSourceAction.completed) && status();
         const text = message ? card.dataset.filterTitle + ' — ' + message : '';
         if (notice.textContent !== text) notice.textContent = text;
         notice.hidden = !text;
