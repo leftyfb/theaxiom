@@ -655,7 +655,7 @@
             {% if pub %}<span class="compact-publication" data-field="publication-summary">{{ "Published" if pub.published else (pub.publication_reason or "Reader unavailable") if pub.enabled and pub.ready_for_publication else "Reader unavailable" if pub.enabled else "" }}</span>{% endif %}
           </div>
           <span class="badge enabled" data-field="update-status" role="status"{% if not source.update_check or source.update_check.state != "update_available" %} hidden{% endif %}>Update available</span>
-          <span class="badge{% if source.installed_verified %} enabled{% endif %}" data-field="status" role="status">{% if not source.adapter %}Not yet supported{% elif source.installed_verified and source.artifact %}{{ source.artifact.bytes | filesizeformat }}{% elif source.adapter in ('pdf','epub') %}{{ 'Not installed or invalid' if source.artifact else 'Not downloaded' }}{% elif source.acquisition and not catalog.acquisition_stale %}{{ {'downloading':'Downloading','verifying':'Verifying','publishing':'Installing','failed':'Failed','retrying':'Retrying','interrupted':'Interrupted','not_started':'Not downloaded','unavailable':'Service unavailable'}.get(source.acquisition.state,'Waiting for status') }}{% elif catalog.acquisition_stale %}Status unavailable{% elif not source.artifact and not source.mutation_blocked %}Not downloaded{% else %}Waiting for status…{% endif %}</span>
+          <span class="badge{% if source.installed_verified %} enabled{% endif %}" data-field="status" role="status">{% if not source.adapter %}Not yet supported{% elif source.installed_verified %}{{ source.artifact.bytes | filesizeformat if source.artifact and source.artifact.bytes is number and source.artifact.bytes > 0 else 'Installed · size unavailable' }}{% elif source.adapter in ('pdf','epub') %}{{ 'Not installed or invalid' if source.artifact else 'Not downloaded' }}{% elif source.acquisition and not catalog.acquisition_stale %}{{ {'downloading':'Downloading','verifying':'Verifying','publishing':'Installing','failed':'Failed','retrying':'Retrying','interrupted':'Interrupted','not_started':'Not downloaded','unavailable':'Service unavailable'}.get(source.acquisition.state,'Waiting for status') }}{% elif catalog.acquisition_stale %}Status unavailable{% elif not source.artifact and not source.mutation_blocked %}Not downloaded{% else %}Waiting for status…{% endif %}</span>
           <span class="badge" data-batch-status role="status" hidden></span>
           <progress class="summary-progress" data-field="summary-progress" max="100" value="0" aria-label="Active download progress" hidden></progress>
         </summary>
@@ -2140,7 +2140,7 @@
         while (bytes >= 1000 && i < units.length - 1) { bytes /= 1000; i++; }
         return bytes.toLocaleString(undefined, {maximumFractionDigits: 2}) + ' ' + units[i];
       }
-      function render(card, job, stale, unavailable = false) {
+      function render(card, job, stale, unavailable = false, installedSource = null) {
         const field = name => card.querySelector('[data-field="' + name + '"]');
         const put = (name, value) => {
           const node = field(name);
@@ -2149,10 +2149,13 @@
           node.hidden = !value;
         };
         const verified = !stale && job?.state === 'completed' && job.verified === true && job.active === false;
-        const status = unavailable ? 'Status unavailable' : stale ? 'Stale sample — status unknown' :
-          !job ? 'Waiting for status' : verified ? size(job.expected_bytes) : (labels[job.state] || 'Status unknown');
+        const installedBytes = installedSource?.artifact?.bytes;
+        const status = installedSource ?
+          (Number.isSafeInteger(installedBytes) && installedBytes > 0 ? size(installedBytes) : 'Installed · size unavailable') :
+          unavailable ? 'Status unavailable' : stale ? 'Stale sample — status unknown' :
+          !job ? 'Waiting for status' : (labels[job.state] || 'Status unknown');
         put('status', status);
-        field('status').className = 'badge' + (!stale && job?.state === 'completed' && job.verified === true ?
+        field('status').className = 'badge' + (installedSource || verified ?
           ' enabled' : !stale && job?.state === 'failed' ? ' disabled' : '');
         const progress = field('transfer');
         const valid = job?.active === true && !stale && Number.isFinite(job?.downloaded_bytes) && job.downloaded_bytes >= 0 &&
@@ -2338,6 +2341,8 @@
             } else if (['pdf','epub'].includes(source?.adapter)) {
               card.querySelector('[data-field="status"]').textContent = source.installed_verified ? size(source.artifact?.bytes) : (source.artifact ? 'Not installed or invalid' : 'Not downloaded');
               card.querySelector('[data-field="status"]').className = 'badge' + (source.installed_verified ? ' enabled' : '');
+            } else if (source?.installed_verified) {
+              render(card, source.acquisition, false, false, source);
             } else if (source?.zim_download) {
               if (source.acquisition) render(card, source.acquisition, false);
               else card.querySelector('[data-field="status"]').textContent = 'Not downloaded';

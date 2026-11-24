@@ -74,6 +74,24 @@ def test_live_states_and_read_only_polling():
     assert all(r == {"url": "/api/sources", "method": "GET"} for r in result["requests"])
 
 
+def test_installed_zim_sizes_use_verified_artifact_bytes():
+    adopted = job("completed")
+    adopted_source = adopted["sources"][0]
+    adopted_source.update(zim_download=True, installed_verified=True, artifact={"bytes": 109_500_000_000})
+    adopted_source["acquisition"].pop("expected_bytes")
+    adopted_source["acquisition"]["verified"] = True
+    acquired = job("completed")
+    acquired_source = acquired["sources"][0]
+    acquired_source.update(zim_download=True, installed_verified=True, artifact={"bytes": 3_420_000_000})
+    acquired_source["acquisition"]["verified"] = True
+    unknown_size = dict(adopted, sources=[dict(adopted_source, artifact={})])
+    states = run_ui([adopted, acquired, unknown_size])["states"]
+    assert [state["status"]["textContent"] for state in states] == [
+        "109.5 GB", "3.42 GB", "Installed · size unavailable"
+    ]
+    assert all(state["status"]["className"] == "badge enabled" for state in states)
+
+
 def test_no_matching_job_waits_for_status():
     sample = job("completed")
     sample["sources"][0]["acquisition"] = None
