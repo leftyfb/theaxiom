@@ -241,9 +241,22 @@ def download_resumable(source_id, config, *, offset=0, validator=None,
                     while True:
                         if stopped():
                             raise TransferStopped()
-                        block = stream.read(CHUNK)
-                        if not block:
+                        # read1() may return only a TLS record or socket fragment.
+                        # Aggregate outside the storage lock, retaining cancellation
+                        # checks and the transport's per-read deadline enforcement.
+                        batch = bytearray()
+                        while len(batch) < CHUNK:
+                            if stopped():
+                                raise TransferStopped()
+                            fragment = stream.read(CHUNK - len(batch))
+                            if not fragment:
+                                break
+                            batch.extend(fragment)
+                        if not batch:
                             break
+                        if stopped():
+                            raise TransferStopped()
+                        block = batch
                         if count + len(block) > (total or MAX_BYTES):
                             raise ValueError("ZIM exceeds download limit or expected size")
                         # Keep the capacity check and write together across ZIM workers.
