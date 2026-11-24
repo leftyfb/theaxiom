@@ -2187,6 +2187,7 @@
         put('sample', Number.isFinite(job?.sampled_at) ? new Date(job.sampled_at * 1000).toLocaleString() : '—');
       }
       function controls(card, source) {
+        const field = name => card.querySelector('[data-field="' + name + '"]');
         const pub = source?.publication;
         const blocked = source?.mutation_blocked !== false || !!pub?.error;
         card.querySelector('[data-catalog-edit]').disabled = blocked;
