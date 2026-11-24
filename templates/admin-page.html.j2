@@ -742,6 +742,7 @@
         {% endif %}
 
           <dl class="storage-status source-details">
+            {% if document %}
             {% for key, label in [('source_url','Source URL'),('expected_size_bytes','Expected size (bytes)'),('sha256','Expected SHA-256'),('provenance','Provenance'),('license','License')] %}
             {% set value = source.configuration.get(key, '') %}
             <dt{% if not value %} hidden{% endif %}>{{ label }}</dt><dd data-source-config="{{ key }}"{% if not value %} hidden{% endif %}>{{ value }}</dd>
@@ -750,6 +751,16 @@
             {% set value = (source.artifact|default({}, true)).get(key, '') %}
             <dt{% if value == '' %} hidden{% endif %}>{{ label }}</dt><dd data-source-artifact="{{ key }}"{% if value == '' %} hidden{% endif %}>{{ value }}</dd>
             {% endfor %}
+            {% else %}
+            {% for key, label in [('source_url','Source URL'),('expected_size_bytes','Expected size (bytes)'),('sha256','Expected SHA-256'),('provenance','Provenance'),('license','License')] if source.configuration.get(key) %}
+            <dt>{{ label }}</dt><dd>{{ source.configuration.get(key) }}</dd>
+            {% endfor %}
+            {% if source.artifact %}
+            {% if source.artifact.filename %}<dt>Artifact filename</dt><dd>{{ source.artifact.filename }}</dd>{% endif %}
+            <dt>Artifact size (bytes)</dt><dd>{{ source.artifact.bytes }}</dd>
+            <dt>Artifact SHA-256</dt><dd>{{ source.artifact.sha256 }}</dd>
+            {% endif %}
+            {% endif %}
             {% if not document and source.adapter %}<dt>Last sample</dt><dd data-field="sample">—</dd>{% endif %}
             {% if source.zim_download or (source.acquisition|default({}, true)).get("attempt_history") %}
             <dt>Last successful acquisition</dt><dd data-field="last-acquisition">—</dd>
