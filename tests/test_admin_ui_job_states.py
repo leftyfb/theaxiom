@@ -143,8 +143,8 @@ def test_publication_refresh_updates_summary_and_controls():
     assert not success["publication-toggle"]["disabled"]
     assert not success["publication-browse"]["hidden"]
     assert not success["[data-catalog-remove]"]["disabled"]
-    assert success["mutation-note"]["textContent"] == ""
-    assert "changes are blocked" in failure["mutation-note"]["textContent"]
+    assert "mutation-note" not in success
+    assert "mutation-note" not in failure
     assert failure["[data-catalog-remove]"]["disabled"]
     assert failure["publication-summary"]["textContent"] == "Publication status unavailable"
     assert failure["publication-toggle"]["disabled"]
