@@ -155,7 +155,16 @@ class CatalogStore:
         if not state.get("starter_groups_initialized"):
             self._merge_starter_groups(state)
             state["starter_groups_initialized"] = True
-        changed = self._configure_planned_pdfs(state)
+        changed = self._configure_planned_sources(state)
+        defaults = source_catalog.source_defaults()
+        for record in state["sources"]:
+            default = defaults.get(record["source_id"])
+            if default is None:
+                continue
+            if "icon_png" in default and "icon_png" not in record["profile"]:
+                record["profile"]["icon_png"] = default["icon_png"]
+                changed = True
+            changed = self._initialize_discovery(record) or changed
         if not changed and existing_v2:
             return state
         if changed and existing_v2:
@@ -166,20 +175,19 @@ class CatalogStore:
             self._atomic_write(payload)
         return state
 
-    def _configure_planned_pdfs(self, state):
-        defaults = {entry["source_id"]: self._seed_record(entry)
-                    for entry in source_catalog.planned_sources()
-                    if entry["source_id"] in source_catalog.CONFIGURED_PDFS}
+    def _configure_planned_sources(self, state):
+        defaults = {entry["source_id"]: entry for entry in source_catalog.planned_sources() if "setup" in entry}
         changed = False
         for record in state["sources"]:
             sid = record["source_id"]
-            default = defaults.get(sid)
+            entry = defaults.get(sid)
             config = record["configuration"]
-            if (default is None or config["format"] not in {"unspecified", "pdf"}
+            if (entry is None or config["format"] not in {"unspecified", entry["setup"]["format"]}
                     or any(config.get(key) for key in ("source_url", "expected_size_bytes", "sha256"))):
                 continue
+            default = self._seed_record(entry)
             fields = {
-                key: value for key, value in source_catalog.CONFIGURED_PDFS[sid].items()
+                key: value for key, value in entry["setup"].items()
                 if key == "format"
                 or (key in PROFILE_FIELDS and (
                     key not in record["profile"] or record["profile"][key] == default["profile"].get(key)
@@ -187,8 +195,23 @@ class CatalogStore:
                 or (key not in PROFILE_FIELDS and not config.get(key))
             }
             self._apply_fields(record, fields)
+            self._initialize_discovery(record)
             changed = True
         return changed
+
+    @staticmethod
+    def _initialize_discovery(record):
+        from . import update_discovery_config
+
+        config = record["configuration"]
+        if not config.get("source_url") or DISCOVERY_FIELDS & config.keys():
+            return False
+        discovery = update_discovery_config.settings(config)
+        if discovery["method"] != "manual":
+            config.update(update_method=discovery["method"], update_endpoint=discovery["endpoint"],
+                          update_periodic="yes" if discovery["periodic"] else "no")
+            return True
+        return False
 
     @staticmethod
     def _default_groups():

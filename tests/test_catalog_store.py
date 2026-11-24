@@ -99,12 +99,12 @@ class CatalogStoreTests(unittest.TestCase):
         added = self.store.mutate("add", "manual", {"title": "Manual", **config}, edited["revision"])
         records = {s["source_id"]: s for s in json.loads(self.path.read_bytes())["sources"]}
         for sid in ("wikipedia-en", "manual"):
-            self.assertEqual(records[sid]["configuration"], config)
+            self.assertEqual({key: records[sid]["configuration"][key] for key in config}, config)
             self.assertFalse(config.keys() & records[sid]["profile"].keys())
             self.assertNotIn("seeded", records[sid])
         sources = {s["source_id"]: s for s in added["sources"]}
         wiki, manual = sources["wikipedia-en"], sources["manual"]
-        self.assertEqual(wiki["configuration"], manual["configuration"])
+        self.assertEqual({key: wiki["configuration"][key] for key in config}, manual["configuration"])
         self.assertEqual(wiki.keys(), manual.keys())
 
     def test_revision_conflict_does_not_overwrite(self):
@@ -367,6 +367,7 @@ class CatalogStoreTests(unittest.TestCase):
 
     def test_ready_gov_seed_and_existing_placeholder_never_auto_upgrade(self):
         expected = self.store._seed_record(source_catalog.READY_GOV_SOURCE)
+        self.store._initialize_discovery(expected)
         initial = self.store.get()
         self.assertEqual(next(s for s in initial["sources"] if s["source_id"] == "fema-ready"), expected)
         self.assertEqual(expected["configuration"]["format"], "zim")
@@ -379,12 +380,11 @@ class CatalogStoreTests(unittest.TestCase):
         saved["sources"] = [old if row["source_id"] == "fema-ready" else row for row in saved["sources"]]
         saved["groups"][0]["source_ids"] = ["fema-ready"]
         self.path.write_text(json.dumps(saved))
-        before = self.path.read_bytes()
         updated = self.store.get()
-        self.assertEqual(updated["revision"], initial["revision"])
+        self.assertEqual(updated["revision"], initial["revision"] + 1)
+        old["profile"]["icon_png"] = expected["profile"]["icon_png"]
         self.assertEqual(next(s for s in updated["sources"] if s["source_id"] == "fema-ready"), old)
         self.assertEqual(updated["groups"][0]["source_ids"], ["fema-ready"])
-        self.assertEqual(self.path.read_bytes(), before)
         self.assertEqual(self.store.get(), updated)
         removed = self.store.mutate("remove", "fema-ready", {}, updated["revision"])
         self.assertEqual(self.store.get(), removed)
@@ -396,10 +396,9 @@ class CatalogStoreTests(unittest.TestCase):
                                                  "description": "emergency preparedness library"})
         saved["sources"] = [edited if row["source_id"] == "fema-ready" else row for row in saved["sources"]]
         self.path.write_text(json.dumps(saved))
-        before = self.path.read_bytes()
         result = self.store.get()
+        edited["profile"]["icon_png"] = source_catalog.READY_GOV_SOURCE["icon_png"]
         self.assertEqual(next(s for s in result["sources"] if s["source_id"] == "fema-ready"), edited)
-        self.assertEqual(self.path.read_bytes(), before)
 
     def test_write_failure_preserves_prior_catalog(self):
         first = self.store.mutate("add", "one", {"title": "One"}, 0)

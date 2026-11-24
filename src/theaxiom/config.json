@@ -1,0 +1,343 @@
+{
+  "version": 2,
+  "sources": [
+    {
+      "source_id": "wikipedia-en",
+      "title": "Wikipedia English All Maxi (2026-08)",
+      "kind": "zim",
+      "filename": "wikipedia_en_all_maxi_2026-08.zim",
+      "source_url": "https://download.kiwix.org/zim/wikipedia/wikipedia_en_all_maxi_2026-08.zim",
+      "sha256": "34162d18b9f96f494eac48a73a309c72e0bc95d85f76be405d0f5de795854aa6",
+      "bytes": 127418087648,
+      "language": "eng",
+      "publisher": "Wikimedia contributors via Kiwix",
+      "catalog_date": "2026-07-06",
+      "license": "CC BY-SA 4.0 and GFDL for Wikipedia text; individual media licenses may vary",
+      "license_url": "https://foundation.wikimedia.org/wiki/Policy:Terms_of_Use",
+      "attribution": "Preserve article-level attribution, applicable license notices, and modification notices.",
+      "rights_review_status": "reviewed-for-whole-zim-redistribution",
+      "availability": "supported",
+      "icon_png": "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"
+    },
+    {
+      "source_id": "fema-ready",
+      "title": "FEMA / Ready.gov",
+      "description": "Emergency preparedness library, English offline website archive",
+      "kind": "zim",
+      "filename": "ready.gov_en_all_2026-10.zim",
+      "source_url": "https://download.kiwix.org/zim/zimit/ready.gov_en_all_2026-10.zim",
+      "language": "eng",
+      "publisher": "FEMA / Ready.gov via Kiwix",
+      "edition": "2026-10",
+      "provenance": "Official Kiwix ZIM download directory, checked 2026-11-20; exact size and SHA-256 not verified.",
+      "availability": "candidate",
+      "issue": 21,
+      "icon_png": "iVBORw0KGgoAAAANSUhEUgAAABgAAAAOCAYAAAA1+Nx+AAADOElEQVR42qWTW2wUVRzGv/+Zy+7s7nS70EoTKTdDYrEPKAKxmgAxNcCLEjJLbGIwJBDxodyiaSrJ2YmKGokNGGPwUlOiJuyUlKJgg2nWPmB8KBelUCkhqamR0iK9LLs7s7Nzjg+UEk2Nkp6n7+Gf8zvnd75DmMWSEkQEOZ1TINgQn514z7w2ceYV3/ca1NkAiCAhQTzFicgWAMk32tZvvzL2zWskaVJlxiVlNoCDHS9Xn6m5ONHT0yMHBgZCxhN9TokKW8LM7NJZ2YDGtCF6cC8gEOQ7XzUkmEHNBS/3+5PznzuaueacCoQXmRevPuH6HgvgdrzV0HXhgRXx1BrFRk8pV8ptcLNjL8VDVZ3dvx77yQ/c21VzFnT60huzGzoPARKcgxHna1QAuPLYQ9JJOsH/Uc85aO3aL/SuwS+bfFncE/iBkTArMqqmndpvHT/MOWcAYNu2mLEZVtpS7umw0pYiJQgArLSlEAhSymm1bzpb6g517FzR8u2O1ZlMRsXd2fvqm49ubNx95JmWptb1W3t7j2j/dmwrDQUA9n2+bsfu1rrnAcDiy/T/vO7e1rohTZgHA8V9NaxF9imx+HldilXNLxw72fRJ/XwzXraynFWdHUXlbVH8+dmJ7M2tQvr98cSc1rdf/H6It9c/Wibiv01eXualUra89y+mAY2fPnUhYhi/wFfNaLjy8B1vZD9jVC4J30XY3HNZf/iAQuykFJQH8LTrFcqJ5I9GJPqwTuUHinL83cdDtZuSVos7JeZvAEYkg6AkbwkEFdn8H4sLbq46COTHolQcDOBWaIp63S1Ninwhv25hZe3OQJS6vZJ3VQo54iP7kcb0zmSypWA5Fvvn5gDAdE33NFR8wBj1h0LRlZFw+JIR1VbPSyzNFcWdTYypUV0tq43FzItD431tsVh8A0l/UBGh9qKfWzE3saQdANKWI2Z6A7XSWLx5EfKjN2I1jTl3PMYKJnnZG49Um/W9btHpFhEWDhlCXRhfNdI3nFmwqKrmT8+sKd6cuLxLk+Gvd238cJRzMCLMDHg92TY8lQMA3lS+BfwAAKP3Rx0A6AdO4/3j22oVRV0Oqe29W0kOwJ6xRX8BT9tdy0LqOhEAAAAASUVORK5CYII="
+    },
+    {
+      "source_id": "wikivoyage",
+      "title": "Wikivoyage",
+      "description": "offline travel and regional reference",
+      "kind": "planned",
+      "issue": 17,
+      "availability": "planned",
+      "icon_png": "iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAADe0lEQVR42q2VTWhcVRTHf+feNzP5aIwpNuLCjaDiREIhCiJoCFRpEXVR36jYlW2SBqS66UaqLyO4KnWZNJOpdCGI89CFKH5kUbIouhEkkFlUigs3VYuloWln3nv3HheTNEPzYWJydu/cc87///7n3HOFPbIa2BC8gAJMw2sWDsoeF5ZZOGTgHQOHU3jrfxeOwCiY1e9ZOFyF7yrga6AV+BZgoz9o82mL1+Rky1cu+3uDZ+EFA+8qvBQADchy4DN4eRx+bCWqCiK6TfICaBVetHDGw7MGbLNFJ+mCfBPm5uAIQNBKaSsehpauYg63zyIdHQS2l+5CD0ljPzcO/ExcatCSZ9nAn65VXAG1EGSgGZyLwYVghdGpowQdb4Dm8K4TTB/q7wPtBbpRNeQK3STNKW7uP0VxUdul+hReByop7CuASeGHUTgSgZTBByT+MpbHEYnovD9Pc2lFBQveQZAH765iJCIuOVCBMjWwACX44kKL/eeupf05QAdWBmCtoScqj5ELzmLMK2QJqEtRETq6LMmdj5kZ/4AoCiiXs/aGXIJgBLIL8CXwUA88twhaBg9gQIXhKKA6doXpt18lzSaQ4Bq5rhxgSBIF/xOoUB9YNwhToAri4ZMUPiqBaz83IMp8OSOsWVChcuI8jebzuOwrCl0G7wTN/gBRiovrAGJwAjoKl0/C9wCr7FcAViNLDkSJooCLE79x/vhRsuYoYv+G/AOb37jIEEVm/R3axHE3iUkoi+f47BOIGqpji22FCAfq8teBosyPtHoyePZY98Lpz5Z3tg/Cmv2vkMGpY/1D1fGpoZmxkTVyaxZsmR2XHFFkqNeFOHZPTZ180pnkQU30uukuPGwcz6jRN421j9CgwtZ7ZwtbWSUHp8eLNtBLIqYPrznbkUedI2umt7JEBxdOVX+/d+2Y7W0f0SiKzK8TM3VU3jf5IOedd+ntZuYz5xHRgjSXNuJsttuOcrnsh6Ph4Je5fy66Rvp10JW3qEfEGBG51ezVxkaamJ30vL/er8SxS3GnfeKum8AaBRRd6rtq3UY5OwKI49iFtdAujFWvZN5/KLnACKrGmJvz9dvprgFagxU7wtA+2neo4pvpN0FPp6D+BnHs1l6pXQAARMWixqWSA97L7qTLGNNgry2shRZgqDJ25unqRHx3nHcrUZtUHlVxNp3xiatt9uz+C9TrfAik8LMHAAAAAElFTkSuQmCC",
+      "setup": {
+        "format": "zim",
+        "source_url": "https://download.kiwix.org/zim/wikivoyage/wikivoyage_en_all_maxi_2026-09.zim",
+        "edition": "2026-09",
+        "language": "eng",
+        "publisher": "Wikivoyage via Kiwix",
+        "provenance": "Archive listed in the official Kiwix download index."
+      }
+    },
+    {
+      "source_id": "wikibooks",
+      "title": "Wikibooks",
+      "description": "offline textbooks and practical manuals",
+      "kind": "planned",
+      "issue": 18,
+      "availability": "planned",
+      "icon_png": "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",
+      "setup": {
+        "format": "zim",
+        "source_url": "https://download.kiwix.org/zim/wikibooks/wikibooks_en_all_maxi_2026-10.zim",
+        "edition": "2026-10",
+        "language": "eng",
+        "publisher": "Wikibooks via Kiwix",
+        "provenance": "Archive listed in the official Kiwix download index."
+      }
+    },
+    {
+      "source_id": "epa-water",
+      "title": "EPA",
+      "description": "emergency drinking water and treatment guidance",
+      "kind": "planned",
+      "issue": 19,
+      "availability": "planned",
+      "setup": {
+        "format": "pdf",
+        "title": "EPA — Emergency Disinfection of Drinking Water",
+        "description": "Emergency drinking-water treatment guidance from the EPA Office of Water.",
+        "publisher": "U.S. Environmental Protection Agency",
+        "edition": "September 2017 (EPA 816-F-15-003)",
+        "language": "eng",
+        "source_url": "https://www.epa.gov/sites/default/files/2017-09/documents/emergency_disinfection_of_drinking_water_sept2017.pdf",
+        "expected_size_bytes": "754723",
+        "sha256": "f404083d00decedc267bf4265eda776bb250ccfe18c1f7b19152aa006ff727c5",
+        "provenance": "Original EPA publication. Size and SHA-256 measured from the EPA download."
+      }
+    },
+    {
+      "source_id": "cdc",
+      "title": "CDC",
+      "description": "sanitation, hygiene and public health guidance",
+      "kind": "planned",
+      "issue": 20,
+      "availability": "planned",
+      "icon_png": "iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAEqUlEQVR42u2VS4hcRRSGv6q6r77dt3um55HMJKMZx0QzDijiZBN1o0HB1yq4EAXxgSgogitdhLgQRFAQRBfqQkXBCIoPRNGo4DMGUUOSidGYcezMo3u6e6Yft++rykXHYBB049J/UeevOnWqioLz//A//gWiH/ZIOCJg2vTjP2A3sO9Pvhv27fv7OmDM61oIYQSAI8/chAGk6Mf+cPZzjAYp+6kz3PTnSva3aQ2RPl3yyU8Lm9/8vPZwEmcFI0xmO0K0OwlKKUAjkVi2JMs0WaoZDFwqqx1sWzFU9Fisdgh8i3zOprLaw2Rabxot+jfMjr931UUjL1vLy8nQ/iO12zNhe61uD4SglHPoxSmZMaSZoZx3WFrrUQ4cVtbqrHUTZiZK9NIuv9e6jJY8MBDGGVEcsz0p4Lkr68DLliaXSmGa9WZz5IKNefPQTdtF4Fs4SvHWgQWqrYi7rz6fpWbIaMnjuxMN3vh6gUq9xcmVFlMbAu69doJtYwGupdCZzu576ahaDPJdACtwExFGmbpsaki9cO+sOTTfFI+8eojRosuWDQHbxkvs2DrMU+/O8cLHv/L4rZdwy5WTXP/Yp9TbEa88sJOJYZ/7nv+WZidh54XD5D1bCSklgBUnoBHctWuK4cDl4Vd/4OelNvNVxUeHlnnitkvQxnDwlzpvf3gc31W89uBO7rlmK98cr3HpeYM88fZRvjhapZdq9h86xVC5zI4tBQCshXqbDSWXmYkBFlY7hFFKKWfhOhapNviOhRSCVi+lMB7QiTI6Ucq2sSKtMEEbQ6MV0eolWEriOxbDxRwbBz0AJA5oY8iMwbUU+ZyFEQIlIWcrqq0eAJ6tGC56LDZCpBCshzHtXgpArRXTClNc22JyNMCSgqVGv05OFAo0OwlzlXVGSx7Tm0ssNUI6UUajE5NpQ6YNvqM4WVlnx9Yhco7i4C91fjjZRArB5dtHwAh8VzFf6/DrShvoN4LViWNcW/L0e3NMj+d59OaLCTybUt6hXHAYG/RQUnDT7GZmp8rccfUUn89V+fjHZQ6eWOXZD45z967zEULw4feLzE6V2f9TG31aJqx2HOPbivlqlzufPcB1l21i18UbybThy2M1vjpWpRVmaK0p5h3uf/EghxfWOVZZJ4wynnxnjsMLa1w6WebG2c1ESYIxhpxrYQALHBBQ9G1W2zFPvjOH7yiUFDQ6CbYSfHakihBQW484dzhPoxuTZJrpiRLdKOOZ94/h52wmhnzqrYhE5RgvjvW/SGtjpCADMksaMxI4wrElaWaIEk3BU2RAN0yZOadEZbWL1oZtYwGn6iFrYcRF5w7gKMliI6QVRllQyuMpmQFYUdqzXMcadHN51YtjEOAqi1qrx8CAj5SSbpQwPGSzvBbi5QMmB3PMr3SwcgVmxkeot2MqzR5K+WzakFcjI6MEvlUUgDU1vrF6RSieSzOdT1JXK9WXylZo4dmKXmZQ9FWz0hDMbBrgxEqHyXKB7eOD/FZr0+yCs8WllHMZK3n61HqcGwnczwx7pOg3w1nmcIYbzpZxJSA1oABxmsu/yLsxkNHPp2eduft19V872Z7pw2bv3r36f0//V/wBcLsN4SuDwioAAAAASUVORK5CYII=",
+      "setup": {
+        "format": "pdf",
+        "title": "CDC — Wash Your Hands",
+        "description": "CDC handwashing fact sheet for water, sanitation and hygiene emergencies.",
+        "publisher": "Centers for Disease Control and Prevention",
+        "language": "eng",
+        "source_url": "https://www.cdc.gov/water-emergency/media/pdfs/factsheet-wash-your-hands.pdf",
+        "expected_size_bytes": "282412",
+        "sha256": "afd3dbf6a5ac9e3e40c6d9ed4d3e00d0e6493a468db7c02c4f2aadbe9d394a03",
+        "provenance": "Original CDC publication. Size and SHA-256 measured from the CDC download."
+      }
+    },
+    {
+      "source_id": "openstreetmap",
+      "title": "OpenStreetMap",
+      "description": "offline maps and regional navigation",
+      "kind": "planned",
+      "issue": 22,
+      "availability": "planned",
+      "icon_png": "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"
+    },
+    {
+      "source_id": "hesperian",
+      "title": "Hesperian Health Guides",
+      "description": "community health reference",
+      "kind": "planned",
+      "issue": 23,
+      "availability": "planned",
+      "icon_png": "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAe0lEQVR42tWTQQrAIAwEJ+JjfINX3+3VN/ib9FBbRKy2lh4aCBEhy+4mEVUFIAW3PwAfs6TgGIWPGQDTNj8NU6qUXAbgLYNTU6vzSKAr085Mav3xMVMbPJTQMVfbPzsZlQzAnplYg91iMFukFQYf78F/AaR3zp2T1quxbuxRNLqRYIWvAAAAAElFTkSuQmCC"
+    },
+    {
+      "source_id": "red-cross",
+      "title": "American Red Cross / authoritative first aid reference",
+      "description": "first aid and emergency response guidance",
+      "kind": "planned",
+      "issue": 24,
+      "availability": "planned",
+      "icon_png": "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAACeElEQVR42o1Tz0tVURD+5pxz/YX2roGilfps0do/wRYuCvpbjP6CMAgSchOtJCSEWvhjFQTRD6NtkAoZRZnvZolEz3uf79737px7zrR4+go0aGAWh5n55ptv5hD+YbXDw8k0zQAItNbx4MDA+ml59PcjzbKQma8T0bRSKlRKASIonIO1dsfa4uG54aGbpwIktdqEd/6VCUzYEQTQWoOoFRYRFEWBZp4jyxrrzHy5PDYa/6Fbq5V/VasH9TQVZhbnnEgYigAtD0Nxzkme5xIniex+//Eu+rYbAoACALZ2QWsdGq2htYZS6uSsRNBaoyMI0NnZMcHMNwBAHcRx2Xs/aYwBKQUQna4qURvEGIMgMNMXR8e6jHNuUqQlhhkcBAB4AEiStkCSJEB/PwDAAKBKBUEQnLkzN3fVuKIogxREBM04Pr27CHAiRoh2doaNcx6kBF4EOf7PtPfw3iNJkj7jvF+HB5xzaJZK7dW5JGl1Pppfl0qQIzZdzoOZUT88rBtXFGteJOGcS31RBGMMtNaIhobgj2irUgkje3twRQG2FsyMarWarK4sb6hyeSy2zPcbzSZyZlhrYa1FQwQZgAxAQwTWWrC1sLZAmmZYXV5+QqDPCgCuTE3NHBxUX2dphmYzBzO3i489zxl5zqjX69jc3Nh6tLj4mIj220sfHxkdmF9YeFAeH79mAoPAGBC1Dkq8R24ZrnB4+eL529szt+5prVe2o0qqjwHiWpK9WVt7FlUqX3p7+856Lz3d3d09zjm839r6+XHrw9e7s7NLq0vL81rrp9tRJT3xGwHg4uiYEZELInJJIOch6AKhTqCIiD4R0f52VPHH+b8BQf9qrX4yKMcAAAAASUVORK5CYII="
+    },
+    {
+      "source_id": "usda-preservation",
+      "title": "USDA / National Center for Home Food Preservation",
+      "description": "food safety and preservation",
+      "kind": "planned",
+      "issue": 25,
+      "availability": "planned",
+      "icon_png": "iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAEdUlEQVR42pWWW2xUVRSGv7X3nHZOq/RGqW1jpJQaIK2FJo2YctGoPBgMNMgl0ZDok5EYH1RABJqgCCIE4+UFDSohYFItL+gDxogPJIBGjWBKArW0UEmZS6elM2fOzDln+zAltGUo8Cf7Ya+s8/9Z/1p77yNMgjFGASHAcH8QwBORYHwwNI5Yi4gPrO25ePH1a4ODKUtrHRjQWiMieJ6X+ygUwhiD7/sogazv+9VVVUX1DQ2fAkfHcd0S6OzsBMD3/foDB7544vvOTsrLyzFAOpUinXYpKi4GY0ilkoRtm7BtI0A8HmfV6tV8sHvXj+O5JgjchOd5mXgsFsSiUV9EVCKRYHZDAy+uX0F5RQUCRK5HONbVxeXeXkpLS4lFo0E8FtOe52Um86nbAkqJZVnKtm3luq5+dtkyva2jQw9cHdDfHjmivz1yVEciEb1j5/t6ydKl2nVdbdu2sixLKaVkMl8of7uEVCrFvMZG1qxby/atW7nQ3U1JSQkAZ06f5uzZM7z19kb6+/q4dOlSrsV5oPIGRXAzLivb2/n97G9cHxykqbGRiooKpk+voLGpiSt9/fxz/hzPr1yB4ziI6LwCoTwW4bouM+vqWLNuLVf6+3l84UKMQNWMSoIAotEomIDplZXMqKrim4NfkXFdlFJ3FwjGRBLDI1z+t5d9e/dyubeXVDLFpi2bcZw0n+zfj11kM3fuPF7d8Bo3RkbQWhEEwT1UAIgIvufhOA6JRIKheJxkMsXQUAI37TA0NISTTpMYTuCkHHw/QETyOh6a6lgqpQiFQliWhVVgYVkWvu9hFRRgWRahkJWzRe58vNXdzr8xZsp1N0wpkCt74n58bPL+3sdUqdzdk/UwxqC0RimF7/t4nodSCqU1QRCQzWYRkbwTdMceOKNJTNajuqaaorDN6PAwrpuhrKyMYtsmnUziuxnswkJqamvA83BGk+TTuE1Aa81D9XU0L2lj5qw6Zjc3Es+kEaC5ZT6xaIxZC5qxLIuWRW3U1c2ifkEz1Y/Wo3X+YZlwXRtjNsVPnt6V6BsIalc/p3uOn8AaGgVjeHjFMmKRCImTZygsDDNtbj3F8+fR/eURv761RZUtbn1HRD7Me12Pd2j4s8Py30+/UrOoFTl0nGs/nAAUpSWlFGQyxN/YgcGQXbWckt0bcbd+TGL5M1K2uNWZqgIlIoExZsH1Q8dOXXh5Y2HBzFrxko4YJ53zc9qDYAK8G6M5O4uKkKKwyfZeNXO+/sidsb69TUT+vMk1oYIxcjWWsMfqu9bx9/ZdgdHhIDTtASUi4idGQEBZIYwxJhOJBeKn5bEdW1TZ+vY9k8knVDDpTVbAtsjB796NfH5YR/46TxD4ni4MC4Dvpo1SOlQ5v5HKDS/5la+8sBN4Dwgmv8n5BAQBQYwx5ul038Cbw8d/eTJ96g87ee4CAMVNcwi3tTgly586GX6kdp+I/GwwggERubefBdPRoW4KGmNajTGbne6eLqe7p8sYs3ksJuNz7xtjdt2qUqvcGufAWM4d8T8tax+ggWBHZgAAAABJRU5ErkJggg=="
+    },
+    {
+      "source_id": "usda-extension",
+      "title": "USDA Extension / university extension",
+      "description": "gardening and food production",
+      "kind": "planned",
+      "issue": 26,
+      "availability": "planned",
+      "icon_png": "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAC+ElEQVR42lWSy28bVRSHv3vn2vEjTgJOcB5Oa6mVQJAKGoFEeYhV/gOEhNjBovwDXUArWiF2RSBeZY3KomJVwZ5WEW0igRqJR2KVlBDSBFPbjO1xZjyeufewMEHiJx3p6Lf4Fuc7yqUinQ4Ui2AMKM3/ksSQzQIKwhAKeegHwnhJIQ7Uzz82xBhDrVZmc3OP+fk56vU6pVKJSqXCH7u7DAYhS0tLzMxkEAGloNcVJiYV+t7OHm+dv4jfhXs7e3xx9RpWDHv7D0CPceHCu8RD4Z2L7/Hdrbug4O3zH2CMIoxAz88do9XsMDMNp5ZOs772Ax9/dIXqQo1sRpHPlzj91DKL1RN8efUrELh54zZXPr+GONCtVpvZ2TlEYGfndy5ffh9rHWfPvkm3myDK0PYj5haO0fq7y+4evPzKa3x74xa5AuhSscAgPMRToLVi97cdrl//lJdeeJHV1VUymQxRFLG1tcXKygrra9/zxOOniOOYb77+Ce+zTz681Gr5NBo9zpxZZuPOHZJhlqmpEs8/9yxBr0OxkKP88CTPPL1Mmg5ZWXmU4dBQO15FSSqCAgTSdKTSWvA8EDXaoxgKBYhjGBsb6Y3j0ag4TsQYg9YgR+4Ti+d5oCH9F3YU68A50AYUoFIJRYCUFJERwinw8FCMvuoIbBH4rxMsDvX6uVclk81SLpepVqssLi4yuzBPpVJhMjtB4AI6vS7N5l+0Oz79fp9u0MP3fYIgwEyffIRCMc/ExAQ2Y/nlYJPbW2vEyQClBeV5xMmANE3xsobx8XHyxQK6rCg9VMTUnjxJNDgkCEOSYYAzDj2dZapQIl8Yw8toDqM+nY6P3+vS8Bv09w8Jwz6DZIiZfew47XaTpOOjhgMOo5CDg/v8unGX+3/u0wl8LAkiQupSnHOgQWvQHpibG+tsb29Tr9d50GwwTGPA4ZTFYckVc6O7iaBEocVicTgtWCWo8TeqIiJ4RpHJeIhWOFI8o/BymigKsTLEIijtUFqjtMWKw7mUfwCAZXKuwQdqrQAAAABJRU5ErkJggg=="
+    },
+    {
+      "source_id": "wiktionary",
+      "title": "Wiktionary",
+      "description": "offline dictionary",
+      "kind": "planned",
+      "issue": 27,
+      "availability": "planned",
+      "icon_png": "iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAD2klEQVR42rWWT0hbWRTGf/clMTFFSdQGWypxo1IRUyLM0E0ILzF0XaWCXRXEjTt30l2hy7gy3Qhus7AIBkQphSQ4gppSWtJ1QcFWI3Wm0lTNe3lnFtO8SRpnKFPn7u6/75zzfefecwAQkZiIbIrIufz8OP+GFQPAMIxRwzD+EBGpVqs/jV7DME3zdxGJKxHZAX4BTMDJ1Ywa1rY6OjqqvH371tnR0aGuX79OIBDA4/H8J9Tz83NKpRLHx8ecnJxIKBQyyGQy4vV6ZXR0VJLJpLx//14syxLLsn6YltrZ/f19mZ+fl3g8Ll6vVzKZjDgBWlpaePToEbFYjEAgwDfhf9hzpRQAnZ2dTExM0N3dzatXrwDQaoeGh4fxeDykUin29vb+ItI0m8Cq1SqWZTU5YFkWbrebmzdvMjg4aBt11i4ppVhYWODx48f4/X6CwSBOZ7PmDofj0ig0TWvQouaAvepyuWhvb8ftdhMKhUgmk0xPT/P169eGizMzM0xOTlIsFu2IAFKpFA8fPuTs7Ayn09lsAGBgYIC2tjb6+/vZ399ncXGRd+/e2fuFQoFnz56RTqdZXV21+TdNkydPnrC9vY3b7baN2gY0TaNcLjM0NMTc3Bwul4v79++jaRq5XM4+/OLFC/x+PyMjI2SzWZua169fc3x8zMTEBJqm2ZTbBpRSXFxccOPGDWZnZ23R/X4/6+vrNhVra2tEo1GmpqbY3Nxkb28PEeHly5eICJFIpCGrGihSSiEiVCoVLMvC7/cTi8XY2tri5OSEw8NDisUikUiEe/fuYRgGuVwOpRQbGxt0dXURDoebxf8+n+sF0nUdwzDI5/MUCgVM00TXdYLBILdu3SKbzXJ6esrOzg7RaJSurq6mjGrKQxGxQ4xEIjgcDvL5PJZlEQwGuX37Nkop4vE4u7u7rK+vU6lU0HW9AfgfDdRz2NvbSygUYnl5GdM0efDgAS6XC4BEIsHKygpPnz6lpaUFXdcvfx/1nteoUUpRrVZpbW1F13U+fPhAqVQiGo3aF2OxGEopisUid+7coa+vz37h9a/cziKPx4NSyg6zFkUikaCnp4dwOMzdu3ftbyEQCDA2NobP52NsbAxN02x6a1gAZDIZ8fl8kk6n5eDgQMrlctNv+eXLFzk7O2taN01TPn/+LIZhiIhIuVyWg4MDSafT4vP5/v5NK5UKS0tLfPz4kfHxcbxeb4PY165du5Rfh8NBe3u7Pf/06RPPnz+3hQdQpVLp4s2bN65/Kzj12lyWdbW9ywqOEpFt4Nf/q2R+X/StKyj6Vn3Rp65t+U1EjCtoW4z6tuVPe75uZhHQJFAAAAAASUVORK5CYII=",
+      "setup": {
+        "format": "zim",
+        "source_url": "https://download.kiwix.org/zim/wiktionary/wiktionary_en_all_nopic_2026-11.zim",
+        "edition": "2026-11",
+        "language": "eng",
+        "publisher": "Wiktionary via Kiwix",
+        "provenance": "Archive listed in the official Kiwix download index."
+      }
+    },
+    {
+      "source_id": "wikisource",
+      "title": "Wikisource",
+      "description": "public-domain and freely licensed texts",
+      "kind": "planned",
+      "issue": 28,
+      "availability": "planned",
+      "icon_png": "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",
+      "setup": {
+        "format": "zim",
+        "source_url": "https://download.kiwix.org/zim/wikisource/wikisource_en_all_maxi_2026-09.zim",
+        "edition": "2026-09",
+        "language": "eng",
+        "publisher": "Wikisource via Kiwix",
+        "provenance": "Archive listed in the official Kiwix download index."
+      }
+    },
+    {
+      "source_id": "wikiquote",
+      "title": "Wikiquote",
+      "description": "quotations and reference",
+      "kind": "planned",
+      "issue": 29,
+      "availability": "planned",
+      "icon_png": "iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAFJElEQVR42qVWW2xUVRRd+9zH3JnpTGlLwRAwCkh4PwRsCVVM1CJEkwLOhESkFKRYoVXgQz+MAyQSfxoeRYKGKSVgIDMhkQh+EKKUpsgbggiJoCiPKKGUzkynM3PvPWf7QcszmFD3584+a+/sx1oH6I0xEwD65OuT+XXbzm5ZFj09AwBiMdYeDRW9QKdQOC4ARtbSPwoU9luiG8aWD6MnS8JhkpEIP4RJ+B+2dPuxYQabUW+gqCydunORNZQ3vDfuBjODiPjpEkQiAgBKrg8spoC2TlN8qnXjovqa6PHBHsOzz5tXMCLd0fbt33kTKkf+Cl69mtTTJKCeqkqXNlZagWCTY2eVJuXiwxsqG2u3ninXPcZeImE6tl3RsHD896FYTIuHw/JJMyAgIroLIABMM+oC3pdqB66YVrUzl0ms1TRDSEJ9WV3TxIb3Jxxwpb3DygsKIv64+uuTRjwcVgATPQ4cEkBc3ndN0zF5dD48xi4Ag2C7M3Fi05XSZdE9VqBwtt2Z3G8U/FExesDbI3TLbBUkvELJ1+oXjDscCrEmHhk4A3GJidX5mLBwAMau9APNLgKaDqUMGL7h0MUuvPiWzyTrUyfTeVto2oxM+/Mvf7Vk0i/KcQ/68gt1h3kmACB0f03vgo+d58eoqlXIOC3IukfhtB3CqKoa/LjxJgyahVzncZj+EliDaw5vfPeSlM4e0x8UpqA5AEAGH5DSAViVVW77yYqHqWcGDEyrtCC1JkgRQVd2DNLZQcg5k6BoM0ZVrUXzhg4wfQ7lKgItxMiQKYC9bi4LEKYCIQ2ME9l00hW6MSRPPlN499BCIQ0gRptWAUnvIHVHIpWUSKUYqaSLdIoh5XKMmjcOA6cehMxeYtKGwywc2reg8KxrZzpZ8pDRc6f29fvoKincBlERUab4boJ4z4GqV+Aqhu0AWVtDOgNkHR22rcCwAP1VxMMSoIvQTQHDGvTCkOcSYJVgwXmeoLfALDYzCtwliAwBEXiEKvgJt813naTxY8vc//5+KOkSbj34xu3molBPDDVDFwTTBCxTwucFLNOF6REQnAVwCKGYBuaRcG0FJ3vt0pE/8yFEPjE6nbTTbqdsrwD5FLOjIFLdLYpLgAmdvBeCY8jroyEQ1BAMEAIBHT4/gUQ9zkfP4VrLG9CtoQR5EXb75bY7ifG66c2DoN/P725tS1v8LAsUgfk2M996oEUE/LU9C10uhK4i8Jrn4PNehcc4Dh0f4ELTZyirKYAQa6AZgqEacSFuK5YVummBmFuBuISrTbb8+TpL97IYELgNAPpDjT63Mw1gDYbWroee88OHBE5904WSuv5QYjc8vsnIpY4hd2VL2Yrtw1jRHDuTkLbt7gEAdlS50HRIpVo3zRyWC8VY0x+fZkjgckMSQPIeVZDmAJyDnbkIKebSqf1dcsrsL61gQWEundjn7XetZXnjyTFK01/PJNpdTTN+AADEHxcc7uahB8iuWeLounYgGfI6bnls5fprpbWNXxiWf1a2K9khGKuaV692XaHX+oJFASmdw5mc8zMAisehnpqupy6Lzjf8+dtdJ6tIqkUtG+Y3LW08O9009O+IhOlkMhUNiyfeo+unFpwpN/v3FR5/PROfPrJ+wbqa6PHBpmbu9wYKh6cT7Tv/yRu3oDeC8x+SaUW9wT5lXamOC+lcZvrW6pIbzLgnmb0T/VBMA5iEa8z1FxSXdaWTV6WtqrZWl16PREA94L237m9L7Y7fgnXbzmyu3XbqzSd9W/4F/wBW/TuGobcAAAAASUVORK5CYII=",
+      "setup": {
+        "format": "zim",
+        "source_url": "https://download.kiwix.org/zim/wikiquote/wikiquote_en_all_maxi_2026-10.zim",
+        "edition": "2026-10",
+        "language": "eng",
+        "publisher": "Wikiquote via Kiwix",
+        "provenance": "Archive listed in the official Kiwix download index."
+      }
+    },
+    {
+      "source_id": "wikiversity",
+      "title": "Wikiversity",
+      "description": "educational learning resources",
+      "kind": "planned",
+      "issue": 30,
+      "availability": "planned",
+      "icon_png": "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",
+      "setup": {
+        "format": "zim",
+        "source_url": "https://download.kiwix.org/zim/wikiversity/wikiversity_en_all_maxi_2026-11.zim",
+        "edition": "2026-11",
+        "language": "eng",
+        "publisher": "Wikiversity via Kiwix",
+        "provenance": "Archive listed in the official Kiwix download index."
+      }
+    },
+    {
+      "source_id": "wikimedia-commons",
+      "title": "Wikimedia Commons",
+      "description": "selected offline media collections",
+      "kind": "planned",
+      "issue": 31,
+      "availability": "planned",
+      "icon_png": "iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAEv0lEQVR42q2VW2xVVRCGv7X27ZyeAxaQcnsBGtAWowmIQSEokhiESCTk1FAvlFDbUi+IETEYUo4PEB+MDwiUFqpUQNMTfUCFIIlaSFRIfDKgESElghCgQC20PfuyxocN9BDEqnFedrJmzf/Pv2fWDAxsCoCnt4yietMLN539A9MD3mhoUIDC88fgJtdRs20GIDQ06P+H4OgkBQiuNw8vPRjCt8i8k4ydov6Z/IH8z7QWkQ4OIaYcy1WYYCmN1S1k2ixyFdF/V5DJaEBI5V/BTU7CBAYT9mDMs9RuHkOuwgyUpHV7lyiOVhjq3x+JiaYRBV24iTKMuYjpXUEyOEliWsjYRzQn282/VdCf1XAu01TTgJgsYRCidAl2agVX0qNoz4a0Z0MybdbtlKjbnEl/EZWQabMoPyKcGbOBRLqe0AcxFxGzBxM201R34Kb7f0OgrrWgzcWhFhuW52+AA5wZnQC9Ds0ynKSLVuD7ecQ00qvfYPuSfJxbP8nNBJk2iyGXNKidKIYS6AW0VHffoqyuaRrCcyhrDhKNJZFW9F3ZhUgVl4aYws6ybgLPVURMnb8M21uJ7Y5H/FLumf0rMyuitsO7+8pBlWQy+ufWt3+T9OR9pN1zeIkHCHoH4yTuxYRnaV18mEybxdGc9CsQUSgFNVuGofX3uInx+Pl2ouBrUkOyuq9rqWmsbUFd7wlB1zXVGKeokZ6uVVjOfLzkdPy+E5hoGk21nYiAUmIDkMtpIALmYdmlBAFE/rsYOab8njJjFzl74LEzSLWAjBbZNtdKKBXlc2LYizbHCPwZaKuUMJgLtJLLWUAUExy5VkTLmYqThKtdR3DMV2rTi1cEFm30Bi3phH22CArohIrNzfVLluW7n1KAZN7roFh+IlVchpH7gdbrmDFBNhs/FBNNiF+H7iB03pTa5pLhV8+vL9qxuj5QirxIAOAp5STy3fUllesPnBtcspIwuIS2OoAyJJxQiKlv1CGejkWYCDBDEfMQtvdEoNy7ReniCCINlgbLQChKDwkcrwzLeRIl04E74ljSBZNWxbMGUWSzBqU6sB0Q/QdiVSUv/z758oevfe6J+WywiAVKC0oPErETYnZf2v7qF8nOrimIVYXQjW2Dto7H2YsCJGbK5OKvkh8J+kCiWdja7dmx6rS9bNvDaxasOdgLH1tIj4309MFHqxc2HLJqmue8fteFs9jaBTOLwAfM0ULMGLg8ExfZhPsIwy4SaRdjXlZ1GxeG6WHfnBg5vrwKFu2/b/a8/ZNmz1sMlR0jxk2MikfszZ4ZvRAxy/FSDqHfhZIvCzFVwebSZNcKdS0tOG4V+Z6rwLco9YMThDuD7t7jDB+2CwWc66x0BiVLA9etRMwURKbjpVIEvR/Q+PySGKu/yLFl43+ECRvw+07heCmUfhRFFLico7vDqMj3VBh4jOwwQdo/TxQJMBvHS+H3nsLPr+3H+qtZdJ25ZutMbGsX2hqDAvzeC2jnU6Ko+Fobd2HCBXhFdyICUXgaCRfRWHOwMPvbjOsGDVlD9YaJeOn1GHkc20miNUThtQlmg4kginpA7cXvXs3Wl365ETvgTi7ctbXNc9H2QiL/QcSMAxWBOonjfEcQfEJz7d5bYgrsT5YwJ90m86/jAAAAAElFTkSuQmCC"
+    },
+    {
+      "source_id": "gutenberg",
+      "title": "Project Gutenberg",
+      "description": "offline public-domain ebook library",
+      "kind": "planned",
+      "issue": 32,
+      "availability": "planned"
+    },
+    {
+      "source_id": "standard-ebooks",
+      "title": "Standard Ebooks",
+      "description": "curated public-domain literature",
+      "kind": "planned",
+      "issue": 33,
+      "availability": "planned"
+    },
+    {
+      "source_id": "kolibri",
+      "title": "Khan Academy / Kolibri",
+      "description": "offline education",
+      "kind": "planned",
+      "issue": 34,
+      "availability": "planned"
+    },
+    {
+      "source_id": "openstax",
+      "title": "OpenStax",
+      "description": "open textbooks",
+      "kind": "planned",
+      "issue": 35,
+      "availability": "planned",
+      "icon_png": "iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAD40lEQVR42tWVz4sdRRDHv9/qnnmzb3dfNiGbIHoQRYy7B1kjiCJkD5KA5qKwsBc9eDCXHIx3nRcQ/wDBQ3LxIBp1wYui112NEgyCClkUFdSISDQxZvNm3kx3V3l42ReT+CPoQVKn6h56vl3Vny8F3OjBqzfKspT1+fUr9ueW5gz9y+t+/7BdcXiU2HUJ/KswsOyX3LzYEoBTp85wfX6HjQXMQBL2zLG9D4h383EYfzViQJOLKlZRtPKBQ4uMQ/pAaUId6nZy0Gt/Oj4dV1ZW0j9VwLIseeHOEx8Xk/nutgogAQNhZkpYA3IoQGNAQ7I2sqZYTZMmtrFRtUqElaldlEwqhX7mrSxlZX2dS3Nz1p9d7QqKnQKDExmrGyEGTgCY4PhWBAHQCNCQFw4AYQaoGZwXtMN45po3OPjmvucB7NFk3jk3QTEPQwYwB5EByEh4wDKAngpRmCBBFMbciWQkxAuaKnzH04ceuTuLaaIG4D0wczarqqkk5zvM20KyCz4UjbeizaUYihQB6Bgta13q1I5dJboq1o2QLqjTP0/gwsYEh3nhtiLipEfST5g5V+iotsG2RADoqZpUqjuMRlAJKKEqgEJhpFMzwMwsGZwZUi6u54I92zv63gubHfFNtH2QWJyPrnM2YMpDk5pw8wXUQDhA7TJxpBAAEgATuplMBz2ntZlkoRs+L8tSFrEqq/1FHR969PEnXnbEvTFqS0KuC3+DOid5G+LJt19/7ck/xdTKUp7+9tPeOZ38UJybSzGCwkuMjJDhVWCP6TKD9x5t23yxdNtg965tMbU3fW/zs7OKxbVEYlT2/v37u72tvQ+88/eEEKDGZGYGUM1o4xzYbLvBYApGJ5K1ASfeeeuVvX9rtOXl5fsA7FRqvHlWe3ne5p2MWeEt6wjyvKN5xzH3Hcuo6GReO96hQ4fp7Vvs3O47Ln5NIFP1mWQ6iaG9uuX+97+6xgf248Jd1S9T76aI3AyehCcgJNyoc+KEJiDcyI9k5h2Qe0AARAVmPH47PTw4s7D6kt/88ZEjT2UHDhwNCH6y281uQUwJZAQsAUhqHIIWzBBhjAZEEkEVGjTFVMVGk8amIXm+zaj88g8tMhqIW+cf3rV9Olt47KFqAQmohqybxKCKpEliHS3UDUMTpa1bDXXFUAfGQWAYbCBtDDhwM8XxH06s1GMfjIZAnzwMvV2K5zaG3eUXj4mBHHlBAHLElBAgR+txfgkrEpjKDakePmiGjxYX97i1tbU4Ejg8UouW3mCozs5MpkBSVK/AwUwBQMeEjz8rzQwC4aDQ9A0JA9bS/zEySwHW/+OUW9G/Gp83ZvwOWw4DZoHHUMQAAAAASUVORK5CYII="
+    },
+    {
+      "source_id": "stack-exchange",
+      "title": "Stack Exchange",
+      "description": "technical Q&A archives",
+      "kind": "planned",
+      "issue": 36,
+      "availability": "planned"
+    },
+    {
+      "source_id": "linux-docs",
+      "title": "Linux and open-source technical documentation",
+      "description": "Linux administration and open-source software manuals",
+      "kind": "planned",
+      "issue": 37,
+      "availability": "planned"
+    },
+    {
+      "source_id": "ifixit",
+      "title": "iFixit",
+      "description": "offline repair guides",
+      "kind": "planned",
+      "issue": 38,
+      "availability": "planned",
+      "icon_png": "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAACTUlEQVR42qWTTUhUYRSGn+/eO47jjDrjTI1GQw7F5GQQ0V30I5iLyEUhbjIiWkWEZTTXWkTSzkVodxP9QLQIXNTGVm5cRJA/QVeMIFKoCCv/SictmnH0ztdm7jCmgdBZvt/7nu+c95wjpJT8T2h/A8KwwkArcBTYDgjgA9AP3JOmPrmKX1iBMKwWIXgoJd71fhOClJSck6besyaBMKxmoHeDlZ+Upv4EQMmJKxyxqgjZsKP0e5Eqsg7brYnskVjZN7eWxx4Lw9qUT+AtUq455OO15dPPWnfeH2irGQ541EzQq2UGL8WH+s/H7jbWlE85PJ9buZFvIdjx+uv875UtAAGPOpdM2TFp6qXJlH1bQNbvUduEYS2VF6vjC2nbD+D3qLPJzr1hIaXEfXVkOWNLrcCsaSmJSVNfAaQwLLcQvJeSkMNxqcLOdO3TFEdT6FCRKkJn94dKgBSQPqMHfZoiAqsmktMoAJVlrrTzEPJqS6PttYMPTlT/dLBHp6KLVmLXcEWJlingpfOLdCjq+zSRnK8FOFDtm4qHi1uEYfmBUcAGGqSpt+iRkpf944sRgINR3+e8iW8mU1f2dL/tyvWWWbZljxA0SUkQQBHMZiV9LlWcXralC+BVIt6hR7ydziL57wzMDl3snYhvZIvMpshYoj5cB8w5Jv64ULe57VZTZExTxD+vSxHIm8e2jifqw5eBuTW3ADS+m0lf734+ve3Fx1+ByYVMMUBVmStdFy1Nth8Of9ld5ekE+tY9plyEgWZABypz2AwwAjwFpgrJfwBa0dUH/EB4DAAAAABJRU5ErkJggg==",
+      "setup": {
+        "format": "zim",
+        "source_url": "https://download.kiwix.org/zim/ifixit/ifixit_en_all_2025-12.zim",
+        "edition": "2025-12",
+        "language": "eng",
+        "publisher": "iFixit via Kiwix",
+        "provenance": "Archive listed in the official Kiwix download index."
+      }
+    },
+    {
+      "source_id": "practical-action",
+      "title": "Practical Action / appropriate technology",
+      "description": "resilient infrastructure guides",
+      "kind": "planned",
+      "issue": 39,
+      "availability": "planned",
+      "icon_png": "iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAD8klEQVR42p1VQWtcVRg957v3vTFga5Jaa4ixie4CosVFk9fFCGKhSxdvoSgIQnXjvguhBH+B1YUrNwYqjhVXtRupsSVTRiJUNAhSpDq0lYaCmyYzc+89Lua9ZBIVmn7wNvfe993vO+d85xL7CwLQwsLCNICXSMbtDVIAvKSr7Xb7Zn3W9pO9LMvhebNTWZYtm9myOXfenDsPctl5vwyzcvSsx0OEB44KQJJEQAAgqe7kKAC0Wi0BgD3MBSKnK0i45xOBp+tjNab7wR/NZtMNQrhkZi/HGCNJV+0nM7OU0k+Z98dXVla2AHC/HajX6x1EVSXJ0QJZwXRkC3iyXrP9dgBgEsBEjfmu2yVIOmT9fg3Tg3NQliUBwPJ8CsABpbQXYgKQc84DmK7/2TfJSmnazBogEwAKkKp2JCWSEDm3rbiyLN3/JZufn9fS0tK2IqokczSDJJkZkNKtJOVmdliSSMLMnt2L6wPKH6Eoik98lr0TQhiYWZZSuiRp2jn3XEpp4JzLYozf9ra2Tq2trQ384uLim2bWAxBCCDCzhpnlMguI8a73/s+NjY0b6+vrfQCk2VRNKEmA/FXDDpBSqtefyrLsAIB7BmBS0jmaXcgbjQsi35Z0EDG+IvLrEGNnYnLyclEUJyspzqaKYJIgeZNSd1RJAA5VaoO12+0PAfwoCZBgZpdXV1c/Wl1dfYvSOTN7lGRB8tOiKI4DmBjRJRTjbQB3quTUMMZry7CyLHOZuZEKxirimVL6RtIgxhgBPC7yVQB5BYOloe5/AfDHyMzJzDzJmZq4uGuaSLVarVgJYBNAADlGs/uMcRbkwQoGSykJZqclzcQYQdLVUmUlVf8f07hjXOSEpIxASin1AGwBaIzW483eE4C0Z/Bq0/vXoJHsA1BZlg7ka34YJvJzSredcyYp1fXElAYxxrBroiVEafbF06czP5IYaUj0ycUTJ9Ttdo+ZWTOGsC7yq7+npj54rNv9zA2x1raZmWWVB23nGfo0Z/z165N+j7wA6VYM4Tt4f9WR74cQ7ly7du1es9l8pE8eraCoYzPGeFekJ3CYQFa7KoHxLMuOeABu5x0hBNzodDpXduF29qzdv3hxPG80nqh8R845hcHgi5DnZ7i5OZbl+Zckj8UYkyQjeSD2+zPWarX6BAbbr5INaWk2m77iyGFpKZGclDQhiSAlgIn87YeVlTudTud3SLeqAlUVmyvL5qwoineV0gs7KtbJhYWF1weDwRiAVJYlAMA59wzJcZIiYATgyY26MEl/kaSRMFJmBgLPe0k9OndmRAljZsZer2fV450wlOHPIt8wIEhilBzJKyOEf9wP4XuTegIQQ8gI3PwHpZwW7bE+1mwAAAAASUVORK5CYII="
+    },
+    {
+      "source_id": "noaa",
+      "title": "NOAA / National Weather Service",
+      "description": "weather and hazard reference",
+      "kind": "planned",
+      "issue": 40,
+      "availability": "planned"
+    },
+    {
+      "source_id": "amateur-radio",
+      "title": "Amateur radio and emergency communications reference",
+      "description": "radio operation and emergency communications guidance",
+      "kind": "planned",
+      "issue": 41,
+      "availability": "planned"
+    },
+    {
+      "source_id": "food-reference",
+      "title": "Open Food Facts / USDA FoodData Central",
+      "description": "offline food reference",
+      "kind": "planned",
+      "issue": 42,
+      "availability": "planned",
+      "icon_png": "iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAADxklEQVR42pWVQWyUVRDHfzPvLV26bVcKBDCBUOPFC54UjpiYGr2ZUA6cjDG4Ho1aLm2aticCGr1oRA8alAMQb2KikcSDmsCtgicUBOlq2bbSbZfd/b73xsPuwlJ21zrJu7z3ze8/M2++eUIvG8Px/K4+zhTr/EAKwKtbB9H+d0COoOSJdpBPb11lCmWauB4hHcGGIBifjOwgpmdBAsSvuZH5glL4iIy+TAAs/gbJAU4VF+97rjPtKCAYUyh/Xl90Qa64bf45l/Mn3Y7woxN7yUXDZSCTcpxTxRJTSCd49wwAM4RzqBwm8OHeY3iOonE38xS5IWWCHefzm6c/Pkrm9VMk3Ti+G1wEA4LN5keor5Z+qeu1KzCQHcA//ZRdeyJnmeqT+ZHNk3evr/PpnYGBCJhNoeS3vo3yJhm3k2BQt4ZHn0BGoG5FavF93lo8IYK1fLsKGAhTCI/vyrJa/4x+HeMeECwNhkMRM0wV++tOEh8bcr5/2BPL4ZwObXqF+WKVaaxdRNe1pco0kZXae+TcGKuWEMwQvFPEAU4QVdFKMF+pmVG1RIfcGHdr78o0kbGHmfczsLM4OUywk9tfIGMXSAjNO+rcCF4AYXE5MRHS4W3epZXwYmZ86dsW6+EMrjbrLvYGKkpEO8IFqgEu/bpGSCKVJMrqvaCoqPdSsCmUqw9KJO0dUJndsjsz4C5pYKeK69rEZrBajwxsUsQ3Kh7TlOis6NfsGZlYut1iNtr0MAqEzXm/hz4ZoB4jK0uxW28LMCgCVSM2Y9V8XnWTDOLjHuB2i+kb/IaNf1XJVpNUtgwP/z05+UHWe+8w6zmuVIQkTcP07Ex1eWl5qM/7XDuzZa55c88CVcnm11brVrMN2krN6vQNrQFV8Afama1LjgC5XHoj47TkkpXsTxe/WcQCaVKLxAAxXbeaZxb4+eKFOz5ZyWaclnK59Ho785HB55w7Ddjo6Oi8ma2laWohhLg+6hBCTNPUzGxtdHR0HrCmb9ch2trcr6o1oDI7O/uHWaNUIQRLksSSJLEQQkunNjMzcwuoqGod2N9zSrcdTKiqAfcKhcKthYWFf8ys3pZAfWFhYblQKNxswg2Y6ASXLiIROK6q4zFGGxwcLB06dCju27evH2Bubq5y/vx5LZfL21WVGOMJYLzNt6fJg67iNedc0nxMHlnOuTngSFtgspH3oL3xSyEEE5HfvfdnRGRv40+2mzHGyyGE74HyRiPvlMV3TcGJHt86/qe1HA424WVgpLnv2sRdryd3I+oCbAEuA1+2la99/af9C9VCImo7J+jWAAAAAElFTkSuQmCC"
+    },
+    {
+      "source_id": "internet-archive",
+      "title": "Internet Archive",
+      "description": "curated offline reference collections",
+      "kind": "planned",
+      "issue": 43,
+      "availability": "planned",
+      "icon_png": "iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAD3klEQVR42rWWv09USxTHPzNzf+xeYnBFshiigQsxgQJCoLEylv4RNPSU1r5K/RtsrOz8E+iAigqyJPJDCMkGEkJ0o2aXnbt3jgWZ8S4Pi/de3mlm5szM+fk9Z0bleS5USCmF1hqlFGVZMhgMsNZyfX1NvV4HoNfrkSQJaZoSRRFRFAHgnENEEPktMqoKd84FgUVRUK/XuX//PouLiywsLLC0tISI0Gq1ODg44PPnz3z9+pVOpwNArVYjiiKMMSilbgz2HiiliOOYsbEx5ubmgtD5+XkePnzIXfTz509OTk7Y29tjf3+fVqvF2dkZvV4P59yNgpmZGbHWMj09zfr6OtPT02RZFsJRFAVFUTAYDIaEG2OIoog4jjHGYK2l2+3S6XR4+/YtrVaLer1OJCJEUcTFxQWHh4d0u90hC7y71bh6j0WEsiwREbTW1Ot1jo+POT4+Jk1TnHM3OVBKYa3lxYsXPHv2jP9CGxsbfPjwgVqthoj8ViAifPz4kYODAw4PD7HWIiI0m01GR0f58uVL8MIYw8zMDFdXV1xdXaGUIssy8jxna2sLY8xvjXmey9OnT+XBgwfy6tUrabfb8vLlSxkZGZGRkRF5//69nJ6eSp7n0mg05N69e7K8vCztdlvevHkjaZpKlmWyuroq7XZb1tbWZHx8XGZnZyXPc4mqEJ2YmGBycpKpqSl2d3dJ05Q8z5mamuLx48cAlGXJkydPmJycJM9zxsfHh3iPHj2iLEu01jjn0NWk+VDFcUxRFABorRERkiShKAqstcRxjAeHR1oUReFuFRAaQEQwxlCr1VBKBQRorQOvVquFS1WeMQbnHEmSoJQiSZKhpAcFWmviOAYgTdPA8xeSJAltwJ9LkgStdfC0Og4pqIbpT+s/zW/zbu9p/mfS1Trw1eucQymFcy7wyrIMFvp5WZZDd6od9W8eOOfo9/sAYXTOYa0NPI80v18URRB227g7FXho9vv9AE+vwI9esD/nMX/XufAe+BD59mCtDfDr9Xqho3ql19fXQ+eNMUO8Oz2ouueF9/t9nHOheHzMu91uqBfP8yH0cA5tvdFo/OUXSZJQliWbm5t0Oh2MMSRJwuXlJdvb2xRFEeoiTVN2dnY4OjoiTVO01hhj2N7e5vz8PFS2yvNcfOJev37N8vLyUOX2ej0GgwFZloUuWZYl3W6XKIpCVfsQbW5u8u7dO7Isu2knSikGgwHNZhNrLe12eyhR1Q/A7Y9BFdreK+cczWaTb9++3XwIjDF8//6d58+fs7CwwI8fP8Jj8U/IG7GyssLR0RGfPn1idHR0+NG/3aj+DYnIUH38AqZyX/Av/vAiAAAAAElFTkSuQmCC"
+    }
+  ]
+}

@@ -478,6 +478,7 @@ def test_source_icon_is_shared_and_uses_only_local_image_data():
 
 def test_preconfigured_source_artwork_and_custom_override():
     wiki = profile("wikipedia-en", title="Wikipedia English")
+    wiki["profile"]["icon_png"] = WIKIPEDIA_SOURCE["icon_png"]
     assert '<img src="data:image/png;base64,' in render([wiki])
     wiki["profile"]["icon_png"] = "custom-fixture"
     assert '<img src="data:image/png;base64,custom-fixture" alt="">' in render([wiki])
