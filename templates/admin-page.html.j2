@@ -654,7 +654,7 @@
       <label class="group-select" hidden><input type="checkbox" data-group-select value="{{ source.source_id }}" aria-label="Select {{ source.profile.title }} for grouping"></label>
       <details class="source-card" data-source-id="{{ source.source_id }}" data-filter-title="{{ source.profile.title }}" data-filter-format="{{ source.configuration.format }}" data-filter-publication="{{ source.publication_filter|default('unknown') }}" data-filter-download="{{ source.download_filter|default('unknown') }}"{% for name in editable_fields %} data-catalog-{{ name|replace('_', '-') }}="{{ source.profile.get(name, source.configuration.get(name, '')) }}"{% endfor %}>
         <summary class="source-header">
-          <span class="source-symbol">{% from 'source-icon.html.j2' import source_icon %}{{ source_icon(source.profile.title, source.profile.get('icon_png', '')) }}</span>
+          <span class="source-symbol">{% from 'source-icon.html.j2' import source_icon %}{{ source_icon(source.profile.title, source.profile.get('icon_png', ''), source.source_id) }}</span>
           <div>
             <h3>{{ source.profile.title }}</h3>
             <p class="source-subtitle">{{ source.configuration.format|upper }}{% if source.profile.description %} · {{ source.profile.description }}{% endif %}</p>

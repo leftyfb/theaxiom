@@ -474,3 +474,11 @@ def test_source_icon_is_shared_and_uses_only_local_image_data():
         name="Reference Library", entry_path="/reader", icon_png=icon, category="PDF")])
     for page in (admin, public):
         assert f'<img src="data:image/png;base64,{icon}" alt="">' in page
+
+
+def test_preconfigured_source_artwork_and_custom_override():
+    wiki = profile("wikipedia-en", title="Wikipedia English")
+    assert '<img src="data:image/png;base64,' in render([wiki])
+    wiki["profile"]["icon_png"] = "custom-fixture"
+    assert '<img src="data:image/png;base64,custom-fixture" alt="">' in render([wiki])
+    assert '🚦' in render([profile("custom-rail", title="railroad signals")])
