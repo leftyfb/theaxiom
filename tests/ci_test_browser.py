@@ -200,12 +200,28 @@ def exercise(browser, base, name, viewport, artifacts):
         expect(page.locator("#catalog-update-endpoint")).to_have_value("https://publisher.org/metadata")
         expect(page.locator("#catalog-update-method")).to_have_value("head")
         expect(page.locator("#catalog-update-periodic")).to_have_value("yes")
+        icon_file = page.locator("#source-icon-file")
+        icon_file.set_input_files(str(Path(__file__).resolve().parents[1] / "templates" / "favicon.png"))
+        expect(page.locator("#source-icon-preview img")).to_be_visible()
         page.locator("#catalog-description").fill("Verified through real browser UI")
         # The application intentionally reloads after a catalog mutation.
         # Wait for that navigation, not just an already-present DOM element.
         with page.expect_navigation(wait_until="domcontentloaded"):
             page.locator('#source-form [type="submit"]').click()
         expect(page.locator(".source-card[data-source-id='" + sid + "']")).to_be_visible(timeout=15000)
+
+        expect(card.locator(".source-symbol img")).to_be_visible()
+        card.locator("summary.source-header").click()
+        card.locator("[data-catalog-edit]").click()
+        page.locator("#source-icon-remove").click()
+        expect(page.locator("#source-icon-preview img")).to_have_count(0)
+        page.locator("#source-cancel").click()
+        expect(card.locator(".source-symbol img")).to_be_visible()
+        card.locator("[data-catalog-edit]").click()
+        page.locator("#source-icon-remove").click()
+        with page.expect_navigation(wait_until="domcontentloaded"):
+            page.locator('#source-form [type="submit"]').click()
+        expect(card.locator(".source-symbol img")).to_have_count(0)
 
         # Closed #68/#70/#77: browser-provided filename populates a new
         # document's title and format. Cancel must not persist the candidate.

@@ -90,7 +90,7 @@ def test_catalog_management_form_exposes_metadata_and_confirmation_controls():
     )
     assert '<dialog id="source-dialog"' in page
     assert 'id="source-form"' in page
-    for field in EDITABLE | {"source_id"}:
+    for field in (EDITABLE - {"icon_png"}) | {"source_id"}:
         assert f'name="{field}"' in page
     assert 'data-catalog-edit="field-guide"' in page
     assert 'data-catalog-source-url="https://example.org/guide?topic=a&amp;part=b"' in page
