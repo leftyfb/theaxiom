@@ -309,9 +309,15 @@ def exercise(browser, base, name, viewport, artifacts):
         page.route("**/api/acquisition-batch", batch_downloads)
         page.once("dialog", lambda dialog: dialog.accept())
         page.get_by_role("button", name="Queue selected downloads").click()
-        expect(page.locator("#acquisition-queue-summary")).to_contain_text("16.78 MB reserved")
-        page.get_by_role("button", name="Cancel Fixture download").click()
-        expect(page.locator("#acquisition-queue-jobs")).to_contain_text("Fixture download · Cancelled")
+        queued_card = page.locator(f'.source-card[data-source-id="{sid}"]')
+        expect(page.get_by_text("Batch downloads", exact=True)).to_have_count(0)
+        expect(queued_card.locator("[data-batch-status]")).to_have_text("Download queued")
+        if not queued_card.evaluate("(card) => card.open"):
+            queued_card.locator(".source-header").click()
+        queued_card.get_by_role("button", name="Cancel queued download").click()
+        expect(queued_card.locator("[data-batch-status]")).to_have_text("Batch download cancelled")
+        batch_jobs[0].update(state="completed", id="b" * 32)
+        expect(queued_card.locator("[data-batch-status]")).to_be_hidden()
         page.unroute("**/api/acquisition-batch", batch_downloads)
         def stale_sources(route):
             response = route.fetch().json()
