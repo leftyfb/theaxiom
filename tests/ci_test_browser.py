@@ -27,8 +27,16 @@ def exercise(browser, base, name, viewport, artifacts):
     try:
         # Test the application through real browser requests, not mock HTML.
         page.goto(base + "/")
-        expect(page.locator("body")).to_contain_text("offline")
-        page.goto(base + "/search?q=emergency")
+        expect(page.get_by_role("link", name="Getting Started")).to_be_visible()
+        search_input = page.locator("#library-search")
+        expect(search_input).to_be_hidden()
+        search_toggle = page.locator('summary[aria-label="Search library"]')
+        search_toggle.focus()
+        page.keyboard.press("Enter")
+        expect(search_input).to_be_visible()
+        search_input.fill("emergency")
+        search_input.press("Enter")
+        expect(page).to_have_url(base + "/search?q=emergency")
         expect(page.locator("body")).to_be_visible()
         # Public pages are the primary mobile entry points. Protect their
         # layout independently of the authenticated administrator pages.
