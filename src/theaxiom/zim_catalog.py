@@ -11,7 +11,6 @@ from pathlib import Path
 import re
 import tempfile
 import uuid
-import stat
 import time
 from urllib.parse import urlsplit
 import xml.etree.ElementTree as ET
@@ -36,33 +35,6 @@ def archive_uuid(stream):
     return str(uuid.UUID(bytes=header[8:24]))
 
 
-def legacy_pinned_entries():
-    """Packaged, fully verified external acquisition capability definitions.
-
-    These entries are an explicit compatibility adapter for archives installed
-    before the generic ZIM ledger. No editable source profile may supply one.
-    """
-    from . import source_catalog
-    result = {}
-    for entry in source_catalog.builtin_sources():
-        unit_name = source_catalog.LEGACY_ACQUISITION_UNITS.get(entry.get("source_id"))
-        has_unit = (isinstance(unit_name, str) and ".." not in unit_name
-                    and re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_.@-]{0,119}\.service", unit_name))
-        if (entry.get("kind") != "zim" or
-                (entry.get("source_id") not in source_catalog.LEGACY_READER_ROUTES and not has_unit)):
-            continue
-        sid, filename, digest, size = (entry.get("source_id"), entry.get("filename"),
-                                       entry.get("sha256"), entry.get("bytes"))
-        if (not isinstance(sid, str) or not re.fullmatch(r"[a-z][a-z0-9-]{0,63}", sid)
-                or not isinstance(filename, str) or not re.fullmatch(
-                    r"[A-Za-z0-9][A-Za-z0-9_.-]{0,195}\.zim", filename)
-                or not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest)
-                or type(size) is not int or size < 96):
-            continue
-        result[sid] = entry
-    return result
-
-
 def verified_books(records, enabled=None):
     """Return vetted Kiwix entries without touching installed content or its modes.
 
@@ -76,8 +48,7 @@ def verified_books(records, enabled=None):
     if not root:
         return []
     candidates = [record for record in records
-                  if not publication.legacy_only(record["source_id"])
-                  and record["configuration"].get("format") == "zim"
+                  if record["configuration"].get("format") == "zim"
                   and enabled.get(record["source_id"], False)]
     result = []
     if candidates:
@@ -115,31 +86,6 @@ def verified_books(records, enabled=None):
                     "id": book_uuid, "path": str(Path(root) / "library" / "zim" / filename),
                     "title": title, "language": language,
                 })
-    # The compatibility capability is selected by immutable seed metadata,
-    # never by source ID. Do not read/have to rehash a large installed ZIM.
-    from . import acquisition_monitor
-    for trusted in legacy_pinned_entries().values():
-        if not enabled.get(trusted["source_id"], False) or not publication.legacy_only(trusted["source_id"]):
-            continue
-        evidence = acquisition_monitor.collect(trusted)
-        if (evidence.get("state") != "completed" or
-                evidence.get("verified") is not True or evidence.get("active") is not False or
-                evidence.get("filename") != trusted["filename"] or
-                evidence.get("sha256") != trusted["sha256"] or
-                evidence.get("expected_bytes") != trusted["bytes"]):
-            continue
-        trusted_path = Path(root) / "library" / "zim" / trusted["filename"]
-        try:
-            fd = os.open(trusted_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
-            with os.fdopen(fd, "rb") as stream:
-                info = os.fstat(stream.fileno())
-                if not stat.S_ISREG(info.st_mode) or info.st_size != trusted["bytes"]:
-                    raise ValueError("Unexpected legacy ZIM archive")
-                trusted_uuid = archive_uuid(stream)
-        except (OSError, ValueError):
-            continue
-        result.append({"id": trusted_uuid, "path": str(trusted_path),
-                       "title": trusted["title"], "language": trusted["language"]})
     return sorted(result, key=lambda book: book["id"])
 
 
@@ -257,9 +203,8 @@ def acknowledged_reader_books(records):
         root = ET.fromstring(stored)
         if root.tag != "library" or root.get("version") != "20110515":
             return {}
-        trusted_by_filename = {entry["filename"]: entry
-                               for entry in legacy_pinned_entries().values()}
-        known = {record["source_id"]: record for record in records}
+        known = {record["source_id"]: record for record in records
+                 if record["configuration"].get("format") == "zim"}
         result = {}
         seen = set()
         for book in root:
@@ -270,35 +215,20 @@ def acknowledged_reader_books(records):
             except (ValueError, AttributeError):
                 return {}
             filename = Path(book.get("path", "")).name
-            pinned = trusted_by_filename.get(filename)
-            sid = pinned["source_id"] if pinned is not None else filename.split(".", 1)[0]
-            if sid in seen or not enabled.get(sid, False):
+            sid = filename.split(".", 1)[0]
+            if sid in seen or not enabled.get(sid, False) or sid not in known:
                 return {}
             seen.add(sid)
             name = Path(filename).stem
-            if not publication.valid_book_id(name) or not filename.endswith(".zim"):
+            if not publication.GENERIC_BOOK_ID_RE.fullmatch(name) or not filename.endswith(".zim"):
                 return {}
-            if pinned is not None and not publication.legacy_only(sid):
-                job = zim_jobs.read(sid)
-                artifact = zim_jobs.installed(job, job["configuration"]) if job else None
-                if not artifact or artifact["filename"] != filename:
-                    continue
-            elif pinned is not None:
-                if (book.get("title") != pinned["title"] or
-                        book.get("language") != pinned["language"]):
-                    return {}
-            else:
-                record = known.get(sid)
-                if not record or record["configuration"].get("format") != "zim":
-                    return {}
-                if not re.fullmatch(re.escape(sid) + r"\.[a-f0-9]{64}\.zim", filename):
-                    return {}
-                if book.get("title") != record["profile"].get("title", "").strip():
-                    return {}
-                language = record["profile"].get("language", "").strip().lower()
-                language = LANGUAGES.get(language, language if re.fullmatch(r"[a-z]{3}", language) else "und")
-                if book.get("language") != language:
-                    return {}
+            record = known[sid]
+            if book.get("title") != record["profile"].get("title", "").strip():
+                return {}
+            language = record["profile"].get("language", "").strip().lower()
+            language = LANGUAGES.get(language, language if re.fullmatch(r"[a-z]{3}", language) else "und")
+            if book.get("language") != language:
+                return {}
             result[name] = sid
         return result
     except (OSError, ValueError, TypeError, KeyError, ET.ParseError):
@@ -348,7 +278,7 @@ def status(record, records):
               "publication_reason": ""}
     try:
         config = record["configuration"]
-        if publication.legacy_only(sid) or config.get("format") != "zim":
+        if config.get("format") != "zim":
             return result
         enabled = publication.load().get(sid, False)
         job = zim_jobs.status(sid)

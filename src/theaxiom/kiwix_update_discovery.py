@@ -175,14 +175,11 @@ def installed_identity_from_job(job: dict, artifact: dict) -> dict | None:
     config = job.get("configuration")
     if not isinstance(config, dict) or config.get("format") != "zim":
         return None
-    from . import zim_jobs
-
     digest = artifact.get("sha256")
     source_id = job.get("source_id")
     if (not isinstance(source_id, str) or not re.fullmatch(r"[a-z][a-z0-9-]{0,63}", source_id)
             or not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest)
-            or (artifact.get("filename") != f"{source_id}.{digest}.zim"
-                and not zim_jobs.adopted_filename(job, artifact))
+            or artifact.get("filename") != f"{source_id}.{digest}.zim"
             # A checksum is optional at acquisition time. The completed,
             # independently verified artifact contains its measured SHA-256;
             # if the operator supplied an expected digest, it must match.
@@ -295,106 +292,3 @@ def cached_checked_source(source_id: str) -> dict:
         return update_check_store.load(source_id, installed["sha256"])
     except (OSError, ValueError, TypeError, KeyError):
         return dict(UNKNOWN)
-
-
-def pinned_seed_identity(record: dict, artifact: dict, *, verified: bool) -> dict | None:
-    """Match a verified legacy artifact against an immutable pinned ZIM seed.
-
-    Works for any safely pinned Kiwix ZIM, never solely because a source ID,
-    local filename or editable profile claims a matching edition. No archive
-    reads, network calls or persistent state mutation occur here.
-    """
-    from . import source_catalog
-    if (verified is not True or not isinstance(record, dict)
-            or not isinstance(artifact, dict)
-            or not isinstance(record.get("configuration"), dict)):
-        return None
-    config = record["configuration"]
-    if config.get("format") != "zim":
-        return None
-    for seed in source_catalog.builtin_sources():
-        if seed.get("kind") != "zim" or record.get("source_id") != seed.get("source_id"):
-            continue
-        if (not isinstance(seed.get("sha256"), str)
-                or not re.fullmatch(r"[a-f0-9]{64}", seed["sha256"])
-                or type(seed.get("bytes")) is not int or seed["bytes"] < 96
-                or not isinstance(seed.get("filename"), str)
-                or any(artifact.get(key) != seed.get(key)
-                       for key in ("filename", "source_url", "bytes", "sha256"))
-                or config.get("source_url") != seed.get("source_url")
-                or config.get("sha256") != seed["sha256"]
-                or config.get("expected_size_bytes") != str(seed["bytes"])):
-            return None
-        name = seed["filename"]
-        match = re.fullmatch(
-            r"([a-z0-9._-]{3,120})_(20[0-9]{2}-(?:0[1-9]|1[0-2]))\.zim", name)
-        if not match or ".." in match.group(1):
-            return None
-        family, edition = match.groups()
-        parts = family.split("_")
-        language = {"en": "eng", "es": "spa", "fr": "fra", "de": "deu"}.get(
-            parts[1] if len(parts) >= 3 else "")
-        if language is None or seed.get("language") != language:
-            return None
-        url = seed["source_url"]
-        try:
-            parsed = urlsplit(url)
-            if (parsed.scheme != "https" or parsed.hostname not in kiwix_opds.DOWNLOAD_HOSTS
-                    or parsed.username or parsed.password or parsed.query or parsed.fragment
-                    or parsed.port not in (None, 443)):
-                return None
-        except (TypeError, ValueError):
-            return None
-        return dict(verified=True, sha256=seed["sha256"],
-                    family=family, edition=edition, source_url=url,
-                    language=language, variant=parts[-1], publisher="kiwix")
-    return None
-
-
-def pinned_wikipedia_identity(record: dict, artifact: dict, *, verified: bool) -> dict | None:
-    """Backward-compatible alias for previously exported legacy pin checks."""
-    return pinned_seed_identity(record, artifact, verified=verified)
-
-def refresh_pinned_seed(record: dict, artifact: dict, *, verified: bool,
-                             fetch=None) -> dict:
-    """Check any trusted pinned seed without archive or download access."""
-    from . import update_check_store
-    sid = record.get("source_id") if isinstance(record, dict) else "<invalid>"
-    LOGGER.info("source_id=%r stage=request pinned=true", sid)
-    installed = pinned_seed_identity(record, artifact, verified=verified)
-    if installed is None:
-        LOGGER.warning("source_id=%r stage=installed_identity state=unable_to_determine", sid)
-        return dict(UNKNOWN)
-    if not CHECK_LOCK.acquire(blocking=False):
-        update_diagnostics.mark("busy")
-        LOGGER.warning("source_id=%r stage=lock state=unable_to_determine", sid)
-        return dict(UNKNOWN)
-    try:
-        update_diagnostics.mark("cache_read", cache="miss")
-        cached = update_check_store.load(sid, installed["sha256"])
-        if ("checked_at" in cached
-                and 0 <= time.time() - cached["checked_at"] < MIN_RECHECK_SECONDS):
-            LOGGER.info("source_id=%r stage=cache_hit state=%s", sid, cached["state"])
-            update_diagnostics.mark("cache_read", cache="hit")
-            return cached
-        LOGGER.info("source_id=%r stage=metadata_check cache=miss", sid)
-        result = check_kiwix_update(installed, fetch=fetch)
-        try:
-            update_check_store.save(sid, installed["sha256"], result)
-        except (OSError, ValueError):
-            update_diagnostics.mark("cache_write")
-            raise
-        LOGGER.info("source_id=%r stage=cache_save state=%s", sid, result["state"])
-        return result
-    except (OSError, ValueError, TypeError, KeyError) as exc:
-        LOGGER.warning("source_id=%r stage=wrapper_failure exception_type=%s",
-                       sid, type(exc).__name__)
-        return dict(UNKNOWN)
-    finally:
-        CHECK_LOCK.release()
-
-
-def refresh_pinned_wikipedia(record: dict, artifact: dict, *, verified: bool,
-                             fetch=None) -> dict:
-    """Compatibility alias for callers migrating to format-driven checks."""
-    return refresh_pinned_seed(record, artifact, verified=verified, fetch=fetch)

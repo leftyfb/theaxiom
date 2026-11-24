@@ -771,29 +771,14 @@ def archive_identity(info):
                 mtime_ns=info.st_mtime_ns, ctime_ns=info.st_ctime_ns)
 
 
-def adopted_filename(job, artifact):
-    from . import zim_adoption
-
-    adoption = job.get("adopted_from_legacy")
-    return bool(isinstance(adoption, dict) and isinstance(adoption.get("identity"), dict)
-                and job.get("source_id") == zim_adoption.SOURCE_ID
-                and artifact.get("filename") == zim_adoption.PINNED_FILENAME
-                and artifact.get("bytes") == zim_adoption.PINNED_BYTES
-                and artifact.get("sha256") == zim_adoption.PINNED_SHA256
-                and artifact.get("source_url") == zim_adoption.PINNED_SOURCE_URL)
-
-
 @contextmanager
 def open_installed_archive(directory, mount, job, artifact):
-    """Open a managed ZIM and enforce any recorded in-place file identity."""
+    """Open the verified, digest-named file recorded in the managed ledger."""
     digest = artifact["sha256"]
     filename = artifact["filename"]
-    preserved_name = filename != f'{job["source_id"]}.{digest}.zim'
-    if not re.fullmatch("[a-f0-9]{64}", digest) or (preserved_name and not adopted_filename(job, artifact)):
+    if not re.fullmatch("[a-f0-9]{64}", digest) or filename != f'{job["source_id"]}.{digest}.zim':
         raise ValueError("Invalid installed archive metadata")
     with pdf_source._file(directory, mount, filename, artifact["bytes"]) as stream:
-        if preserved_name and archive_identity(os.fstat(stream.fileno())) != job["adopted_from_legacy"]["identity"]:
-            raise ValueError("Installed archive identity changed")
         yield stream
 
 

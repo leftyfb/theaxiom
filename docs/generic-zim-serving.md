@@ -2,7 +2,7 @@
 
 ## Current implementation (reviewed 2026-11-22)
 
-The unified Kiwix reader is deployed on Vancouver, with the shared `/zim/` route and default loopback port 8081. The application prepares a private `kiwix-library.xml` manifest containing only explicitly published and independently verified ZIM archives. Wikipedia remains a narrowly scoped trusted legacy acquisition, not a pattern for arbitrary uploaded sources. The reader configuration and deployment examples are in `deploy/` and `templates/`.
+The unified Kiwix reader is deployed on Vancouver, with the shared `/zim/` route and default loopback port 8081. The application prepares a private `kiwix-library.xml` manifest containing only explicitly published and independently verified ZIM archives. The reader configuration and deployment examples are in `deploy/` and `templates/`.
 
 There is **no pending 8082 sidecar migration** and no standing, blanket authorization to deploy. The previously documented migration and request-time verification blockers are historical, not current live deployment holds. Confirm the actual deployed application SHA before relying on newer code paths.
 

@@ -72,51 +72,6 @@ def test_opds_book_identity_rejects_ambiguous_duplicates_and_external_links():
             read(xml)
 
 
-def test_opds_accepts_only_exact_trusted_legacy_wikipedia_identity():
-    from pathlib import Path
-    from theaxiom.source_catalog import WIKIPEDIA_SOURCE
-    legacy = Path(WIKIPEDIA_SOURCE["filename"]).stem
-    def read(book_id):
-        xml = (f'<feed xmlns="http://www.w3.org/2005/Atom">'
-               f'<entry><link href="/zim/content/{book_id}"/></entry></feed>')
-        with patch.object(zim_reader_probe.http.client, "HTTPConnection") as factory:
-            response = factory.return_value.getresponse.return_value
-            response.status = 200
-            response.read.return_value = xml.encode()
-            return zim_reader_probe.listed_book_ids()
-    assert read(legacy) == {legacy}
-    for invalid in (legacy.upper(), legacy + ".zim", "wikipedia_en_all_maxi_2026-07",
-                    "wikipedia_en_all_maxi_2026-08%2fother"):
-        with pytest.raises(ValueError, match="Ambiguous"):
-            read(invalid)
-
-
-def test_shared_manifest_includes_only_verified_published_wikipedia(disk):
-    from theaxiom import source_catalog, acquisition_monitor
-    trusted = source_catalog.WIKIPEDIA_SOURCE
-    evidence = {"state": "completed", "verified": True, "active": False,
-                "filename": trusted["filename"], "sha256": trusted["sha256"],
-                "expected_bytes": trusted["bytes"]}
-    # Sparse fixture mimics a large, verified archive without allocating its bytes.
-    wikipedia_path = disk / "library" / "zim" / trusted["filename"]
-    wikipedia_path.parent.mkdir(parents=True, exist_ok=True)
-    with wikipedia_path.open("wb") as stream:
-        stream.write(fixture_bytes()[:24])
-        stream.truncate(trusted["bytes"])
-    with patch.object(acquisition_monitor, "collect", return_value=evidence) as probe:
-        publication.save("wikipedia-en", True)
-        books = zim_catalog.verified_books([])
-        assert [book["id"] for book in books] == [str(uuid.UUID(int=0))]
-        assert books[0]["path"].endswith("/library/zim/" + trusted["filename"])
-        assert zim_catalog.content_name(books[0]) == trusted["filename"][:-4]
-        assert probe.call_count == 1
-        publication.save("wikipedia-en", False)
-        assert zim_catalog.verified_books([]) == []
-    with patch.object(acquisition_monitor, "collect", return_value={**evidence, "verified": False}):
-        publication.save("wikipedia-en", True)
-        assert zim_catalog.verified_books([]) == []
-
-
 @pytest.mark.parametrize(("error", "category"), [
     (OSError("/secret/private/archive.zim missing"), "listener-or-filesystem-unavailable"),
     (ValueError("Kiwix reader not ready"), "listener-not-ready"),

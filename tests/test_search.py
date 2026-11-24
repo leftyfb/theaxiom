@@ -28,26 +28,20 @@ def test_search_only_published_and_bounded():
     def adapter(route, query):
         assert query == "water"
         return [search.Result("Water", "/fixture/article")] * 30
-    with patch.dict(search.publication.ROUTES, {"fixture": ROUTE}, clear=True), \
-         patch.dict(search.ADAPTERS, {"fixture": search.Adapter("full text", adapter)}, clear=True), \
-         patch.object(search.publication, "allowed", return_value=True):
-        groups = search.search("water", lambda: {})
-        assert len(groups[0]["results"]) == search.MAX_RESULTS
-    with patch.dict(search.publication.ROUTES, {"fixture": ROUTE}, clear=True), \
-         patch.dict(search.ADAPTERS, {"fixture": search.Adapter("full text", adapter)}, clear=True), \
-         patch.object(search.publication, "allowed", side_effect=[True, False]):
-        assert search.search("water", lambda: {}) == []
+    targets = {"fixture": (ROUTE, search.Adapter("full text", adapter))}
+    groups = search.search("water", dict, targets=targets, allowed=lambda *_: True)
+    assert len(groups[0]["results"]) == search.MAX_RESULTS
+    allowed = iter([True, False])
+    assert search.search("water", dict, targets=targets, allowed=lambda *_: next(allowed)) == []
 
 
 def test_failed_adapter_does_not_expose_results():
     def unavailable(route, query):
         raise OSError("fixture failure")
-    with patch.dict(search.publication.ROUTES, {"fixture": ROUTE}, clear=True), \
-         patch.dict(search.ADAPTERS, {"fixture": search.Adapter("full text", unavailable)}, clear=True), \
-         patch.object(search.publication, "allowed", return_value=True):
-        group = search.search("water", lambda: {})[0]
-        assert group["status"] == "unavailable"
-        assert group["results"] == []
+    targets = {"fixture": (ROUTE, search.Adapter("full text", unavailable))}
+    group = search.search("water", dict, targets=targets, allowed=lambda *_: True)[0]
+    assert group["status"] == "unavailable"
+    assert group["results"] == []
 
 
 def test_kiwix_rss_scopes_links_and_strips_snippet_markup():

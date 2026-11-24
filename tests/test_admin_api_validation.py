@@ -191,13 +191,13 @@ class AdminAPIValidationTests(unittest.TestCase):
         )
 
     def test_valid_action_is_disabled_without_subprocess(self):
-        with mock.patch.object(admin_api, "probe_source") as probe:
+        with mock.patch.object(admin_api.subprocess, "Popen") as probe:
             for action in ("download", "redownload", "update"):
                 status, body = self.post_action("wikipedia-en", action)
-                self.assertEqual(status, 503)
+                self.assertEqual(status, 409)
                 assert isinstance(body, dict)
                 self.assertFalse(body["accepted"])
-                self.assertIn("acquisition disabled", body["error"])
+                self.assertIn("Use the ZIM Download action", body["error"])
             probe.assert_not_called()
 
     def test_unknown_action(self):

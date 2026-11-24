@@ -7,12 +7,12 @@ from unittest.mock import Mock
 
 import pytest
 
-from theaxiom import admin_api, catalog_store, publication, storage_settings
+from theaxiom import admin_api, catalog_store, publication, source_catalog, storage_settings
 from test_admin_page_template import Parser
 
 
 SID = "wikipedia-en"
-PIN = admin_api.WIKIPEDIA_SOURCE
+PIN = source_catalog.WIKIPEDIA_SOURCE
 
 
 @pytest.fixture
@@ -20,8 +20,23 @@ def app(tmp_path, monkeypatch):
     store = catalog_store.CatalogStore(tmp_path / "sources.json")
     monkeypatch.setattr(admin_api, "SOURCE_CATALOG", store)
     monkeypatch.setattr(storage_settings, "SETTINGS_PATH", tmp_path / "storage.json")
-    monkeypatch.setattr(publication, "reachable", lambda route: True)
     monkeypatch.setattr(publication, "reader_location", lambda route, book_id=None: (route["path"] + "viewer#fixture/"))
+    filename = f"{SID}.{PIN['sha256']}.zim"
+    config = next(record["configuration"] for record in store.get()["sources"]
+                  if record["source_id"] == SID)
+    artifact = dict(filename=filename, source_url=PIN["source_url"], bytes=PIN["bytes"], sha256=PIN["sha256"])
+    job = dict(source_id=SID, state="completed", verified=True, active=False,
+               configuration=admin_api.zim_jobs.identity(config), artifact=artifact)
+    original_status = admin_api.zim_jobs.status
+    original_installed = admin_api.zim_jobs.installed
+    monkeypatch.setattr(admin_api.zim_jobs, "status",
+                        lambda sid: job if sid == SID else original_status(sid))
+    monkeypatch.setattr(admin_api.zim_jobs, "installed",
+                        lambda current, config: artifact if current is job and
+                        admin_api.zim_jobs.matches(job, config) else original_installed(current, config))
+    monkeypatch.setattr(admin_api.zim_catalog, "active_manifest_matches", lambda _: True)
+    monkeypatch.setattr(admin_api.zim_catalog, "acknowledged_reader_books",
+                        lambda _: {filename[:-4]: SID} if publication.load().get(SID) else {})
     snapshot = {"stale": False, "acquisitions": [{
         "source_id": SID, "state": "completed", "active": False, "verified": True,
         "filename": PIN["filename"], "expected_bytes": PIN["bytes"], "sha256": PIN["sha256"],
@@ -98,89 +113,6 @@ def control(html, key, value):
     return next(attrs for _, attrs in parser.tags if attrs.get(key) == value)
 
 
-def test_published_profile_edit_unpublish_remove_and_equivalent_readd(app, tmp_path):
-    request, _ = app
-    archive = tmp_path / PIN["filename"]
-    archive.write_bytes(b"installed fixture bytes")
-    publication.save(SID, True)  # Existing deployment state, before any profile modification.
-    initial = request("/api/sources")
-    original = source(initial)
-    assert original["publication"]["published"]
-    page = request("/admin/sources")
-    assert 'name="format"' in page
-    assert 'data-catalog-format="zim"' in card(page)
-    assert "Unpublish" in card(page)
-    assert "disabled" not in control(card(page), "data-catalog-remove", SID)
-    assert request("/read/wikipedia-en", status=302) == "/zim/viewer#fixture/"
-    assert request("/internal/publication/wikipedia-en", status=204) == ""
-    assert 'href="/read/wikipedia-en"' in request("/")
-    mutate(request, initial, "edit", {"format": "pdf"}, status=409)
-    edited = mutate(request, initial, "edit", {"title": 'Local <reference> "edition"', "license": "Operator note"})
-    assert source(edited)["artifact"] == original["artifact"]
-    assert source(edited)["publication"]["published"]
-    wiki = card(request("/admin/sources"))
-    assert "Local &lt;reference&gt;" in wiki and "License</dt><dd>Operator note" in wiki
-    publish(request, False)
-    assert request("/read/wikipedia-en", status=403)
-    before = card(request("/admin/sources"))
-    assert "disabled" not in control(before, "data-catalog-remove", SID)
-    assert "disabled" not in control(before, "data-field", "publication-toggle")
-    removed = mutate(request, edited, "remove")
-    assert card(request("/admin/sources")) is None
-    assert "revision changed" in refuse_action(request, edited, 409)
-    assert "no configured profile" in refuse_action(request, removed, 400)
-    publish(request, True, status=409)
-    fields = source(edited)["profile"] | source(edited)["configuration"]
-    added = mutate(request, removed, "add", fields)
-    assert card(request("/admin/sources")) == before
-    restored = source(added)
-    for key in ("adapter", "configuration_valid", "artifact", "installed_verified", "actions"):
-        assert restored[key] == original[key]
-    assert restored["installed_verified"] and restored["publication"]["serving"]
-    assert not restored["publication"]["enabled"]
-    for action in restored["actions"]:
-        assert not restored["actions"][action]
-        assert 'data-action="' + action + '"' not in card(request("/admin/sources"))
-        assert "acquisition disabled" in refuse_action(request, added, 503, action=action)
-    publish(request, True, status=409, revision=removed["revision"])
-    publish(request, True)
-    assert request("/read/wikipedia-en", status=302) == "/zim/viewer#fixture/"
-    assert archive.read_bytes() == b"installed fixture bytes"
-
-
-@pytest.mark.parametrize("conflict", [dict(format="pdf"), dict(source_url="https://example.org/a.zim"),
-                                      dict(expected_size_bytes="1"), dict(sha256="a" * 64)])
-def test_conflicting_profile_does_not_inherit_trusted_state(app, conflict):
-    request, _ = app
-    catalog = request("/api/sources")
-    edited = mutate(request, catalog, "edit", conflict)
-    wiki = source(edited)
-    assert all(wiki[key] is None for key in ("artifact", "acquisition", "publication"))
-    assert not wiki["installed_verified"]
-    assert refuse_action(request, edited, 409) == wiki["acquisition_reason"]
-    assert wiki["configuration"] == source(catalog)["configuration"] | conflict
-    changed = card(request("/admin/sources"))
-    assert "Expected SHA-256" in changed and "Artifact SHA-256" not in changed
-    assert "publication-toggle" not in changed
-    assert "Installed verification" not in changed
-    assert 'data-field="verified"' not in changed
-    publish(request, True, status=409)
-    publication.save(SID, True)  # A stale persisted flag cannot bypass the configuration check.
-    assert request("/internal/publication/wikipedia-en", status=403) == ""
-    assert request("/read/wikipedia-en", status=403)
-    assert "Unpublish" in card(request("/admin/sources"))
-
-
-def test_monitor_identity_mismatch_does_not_supply_verification(app):
-    request, snapshot = app
-    snapshot["acquisitions"][0]["sha256"] = "b" * 64
-    wiki = source(request("/api/sources"))
-    assert wiki["artifact"]["sha256"] == PIN["sha256"]
-    assert wiki["acquisition"] is None and not wiki["publication"]["verified"]
-    publish(request, True, status=409)
-    assert "unresolved" in refuse_action(request, request("/api/sources"), 409)
-
-
 @pytest.mark.parametrize("format_name,complete,adapter,reason", [
     ("zim", True, "kiwix", "Use the ZIM Download action"),
     ("zim", False, "kiwix", "ZIM download requires a direct plain HTTPS URL"),
@@ -246,11 +178,11 @@ def test_empty_catalog_and_same_candidate_card_after_manual_readd(app):
 
 
 @pytest.mark.parametrize("state,active", [("downloading", True), ("unknown", False)])
-def test_active_and_unresolved_states_block_seed_and_manual_changes(app, state, active):
+def test_active_and_unresolved_states_block_manual_changes(app, state, active):
     request, snapshot = app
     catalog = request("/api/sources")
     catalog = mutate(request, catalog, "add", {"title": "Manual"}, sid="manual")
-    for sid in (SID, "manual"):
+    for sid in ("manual",):
         snapshot["acquisitions"].append(dict(source_id=sid, state=state, active=active))
         rendered = card(request("/admin/sources"), sid)
         assert source(request("/api/sources"), sid)["mutation_blocked"]
@@ -258,19 +190,7 @@ def test_active_and_unresolved_states_block_seed_and_manual_changes(app, state, 
             assert "disabled" in control(rendered, f"data-catalog-{action}", sid)
             mutate(request, catalog, action, {"title": "Changed"} if action == "edit" else {},
                    sid=sid, status=400)
-    assert "active or unresolved" in refuse_action(request, catalog, 409)
-    publish(request, True, status=409)
-
-
-def test_acquisition_requires_current_revision_and_fresh_monitor(app):
-    request, snapshot = app
-    catalog = request("/api/sources")
-    for revision in (None, True, "0", -1):
-        body = request("/api/action", dict(source_id=SID, action="update", revision=revision), status=400)
-        assert "requires a catalog revision" in body["error"]
-    snapshot["stale"] = True
-    assert "unresolved" in refuse_action(request, catalog, 409)
-    assert not source(request("/api/sources"))["installed_verified"]
+    assert "Use the ZIM Download action" in refuse_action(request, catalog, 409)
 
 
 def test_remove_published_zim_automatically(app, tmp_path, monkeypatch):
@@ -296,14 +216,12 @@ def test_remove_published_zim_automatically(app, tmp_path, monkeypatch):
         patch.setattr(admin_api.SOURCE_CATALOG, "mutate", fail)
         result = mutate(request, catalog, "remove", status=409)
         assert "unpublished but profile removal failed" in result["error"]
-    assert not publication.load()[SID]
-    assert request("/internal/publication/wikipedia-en", status=403) == ""
+    assert not publication.load().get(SID, False)
     publish(request, True)
     removed = mutate(request, catalog, "remove")
     assert not any(row["source_id"] == SID for row in removed["sources"])
-    assert not publication.load()[SID]
-    assert request("/read/wikipedia-en", status=403)
-    assert request("/internal/publication/wikipedia-en", status=403) == ""
+    assert not publication.load().get(SID, False)
+    assert request("/read/zim/wikipedia-en", status=403)
 
 
 def test_group_api_bulk_membership_and_revision(app):
@@ -338,10 +256,10 @@ def test_public_group_filters_hide_unpublished_members(app):
         catalog = request("/api/groups", dict(operation="add-members", kind=kind, group_id=gid,
                                                source_ids=members, revision=created["revision"]))
     page = request("/?category=reference&tag=mixed")
-    assert 'href="/read/wikipedia-en"' in page
+    assert 'href="/read/zim/wikipedia-en"' in page
     assert 'Private fixture' not in page and 'value="private"' not in page
     assert 'value="reference" selected' in page
-    assert 'href="/read/wikipedia-en"' not in request("/?collection=private")
+    assert 'href="/read/zim/wikipedia-en"' not in request("/?collection=private")
     assert "No published sources match" in request("/?category=missing")
     request("/?category=reference&category=other", status=400)
     request("/?tag=../bad", status=400)
@@ -367,7 +285,7 @@ def test_admin_filter_status_distinguishes_installed_and_unpublished(app):
     catalog = mutate(request, catalog, "add", {"title": "Not downloaded"}, sid="candidate-filter")
     assert source(catalog, "candidate-filter")["download_filter"] == "not-downloaded"
     snapshot["stale"] = True
-    assert source(request("/api/sources"))["download_filter"] == "unknown"
+    assert source(request("/api/sources"))["download_filter"] == "downloaded"
 
 
 def test_bulk_group_assignment_preserves_unrelated_memberships(app):
@@ -406,6 +324,7 @@ def test_zim_preflight_error_returns_actionable_message(app, monkeypatch):
 
 def test_generic_zim_publication_intent_waits_for_verified_reader(app, monkeypatch):
     request, _ = app
+    monkeypatch.setattr(admin_api.zim_catalog, "active_manifest_matches", lambda _: False)
     sid = "fema-ready"
     catalog = request("/api/sources")
     assert next(s for s in catalog["sources"] if s["source_id"] == sid)["adapter"] == "kiwix"
@@ -513,23 +432,6 @@ def test_zim_recovery_actions_dispatch_through_http(app, monkeypatch, action, me
     assert calls == [("fema-ready", True if method == "start" else keyword)]
 
 
-def test_freshness_endpoint_selects_trusted_source_without_wikipedia_default(app, monkeypatch):
-    request, _ = app
-    second = dict(PIN, source_id="second-zim", title="Second pinned ZIM",
-                  source_url="https://download.kiwix.org/zim/second_en_all_2026-11.zim",
-                  sha256="b" * 64, bytes=4096)
-    checked = []
-    monkeypatch.setattr(admin_api, "probe_source",
-                        lambda url, digest, size: (checked.append((url, digest, size))
-                                                   or {"state": "no_newer_edition_listed"}))
-    monkeypatch.setattr(admin_api, "installed_evidence", lambda snapshot, entry: {})
-    monkeypatch.setitem(admin_api.TRUSTED_SOURCES, "second-zim", second)
-    assert "Specify" in request("/api/freshness", status=400)["error"]
-    assert request("/api/freshness?source_id=unknown", status=400)["error"]
-    assert request("/api/freshness?source_id=second-zim")["source_id"] == "second-zim"
-    assert checked == [(second["source_url"], second["sha256"], second["bytes"])]
-
-
 def test_storage_status_not_tied_to_default_wikipedia_archive_size(app, monkeypatch):
     request, _ = app
     calls = []
@@ -560,17 +462,6 @@ def test_explicit_kiwix_update_check_requires_same_origin_and_catalog_identity(a
         dict(payload, revision=0), status=409)["error"]
     assert "not support" in request("/api/update-check",
         dict(payload, source_id="missing"), status=400)["error"]
-    # Pinned legacy acquisition uses a separate verification-gated, read-only
-    # checker. Mock it rather than making a live publisher HTTP request.
-    pinned_calls = []
-    monkeypatch.setattr(admin_api.kiwix_update_discovery, "refresh_pinned_seed",
-        lambda record, artifact, *, verified: (
-            pinned_calls.append((record["source_id"], verified))
-            or {"state": "no_newer_edition_listed"}))
-    pinned = request("/api/update-check", dict(payload, source_id=SID))
-    assert pinned["state"] == "no_newer_edition_listed"
-    assert pinned_calls == [(SID, True)]
-    assert not called
     result = request("/api/update-check", payload)
     assert result["state"] == "unable_to_determine"
     assert result["source_id"] == "update-fixture"
@@ -692,46 +583,48 @@ def test_zim_controls_follow_capabilities_not_source_identity(app):
     request, _ = app
     catalog = request("/api/sources")
     entries = {source["source_id"]: source for source in catalog["sources"]}
-    assert entries["wikipedia-en"]["legacy_pinned"] is True
-    assert entries["wikipedia-en"].get("zim_download") is not True
-    assert entries["fema-ready"]["legacy_pinned"] is False
+    assert entries["wikipedia-en"]["zim_download"] is True
     assert entries["fema-ready"]["zim_download"] is True
     template = admin_api.ADMIN_TEMPLATE_DIR / "admin-page.html.j2"
     assert "source.source_id == 'wikipedia-en'" not in template.read_text()
 
 
-def test_pinned_wikipedia_shows_metadata_check_without_inert_download_actions(app):
+def test_readding_wikipedia_uses_the_generic_zim_lifecycle(app, monkeypatch):
     request, _ = app
-    html = card(request("/admin/sources"), "wikipedia-en")
-    assert html is not None
-    assert "Check for updates" in html
-    assert "data-zim-update-check" in html
-    assert 'data-action="download"' not in html
-    assert 'data-action="redownload"' not in html
-    assert 'data-action="update"' not in html
-    assert "data-zim-download" not in html
+    catalog = request("/api/sources")
+    fields = source(catalog)["profile"] | source(catalog)["configuration"]
+    catalog = mutate(request, catalog, "remove")
+    assert card(request("/admin/sources")) is None
+
+    with monkeypatch.context() as patch:
+        patch.setattr(admin_api.zim_jobs, "status", lambda _: None)
+        catalog = mutate(request, catalog, "add", fields)
+        added = source(catalog)
+        assert added["zim_download"]
+        assert not added["installed_verified"]
+        assert not added["publication"]["enabled"]
+        publish(request, True, status=409)
+        request("/read/zim/wikipedia-en", status=403)
+
+    publish(request, True)
+    assert request("/read/zim/wikipedia-en", status=302) == "/zim/viewer#fixture/"
+    assert 'href="/read/zim/wikipedia-en"' in request("/")
+    assert 'href="/read/wikipedia-en"' not in request("/")
 
 
-def test_verified_pinned_wikipedia_update_check_dispatches_read_only(app, monkeypatch):
-    request, snapshot = app
+def test_wikipedia_update_check_dispatches_to_managed_zim_checker(app, monkeypatch):
+    request, _ = app
     catalog = request("/api/sources")
     calls = []
 
-    def fake_check(record, artifact, *, verified):
-        calls.append((record["source_id"], artifact["sha256"], verified))
-        return {"state": "no_newer_edition_listed", "installed_edition": "2026-08"}
+    def check(source_id):
+        calls.append(source_id)
+        return {"state": "no_newer_edition_listed"}
 
-    monkeypatch.setattr(admin_api.kiwix_update_discovery,
-                        "refresh_pinned_seed", fake_check)
+    monkeypatch.setattr(admin_api.kiwix_update_discovery, "refresh_checked_source", check)
     payload = dict(source_id="wikipedia-en", revision=catalog["revision"])
     assert request("/api/update-check", payload)["state"] == "no_newer_edition_listed"
-    assert calls == [("wikipedia-en", PIN["sha256"], True)]
-    snapshot["acquisitions"] = []
-    result = request("/api/update-check", payload)
-    assert result["state"] == "no_newer_edition_listed"
-    assert calls[-1] == ("wikipedia-en", PIN["sha256"], False)
-    # Verified gating belongs in the real checker, not in HTTP's trust of
-    # mutable client-provided metadata.
+    assert calls == ["wikipedia-en"]
 
 
 def test_fema_and_wikipedia_have_consistent_update_check_controls(app):
@@ -1039,12 +932,11 @@ def test_public_layout_order_groups_reset_and_publication_boundary(app, monkeypa
     def zim_publications(handler, catalog):
         for record in catalog["sources"]:
             sid = record["source_id"]
-            if sid != SID:
-                yield record, {"published": publication.load().get(sid, False), "entry_path": "/read/zim/" + sid}
+            yield record, {"published": publication.load().get(sid, False), "entry_path": "/read/zim/" + sid}
 
     monkeypatch.setattr(admin_api.AdminAPIHandler, "_zim_publications", zim_publications)
     original = request("/")
-    first = 'href="/read/wikipedia-en"'
+    first = 'href="/read/zim/wikipedia-en"'
     second = 'href="/read/zim/fema-ready"'
     later = 'href="/read/zim/later"'
     assert original.index(first) < original.index(second) < original.index(later)
@@ -1083,7 +975,7 @@ def test_public_layout_order_groups_reset_and_publication_boundary(app, monkeypa
 def test_public_search_groups_two_published_zims_and_hides_unpublished(app, monkeypatch):
     from theaxiom import search, zim_catalog
     request, _ = app
-    legacy = publication.ROUTES[SID]["book_id"]
+    legacy = f"{SID}.{PIN['sha256']}"
     second = "second-book." + "a" * 64
     publication.save(SID, True)
     publication.save("second-book", True)
@@ -1250,7 +1142,7 @@ def test_existing_source_placeholders_are_configured_without_downloads(app, monk
     catalog = request("/api/sources")
     store = admin_api.SOURCE_CATALOG
     state = json.loads(store.path.read_text())
-    placeholders = {entry["source_id"]: entry for entry in admin_api.source_catalog.planned_sources()}
+    placeholders = {entry["source_id"]: entry for entry in source_catalog.planned_sources()}
     for index, record in enumerate(state["sources"]):
         sid = record["source_id"]
         if sid in {"epa-water", "cdc"}:
@@ -1262,7 +1154,7 @@ def test_existing_source_placeholders_are_configured_without_downloads(app, monk
 
     upgraded = request("/api/sources")
     assert upgraded["revision"] == catalog["revision"] + 1
-    for sid, expected in admin_api.source_catalog.CONFIGURED_PDFS.items():
+    for sid, expected in source_catalog.CONFIGURED_PDFS.items():
         record = source(upgraded, sid)
         assert record["configuration"]["format"] == "pdf"
         assert record["configuration"]["source_url"] == expected["source_url"]
@@ -1284,7 +1176,7 @@ def test_configured_defaults_fill_blank_download_settings_preserving_edits(app):
     state = json.loads(store.path.read_text())
     state["sources"] = [record for record in state["sources"]
                         if record["source_id"] not in {"epa-water", "cdc"}]
-    entry = next(entry for entry in admin_api.source_catalog.planned_sources()
+    entry = next(entry for entry in source_catalog.planned_sources()
                  if entry["source_id"] == "cdc")
     edited = store._seed_record(entry)
     edited["profile"]["title"] = "My custom CDC profile"
@@ -1298,7 +1190,7 @@ def test_configured_defaults_fill_blank_download_settings_preserving_edits(app):
     assert not any(row["source_id"] == "epa-water" for row in upgraded["sources"])
     cdc = source(upgraded, "cdc")
     assert cdc["configuration"]["format"] == "pdf"
-    assert cdc["configuration"]["source_url"] == admin_api.source_catalog.CONFIGURED_PDFS["cdc"]["source_url"]
+    assert cdc["configuration"]["source_url"] == source_catalog.CONFIGURED_PDFS["cdc"]["source_url"]
     assert cdc["configuration"]["provenance"] == "My notes"
     assert source(upgraded, "cdc")["profile"]["title"] == "My custom CDC profile"
 

@@ -1,7 +1,8 @@
 from html.parser import HTMLParser
 from pathlib import Path
 from jinja2 import Environment
-from theaxiom.admin_api import ACTION_LABELS, WIKIPEDIA_SOURCE, select_lifecycle
+from theaxiom.admin_api import ACTION_LABELS, select_lifecycle
+from theaxiom.source_catalog import WIKIPEDIA_SOURCE
 from theaxiom.catalog_store import EDITABLE
 from theaxiom import zim_catalog
 
@@ -12,9 +13,7 @@ def profile(source_id="fixture", title="Fixture", description="", **configuratio
     configuration = {"format": "pdf", **configuration}
     return dict(source_id=source_id, profile=dict(title=title, description=description),
                 configuration=configuration, **select_lifecycle(source_id, configuration),
-                publication=None, installed_verified=False, mutation_blocked=False,
-                legacy_pinned=(configuration["format"] == "zim"
-                               and source_id in zim_catalog.legacy_pinned_entries()))
+                publication=None, installed_verified=False, mutation_blocked=False)
 
 
 def render(sources=(), **overrides):
@@ -145,7 +144,7 @@ def test_offline_source_guide_is_discoverable_and_honest():
     assert 'https://download.kiwix.org/zim/' in page
     assert 'https://www.ready.gov/' in page
     assert 'explicitly configured NFS storage is supported' in page
-    assert 'arbitrary remote downloads are not yet enabled' in page
+    assert 'Set a supported HTTPS ZIM download URL' in page
     assert 'Removing a published profile automatically unpublishes it and does not delete installed files' in page
     assert 'id="source-guide"' not in render(admin_page="settings")
 

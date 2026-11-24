@@ -99,56 +99,22 @@ def test_url_based_documents_are_checked_but_local_uploads_are_not(monkeypatch):
     assert "upload-only" not in states
 
 
-def test_scheduled_pinned_zim_uses_verified_generic_seed_gate(monkeypatch):
-    from theaxiom import acquisition_monitor, admin_api, kiwix_update_discovery, publication
-    sid = next(iter(publication.ROUTES))
-    record = {"source_id": sid, "configuration": {"format": "zim"}}
+def test_scheduled_zims_use_the_same_managed_checker(monkeypatch):
+    from theaxiom import kiwix_update_discovery
+
+    ids = ["fema-ready", "wikipedia-en"]
+    records = [{"source_id": sid, "configuration": {"format": "zim"}} for sid in ids]
     calls = []
-    monkeypatch.setattr(admin_api, "select_lifecycle",
-                        lambda source_id, config: {"artifact": {"sha256": "a" * 64, "filename": "example.zim", "bytes": 100}})
-    monkeypatch.setitem(admin_api.TRUSTED_SOURCES, sid, {"source_id": sid})
-    monkeypatch.setattr(acquisition_monitor, "collect",
-                        lambda entry: {"state": "completed", "verified": True, "active": False,
-                                       "filename": "example.zim", "expected_bytes": 100,
-                                       "sha256": "a" * 64})
-    def check(entry, artifact, *, verified):
-        calls.append((entry, artifact, verified))
-        return {"state": "no_newer_edition_listed"}
-    monkeypatch.setattr(kiwix_update_discovery, "refresh_pinned_seed", check)
-    result = scheduler.check_records([record])
-    assert result == [{"source_id": sid, "state": "no_newer_edition_listed"}]
-    assert calls == [(record, {"sha256": "a" * 64, "filename": "example.zim", "bytes": 100}, True)]
 
+    def check(source_id):
+        calls.append(source_id)
+        return {"state": "up_to_date"}
 
-def test_adopted_legacy_zim_uses_managed_scheduler_check(monkeypatch):
-    from theaxiom import kiwix_update_discovery, publication
-    sid = next(iter(publication.ROUTES))
-    record = {"source_id": sid, "configuration": {"format": "zim"}}
-    calls = []
-    monkeypatch.setattr(publication, "legacy_only", lambda source_id: False)
-    monkeypatch.setattr(kiwix_update_discovery, "refresh_checked_source",
-                        lambda source_id: (calls.append(source_id) or
-                                           {"state": "up_to_date"}))
-    result = scheduler.check_records([record])
-    assert result == [{"source_id": sid, "state": "up_to_date"}]
-    assert calls == [sid]
-
-
-def test_scheduled_pinned_zim_does_not_assume_installed_verification(monkeypatch):
-    from theaxiom import acquisition_monitor, admin_api, kiwix_update_discovery, publication
-    sid = next(iter(publication.ROUTES))
-    record = {"source_id": sid, "configuration": {"format": "zim"}}
-    monkeypatch.setattr(admin_api, "select_lifecycle",
-                        lambda source_id, config: {"artifact": None})
-    monkeypatch.setitem(admin_api.TRUSTED_SOURCES, sid, {"source_id": sid})
-    monkeypatch.setattr(acquisition_monitor, "collect",
-                        lambda entry: {"state": "unknown", "verified": False, "active": False})
-    def check(entry, artifact, *, verified):
-        assert not verified and artifact is None
-        return {"state": "unable_to_determine"}
-    monkeypatch.setattr(kiwix_update_discovery, "refresh_pinned_seed", check)
-    assert scheduler.check_records([record]) == [
-        {"source_id": sid, "state": "unable_to_determine"}]
+    monkeypatch.setattr(kiwix_update_discovery, "refresh_checked_source", check)
+    assert scheduler.check_records(records) == [
+        {"source_id": sid, "state": "up_to_date"} for sid in ids
+    ]
+    assert calls == ids
 
 
 def test_update_check_systemd_units_are_metadata_only_and_daily():

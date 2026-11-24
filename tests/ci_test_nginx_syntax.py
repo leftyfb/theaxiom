@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def main():
     nginx = shutil.which("nginx") or "/usr/sbin/nginx"
     site = (ROOT / "deploy/nginx/theaxiom.conf").read_text()
-    assert "location ^~ /wikipedia/" in site
+    assert "location ^~ /wikipedia/" not in site
     assert "auth_request /_publication_zim;" in site
     site = site.replace("listen 80;", "listen 127.0.0.1:18080;")
     site = site.replace("listen [::]:80;", "")

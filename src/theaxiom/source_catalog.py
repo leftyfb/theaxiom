@@ -41,23 +41,6 @@ READY_GOV_SOURCE: dict[str, Any] = {
     "issue": 21,
 }
 
-# One-time compatibility registry for externally installed pre-ledger archives.
-# Keep this separate from mutable seed records and the historical draft catalog
-# schema: adding arbitrary fields to seeds would break strict v2 conversion.
-# New ZIMs always use the normal zim_jobs lifecycle.
-LEGACY_ACQUISITION_UNITS: dict[str, str] = {}
-
-LEGACY_READER_ROUTES = {
-    # Compatibility bookmark and presentation metadata for pre-ledger archives.
-    # Ordinary new ZIMs use the shared /read/zim/<source-id> route.
-    "wikipedia-en": {
-        "path": "/wikipedia/", "entry_path": "/read/wikipedia-en",
-        "name": "Wikipedia", "category": "Encyclopedia",
-        "description": "Explore millions of articles, illustrations and reference material without an internet connection.",
-        "symbol": "W", "language": "English",
-    },
-}
-
 PLANNED_SOURCES = [
     {
         "source_id": "wikivoyage",

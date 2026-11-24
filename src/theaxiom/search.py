@@ -85,8 +85,8 @@ def search(query: str, snapshot: Callable[[], dict], *, source_ids=None, targets
         groups = []
         deadline = time.monotonic() + MAX_SEARCH_SECONDS
         if targets is None:
-            targets = {sid: (route, ADAPTERS.get(sid)) for sid, route in publication.ROUTES.items()}
-        check = allowed or (lambda sid, route: publication.allowed(snapshot(), sid))
+            targets = {}
+        check = allowed or (lambda sid, route: False)
         for source_id, (route, adapter) in targets.items():
             if source_ids is not None and source_id not in source_ids:
                 continue

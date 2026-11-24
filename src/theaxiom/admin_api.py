@@ -21,10 +21,6 @@ from typing import Any
 
 from jinja2 import Environment, FileSystemLoader
 
-if __package__:
-    from .freshness_probe import probe_source, installed_evidence
-else:
-    from freshness_probe import probe_source, installed_evidence
 storage_settings = importlib.import_module(
     f"{__package__}.storage_settings" if __package__ else "storage_settings"
 )
@@ -37,7 +33,6 @@ catalog_store = importlib.import_module(f"{__package__}.catalog_store" if __pack
 
 security = importlib.import_module(f"{__package__}.admin_security" if __package__ else "theaxiom.admin_security")
 admin_sessions = importlib.import_module(f"{__package__}.admin_sessions" if __package__ else "theaxiom.admin_sessions")
-monitoring = importlib.import_module(f"{__package__}.acquisition_monitor" if __package__ else "theaxiom.acquisition_monitor")
 publication = importlib.import_module(f"{__package__}.publication" if __package__ else "theaxiom.publication")
 pdf_source = importlib.import_module(f"{__package__}.pdf_source" if __package__ else "theaxiom.pdf_source")
 epub_source = importlib.import_module(f"{__package__}.epub_source" if __package__ else "theaxiom.epub_source")
@@ -75,49 +70,6 @@ ZIM_READER_ROUTE = re.compile(r'/read/zim/([a-z0-9-]{1,63})\Z')
 PDFJS_ASSET = re.compile(r"/api/pdfjs/(?:build|web|cmaps|standard_fonts|wasm|iccs|image_decoders|locale)/[A-Za-z0-9_./-]+\Z")
 
 ACTION_LABELS = {"download": "Download", "redownload": "Re-download", "update": "Update"}
-ACQUISITION_DISABLED = "acquisition disabled pending storage safety integration"
-
-# Trusted acquisition metadata is shipped separately from planned catalog entries.
-source_catalog = importlib.import_module(f"{__package__}.source_catalog" if __package__ else "theaxiom.source_catalog")
-WIKIPEDIA_SOURCE = source_catalog.WIKIPEDIA_SOURCE
-
-def trusted_source_manifests(entries) -> dict[str, dict[str, Any]]:
-    """Select immutable, fully pinned acquisition definitions by capability.
-
-    Seed profiles without a verified size and checksum remain editable
-    candidates, never trusted acquisition manifests.
-    """
-    result = {}
-    for entry in entries:
-        if not isinstance(entry, dict) or entry.get("kind") != "zim":
-            continue
-        sid, filename, digest = (entry.get("source_id"), entry.get("filename"), entry.get("sha256"))
-        size, url = entry.get("bytes"), entry.get("source_url")
-        if (not isinstance(sid, str) or not catalog_store.ID_RE.fullmatch(sid)
-                or not isinstance(filename, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,195}\.zim", filename)
-                or not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest)
-                or type(size) is not int or size < 96
-                or not isinstance(url, str) or not url.startswith("https://")):
-            continue
-        result[sid] = {key: value for key, value in entry.items() if key != "availability"}
-    return result
-
-
-# Immutable packaged acquisition pins are selected by capability, not title.
-TRUSTED_SOURCES: dict[str, dict[str, Any]] = trusted_source_manifests(
-    source_catalog.builtin_sources()
-)
-
-
-def resolve_source(source_id: str) -> dict[str, Any] | None:
-    """Resolve a source_id to its trusted manifest entry.
-
-    Returns None for unknown or untrusted source IDs. Never accepts
-    client-supplied URLs, commands, or checksums.
-    """
-    return TRUSTED_SOURCES.get(source_id)
-
-
 def _release_revision() -> str | None:
     """Return the immutable source revision loaded by this process, if known."""
     try:
@@ -135,7 +87,6 @@ def _release_revision() -> str | None:
     return revision if re.fullmatch(r"[0-9a-f]{40}", revision) else None
 
 
-ARTIFACT_FIELDS = {"format", "source_url", "expected_size_bytes", "sha256"}
 FORMAT_ADAPTERS = {"zim": "kiwix", "pdf": "pdf", "epub": "epub"}
 
 
@@ -143,7 +94,7 @@ def select_lifecycle(source_id, configuration):
     """Select by format first; candidate configuration never creates trust."""
     format_name = configuration.get("format")
     adapter = FORMAT_ADAPTERS.get(format_name) if isinstance(format_name, str) else None
-    if adapter == "epub" and source_id not in publication.ROUTES:
+    if adapter == "epub":
         artifact = None
         try:
             artifact = epub_source.pin(source_id, configuration, require_rights=False)
@@ -152,7 +103,7 @@ def select_lifecycle(source_id, configuration):
         return dict(adapter=adapter, configuration_valid=artifact is not None, artifact=artifact,
                     pdf_download=pdf_source.valid_source_url(configuration.get("source_url", "")),
                     acquisition_reason="Upload an EPUB or download from a direct HTTPS URL. Publication is separate.", actions={})
-    if adapter == "pdf" and source_id not in publication.ROUTES:
+    if adapter == "pdf":
         artifact = None
         try:
             artifact = pdf_source.pin(source_id, configuration, require_rights=False)
@@ -162,7 +113,7 @@ def select_lifecycle(source_id, configuration):
         return dict(adapter=adapter, configuration_valid=artifact is not None, artifact=artifact,
                     pdf_download=pdf_source.valid_source_url(configuration.get("source_url", "")),
                     acquisition_reason=reason, actions={})
-    if adapter == "kiwix" and not publication.legacy_only(source_id):
+    if adapter == "kiwix":
         try:
             zim_source.candidate(configuration)
         except ValueError as exc:
@@ -170,30 +121,8 @@ def select_lifecycle(source_id, configuration):
                         acquisition_reason=str(exc), actions={}, zim_download=False)
         return dict(adapter=adapter, configuration_valid=True, artifact=None,
                     acquisition_reason="", actions={}, zim_download=True)
-    # CatalogStore validates field syntax; the adapter also requires these
-    # fields to be present before a candidate can select an acquisition pin.
-    valid = bool(adapter and all(isinstance(configuration.get(key), str) and configuration[key]
-                                 for key in ARTIFACT_FIELDS))
-    artifact = None
-    if not adapter:
-        reason = "No lifecycle adapter supports this format."
-    elif not valid:
-        reason = "ZIM candidate configuration requires a URL, expected size and SHA-256."
-    else:
-        entry = resolve_source(source_id)
-        if entry is None:
-            reason = "No trusted acquisition manifest is configured for this source."
-        elif (configuration["format"] != entry["kind"]
-              or configuration["source_url"] != entry["source_url"]
-              or configuration["expected_size_bytes"] != str(entry["bytes"])
-              or configuration["sha256"].lower() != entry["sha256"]):
-            reason = "Candidate configuration does not match the trusted acquisition manifest."
-        else:
-            artifact = {key: entry[key] for key in ("filename", "source_url", "bytes", "sha256")}
-            reason = ACQUISITION_DISABLED
-    return {"adapter": adapter, "configuration_valid": valid, "artifact": artifact,
-            "acquisition_reason": reason,
-            "actions": {action: False for action in ACTION_LABELS} if artifact else {}}
+    return dict(adapter=None, configuration_valid=False, artifact=None,
+                acquisition_reason="No lifecycle adapter supports this format.", actions={})
 
 
 RELEASE_REVISION = _release_revision()
@@ -208,41 +137,12 @@ def health_response() -> dict[str, Any]:
     }
 
 
-def freshness_response(snapshot: dict[str, Any] | None = None, *,
-                       source_id: str | None = None) -> dict[str, Any]:
-    """Return origin metadata for an explicitly trusted pinned source.
-
-    A missing selector only works when exactly one pinned source exists;
-    never silently choose Wikipedia or the first item as the privileged one.
-    """
-    if source_id is None:
-        entry = next(iter(TRUSTED_SOURCES.values())) if len(TRUSTED_SOURCES) == 1 else None
-    else:
-        entry = resolve_source(source_id)
-    if entry is None:
-        return {"error": "Specify a configured pinned source_id"}
-    result = probe_source(entry["source_url"], entry["sha256"], entry["bytes"])
-    result.update(source_id=entry["source_id"], title=entry["title"])
-    result.update(installed_evidence(snapshot, entry))
-    return result
-
-
 # Local development defaults follow the XDG user data location. Deployments can
 # override both values explicitly without depending on this source repository.
 DATA_HOME = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share"))
 CONFIG_HOME = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
 SOURCE_CATALOG_PATH = Path(os.environ.get("THEAXIOM_SOURCE_CATALOG", Path(storage_settings.SETTINGS_PATH or CONFIG_HOME / "theaxiom/storage.json").with_name("sources.json")))
 SOURCE_CATALOG = catalog_store.CatalogStore(SOURCE_CATALOG_PATH)
-ACQUISITION_STAGING_DIR = Path(
-    os.environ.get("THEAXIOM_STAGING_DIR", DATA_HOME / "theaxiom/staging")
-)
-ACQUISITION_SCRIPT = Path(
-    os.environ.get(
-        "THEAXIOM_ACQUISITION_SCRIPT",
-        Path(__file__).resolve().parents[2] / "scripts/acquire_kiwix_zim.sh",
-    )
-)
-
 # Keep process handles so completed jobs can be distinguished from active ones.
 _active_downloads: dict[str, subprocess.Popen[bytes]] = {}
 _jobs: dict[str, dict[str, Any]] = {}
@@ -281,33 +181,11 @@ def job_status_response(job_id: str) -> dict[str, Any] | None:
         }
 
 
-def build_acquisition_args(source_id: str) -> list[str] | None:
-    """Construct the acquire_kiwix_zim.sh argument list from trusted config.
-
-    The acquisition script (scripts/acquire_kiwix_zim.sh) expects four
-    positional arguments: URL, destination, expected bytes, expected SHA-256.
-    All values are sourced from the trusted manifest entry for source_id;
-    no client-supplied data is used.
-
-    Returns None if source_id is unknown or untrusted.
-    """
-    entry = resolve_source(source_id)
-    if entry is None:
-        return None
-    destination = f"{ACQUISITION_STAGING_DIR}/{entry['filename']}"
-    return [
-        entry["source_url"],
-        destination,
-        str(entry["bytes"]),
-        entry["sha256"],
-    ]
-
-
 def _public_acquisition(job):
     """Only expose recorded outcomes and timestamps from the attempt journal."""
     if job is None:
         return None
-    job = {key: value for key, value in job.items() if key not in {"promotion_intent", "adopted_from_legacy"}}
+    job = {key: value for key, value in job.items() if key not in {"promotion_intent", "adopted_from_legacy", "installed_provenance"}}
     if "checksum_sampled_at" in job:
         sample = zim_jobs.current_checksum(job)
         job.pop("checksum_sampled_at")
@@ -494,8 +372,6 @@ def _batch_job(record, published):
     sid = record["source_id"]
     config = record["configuration"]
     kind = config["format"]
-    if publication.legacy_only(sid):
-        raise ValueError("Legacy sources cannot be queued")
     size = config.get("expected_size_bytes")
     if kind in {"pdf", "epub"}:
         limit = pdf_source.MAX_BYTES if kind == "pdf" else epub_source.MAX_BYTES
@@ -655,9 +531,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         if post and self.headers.get("Sec-Fetch-Site") in {"cross-site", "same-site"}:
             self._send_json(403, {"error": "cross-origin request rejected"})
             return False
-        compatibility_paths = ({route["entry_path"] for route in publication.ROUTES.values()}
-                               | {"/internal/publication/" + sid for sid in publication.ROUTES})
-        public_paths = set(PUBLIC_ICON_PATHS) | compatibility_paths | {
+        public_paths = set(PUBLIC_ICON_PATHS) | {
             "/", "/index.html", "/health", "/health/", "/api/pdf-reader.mjs"}
         if not post and (self.path in public_paths or self.path == "/admin/login"
                          or self.path.split("?", 1)[0] in {"/", "/index.html", "/search"}
@@ -918,7 +792,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 if not state or not state["published"]:
                     self._send_json(403, {"error": "ZIM collection unavailable"})
                     return
-                location = publication.reader_location(zim_catalog.GENERIC_READER, zim_catalog.source_content_name(record))
+                book = zim_catalog.source_content_name(record)
+                location = publication.reader_location(zim_catalog.GENERIC_READER, book) if book else None
                 if location is None:
                     self._send_json(503, {"error": "ZIM reader entry unavailable"})
                     return
@@ -939,69 +814,14 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             self.send_response(204 if allowed else 403)
             self.send_header("Content-Length", "0")
             self.end_headers()
-        elif (compat := next(((sid, route) for sid, route in publication.ROUTES.items()
-                              if self.path == route["entry_path"]), None)) is not None:
-            source_id, route = compat
-            if publication.managed_installation(source_id):
-                try:
-                    records = SOURCE_CATALOG.get()["sources"]
-                    record = next((r for r in records if r["source_id"] == source_id), None)
-                    state = zim_catalog.status(record, records) if record else None
-                    location = (publication.reader_location(zim_catalog.GENERIC_READER,
-                                                              zim_catalog.source_content_name(record))
-                                if state and state["published"] else None)
-                except (OSError, ValueError, catalog_store.CatalogError, KeyError, TypeError):
-                    location = None
-                if location is None:
-                    self._send_json(503, {"error": "reader entry unavailable"})
-                    return
-            else:
-                if not publication.allowed(self._publication_snapshot(), source_id):
-                    self._send_json(403, {"error": "collection unavailable"})
-                    return
-                # Historical bookmarks resolve their exact independently verified
-                # book through shared OPDS, never the first available ZIM.
-                location = publication.reader_location(
-                    {"path": route["reader_path"], "port": route["port"]},
-                    route["book_id"])
-                if location is None:
-                    self._send_json(503, {"error": "reader entry unavailable"})
-                    return
-            self.send_response(302)
-            self.send_header("Location", location)
-            self.send_header("Content-Length", "0")
-            self.end_headers()
-        elif (self.path.startswith("/internal/publication/") and
-              self.path.removeprefix("/internal/publication/") in publication.ROUTES):
-            source_id = self.path.removeprefix("/internal/publication/")
-            self.send_response(204 if publication.allowed(self._publication_snapshot(), source_id) else 403)
-            self.send_header("Content-Length", "0")
-            self.end_headers()
         elif self.path == "/api/publication":
-            snapshot = self._publication_snapshot()
-            self._send_json(200, {key: publication.status(snapshot, key)
-                                  for key in publication.ROUTES}
-                            | {item["source_id"]: state for item, state in self._pdf_publications()}
+            self._send_json(200, {item["source_id"]: state for item, state in self._pdf_publications()}
                             | {item["source_id"]: state for item, state in self._zim_publications()})
         elif self.path.rstrip("/") == "/health":
             self._send_json(200, health_response())
         elif self.path.rstrip("/") in {"/admin", "/admin/sources", "/admin/settings", "/admin/groupings"}:
             page = {"/admin/settings": "settings", "/admin/groupings": "groupings"}.get(self.path.rstrip("/"), "sources")
             self._send_admin_page(page)
-        elif urlsplit(self.path).path.rstrip("/") == "/api/freshness":
-            try:
-                query = parse_qs(urlsplit(self.path).query, keep_blank_values=True,
-                                 max_num_fields=2, strict_parsing=True)
-                if (set(query) - {"source_id"} or
-                        any(len(values) != 1 for values in query.values()) or
-                        ("source_id" in query and not catalog_store.ID_RE.fullmatch(query["source_id"][0]))):
-                    raise ValueError("invalid freshness source selector")
-            except ValueError:
-                self._send_json(400, {"error": "invalid freshness source selector"})
-                return
-            result = freshness_response(
-                self._snapshot(), source_id=query.get("source_id", [None])[0])
-            self._send_json(400 if "error" in result else 200, result)
         elif self.path.rstrip("/") == "/api/acquisitions":
             self._send_json(200, self._snapshot())
         elif self.path.rstrip("/") == "/api/storage-status":
@@ -1031,18 +851,15 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
 
     @staticmethod
     def _pdf_record(record):
-        return (not publication.legacy_only(record["source_id"])
-                and record["configuration"].get("format") == "pdf")
+        return record["configuration"].get("format") == "pdf"
 
     @staticmethod
     def _epub_record(record):
-        return (not publication.legacy_only(record["source_id"])
-                and record["configuration"].get("format") == "epub")
+        return record["configuration"].get("format") == "epub"
 
     @staticmethod
     def _zim_record(record):
-        return (not publication.legacy_only(record["source_id"])
-                and record["configuration"].get("format") == "zim")
+        return record["configuration"].get("format") == "zim"
 
     def _manage_acquisition_batch(self, data):
         if not self.headers.get("Origin"):
@@ -1139,10 +956,6 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                        book_id=book, port=zim_catalog.GENERIC_READER["port"]), library_search.KIWIX_ADAPTER)
             for book, sid in acknowledged().items() if sid in names
         }
-        missing = {sid: (dict(name=name, book_id=None), None)
-                   for sid, name in names.items() if sid not in targets and sid in publication.ROUTES}
-        targets.update(missing)
-
         def current_documents():
             try:
                 with publication.LOCK:
@@ -1180,16 +993,10 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                             and adapter.ready(route["artifact"], verify=False))
                 except ValueError:
                     return False
-            if route["book_id"] is None:
-                return publication.allowed(self._publication_snapshot(), sid)
-            return (acknowledged().get(route["book_id"]) == sid
-                    and (sid not in publication.ROUTES or publication.allowed(self._publication_snapshot(), sid)))
+            return acknowledged().get(route["book_id"]) == sid
 
         results = library_search.search(query, self._publication_snapshot, targets=targets, allowed=allowed,
                                         page=page, start_base=start_base)
-        for group in results:
-            if group["source_id"] in missing:
-                group.update(status="unavailable", capability=library_search.KIWIX_CAPABILITY)
         return results
 
     def _public_library(self):
@@ -1199,13 +1006,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 catalog = SOURCE_CATALOG.get()
             except (catalog_store.CatalogError, OSError):
                 return [], []
-            records = {record["source_id"]: record for record in catalog["sources"]}
-            snapshot = self._publication_snapshot()
             sources = []
-            for sid, route in publication.ROUTES.items():
-                if sid in records and publication.legacy_only(sid) and publication.status(snapshot, sid)["published"]:
-                    profile = records[sid]["profile"]
-                    sources.append(dict(route, source_id=sid, name=profile["title"]))
             for record, state in self._pdf_publications():
                 if state["published"]:
                     profile = record["profile"]
@@ -1373,10 +1174,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                         and all(isinstance(job, dict) and isinstance(job.get("source_id"), str)
                                 for job in jobs)):
                     return snap
-            elif getattr(self.server, "manage_external_monitor", False):
-                # No sampler is required for managed ZIMs. Recheck the
-                # compatibility selection so in-process rollback fails closed.
-                return {"acquisitions": [], "stale": configured_external_monitor_entries() != []}
+            elif getattr(self.server, "managed_acquisition_only", False):
+                return {"acquisitions": [], "stale": False}
         except Exception:
             pass
         return {"acquisitions": [], "stale": True}
@@ -1411,7 +1210,6 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         artifacts = {sid: life["artifact"] for sid, life in lifecycles.items()}
         matched = self._matched_snapshot(snapshot, artifacts)
         jobs = {job["source_id"]: job for job in matched["acquisitions"]}
-        legacy_pins = zim_catalog.legacy_pinned_entries()
         sources = []
         for record in catalog["sources"]:
             sid = record["source_id"]
@@ -1419,12 +1217,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             update_check = None
             discovery = update_discovery_config.settings(record["configuration"])
             state = None
-            if publication.legacy_only(sid):
-                state = publication.status(matched, sid)
-                state["entry_path"] = publication.ROUTES[sid]["entry_path"]
-                if not artifacts[sid] and not state["enabled"] and not state.get("error"):
-                    state = None
-            elif self._pdf_record(record):
+            if self._pdf_record(record):
                 busy = False
                 pdf_state = pdf_source.status(record, artifacts[sid])
                 state = pdf_state
@@ -1432,7 +1225,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 busy = False
                 state = epub_source.status(record, artifacts[sid])
             verified = (bool(state and state["verified"]) if self._pdf_record(record) or self._epub_record(record)
-                        else publication.verified(matched, sid))
+                        else False)
             if (verified and (self._pdf_record(record) or self._epub_record(record))
                     and isinstance(artifacts.get(sid), dict)
                     and discovery["method"] == "head"):
@@ -1462,10 +1255,6 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             if self._zim_record(record):
                 state = zim_catalog.status(record, catalog["sources"])
                 verified = bool(state["verified"])
-            if publication.legacy_only(sid) and verified and isinstance(artifacts.get(sid), dict):
-                if kiwix_update_discovery.pinned_seed_identity(
-                        record, artifacts[sid], verified=verified) is not None:
-                    update_check = update_check_store.load(sid, artifacts[sid]["sha256"])
             publication_filter = ("unknown" if state and state.get("error") else
                                   "published" if state and state["published"] else "unpublished")
             download_filter = "unknown"
@@ -1511,7 +1300,6 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 except (ValueError, OSError):
                     replacement = {"state": "unavailable", "error": "Replacement status unavailable"}
             sources.append(dict(record, **lifecycles[sid], acquisition=_public_acquisition(job), replacement=replacement, replacement_available=replacement_available,
-                                legacy_pinned=(sid in legacy_pins and record["configuration"].get("format") == "zim"),
                                 update_check=update_check if discovery["method"] != "manual" else None,
                                 discovery=discovery,
                                 installed_verified=verified, publication=state, mutation_blocked=busy,
@@ -1676,15 +1464,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 self._send_json(400, {"error": "source does not support update checks"})
                 return
             with update_diagnostics.attempt(sid, discovery, trigger="manual") as diagnostic:
-                if publication.legacy_only(sid):
-                    lifecycle = select_lifecycle(sid, record["configuration"])
-                    artifact = lifecycle.get("artifact")
-                    matched = self._matched_snapshot(self._snapshot(), {sid: artifact})
-                    verified = publication.verified(matched, sid)
-                    result = kiwix_update_discovery.refresh_pinned_seed(
-                        record, artifact, verified=verified,
-                    )
-                elif self._zim_record(record):
+                if record["configuration"]["format"] == "zim":
                     result = kiwix_update_discovery.refresh_checked_source(sid)
                 else:
                     result = document_update_discovery.check_installed_document(record)
@@ -1826,10 +1606,10 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     catalog = SOURCE_CATALOG.get()
                     existing = next((item for item in catalog["sources"] if item["source_id"] == sid), None)
                     is_pdf = (existing and (self._pdf_record(existing) or self._epub_record(existing))) or (
-                        existing is None and isinstance(sid, str) and sid not in publication.ROUTES
+                        existing is None and isinstance(sid, str)
                         and isinstance(fields, dict) and fields.get("format") in {"pdf", "epub"})
                     busy = not is_pdf and source_busy(self._snapshot(), sid)
-                    if isinstance(sid, str) and not publication.legacy_only(sid):
+                    if isinstance(sid, str):
                         local_job = zim_jobs.status(sid)
                         if local_job and local_job.get("active"):
                             busy = True
@@ -1851,7 +1631,9 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                                     zim_refresh.schedule(lambda: SOURCE_CATALOG.get()["sources"])
                         except (OSError, ValueError) as exc:
                             raise catalog_store.RevisionConflict("could not unpublish source; removal refused") from exc
-                    elif isinstance(sid, str) and (sid in publication.ROUTES or is_pdf):
+                    elif isinstance(sid, str) and (is_pdf or
+                            existing and self._zim_record(existing) and isinstance(fields, dict)
+                            and fields.get("format", "zim") != "zim"):
                         self._guard_published_mutation(operation, sid, fields, revision)
                     try:
                         result = SOURCE_CATALOG.mutate(operation, sid, fields, revision, busy)
@@ -1897,7 +1679,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 is_pdf = record is not None and self._pdf_record(record)
                 is_document = is_pdf or is_epub
                 is_zim = record is not None and self._zim_record(record)
-                if source_id not in publication.ROUTES and not (is_document or is_zim):
+                if not (is_document or is_zim):
                     self._send_json(400, {"error": "source has no publication adapter"})
                     return
                 if "acknowledge_rights" in data and not (is_document or is_zim):
@@ -1933,14 +1715,6 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                         except (catalog_store.CatalogError, OSError):
                             self._send_json(503, {"error": "Could not record publication acknowledgement"})
                             return
-                elif enabled:
-                    snapshot = self._snapshot()
-                    life = self._lifecycles(catalog).get(source_id)
-                    artifact = life["artifact"] if life else None
-                    matched = self._matched_snapshot(snapshot, {source_id: artifact})
-                    if source_busy(snapshot, source_id) or not publication.status(matched, source_id)["serving"]:
-                        self._send_json(409, {"error": "matching source configuration, verified content and a reachable reader are required"})
-                        return
                 try:
                     publication.save(source_id, enabled)
                 except (OSError, ValueError):
@@ -1995,7 +1769,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
     def _check_storage_change(self):
         """Check local acquisition records without probing the managed mount."""
         monitor = getattr(self.server, "acquisition_monitor", None)
-        if monitor is not None or getattr(self.server, "manage_external_monitor", False):
+        if monitor is not None:
             snapshot = self._snapshot()
             if snapshot["stale"] or any(
                     job.get("active") is not False or
@@ -2119,7 +1893,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     raise ValueError("catalog revision changed")
                 record = next((item for item in catalog["sources"] if item["source_id"] == sid), None)
                 if adding:
-                    if record is not None or sid in publication.ROUTES or len(catalog["sources"]) >= catalog_store.MAX_ENTRIES:
+                    if record is not None or len(catalog["sources"]) >= catalog_store.MAX_ENTRIES:
                         raise ValueError("source ID already exists or catalog is full")
                 elif record is None or not (self._pdf_record(record) if requested_format == "pdf" else self._epub_record(record)):
                     raise ValueError("source has no matching document upload adapter")
@@ -2205,7 +1979,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 record = next((item for item in catalog["sources"] if item["source_id"] == sid), None)
                 is_epub = data["action"] in {"epub-download", "epub-add-download"}
                 if adding:
-                    if record is not None or sid in publication.ROUTES or len(catalog["sources"]) >= catalog_store.MAX_ENTRIES:
+                    if record is not None or len(catalog["sources"]) >= catalog_store.MAX_ENTRIES:
                         raise ValueError("source ID already exists or catalog is full")
                 elif record is None or not (self._epub_record(record) if is_epub else self._pdf_record(record)):
                     raise ValueError("source has no matching document download adapter")
@@ -2257,7 +2031,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 if data["revision"] != catalog["revision"]:
                     raise ValueError("Catalog changed; review the source again")
                 record = next((item for item in catalog["sources"] if item["source_id"] == sid), None)
-                if not record or publication.legacy_only(sid):
+                if not record:
                     raise ValueError("Source has no managed installation")
                 kind = record["configuration"]["format"]
                 if kind not in {"zim", "pdf", "epub"}:
@@ -2323,7 +2097,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 if data["revision"] != catalog["revision"]:
                     raise ValueError("catalog revision changed")
                 record = next((r for r in catalog["sources"] if r["source_id"] == sid), None)
-                if not record or publication.legacy_only(sid) or not select_lifecycle(sid, record["configuration"]).get("zim_download"):
+                if not record or not select_lifecycle(sid, record["configuration"]).get("zim_download"):
                     raise ValueError("Source has no supported ZIM download URL")
                 operation = data["action"]
                 if publication.load().get(sid) and not operation.startswith("zim-replacement-"):
@@ -2427,7 +2201,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             return
         if operation in ("remove", "add"):
             raise catalog_store.RevisionConflict("unpublish source before removing or re-adding it")
-        guarded_fields = ARTIFACT_FIELDS if publication.legacy_only(sid) else catalog_store.ARTIFACT_CONFIG_FIELDS
+        guarded_fields = catalog_store.ARTIFACT_CONFIG_FIELDS
         if isinstance(fields, dict) and fields.keys() & guarded_fields:
             catalog = SOURCE_CATALOG.get()
             if catalog["revision"] != revision:
@@ -2436,8 +2210,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             if record:
                 config = record["configuration"]
                 proposed = config | fields
-                if ((publication.legacy_only(sid) and not select_lifecycle(sid, proposed)["artifact"])
-                        or (not publication.legacy_only(sid) and any(proposed.get(k) != config.get(k) for k in guarded_fields))):
+                if any(proposed.get(k) != config.get(k) for k in guarded_fields):
                     raise catalog_store.RevisionConflict("unpublish source before changing artifact configuration")
 
     def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
@@ -2446,37 +2219,12 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         return
 
 
-def configured_external_monitor_entries():
-    """Find configured pre-ledger ZIMs requiring external monitoring.
-
-    This compatibility monitor is optional and never re-adds a removed seed,
-    reads an archive, downloads content, or changes publication state.
-    """
-    try:
-        configured = {record["source_id"] for record in SOURCE_CATALOG.get()["sources"]}
-    except (OSError, catalog_store.CatalogError):
-        return None
-    return [entry for sid, entry in zim_catalog.legacy_pinned_entries().items()
-            if sid in configured and sid in source_catalog.LEGACY_ACQUISITION_UNITS
-            and not publication.managed_installation(sid)]
-
-
-def configured_external_monitor_entry():
-    entries = configured_external_monitor_entries()
-    # One sampler only: never spawn extra potentially stalled NFS workers.
-    return entries[0] if entries and len(entries) == 1 else None
-
-
 def main() -> None:
     """Start the admin API server."""
     config = security.load_config()
     server = ThreadingHTTPServer((config.host, config.port), AdminAPIHandler)
     server.axiom_config = config
-    legacy = configured_external_monitor_entry()
-    server.manage_external_monitor = True
-    server.acquisition_monitor = monitoring.Monitor(legacy) if legacy else None
-    if server.acquisition_monitor:
-        server.acquisition_monitor.start()
+    server.managed_acquisition_only = True
     queue_shutdown = acquisition_queue.start(_execute_batch_job)
     try:
         server.serve_forever()
@@ -2484,8 +2232,6 @@ def main() -> None:
         pass
     finally:
         queue_shutdown.set()
-        if server.acquisition_monitor:
-            server.acquisition_monitor.stop.set()
         server.server_close()
 
 

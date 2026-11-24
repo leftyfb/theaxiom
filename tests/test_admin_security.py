@@ -7,7 +7,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from theaxiom import admin_api, catalog_store
 from theaxiom.admin_security import PasswordStore, ServerConfig, load_config
@@ -96,61 +96,20 @@ class ReleaseRevisionTests(unittest.TestCase):
             })
 
 
-class ExternalMonitorSelectionTests(unittest.TestCase):
-    def setUp(self):
-        units = dict.fromkeys(("wikipedia-en", "another-legacy", "first", "second"),
-                             "fixture-acquisition.service")
-        registry = patch.object(admin_api.source_catalog, "LEGACY_ACQUISITION_UNITS", units)
-        registry.start()
-        self.addCleanup(registry.stop)
-
-    def test_unregistered_pinned_source_never_starts_sampler(self):
-        sid = admin_api.WIKIPEDIA_SOURCE["source_id"]
-        with (patch.object(admin_api.source_catalog, "LEGACY_ACQUISITION_UNITS", {}),
-              patch.object(admin_api.SOURCE_CATALOG, "get", return_value={"sources": [{"source_id": sid}]})):
-            self.assertIsNone(admin_api.configured_external_monitor_entry())
-
-    def test_configured_external_monitor_is_selected_by_capability(self):
-        from theaxiom import source_catalog
-        pinned = dict(source_catalog.WIKIPEDIA_SOURCE, source_id="another-legacy")
-        with (patch.object(admin_api.SOURCE_CATALOG, "get",
-                           return_value={"sources": [{"source_id": "another-legacy"}]}),
-              patch.object(admin_api.zim_catalog, "legacy_pinned_entries",
-                           return_value={"another-legacy": pinned})):
-            self.assertEqual(admin_api.configured_external_monitor_entry(), pinned)
-        with (patch.object(admin_api.SOURCE_CATALOG, "get",
-                           return_value={"sources": [{"source_id": "unrelated"}]}),
-              patch.object(admin_api.zim_catalog, "legacy_pinned_entries",
-                           return_value={"another-legacy": pinned})):
-            self.assertIsNone(admin_api.configured_external_monitor_entry())
-
-    def test_managed_wikipedia_skips_sampler_and_rollback_is_fail_closed(self):
+class ManagedAcquisitionStartupTests(unittest.TestCase):
+    def test_managed_only_startup_ignores_external_acquisition(self):
         from types import SimpleNamespace
 
-        sid = admin_api.WIKIPEDIA_SOURCE["source_id"]
-        catalog = {"sources": [{"source_id": sid}]}
-        handler = SimpleNamespace(server=SimpleNamespace(
-            acquisition_monitor=None, manage_external_monitor=True))
-        with (patch.object(admin_api.SOURCE_CATALOG, "get", return_value=catalog),
-              patch.object(admin_api.publication, "managed_installation", return_value=True) as adopted):
-            self.assertIsNone(admin_api.configured_external_monitor_entry())
-            self.assertEqual(admin_api.AdminAPIHandler._snapshot(handler),
-                             {"acquisitions": [], "stale": False})
-            adopted.return_value = False
-            self.assertEqual(admin_api.configured_external_monitor_entry()["source_id"], sid)
-            self.assertEqual(admin_api.AdminAPIHandler._snapshot(handler),
-                             {"acquisitions": [], "stale": True})
-
-    def test_multiple_legacy_monitors_fail_closed_without_parallel_nfs_sampling(self):
-        from theaxiom import source_catalog
-        seed = source_catalog.WIKIPEDIA_SOURCE
-        with (patch.object(admin_api.SOURCE_CATALOG, "get",
-                           return_value={"sources": [{"source_id": "first"},
-                                                     {"source_id": "second"}]}),
-              patch.object(admin_api.zim_catalog, "legacy_pinned_entries",
-                           return_value={"first": dict(seed, source_id="first"),
-                                         "second": dict(seed, source_id="second")})):
-            self.assertIsNone(admin_api.configured_external_monitor_entry())
+        server = Mock()
+        handler = SimpleNamespace(server=SimpleNamespace(managed_acquisition_only=True))
+        with (patch.object(admin_api, "ThreadingHTTPServer", return_value=server),
+              patch.object(admin_api.security, "load_config", return_value=SimpleNamespace(host="localhost", port=0)),
+              patch.object(admin_api.acquisition_queue, "start")):
+            admin_api.main()
+        self.assertTrue(server.managed_acquisition_only)
+        server.serve_forever.assert_called_once_with()
+        self.assertEqual(admin_api.AdminAPIHandler._snapshot(handler),
+                         {"acquisitions": [], "stale": False})
 
 
 class HTTPAuthTests(unittest.TestCase):
@@ -363,19 +322,6 @@ class HTTPAuthTests(unittest.TestCase):
         self.assertNotIn("WWW-Authenticate", headers)
         self.assertIn(b"sign in required", body)
 
-    def test_legacy_reader_auth_paths_derive_from_registry(self):
-        from theaxiom import publication
-        route = {"entry_path": "/read/another-legacy", "reader_path": "/zim/",
-                 "port": 8081, "book_id": "other_en_all_2026-11",
-                 "path": "/old-other/"}
-        with patch.dict(publication.ROUTES, {"another-legacy": route}):
-            for path in (route["entry_path"], "/internal/publication/another-legacy"):
-                with self.subTest(path=path):
-                    code, response_headers, _ = self.request(path)
-                    self.assertEqual(code, 403)
-                    self.assertNotIn("WWW-Authenticate", response_headers)
-
-
     def test_cross_site_post_rejected_without_basic_challenge(self):
         for site in ("cross-site", "same-site"):
             with self.subTest(site=site):
@@ -491,7 +437,7 @@ class HTTPAuthTests(unittest.TestCase):
             code, _, _ = self.request("/api/action", "POST", self.auth,
                 {"Content-Type":"application/json","Origin":"http://"+self.host},
                 '{"source_id":"wikipedia-en","action":"download","revision":0}')
-            self.assertEqual(code, 503)
+            self.assertEqual(code, 409)
             launch.assert_not_called()
 
 

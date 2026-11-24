@@ -552,7 +552,7 @@
   <h4>3. Review advanced details</h4>
   <p>Author, publisher, edition and language describe the content. Expected size and SHA-256 are the exact byte count and fingerprint of the intended file. Provenance records where the information came from; license records the permission to use it. Use trustworthy publisher metadata where available. A checksum calculated from a downloaded file can identify those bytes later, but does not independently prove their origin. Saving metadata does not verify it.</p>
   <h4>4. Acquire and verify</h4>
-  <p><strong>ZIM:</strong> The existing verified Wikipedia archive is supported. New ZIM profiles currently require a matching trusted acquisition manifest; arbitrary remote downloads are not yet enabled.</p>
+  <p><strong>ZIM:</strong> Set a supported HTTPS ZIM download URL, then use Download on the source card. The archive is verified before it can be published.</p>
   <p><strong>PDF:</strong> Use Download from URL for a configured HTTPS PDF link (up to three independently validated HTTPS redirects; query strings and private addresses remain unsupported), or Upload PDF to choose a file from your computer. Both support up to 16 MiB, compute missing size and SHA-256, and record provenance. A URL is optional for uploads. When publishing a PDF without a documented license, confirm you have permission to make it available to library users. Local or explicitly configured NFS storage is supported; the expected mount target and export must match.</p>
   <h4>5. Publish and read offline</h4>
   <p>After matching content is verified and its reader is ready, use Publish on the source card. Open the published collection from The Axiom homepage, even without internet connectivity. PDFs use the browser PDF viewer; PDF full-text search is not yet supported.</p>
@@ -693,7 +693,7 @@
             Review newer edition
           </button>
           {% endif %}
-          {% if (source.zim_download or source.legacy_pinned) and discovery.get("method") != "manual" %}<button class="button" type="button" data-zim-update-check{% if not source.installed_verified %} hidden disabled{% endif %}>Check for updates</button>{% endif %}
+          {% if source.zim_download and discovery.get("method") != "manual" %}<button class="button" type="button" data-zim-update-check{% if not source.installed_verified %} hidden disabled{% endif %}>Check for updates</button>{% endif %}
           {% if document and url_managed and (discovery.get("method") == "head" or not discovery) %}
           <button class="button" type="button" data-document-update-check{% if not source.installed_verified %} hidden disabled{% endif %}>Check for updates</button>
           {% endif %}
@@ -740,7 +740,7 @@
             {% if document or source.zim_download %}<p class="source-note" data-delete-feedback role="status"></p>{% endif %}
           </details>
         </div>
-        {% if source.zim_download or source.legacy_pinned %}<p class="source-note" data-zim-feedback role="status" aria-live="polite"></p>{% endif %}
+        {% if source.zim_download %}<p class="source-note" data-zim-feedback role="status" aria-live="polite"></p>{% endif %}
         {% if document %}
         <div class="busy-indicator" data-pdf-busy hidden><span class="busy-spinner" aria-hidden="true"></span><span role="status" data-pdf-busy-text></span></div>
         <p class="source-note" data-pdf-feedback role="status"></p>
@@ -762,7 +762,7 @@
           <p class="source-note" data-field="update-evidence">
             {% if source.update_check %}{{ source.update_check.evidence }}{% endif %}
           </p>
-        {% if source.zim_download or source.legacy_pinned %}
+        {% if source.zim_download %}
         <p class="source-note" data-field="update-details"{% if not source.update_check or source.update_check.state != "update_available" %} hidden{% endif %}>
         {% if source.update_check and source.update_check.state == "update_available" %}
           Installed edition: {{ source.update_check.installed_edition }} · Publisher edition: {{ source.update_check.candidate_edition }}

@@ -89,7 +89,7 @@ ambiguous metadata is reported as unknown rather than as an update. A manual
 The first iteration supports only versioned generic ZIMs in recognized
 Kiwix naming families whose trusted installed-job identity and official
 catalog metadata can be matched. It does not establish universal coverage
-for Wikipedia's legacy acquisition, arbitrary PDF/EPUB sources, feeds
+for arbitrary PDF/EPUB sources, feeds
 requiring pagination, or alternative Metalink publisher formats. Do not
 enable automatic archive updates on the strength of these checks.
 
