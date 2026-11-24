@@ -598,6 +598,122 @@ def exercise_history_poll(browser, viewport):
         page.close()
 
 
+
+def exercise_source_actions(browser, viewport):
+    """Use controlled responses to exercise the actual rendered source cards."""
+    from test_admin_page_template import profile, render
+
+    fillers = [dict(profile(f"fixture-{i:02}", title=f"Fixture {i:02}", format="other"),
+                    publication_filter="unpublished", download_filter="not-downloaded")
+               for i in range(60)]
+    target = dict(profile("action-target", title="Fixture 30 PDF", source_url="https://publisher.org/fixture.pdf"),
+                  publication={"entry_path": "/fixture.pdf"}, publication_filter="unpublished",
+                  download_filter="not-downloaded")
+    revision = 0
+    downloads = 0
+
+    def api(route):
+        nonlocal revision, downloads
+        if route.request.method == "GET":
+            route.fulfill(json={"revision": revision, "sources": [*fillers, target]})
+            return
+        payload = route.request.post_data_json
+        assert payload["revision"] == revision
+        if route.request.url.endswith("/publication"):
+            enabled = payload["enabled"]
+            target["publication"].update(enabled=enabled, published=enabled)
+            target["publication_filter"] = "published" if enabled else "unpublished"
+            route.fulfill(json={"enabled": enabled})
+            return
+        assert payload["action"] == "pdf-download"
+        downloads += 1
+        if downloads == 2:
+            route.fulfill(status=409, json={"error": "Fixture download failed"})
+            return
+        revision += 1
+        target.update(installed_verified=True, download_filter="downloaded",
+                      artifact={"bytes": 1024 * revision})
+        target["publication"]["ready_for_publication"] = True
+        route.fulfill(json={"installed_verified": True, "revision": revision})
+
+    page = browser.new_page(viewport=viewport)
+    navigations = []
+    errors = []
+    page.on("framenavigated", lambda frame: navigations.append(frame.url))
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    try:
+        markup = render([*fillers, target])
+        page.route("http://fixture.local/admin/sources", lambda route: route.fulfill(
+            content_type="text/html", body=markup))
+        page.route("http://fixture.local/api/*", api)
+        page.goto("http://fixture.local/admin/sources")
+        card = page.locator('[data-source-id="action-target"]')
+        summary = card.locator(".source-header")
+        download = card.locator("[data-pdf-download]")
+        feedback = card.locator("[data-pdf-feedback]")
+        publish = card.locator('[data-field="publication-toggle"]')
+        search = page.locator("#source-filter-search")
+        sort = page.locator("#source-filter-sort")
+        page.locator("#source-filter-toggle").click()
+        page.locator("#source-filter-format").select_option("pdf")
+        expect(card).to_be_visible()
+        page.locator("#source-filter-format").select_option("")
+        search.fill("Fixture")
+        sort.select_option("alpha")
+        page.locator("#source-select-mode").click()
+        selected = page.locator('[data-group-select][value="action-target"]')
+        selected.check()
+        assert summary.evaluate("(node) => node.getBoundingClientRect().top + scrollY") > viewport["height"]
+        summary.click()
+        download.scroll_into_view_if_needed()
+        top = card.evaluate("(node) => node.getBoundingClientRect().top")
+        download.focus()
+        page.keyboard.press("Enter")
+        expect(feedback).to_have_text("PDF downloaded and verified.")
+        expect(download).to_have_text("Re-download")
+        expect(download).to_be_focused()
+        assert abs(card.evaluate("(node) => node.getBoundingClientRect().top") - top) <= 2
+
+        page.keyboard.press("Enter")
+        expect(feedback).to_have_text("Fixture download failed")
+        expect(download).to_be_focused()
+        page.keyboard.press("Enter")
+        expect(card.locator('[data-field="status"]')).to_have_text("2.0 KiB")
+        expect(card).to_have_attribute("open", "")
+        expect(selected).to_be_checked()
+        expect(search).to_have_value("Fixture")
+        expect(sort).to_have_value("alpha")
+
+        # Start below the fold in default order. Other downloaded cards keep
+        # the target below the fold until publication moves it to the front.
+        for source in fillers[:24]:
+            source["download_filter"] = "downloaded"
+        sort.select_option("status")
+        expect(page.locator(".source-card").nth(24)).to_have_attribute("data-source-id", "action-target")
+        publish.scroll_into_view_if_needed()
+        publish.focus()
+        page.keyboard.press("Enter")
+        expect(page.locator(".source-card").first).to_have_attribute("data-source-id", "action-target")
+        expect(publish).to_have_text("Unpublish")
+        expect(publish).to_be_in_viewport()
+        expect(publish).to_be_focused()
+        expect(card).to_have_attribute("open", "")
+        expect(selected).to_be_checked()
+
+        page.locator("#source-filter-publication").select_option("published")
+        publish.click()
+        expect(card).to_be_hidden()
+        expect(page.locator("#filtered-action-feedback")).to_have_text("Fixture 30 PDF — Source unpublished.")
+        expect(page.locator("#filtered-action-feedback")).to_be_in_viewport()
+        page.locator("#source-filter-publication").select_option("")
+        expect(card).to_have_attribute("open", "")
+        expect(selected).to_be_checked()
+        assert len(navigations) == 1, navigations
+        assert not errors, errors
+    finally:
+        page.close()
+
+
 def main():
     artifacts = Path(os.environ.get("AXIOM_BROWSER_ARTIFACTS", "/tmp/axiom-browser-artifacts"))
     with tempfile.TemporaryDirectory(prefix="axiom-browser-fixtures-") as tmp:
@@ -633,6 +749,7 @@ def main():
                                 ):
                                     exercise(browser, f"http://{host}:{port}", name, viewport, artifacts)
                                     exercise_history_poll(browser, viewport)
+                                    exercise_source_actions(browser, viewport)
                             finally:
                                 browser.close()
                     finally:

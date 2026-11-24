@@ -71,6 +71,8 @@
     .source-card > summary::-webkit-details-marker { display: none; }
     .source-card > summary::after { content: '▾'; color: var(--green); margin-left: .25rem; }
     .source-card[open] > summary::after { content: '▴'; }
+    .source-metadata > div[hidden], .source-details > [hidden] { display: none; }
+    .source-metadata:not(:has(dd:not(:empty))) { display: none; }
     .source-expanded { padding: .8rem 1rem 1rem; border-top: 1px solid var(--line); }
     .source-card > summary .source-subtitle { font-weight: 400; font-size: .9rem; }
     .source-card > summary h3 { font-size: 1.05rem; }
@@ -114,6 +116,9 @@
     .source-filters { background:var(--paper); border:1px solid var(--line); border-radius:.8rem; padding:1rem; margin:1rem 0; }
     .source-filters > summary, .group-panel > summary, #source-editor-groups > summary, .membership-section > summary, #source-advanced > summary { display:list-item; list-style-position:inside; }
     .source-filters summary { cursor:pointer; font-weight:700; color:var(--green); }
+    #filtered-action-feedback { position: fixed; z-index: 2; bottom: 1rem; right: 1rem;
+      max-width: min(28rem, calc(100vw - 2rem)); margin: 0; padding: .65rem .85rem;
+      background: var(--dark); color: white; border-radius: .45rem; }
     #catalog-feedback:empty { margin:0; padding:0; }
     .source-selection-bar { display:flex; align-items:center; gap:.75rem; padding:.35rem .8rem; margin:.35rem 0; color:var(--muted); flex-wrap:wrap; }
     .source-selection-bar label { display:flex; align-items:center; gap:.45rem; cursor:pointer; font-size:.9rem; }
@@ -598,6 +603,7 @@
       <div class="source-actions"><button class="button" type="button" id="source-filter-reset">Clear filters</button><button class="button" type="button" id="source-filter-reorder">Refresh order</button></div>
     </section>
     <p id="source-filter-empty" class="empty" hidden>No sources match the selected filters.</p>
+    <p id="filtered-action-feedback" role="status" hidden></p>
     <div id="source-cards">
     {% for source in (catalog|default({})).sources|default([]) %}
       {% set pub = source.publication %}
@@ -702,15 +708,14 @@
         <p class="source-note" data-pdf-feedback role="status"></p>
         {% if url_managed and not source.pdf_download %}<p class="source-note">Configured download URL is unsupported. Edit the source URL.</p>{% endif %}
         {% elif source.acquisition_reason and source.acquisition_reason != 'acquisition disabled pending storage safety integration' %}<p class="source-note" data-field="acquisition-reason">{{ source.acquisition_reason }}</p>{% endif %}
+        {% if pub %}<p class="source-note" data-publication-feedback role="status"></p>{% endif %}
         {% if pub %}<p class="source-note" data-field="publication-status" role="status"{% if pub.published %} hidden{% endif %}>{{ publication_label }}</p>{% endif %}
         <p class="source-note" data-field="mutation-note">{% if source.mutation_blocked or pub.error %}Acquisition or publication status unresolved; changes are blocked.{% endif %}</p>
-        {% if source.profile.author or source.profile.publisher or source.profile.edition or source.profile.language %}
         <dl class="source-metadata">
-          {% for name in ('author', 'publisher', 'edition', 'language') if source.profile.get(name) %}
-          <div><dt>{{ name|capitalize }}:</dt><dd>{{ source.profile.get(name) }}</dd></div>
+          {% for name in ('author', 'publisher', 'edition', 'language') %}
+          <div{% if not source.profile.get(name) %} hidden{% endif %}><dt>{{ name|capitalize }}:</dt><dd data-source-profile="{{ name }}">{{ source.profile.get(name, '') }}</dd></div>
           {% endfor %}
         </dl>
-        {% endif %}
         <details class="source-technical">
           <summary>Technical details</summary>
           {% if discovery %}
@@ -737,14 +742,14 @@
         {% endif %}
 
           <dl class="storage-status source-details">
-            {% for key, label in [('source_url','Source URL'),('expected_size_bytes','Expected size (bytes)'),('sha256','Expected SHA-256'),('provenance','Provenance'),('license','License')] if source.configuration.get(key) %}
-            <dt>{{ label }}</dt><dd>{{ source.configuration.get(key) }}</dd>
+            {% for key, label in [('source_url','Source URL'),('expected_size_bytes','Expected size (bytes)'),('sha256','Expected SHA-256'),('provenance','Provenance'),('license','License')] %}
+            {% set value = source.configuration.get(key, '') %}
+            <dt{% if not value %} hidden{% endif %}>{{ label }}</dt><dd data-source-config="{{ key }}"{% if not value %} hidden{% endif %}>{{ value }}</dd>
             {% endfor %}
-            {% if source.artifact %}
-            {% if source.artifact.filename %}<dt>Artifact filename</dt><dd>{{ source.artifact.filename }}</dd>{% endif %}
-            <dt>Artifact size (bytes)</dt><dd>{{ source.artifact.bytes }}</dd>
-            <dt>Artifact SHA-256</dt><dd>{{ source.artifact.sha256 }}</dd>
-            {% endif %}
+            {% for key, label in [('filename','Artifact filename'),('bytes','Artifact size (bytes)'),('sha256','Artifact SHA-256')] %}
+            {% set value = (source.artifact|default({}, true)).get(key, '') %}
+            <dt{% if value == '' %} hidden{% endif %}>{{ label }}</dt><dd data-source-artifact="{{ key }}"{% if value == '' %} hidden{% endif %}>{{ value }}</dd>
+            {% endfor %}
             {% if not document and source.adapter %}<dt>Last sample</dt><dd data-field="sample">—</dd>{% endif %}
             {% if source.zim_download or (source.acquisition|default({}, true)).get("attempt_history") %}
             <dt>Last successful acquisition</dt><dd data-field="last-acquisition">—</dd>
@@ -777,7 +782,8 @@
   <script id="source-catalog-script">
     (() => {
       const feedback = document.getElementById('catalog-feedback');
-      const revision = {{ (catalog|default({})).revision|default(none)|tojson }};
+      let revision = {{ (catalog|default({})).revision|default(none)|tojson }};
+      window.axiomSourceRevision = () => revision;
       const stateKey = 'theaxiom-source-view';
       try {
         const saved = JSON.parse(sessionStorage.getItem(stateKey) || 'null');
@@ -806,6 +812,26 @@
           }));
         } catch (_) { /* Reload remains available without session storage. */ }
         window.location.reload();
+      }
+
+      let lastSourceAction;
+      function sourceAction(card, status) {
+        lastSourceAction = {card, status};
+        showFilteredAction();
+      }
+      function showFilteredAction() {
+        const notice = document.getElementById('filtered-action-feedback');
+        const {card, status} = lastSourceAction || {};
+        const message = card?.hidden && status();
+        const text = message ? card.dataset.filterTitle + ' — ' + message : '';
+        if (notice.textContent !== text) notice.textContent = text;
+        notice.hidden = !text;
+      }
+      document.addEventListener('axiom-source-filters-changed', showFilteredAction);
+
+      function restoreActionFocus(card, trigger, hadFocus) {
+        if (!hadFocus || document.activeElement !== document.body || card.hidden || !card.open) return;
+        (trigger.disabled || trigger.hidden ? card.querySelector('.source-header') : trigger).focus({preventScroll: true});
       }
 
       const groupKind = document.getElementById('group-kind');
@@ -1669,7 +1695,7 @@
         catch (error) { feedback.textContent = error.message; }
       }));
       {% if catalog.sources | selectattr('adapter', 'in', ['pdf','epub']) | list %}
-      async function acquirePDF(card, file = null) {
+      async function acquirePDF(card, file = null, trigger = null) {
         const feedback = card.querySelector('[data-pdf-feedback]');
         const buttons = card.querySelectorAll('[data-pdf-download], [data-pdf-upload]');
         if (card.dataset.acquiring === 'true' || !Array.from(buttons).some(button => !button.disabled && !button.hidden)) return;
@@ -1679,12 +1705,14 @@
           feedback.textContent = 'Choose a document between 1 byte and 16 MiB.';
           return;
         }
+        const hadFocus = document.activeElement === trigger;
         card.dataset.acquiring = 'true';
         buttons.forEach(button => button.disabled = true);
         feedback.textContent = '';
         busy.hidden = false;
         const formatLabel = card.dataset.filterFormat.toUpperCase();
         busyText.textContent = (file ? 'Uploading and verifying ' : 'Downloading and verifying ') + formatLabel + '…';
+        sourceAction(card, () => busy.hidden ? feedback.textContent : busyText.textContent);
         try {
           const response = file
             ? await acquisitionFetch('/api/pdf-upload', {method:'POST', headers:{...((typeof window !== 'undefined' && window.axiomCsrfHeaders?.()) || {}),'Content-Type':card.dataset.filterFormat === 'epub' ? 'application/epub+zip' : 'application/pdf',
@@ -1694,17 +1722,24 @@
           const result = await response.json().catch(() => ({}));
           if (!response.ok) throw acquisitionError(response, result, 'Document acquisition failed');
           if (!result.installed_verified) throw new Error('Document installation was not confirmed');
-          reloadSources();
+          if (file) {
+            reloadSources();
+            return;
+          }
+          revision = result.revision;
+          feedback.textContent = formatLabel + ' downloaded and verified.';
         } catch (error) {
           feedback.textContent = error.message;
         } finally {
           card.dataset.acquiring = 'false';
           busy.hidden = true;
           buttons.forEach(button => button.disabled = card.dataset.acquisitionBlocked === 'true' || button.hidden);
+          restoreActionFocus(card, trigger, hadFocus);
+          showFilteredAction();
         }
       }
       document.querySelectorAll('[data-pdf-download]').forEach(button => button.addEventListener('click', () => {
-        acquirePDF(button.closest('.source-card'));
+        acquirePDF(button.closest('.source-card'), null, button);
       }));
       document.querySelectorAll('[data-pdf-upload]').forEach(button => button.addEventListener('click', () => {
         button.closest('.source-card').querySelector('[data-pdf-file]').click();
@@ -1717,11 +1752,15 @@
       {% endif %}
       document.querySelectorAll('[data-zim-download]').forEach(button => button.addEventListener('click', async () => {
         if (button.disabled) return;
+        const hadFocus = document.activeElement === button;
         button.disabled = true;
         const card = button.closest('.source-card');
         const localFeedback = card.querySelector('[data-zim-feedback]');
         card.dataset.zimPosting = 'true';
         localFeedback.textContent = 'Starting download…';
+        sourceAction(card, () => localFeedback.textContent ||
+          card.querySelector('[data-field="metrics"]:not([hidden])')?.textContent ||
+          card.querySelector('[data-field="status"]').textContent);
         try {
           const response = await acquisitionFetch('/api/action', {method:'POST', headers:{...((typeof window !== 'undefined' && window.axiomCsrfHeaders?.()) || {}),'Content-Type':'application/json'},
             body:JSON.stringify({source_id:card.dataset.sourceId, action:'zim-download', revision})});
@@ -1736,6 +1775,8 @@
         } finally {
           delete card.dataset.zimPosting;
           button.disabled = card.dataset.zimAccepted === 'true' || card.dataset.zimBlocked === 'true';
+          restoreActionFocus(card, button, hadFocus);
+          showFilteredAction();
         }
       }));
       document.querySelectorAll('[data-zim-update-check], [data-document-update-check]').forEach(button => button.addEventListener('click', async () => {
@@ -1862,21 +1903,33 @@
         }
       }));
       document.querySelectorAll('[data-field="publication-toggle"]').forEach(button => button.addEventListener('click', async () => {
+        if (button.disabled) return;
         const enabled = button.dataset.enabled !== 'true';
         const acknowledge = enabled && button.dataset.acknowledgeRights === 'true';
         if (acknowledge && !window.confirm("Publish this PDF to library users? Confirm that you have permission to make it available in this library.")) return;
+        const card = button.closest('.source-card');
+        const status = card.querySelector('[data-publication-feedback]');
+        const hadFocus = document.activeElement === button;
         button.dataset.posting = 'true';
         button.disabled = true;
+        status.textContent = enabled ? 'Publishing…' : 'Unpublishing…';
+        sourceAction(card, () => status.textContent);
         try {
-          const payload = {source_id:button.closest('.source-card').dataset.sourceId, enabled, revision};
+          const payload = {source_id:card.dataset.sourceId, enabled, revision};
           if (acknowledge) payload.acknowledge_rights = true;
-          const response = await fetch('/api/publication', {method:'POST', headers:{...((typeof window !== 'undefined' && window.axiomCsrfHeaders?.()) || {}),'Content-Type':'application/json'},
+          const response = await fetch('/api/publication', {method:'POST', headers:{...window.axiomCsrfHeaders(),'Content-Type':'application/json'},
             body:JSON.stringify(payload)});
           if (!response.ok) throw new Error((await response.json()).error || 'Publication failed');
-          reloadSources();
+          button.dataset.enabled = String(enabled);
+          button.textContent = enabled ? 'Unpublish' : 'Publish';
+          status.textContent = enabled ? 'Publication enabled.' : 'Source unpublished.';
         } catch (error) {
-          window.alert(error.message);
+          status.textContent = error.message;
+        } finally {
           delete button.dataset.posting;
+          button.disabled = false;
+          restoreActionFocus(card, button, hadFocus);
+          showFilteredAction();
         }
       }));
     })();
@@ -1919,7 +1972,12 @@
           cards.sort((a,b) => (v.sort === 'alpha' ? 0 : rank(a)-rank(b)) ||
             a.dataset.filterTitle.localeCompare(b.dataset.filterTitle, undefined, {sensitivity:'base'}) ||
             a.dataset.sourceId.localeCompare(b.dataset.sourceId));
-          for (const card of cards) root.appendChild(card.closest('.source-row'));
+          let next = root.querySelector('.source-row');
+          for (const card of cards) {
+            const row = card.closest('.source-row');
+            if (row === next) next = row.nextElementSibling;
+            else root.insertBefore(row, next);
+          }
         }
         const count = document.getElementById('source-filter-count');
         count.textContent = visible + ' of ' + cards.length + ' sources';
@@ -1957,7 +2015,7 @@
     (() => {
       const cards = Array.from(document.querySelectorAll('.source-card[data-source-id]'));
       if (!cards.length) return;
-      const revision = {{ (catalog|default({})).revision|default(none)|tojson }};
+      const editableFields = {{ editable_fields|list|tojson }};
       const updateSummary = document.getElementById('source-update-summary');
       const showUpdateSummary = text => {
         if (!updateSummary) return;
@@ -2156,6 +2214,7 @@
         const controller = new AbortController();
         const timer = window.setTimeout(() => controller.abort(), 5000);
         try {
+          const revision = window.axiomSourceRevision();
           const response = await fetch('/api/sources', {cache: 'no-store', signal: controller.signal});
           if (response.status === 401) {
             redirectExpiredSession();
@@ -2163,12 +2222,22 @@
           }
           if (!response.ok) throw new Error('Status unavailable');
           const data = await response.json();
+          if (revision !== window.axiomSourceRevision()) return;
           if (data.revision !== revision) {
+            // A document install can commit before its POST response arrives.
+            if (data.revision === revision + 1 && cards.some(card => card.dataset.acquiring === 'true')) return;
             window.axiomHandleStaleSources?.();
             throw new Error('Catalog revision changed');
           }
           showUpdateSummary(data.update_summary || '');
           const sources = new Map(data.sources.map(source => [source.source_id, source]));
+          const focused = document.activeElement;
+          const focusedCard = focused.closest('.source-card');
+          const anchor = focused.closest('.source-row') || Array.from(document.querySelectorAll('.source-row'))
+            .find(row => !row.hidden && row.getBoundingClientRect().bottom > 0 &&
+              row.getBoundingClientRect().top < window.innerHeight);
+          const anchorTop = anchor?.getBoundingClientRect().top;
+          let reorder = false;
           cards.forEach(card => {
             const source = sources.get(card.dataset.sourceId);
             if (source && !source.adapter) {
@@ -2254,10 +2323,37 @@
               }
             }
             controls(card, source);
-            card.dataset.filterPublication = source?.publication_filter || "unknown";
-            card.dataset.filterDownload = source?.download_filter || "unknown";
+            if (source) {
+              for (const field of editableFields) {
+                const attribute = 'data-catalog-' + field.replaceAll('_', '-');
+                card.setAttribute(attribute, source.profile?.[field] ?? source.configuration?.[field] ?? '');
+              }
+              for (const node of card.querySelectorAll('[data-source-config], [data-source-artifact]')) {
+                const value = (node.dataset.sourceConfig ? source.configuration?.[node.dataset.sourceConfig] :
+                  source.artifact?.[node.dataset.sourceArtifact]) ?? '';
+                node.textContent = value;
+                node.previousElementSibling.hidden = node.hidden = value === '';
+              }
+              for (const node of card.querySelectorAll('[data-source-profile]')) {
+                node.textContent = source.profile?.[node.dataset.sourceProfile] || '';
+                node.parentElement.hidden = !node.textContent;
+              }
+            }
+            const publication = source?.publication_filter || 'unknown';
+            const download = source?.download_filter || 'unknown';
+            reorder ||= publication !== card.dataset.filterPublication || download !== card.dataset.filterDownload;
+            card.dataset.filterPublication = publication;
+            card.dataset.filterDownload = download;
           });
-          window.axiomSourceFilters?.apply(false);
+          window.axiomSourceFilters?.apply(reorder);
+          if (focusedCard && !focusedCard.hidden && document.activeElement === document.body) {
+            const control = focused.disabled || focused.hidden ? focusedCard.querySelector('.source-header') : focused;
+            control.focus({preventScroll: true});
+          }
+          if (anchor && !anchor.hidden) {
+            const offset = anchor.getBoundingClientRect().top - anchorTop;
+            if (offset) window.scrollBy(0, offset);
+          }
         } catch (_) {
           showUpdateSummary('');
           cards.forEach(card => {

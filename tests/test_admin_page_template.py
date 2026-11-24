@@ -269,7 +269,6 @@ def test_source_summary_is_compact_and_selection_is_separate():
     assert card.index('data-group-select') < card.index('<summary')
     assert card.index('<button class="button" type="button" data-catalog-edit=') > card.index('</summary>')
     assert "job?.active === true && !stale" in page
-    assert "root.appendChild(card.closest('.source-row'))" in page
 
 
 def test_document_card_actions_are_contextual():
@@ -283,8 +282,8 @@ def test_document_card_actions_are_contextual():
         manual["artifact"] = dict(bytes=4096, sha256="a" * 64, filename="guide")
         page = render([manual])
         assert f">Replace {label}</button>" in page
-        assert "Artifact size (bytes)</dt><dd>4096" in page
-        assert "<dt>Author" not in page
+        assert 'data-source-artifact="bytes">4096</dd>' in page
+        assert '<div hidden><dt>Author:' in page
         assert "Technical details</summary>" in page
         url = profile(format=format_name, source_url="https://example.org/guide." + format_name)
         page = render([url])

@@ -12,15 +12,16 @@ def run_ui(samples):
     harness = r"""
 const samples = SAMPLES;
 const fields = {};
-const card = {dataset:{sourceId:'wikipedia-en'}, querySelector(selector) {
+const card = {setAttribute(){}, querySelectorAll(){return [];}, dataset:{sourceId:'wikipedia-en'}, querySelector(selector) {
   const key = selector.split('"')[1] || selector;
   return fields[key] ??= {dataset:{}, hidden:false, value:0, textContent:'', className:'', removeAttribute(name){delete this[name];}};
 }};
 const requests = [];
 let next;
-global.document = {querySelectorAll: () => [card], getElementById: id =>
+global.document = {activeElement:{closest(){return null;}},
+  querySelectorAll: selector => selector === '.source-row' ? [] : [card], getElementById: id =>
   id === 'source-update-summary' ? (fields[id] ??= {}) : ({})};
-global.window = {setTimeout(fn, ms) {if(ms===2000) next=fn; return 1;}, clearTimeout(){}};
+global.window = {axiomSourceRevision: () => 0, setTimeout(fn, ms) {if(ms===2000) next=fn; return 1;}, clearTimeout(){}};
 global.fetch = async (url, options) => {
   requests.push({url, method:options.method || 'GET'});
   const sample = samples.shift();
