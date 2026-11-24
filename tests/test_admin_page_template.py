@@ -1,6 +1,6 @@
 from html.parser import HTMLParser
 from pathlib import Path
-from jinja2 import Environment
+from jinja2 import Environment, FileSystemLoader
 from theaxiom.admin_api import ACTION_LABELS, select_lifecycle
 from theaxiom.source_catalog import WIKIPEDIA_SOURCE
 from theaxiom.catalog_store import EDITABLE
@@ -20,7 +20,7 @@ def render(sources=(), **overrides):
     values = dict(catalog=dict(sources=sources, revision=0), editable_fields=sorted(EDITABLE),
                   action_labels=ACTION_LABELS)
     values.update(overrides)
-    return Environment(autoescape=True).from_string(TEMPLATE.read_text()).render(**values)
+    return Environment(loader=FileSystemLoader(TEMPLATE.parent), autoescape=True).get_template(TEMPLATE.name).render(**values)
 
 
 class Parser(HTMLParser):
@@ -461,3 +461,16 @@ def test_installed_url_sources_share_the_update_label():
     upload = profile()
     upload["installed_verified"] = True
     assert "data-document-update-check>Check for updates" not in render([upload])
+
+
+def test_source_icon_is_shared_and_uses_only_local_image_data():
+    icon = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aWZkAAAAASUVORK5CYII="
+    source = profile(title="Reference Library")
+    assert '<span aria-hidden="true">RL</span>' in render([source])
+    source["profile"]["icon_png"] = icon
+    admin = render([source])
+    env = Environment(loader=FileSystemLoader(TEMPLATE.parent), autoescape=True)
+    public = env.get_template("library.html.j2").render(sources=[dict(
+        name="Reference Library", entry_path="/reader", icon_png=icon, category="PDF")])
+    for page in (admin, public):
+        assert f'<img src="data:image/png;base64,{icon}" alt="">' in page

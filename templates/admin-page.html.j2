@@ -42,6 +42,7 @@
     .source-header { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
     .source-header h3 { margin: 0; overflow-wrap: anywhere; }
     .source-header > div { flex: 1; min-width: 0; }
+    .source-symbol img { width: 2rem; height: 2rem; object-fit: contain; vertical-align: middle; }
     .source-symbol { background: var(--accent); border-radius: .6rem; padding: .65rem; font-weight: 800; }
     .source-subtitle, .source-note { color: var(--muted); margin: .35rem 0; }
     .source-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .75rem; }
@@ -471,6 +472,12 @@
         <p id="catalog-id-display" class="source-note" hidden></p>
         <div class="editor-grid">
           <div class="editor-wide" id="source-upload-row"><label for="source-upload-file">Upload PDF or EPUB (optional)</label><input id="source-upload-file" type="file" accept=".pdf,.epub,application/pdf,application/epub+zip"><small>Choose a PDF or EPUB to populate its name and format automatically.</small></div>
+          <div class="editor-wide">
+            <label for="source-icon-file">Source icon</label>
+            <span class="source-symbol" id="source-icon-preview" aria-hidden="true"></span>
+            <input type="file" id="source-icon-file" accept="image/png,image/jpeg,image/webp">
+            <button class="button" type="button" id="source-icon-remove">Remove icon</button>
+          </div>
           <div class="editor-wide"><label for="catalog-title">Source name</label><input id="catalog-title" name="title" required maxlength="512"></div>
           <div class="editor-wide"><label for="catalog-url">Download URL</label><input id="catalog-url" name="source_url" type="url" maxlength="512">
             <small>Direct HTTP(S) download URL, if available.</small></div>
@@ -647,7 +654,7 @@
       <label class="group-select" hidden><input type="checkbox" data-group-select value="{{ source.source_id }}" aria-label="Select {{ source.profile.title }} for grouping"></label>
       <details class="source-card" data-source-id="{{ source.source_id }}" data-filter-title="{{ source.profile.title }}" data-filter-format="{{ source.configuration.format }}" data-filter-publication="{{ source.publication_filter|default('unknown') }}" data-filter-download="{{ source.download_filter|default('unknown') }}"{% for name in editable_fields %} data-catalog-{{ name|replace('_', '-') }}="{{ source.profile.get(name, source.configuration.get(name, '')) }}"{% endfor %}>
         <summary class="source-header">
-          <span class="source-symbol" aria-hidden="true">{{ 'P' if source.adapter == 'pdf' else 'E' if source.adapter == 'epub' else 'Z' if source.adapter == 'kiwix' else '·' }}</span>
+          <span class="source-symbol">{% from 'source-icon.html.j2' import source_icon %}{{ source_icon(source.profile.title, source.profile.get('icon_png', '')) }}</span>
           <div>
             <h3>{{ source.profile.title }}</h3>
             <p class="source-subtitle">{{ source.configuration.format|upper }}{% if source.profile.description %} · {{ source.profile.description }}{% endif %}</p>
@@ -1616,8 +1623,66 @@
         for (let n = 2; used.has(id); n++) id = base + '-' + n;
         return id;
       }
+      const iconFile = document.getElementById('source-icon-file');
+      const iconPreview = document.getElementById('source-icon-preview');
+      const iconRemove = document.getElementById('source-icon-remove');
+      let iconValue = null;
+      let iconDecode = null;
+      function showIcon(value) {
+        const title = input('title').value.trim();
+        iconPreview.textContent = title.split(/\s+/).slice(0, 2).map(word => Array.from(word)[0]).join('').toUpperCase() || '·';
+        iconRemove.disabled = !value;
+        if (value) {
+          const image = document.createElement('img');
+          image.alt = '';
+          image.src = 'data:image/png;base64,' + value;
+          iconPreview.replaceChildren(image);
+        }
+      }
+      iconFile.addEventListener('change', () => {
+        const file = iconFile.files[0];
+        if (!file) return;
+        const pending = (async () => {
+          if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 2 * 1024 * 1024) {
+            throw new Error('Choose a PNG, JPEG, or WebP image up to 2 MiB.');
+          }
+          const bitmap = await createImageBitmap(file);
+          try {
+            const canvas = document.createElement('canvas');
+            const scale = 24 / Math.max(bitmap.width, bitmap.height);
+            canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+            canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+            canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+            return canvas.toDataURL('image/png').split(',')[1];
+          } finally {
+            bitmap.close();
+          }
+        })();
+        iconDecode = pending;
+        pending.then(value => {
+          if (iconDecode !== pending) return;
+          iconValue = value;
+          formFeedback.textContent = '';
+          showIcon(value);
+        }, error => {
+          if (iconDecode !== pending) return;
+          iconFile.value = '';
+          formFeedback.textContent = error.message || 'Could not read the icon.';
+        }).finally(() => {
+          if (iconDecode === pending) iconDecode = null;
+        });
+      });
+      iconRemove.addEventListener('click', () => {
+        iconDecode = null;
+        iconFile.value = '';
+        iconValue = '';
+        showIcon('');
+      });
+      input('title').addEventListener('input', () => showIcon(iconValue));
       function openForm(operation, card = null) {
         form.reset();
+        iconDecode = null;
+        iconValue = card?.dataset.catalogIconPng || '';
         automaticTitle = false;
         document.getElementById('source-upload-row').hidden = !!card;
         uploadFile.disabled = !!card;
@@ -1653,6 +1718,7 @@
         }
         if (!card) input('update_periodic').value = 'no';
         discoveryOptions();
+        showIcon(iconValue);
         dialog.showModal();
         input('title').focus();
       }
@@ -1733,8 +1799,10 @@
       form.addEventListener('submit', async event => {
         event.preventDefault();
         if (formPosting) return;
+        if (iconDecode) { formFeedback.textContent = 'Wait for the icon preview before saving.'; return; }
         const source_id = form.dataset.operation === 'add' ? generateId() : input('source_id').value;
         const fields = Object.fromEntries(fieldsToEdit.map(field => [field.name, field.value]));
+        if (iconValue || form.dataset.operation === 'edit') fields.icon_png = iconValue;
         const save = form.querySelector('[type="submit"]');
         formPosting = true;
         save.disabled = true;
@@ -1749,7 +1817,7 @@
         try {
           if (form.dataset.operation === 'add' && file) {
             if (!file.size || file.size > 16 * 1024 * 1024) throw new Error('Choose a PDF or EPUB up to 16 MiB');
-            const metadata = Object.fromEntries(Object.entries(fields).filter(([k]) => ['title','description','author','publisher','edition','language','source_url','license','update_method','update_endpoint','update_periodic'].includes(k)));
+            const metadata = Object.fromEntries(Object.entries(fields).filter(([k]) => ['title','description','author','publisher','edition','language','source_url','license','update_method','update_endpoint','update_periodic','icon_png'].includes(k)));
             const headers = {...window.axiomCsrfHeaders(), 'Content-Type':format.value === 'epub' ? 'application/epub+zip' : 'application/pdf', 'X-Document-Format':format.value, 'X-Source-ID':source_id,
               'X-Catalog-Revision':String(revision), 'X-PDF-Add':'1',
               'X-PDF-Metadata':encodeURIComponent(JSON.stringify(metadata))};
@@ -1759,7 +1827,7 @@
             if (!response.ok || !result.installed_verified) throw acquisitionError(response, result, 'Document upload was not confirmed');
             reloadSources();
           } else if (form.dataset.operation === 'add' && format.value === 'epub' && fields.source_url) {
-            const metadata = Object.fromEntries(Object.entries(fields).filter(([k]) => ['title','description','author','publisher','edition','language','source_url','license','update_method','update_endpoint','update_periodic'].includes(k)));
+            const metadata = Object.fromEntries(Object.entries(fields).filter(([k]) => ['title','description','author','publisher','edition','language','source_url','license','update_method','update_endpoint','update_periodic','icon_png'].includes(k)));
             const response = await acquisitionFetch('/api/action', {method:'POST', headers:{...((typeof window !== 'undefined' && window.axiomCsrfHeaders?.()) || {}),'Content-Type':'application/json'},
               body:JSON.stringify({source_id, action:'epub-add-download', revision, fields:metadata, auto_title:automaticTitle})});
             const result = await response.json().catch(() => ({}));

@@ -1013,6 +1013,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     sources.append(dict(source_id=record["source_id"], entry_path=state["entry_path"],
                                         symbol="E" if self._epub_record(record) else "P", category="EPUB" if self._epub_record(record) else "PDF", name=profile["title"],
                                         description=profile.get("description", ""),
+                                        icon_png=profile.get("icon_png", ""),
                                         language=profile.get("language") or "Unspecified language"))
             for record, state in self._zim_publications(catalog):
                 if state["published"]:
@@ -1021,6 +1022,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                                         entry_path=state["entry_path"], symbol="Z",
                                         category="Kiwix", name=profile["title"],
                                         description=profile.get("description", ""),
+                                        icon_png=profile.get("icon_png", ""),
                                         language=profile.get("language") or "Unspecified language"))
             ids = {source["source_id"] for source in sources}
             groups = [dict(group, source_ids=[sid for sid in group["source_ids"] if sid in ids])

@@ -1,0 +1,4 @@
+{% macro source_icon(title, icon_png) -%}
+{% if icon_png %}<img src="data:image/png;base64,{{ icon_png }}" alt="">
+{% else %}<span aria-hidden="true">{{ title.split()[:2]|map('first')|join|upper or '·' }}</span>{% endif %}
+{%- endmacro %}

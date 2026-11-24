@@ -1,6 +1,8 @@
 """Versioned persistent source catalog; candidate URLs are data, never fetched."""
 from __future__ import annotations
 
+import base64
+import binascii
 import fcntl
 import json
 import os
@@ -16,7 +18,7 @@ from urllib.parse import urlsplit
 from . import source_catalog
 
 SCHEMA_VERSION = 2
-PROFILE_FIELDS = {"title", "description", "publisher", "edition", "language", "author"}
+PROFILE_FIELDS = {"title", "description", "publisher", "edition", "language", "author", "icon_png"}
 CANDIDATE_FIELDS = {"source_url", "expected_size_bytes", "sha256", "provenance", "license"}
 ARTIFACT_CONFIG_FIELDS = CANDIDATE_FIELDS | {"format"}
 DISCOVERY_FIELDS = {"update_method", "update_endpoint", "update_periodic"}
@@ -25,7 +27,8 @@ V1_FIELDS = PROFILE_FIELDS | CANDIDATE_FIELDS
 EDITABLE = PROFILE_FIELDS | CONFIG_FIELDS
 HEADER_FIELDS = {"schema_version", "revision", "updated_at"}
 ID_RE = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z")
-MAX_CATALOG_BYTES = 256 * 1024
+MAX_ICON_FIELD = 4096
+MAX_CATALOG_BYTES = 256 * 1024 + 2 * 100 * MAX_ICON_FIELD
 MAX_ENTRIES = 100
 MAX_FIELD = 512
 GROUP_KINDS = frozenset({'categories', 'collections', 'tags'})
@@ -319,6 +322,23 @@ class CatalogStore:
 
     @staticmethod
     def _validate_field(key, value):
+        if key == "icon_png" and value != "":
+            try:
+                if not isinstance(value, str) or len(value) > MAX_ICON_FIELD:
+                    raise ValueError
+                image = base64.b64decode(value, validate=True)
+                if base64.b64encode(image).decode("ascii") != value:
+                    raise ValueError
+                if not image.startswith(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"):
+                    raise ValueError
+                if any(not 1 <= int.from_bytes(image[offset:offset + 4], "big") <= 24
+                       for offset in (16, 20)):
+                    raise ValueError
+                if not image.endswith(b"\x00\x00\x00\x00IEND\xaeB\x60\x82"):
+                    raise ValueError
+            except (ValueError, binascii.Error) as exc:
+                raise CatalogError("invalid source icon PNG") from exc
+            return
         if (not isinstance(value, str) or len(value) > MAX_FIELD
                 or any(ord(c) < 32 or 0xD800 <= ord(c) <= 0xDFFF for c in value)):
             raise CatalogError("invalid source field")
