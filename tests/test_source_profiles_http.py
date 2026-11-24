@@ -836,12 +836,12 @@ def test_selection_presets_report_missing_planned_and_bounded_configured_sources
     assert emergency["revision"] == catalog["revision"]
     assert [(item["source_id"], item["state"]) for item in emergency["sources"]] == [
         ("fema-ready", "match"), ("epa-water", "match"), ("noaa", "missing"),
-        ("amateur-radio", "planned"),
+        ("amateur-radio", "match"),
     ]
-    assert [row["source_id"] for row in emergency["storage"]["sources"]] == ["fema-ready", "epa-water"]
+    assert [row["source_id"] for row in emergency["storage"]["sources"]] == ["fema-ready", "epa-water", "amateur-radio"]
     lightweight = request(route, {"preset": "lightweight"})
-    assert [row["source_id"] for row in lightweight["sources"]] == ["epa-water", "cdc", "compact-guide"]
-    assert [row["transfer_bytes"] for row in lightweight["storage"]["sources"]] == [754723, 282412, 1024]
+    assert [row["source_id"] for row in lightweight["sources"]] == ["epa-water", "cdc", "usda-preservation", "usda-extension", "practical-action", "amateur-radio", "compact-guide"]
+    assert [row["transfer_bytes"] for row in lightweight["storage"]["sources"]] == [754723, 282412, 3794234, 223610, 652708, 355690, 1024]
     assert request("/api/sources")["revision"] == catalog["revision"]
 
 
