@@ -21,3 +21,4 @@ Source cards use local copies of these project icons for identification. PNG cop
 - wikiversity: https://en.wikiversity.org/favicon.ico
 - wikivoyage: https://en.wikivoyage.org/favicon.ico
 - wiktionary: https://en.wiktionary.org/favicon.ico
+- fema-ready: https://commons.wikimedia.org/wiki/File:Ready.gov_logo.png
