@@ -262,3 +262,66 @@ def test_world_writable_staging_does_not_allow_swapped_inode_promotion(disk, mon
     assert not list(library.iterdir())
     assert stage.stat().st_mode & 0o777 == 0o777
     assert library.stat().st_mode & 0o777 == 0o777
+
+
+@pytest.mark.parametrize("interrupt", [False, True])
+def test_short_network_reads_batch_storage_writes_and_resume(disk, monkeypatch, interrupt):
+    from contextlib import contextmanager
+
+    # Keep the fixture small while exercising the same batching ratio.
+    chunk = 64
+    data = fixture_bytes()
+    monkeypatch.setattr(zim_source, "CHUNK", chunk)
+    reads = []
+    locks = []
+    offsets = []
+    progress = []
+    cancel = False
+
+    class Stream(BytesIO):
+        total_size = len(data)
+        etag = '"stable"'
+        last_modified = None
+
+        def read(self, size=-1):
+            nonlocal cancel
+            block = super().read(min(size, 4))
+            if block:
+                reads.append(len(block))
+                if interrupt and len(reads) == 18:
+                    cancel = True
+            return block
+
+    @contextmanager
+    def remote(url, *, offset=0, validator=None, **kwargs):
+        offsets.append(offset)
+        assert validator == ('"stable"' if offset else None)
+        yield Stream(data[offset:])
+
+    @contextmanager
+    def write_lock():
+        locks.append(len(reads))
+        yield
+
+    monkeypatch.setattr(zim_source.pdf_transport, "open_pdf", remote)
+    kwargs = dict(write_lock=write_lock, stopped=lambda: cancel,
+                  progress=lambda n, total, metadata: progress.append(n))
+    if interrupt:
+        with pytest.raises(zim_source.TransferStopped):
+            zim_source.download_resumable("ready", CONFIG, **kwargs)
+        partial = disk / "staging/zim/.download-ready.partial"
+        assert partial.read_bytes() == data[:chunk]
+        assert locks == [16]
+        assert progress[-1] == chunk
+        cancel = False
+        artifact = zim_source.download_resumable(
+            "ready", CONFIG, offset=chunk, validator='"stable"', **kwargs)
+        assert offsets == [0, chunk]
+        assert locks == [16, 32]
+    else:
+        artifact = zim_source.download_resumable("ready", CONFIG, **kwargs)
+        assert offsets == [0]
+        assert locks == [16, 30]
+    assert artifact["sha256"] == hashlib.sha256(data).hexdigest()
+    assert (disk / "library/zim" / artifact["filename"]).read_bytes() == data
+    assert not (disk / "staging/zim/.download-ready.partial").exists()
