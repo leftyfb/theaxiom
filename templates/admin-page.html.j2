@@ -749,7 +749,7 @@
             {% endfor %}
             {% for key, label in [('filename','Artifact filename'),('bytes','Artifact size (bytes)'),('sha256','Artifact SHA-256')] %}
             {% set value = (source.artifact|default({}, true)).get(key, '') %}
-            <dt{% if value == '' %} hidden{% endif %}>{{ label }}</dt><dd data-source-artifact="{{ key }}"{% if value == '' %} hidden{% endif %}>{{ value }}</dd>
+            <dt{% if value == '' %} hidden{% endif %}>{{ label if value != '' else '' }}</dt><dd data-source-artifact="{{ key }}"{% if value == '' %} hidden{% endif %}>{{ value }}</dd>
             {% endfor %}
             {% else %}
             {% for key, label in [('source_url','Source URL'),('expected_size_bytes','Expected size (bytes)'),('sha256','Expected SHA-256'),('provenance','Provenance'),('license','License')] if source.configuration.get(key) %}
@@ -2027,6 +2027,7 @@
       const cards = Array.from(document.querySelectorAll('.source-card[data-source-id]'));
       if (!cards.length) return;
       const editableFields = {{ editable_fields|list|tojson }};
+      const artifactLabels = {filename: 'Artifact filename', bytes: 'Artifact size (bytes)', sha256: 'Artifact SHA-256'};
       const updateSummary = document.getElementById('source-update-summary');
       const showUpdateSummary = text => {
         if (!updateSummary) return;
@@ -2343,7 +2344,9 @@
                 const value = (node.dataset.sourceConfig ? source.configuration?.[node.dataset.sourceConfig] :
                   source.artifact?.[node.dataset.sourceArtifact]) ?? '';
                 node.textContent = value;
-                node.previousElementSibling.hidden = node.hidden = value === '';
+                const label = node.previousElementSibling;
+                label.hidden = node.hidden = value === '';
+                if (node.dataset.sourceArtifact) label.textContent = value === '' ? '' : artifactLabels[node.dataset.sourceArtifact];
               }
               for (const node of card.querySelectorAll('[data-source-profile]')) {
                 node.textContent = source.profile?.[node.dataset.sourceProfile] || '';
