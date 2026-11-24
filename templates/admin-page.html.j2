@@ -123,12 +123,34 @@
     .source-selection-bar { display:flex; align-items:center; gap:.75rem; padding:.35rem .8rem; margin:.35rem 0; color:var(--muted); flex-wrap:wrap; }
     .source-selection-bar label { display:flex; align-items:center; gap:.45rem; cursor:pointer; font-size:.9rem; }
     .source-selection-bar input { width:1.2rem; height:1.2rem; margin:0; accent-color:var(--green); }
-    .source-filter-toggle { margin-left:auto; display:inline-flex; align-items:center; justify-content:center; gap:.35rem; min-height:44px; }
+    .source-filter-toggle { display:inline-flex; align-items:center; justify-content:center; gap:.35rem; min-height:44px; }
     .source-filter-toggle[aria-expanded="true"] { background:var(--dark); color:white; }
     .source-filter-toggle svg { width:1.2rem; height:1.2rem; flex:none; }
     .source-search-row { display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; }
-    .source-search-row input { margin-left:auto; width:min(100%,20rem); min-height:44px; padding:.55rem .7rem; font:inherit; border:1px solid #aac5b7; border-radius:.4rem; background:white; color:var(--dark); }
-    .source-list-toolbar { display:flex; align-items:center; gap:.75rem; flex-wrap:wrap; margin:.75rem 0; }
+    .source-browse-tools { margin-left:auto; display:flex; align-items:center; flex-wrap:wrap; gap:.5rem; max-width:100%; }
+    .source-browse-tools input { flex:1 1 12rem; min-width:0; width:20rem; min-height:44px; padding:.55rem .7rem; font:inherit; border:1px solid #aac5b7; border-radius:.4rem; background:white; color:var(--dark); }
+    #source-selection-panel { margin:.5rem 0; padding:.65rem .8rem; }
+    #source-selection-panel:not(.has-selection) { background:transparent; border-color:transparent; padding:0; }
+    #source-selection-panel .source-selection-bar { padding:.15rem 0; }
+    #source-selection-panel .source-actions { margin:0; }
+    #source-selection-panel .primary-action { background:var(--dark); color:white; }
+    #bulk-actions { align-items:flex-start; }
+    #bulk-more-actions { position:relative; }
+    #bulk-more-actions > summary { display:block; list-style:none; }
+    #bulk-more-actions > div { position:absolute; z-index:1; min-width:min(15rem, 80vw); padding:.45rem;
+      background:var(--paper); border:1px solid var(--line); border-radius:.5rem; box-shadow:0 .25rem .8rem #1232; }
+    @media (max-width: 560px) {
+      .source-browse-tools { margin-left:0; width:100%; }
+      #bulk-more-actions > div { position:static; min-width:0; }
+      #bulk-preview-row { align-items:flex-start; flex-direction:column; }
+    }
+    #bulk-more-actions button { display:block; width:100%; text-align:left; padding:.5rem; }
+    #bulk-preview-result { border-top:1px solid var(--line); margin-top:.65rem; padding-top:.65rem; }
+    #bulk-preview-result p { margin:.2rem 0; }
+    #bulk-preview-row { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:.5rem; }
+    #bulk-preview-details { margin-top:.5rem; }
+    #bulk-action-note:not(:empty) { margin:.4rem 0 0; }
+    #bulk-action-note:empty, #bulk-queue-feedback:empty { display:none; }
     .source-filters .editor-grid { grid-template-columns:repeat(auto-fit,minmax(145px,1fr)); margin:.5rem 0; }
     .source-card[hidden] { display:none !important; }
     .group-panel { background:var(--paper); border:1px solid var(--line); border-radius:.8rem; padding:1rem; margin:1rem 0; }
@@ -416,7 +438,11 @@
     <div class="source-search-row">
       <button class="button" type="button" id="source-add">Add Source</button>
       <button class="button" type="button" id="source-guide-open">Content source guide</button>
-      <input id="source-filter-search" type="search" aria-label="Search source names" placeholder="Search sources…" maxlength="512">
+      <div class="source-browse-tools">
+        <input id="source-filter-search" type="search" aria-label="Search source names" placeholder="Search sources…" maxlength="512">
+        <button class="button source-filter-toggle" type="button" id="source-filter-toggle" aria-label="Filter and sort sources" title="Filter and sort sources" aria-controls="source-filters-panel" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg> Filters<span id="source-filter-active" hidden></span></button>
+        <span id="source-filter-count" class="source-note" role="status"></span>
+      </div>
     </div>
     <p id="catalog-feedback" role="status" aria-live="polite"></p>
     <dialog id="selection-file-dialog" aria-labelledby="selection-file-title">
@@ -535,33 +561,47 @@
 </section>
       <form method="dialog"><button class="button">Close guide</button></form>
     </dialog>
-    <div class="source-selection-bar" id="source-selection-bar">
-      <button class="button" type="button" id="source-select-mode" aria-pressed="false">Select</button>
-      <button class="button" type="button" id="selection-file-open" hidden>Presets and saved selections</button>
-      <label id="select-all-label" hidden><input type="checkbox" id="group-select-all" aria-label="Select all visible sources">Select all</label>
-      <span id="group-count" class="source-note" aria-live="polite" hidden>0 selected</span>
-      <span id="source-filter-count" class="source-note" role="status"></span>
-      <button class="button source-filter-toggle" type="button" id="source-filter-toggle" aria-label="Filter and sort sources" title="Filter and sort sources" aria-controls="source-filters-panel" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg><span id="source-filter-active" hidden></span></button>
-    </div>
-    <section class="group-panel" id="bulk-selection" aria-label="Selected source actions" hidden>
-      <div class="source-actions" id="bulk-actions" hidden>
+    <section class="group-panel" id="source-selection-panel" aria-label="Source selection">
+      <div class="source-selection-bar" id="source-selection-bar">
+        <label id="select-all-label" hidden><input type="checkbox" id="group-select-all" aria-label="Select all visible sources">Select all</label>
+        <span id="group-count" class="source-note" aria-live="polite" hidden>0 selected</span>
+        <button class="button" type="button" id="source-select-mode" aria-pressed="false">Select</button>
+        <button class="button" type="button" id="selection-file-open" hidden>Presets and saved selections</button>
+      </div>
+      <div id="bulk-selection" hidden>
+      <div class="source-actions" id="bulk-actions">
         <button class="button" type="button" id="bulk-publish" disabled>Publish</button>
         <button class="button" type="button" id="bulk-unpublish" disabled>Unpublish</button>
-        <button class="button" type="button" id="bulk-remove">Remove sources</button>
-        <button class="button" type="button" id="bulk-preview">Preview storage</button>
-        <button class="button" type="button" id="selection-export">Export selected sources</button>
-        <button class="button" type="button" id="transfer-export">Export ZIM verification manifest</button>
+        <button class="button" type="button" id="bulk-preview" aria-controls="bulk-preview-result" aria-expanded="false">Batch download</button>
+        <details id="bulk-more-actions">
+          <summary class="button">More actions ▾</summary>
+          <div>
+            <button class="button" type="button" id="selection-file-menu">Presets and saved selections</button>
+            <button class="button" type="button" id="selection-export">Export selected sources</button>
+            <button class="button" type="button" id="transfer-export">Export ZIM verification manifest</button>
+            <button class="button danger-action" type="button" id="bulk-remove">Remove sources</button>
+          </div>
+        </details>
       </div>
+      <p class="source-note" id="bulk-action-note" role="status"></p>
       <div id="bulk-preview-result" hidden>
-        <p class="source-note">Capacity is a snapshot of free space after the configured reserve. PDF and EPUB estimates use the configured download sizes.</p>
-        <p id="bulk-preview-summary" role="status"></p>
-        <p id="bulk-preview-capacity" role="status"></p>
-        <ul id="bulk-preview-sources"></ul>
-        <button class="button" type="button" id="bulk-queue" hidden>Queue selected downloads</button>
-        <p id="bulk-queue-feedback" role="status"></p>
+        <div id="bulk-preview-row">
+          <div>
+            <p id="bulk-preview-summary" role="status"></p>
+            <p id="bulk-preview-capacity" class="source-note" role="status"></p>
+          </div>
+          <button class="button primary-action" type="button" id="bulk-queue" hidden>Start downloads</button>
+        </div>
+        <details id="bulk-preview-details" hidden>
+          <summary>Storage details</summary>
+          <p class="source-note" id="bulk-preview-storage"></p>
+          <ul id="bulk-preview-sources"></ul>
+        </details>
+      </div>
+      <p id="bulk-queue-feedback" role="status"></p>
       </div>
     </section>
-    <details class="group-panel" id="group-panel" hidden>
+    <details class="group-panel" id="group-panel">
       <summary>Organize sources · Categories, collections &amp; tags</summary>
       <p class="source-note">Select source cards to assign groupings. <a href="/admin/groupings">Manage categories, tags and collections separately.</a></p>
       <div class="editor-grid" id="bulk-group-fields" hidden>
@@ -615,7 +655,7 @@
             {% if pub %}<span class="compact-publication" data-field="publication-summary">{{ "Published" if pub.published else (pub.publication_reason or "Reader unavailable") if pub.enabled and pub.ready_for_publication else "Reader unavailable" if pub.enabled else "" }}</span>{% endif %}
           </div>
           <span class="badge enabled" data-field="update-status" role="status"{% if not source.update_check or source.update_check.state != "update_available" %} hidden{% endif %}>Update available</span>
-          <span class="badge{% if source.installed_verified %} enabled{% endif %}" data-field="status" role="status">{% if not source.adapter %}Not yet supported{% elif source.installed_verified and source.artifact %}{{ source.artifact.bytes | filesizeformat(true) }}{% elif source.adapter in ('pdf','epub') %}{{ 'Not installed or invalid' if source.artifact else 'Not downloaded' }}{% elif source.acquisition and not catalog.acquisition_stale %}{{ {'downloading':'Downloading','verifying':'Verifying','publishing':'Installing','failed':'Failed','retrying':'Retrying','interrupted':'Interrupted','not_started':'Not downloaded','unavailable':'Service unavailable'}.get(source.acquisition.state,'Waiting for status') }}{% elif catalog.acquisition_stale %}Status unavailable{% elif not source.artifact and not source.mutation_blocked %}Not downloaded{% else %}Waiting for status…{% endif %}</span>
+          <span class="badge{% if source.installed_verified %} enabled{% endif %}" data-field="status" role="status">{% if not source.adapter %}Not yet supported{% elif source.installed_verified and source.artifact %}{{ source.artifact.bytes | filesizeformat }}{% elif source.adapter in ('pdf','epub') %}{{ 'Not installed or invalid' if source.artifact else 'Not downloaded' }}{% elif source.acquisition and not catalog.acquisition_stale %}{{ {'downloading':'Downloading','verifying':'Verifying','publishing':'Installing','failed':'Failed','retrying':'Retrying','interrupted':'Interrupted','not_started':'Not downloaded','unavailable':'Service unavailable'}.get(source.acquisition.state,'Waiting for status') }}{% elif catalog.acquisition_stale %}Status unavailable{% elif not source.artifact and not source.mutation_blocked %}Not downloaded{% else %}Waiting for status…{% endif %}</span>
           <span class="badge" data-batch-status role="status" hidden></span>
           <progress class="summary-progress" data-field="summary-progress" max="100" value="0" aria-label="Active download progress" hidden></progress>
         </summary>
@@ -727,9 +767,9 @@
         {% if source.update_check and source.update_check.state == "update_available" %}
           Installed edition: {{ source.update_check.installed_edition }} · Publisher edition: {{ source.update_check.candidate_edition }}
           {% if source.update_check.candidate_bytes %}
-            · Estimated transfer and staging: {{ source.update_check.candidate_bytes | filesizeformat(true) }}
+            · Estimated transfer and staging: {{ source.update_check.candidate_bytes | filesizeformat }}
             · Installed and candidate archives together:
-              {{ ((source.artifact.bytes + source.update_check.candidate_bytes) | filesizeformat(true))
+              {{ ((source.artifact.bytes + source.update_check.candidate_bytes) | filesizeformat)
                  if source.installed_verified and source.artifact and source.artifact.bytes else 'unknown' }}
           {% endif %}
           · Check recorded: {{ source.update_check.checked_at }}
@@ -846,7 +886,7 @@
       const groupName = document.getElementById('group-name');
       const groupFeedback = document.getElementById('group-feedback');
       const groupChecks = Array.from(document.querySelectorAll('[data-group-select]'));
-      const groupButtons = Array.from(document.querySelectorAll('#group-panel button, #bulk-selection button'));
+      const groupButtons = Array.from(document.querySelectorAll('#group-panel button, #source-selection-panel button:not(#source-select-mode)'));
       const selectMode = document.getElementById('source-select-mode');
       const selectAll = document.getElementById('group-select-all');
       const visibleChecks = () => groupChecks.filter(item => !item.closest('.source-row').querySelector('.source-card').hidden);
@@ -872,7 +912,9 @@
         if (!response.ok) throw new Error(data.error || 'Selection request failed.');
         return data;
       }
-      document.getElementById('selection-file-open').addEventListener('click', () => selectionDialog.showModal());
+      for (const id of ['selection-file-open', 'selection-file-menu']) {
+        document.getElementById(id).addEventListener('click', () => selectionDialog.showModal());
+      }
       selectionFile.addEventListener('change', () => {
         const file = selectionFile.files[0];
         selectionFile.value = '';
@@ -986,7 +1028,15 @@
       }
       document.getElementById('selection-export').addEventListener('click', () => exportSelection(false));
       document.getElementById('transfer-export').addEventListener('click', () => exportSelection(true));
+      const previewButton = document.getElementById('bulk-preview');
       const preview = document.getElementById('bulk-preview-result');
+      const previewDetails = document.getElementById('bulk-preview-details');
+      const moreActions = document.getElementById('bulk-more-actions');
+      function closePreview() {
+        preview.hidden = true;
+        previewButton.setAttribute('aria-expanded', 'false');
+        previewIds = '';
+      }
       const previewSummary = document.getElementById('bulk-preview-summary');
       const previewCapacity = document.getElementById('bulk-preview-capacity');
       const previewSources = document.getElementById('bulk-preview-sources');
@@ -1005,8 +1055,8 @@
         ['Transfer', 'transfer_bytes'], ['Installed', 'installed_bytes'],
         ['Staging', 'staging_bytes'], ['Peak', 'peak_bytes']
       ];
-      function estimateSummary(estimates) {
-        return previewFields.map(([label, field]) => {
+      function estimateSummary(estimates, fields = previewFields) {
+        return fields.map(([label, field]) => {
           const known = estimates.map(source => source[field]).filter(Number.isSafeInteger);
           const unknown = estimates.length - known.length;
           if (!known.length) return label + ' unknown';
@@ -1028,19 +1078,21 @@
         return estimates.join(' · ') || 'No supported sources to estimate.';
       }
       function capacitySummary(capacity) {
-        const result = {
-          fits: 'Estimated staging fits.',
-          fits_with_unknown_sizes: 'Estimated staging fits using the format limits for unknown document sizes.',
+        return {
+          fits: 'Enough space to start.',
+          fits_with_unknown_sizes: 'Enough space using the maximum sizes for unknown downloads.',
           insufficient: 'Insufficient space for the staging estimate and configured reserve.',
           uncertain: 'Some staging sizes are unknown.',
           pending: 'Storage capacity check still pending. Preview again to refresh.',
           unavailable: 'Current storage capacity is unavailable.'
         }[capacity.state] || '';
+      }
+      function capacityDetails(capacity) {
         const upperBound = Number.isSafeInteger(capacity.staging_upper_bound_bytes) ?
           ' Staging could use up to ' + previewSize(capacity.staging_upper_bound_bytes) + '.' : '';
         return Number.isSafeInteger(capacity.available_bytes) ?
           previewSize(capacity.available_bytes) + ' available for staging after the ' +
-            previewSize(capacity.reserve_bytes) + ' reserve. ' + result + upperBound : result;
+            previewSize(capacity.reserve_bytes) + ' reserve.' + upperBound : upperBound;
       }
       function storagePlanNote(state) {
         return {
@@ -1072,7 +1124,7 @@
         feedback.replaceChildren('Source profiles changed. ', reload);
       };
       const queueStates = {
-        queued: 'Download queued', running: 'Batch download in progress', failed: 'Batch download failed',
+        queued: 'Waiting to download', running: 'Downloading', failed: 'Batch download failed',
         cancelled: 'Batch download cancelled', interrupted: 'Batch download interrupted'
       };
       async function batchRequest(payload) {
@@ -1140,14 +1192,16 @@
       queueButton.addEventListener('click', async () => {
         const ids = selectedIds();
         if (!ids.length || ids.join(',') !== previewIds || queueButton.disabled) return;
-        if (!window.confirm('Queue ' + ids.length + (ids.length === 1 ? ' download?' : ' downloads?'))) return;
         queueButton.disabled = true;
         try {
           const result = await batchRequest({revision: previewRevision, source_ids: ids, confirm: true});
           batchJobIds = result.job_ids;
           completedBatch = false;
-          queueButton.hidden = true;
-          queueFeedback.textContent = 'Downloads queued.';
+          if (previewIds === ids.join(',')) {
+            closePreview();
+            previewButton.focus();
+          }
+          queueFeedback.textContent = 'Downloads submitted. Follow progress on the source cards.';
           await loadQueue();
         } catch (error) {
           queueFeedback.textContent = error.message;
@@ -1155,7 +1209,11 @@
           queueButton.disabled = false;
         }
       });
-      document.getElementById('bulk-preview').addEventListener('click', async () => {
+      previewButton.addEventListener('click', async () => {
+        if (!preview.hidden) {
+          closePreview();
+          return;
+        }
         const ids = selectedIds();
         const selection = ids.join(',');
         const requestId = ++previewRequest;
@@ -1164,6 +1222,9 @@
         previewIds = selection;
         previewRevision = requestedRevision;
         preview.hidden = false;
+        previewButton.setAttribute('aria-expanded', 'true');
+        previewDetails.hidden = true;
+        previewDetails.open = false;
         previewSummary.textContent = 'Calculating estimates…';
         queueButton.hidden = true;
         queueFeedback.textContent = '';
@@ -1188,10 +1249,20 @@
             result = await requestPreview();
             if (!current()) return;
           }
-          previewSummary.textContent = formatEstimates(result.sources);
+          const estimates = result.sources.filter(source => source.state === 'estimated');
+          previewSummary.textContent = estimates.length ?
+            estimates.length + (estimates.length === 1 ? ' download · ' : ' downloads · ') +
+            estimateSummary(estimates, [['Transfer', 'transfer_bytes']]) :
+            'No selected sources have a download estimate.';
           queueButton.hidden = !['fits', 'fits_with_unknown_sizes'].includes(result.capacity?.state) ||
             !result.sources.every(source => source.state === 'estimated');
-          previewCapacity.textContent = capacitySummary(result.capacity);
+          previewCapacity.textContent = estimates.length !== result.sources.length ?
+            'Review the unavailable downloads in Storage details.' : capacitySummary(result.capacity);
+          document.getElementById('bulk-preview-storage').textContent = [
+            capacityDetails(result.capacity),
+            estimates.length ? estimateSummary(estimates, previewFields.slice(1)) : ''
+          ].filter(Boolean).join(' ');
+          previewDetails.hidden = false;
           for (const source of result.sources) {
             const row = document.createElement('li');
             row.textContent = source.title + ' · ' + (storagePlanNote(source.state) ||
@@ -1212,7 +1283,7 @@
         document.getElementById('select-all-label').hidden = !selecting;
         document.getElementById('selection-file-open').hidden = !selecting;
         document.getElementById('group-count').hidden = !selecting;
-        document.getElementById('group-panel').open = false;
+
         groupControls();
       }
       selectMode.addEventListener('click', () => {
@@ -1232,29 +1303,47 @@
       }
       function groupControls() {
         const kind = groupKind.value, ids = selectedIds();
-        if (previewIds !== ids.join(',')) {
-          previewIds = '';
-          preview.hidden = true;
-        }
+        if (previewIds !== ids.join(',')) closePreview();
         const visible = visibleChecks();
         const checkedVisible = visible.filter(item => item.checked).length;
         const hiddenSelected = ids.length - checkedVisible;
         selectAll.checked = visible.length > 0 && checkedVisible === visible.length;
         selectAll.indeterminate = !selectAll.checked && ids.length > 0;
         selectAll.disabled = bulkBusy || (!visible.length && !ids.length);
+        document.getElementById('source-selection-panel').classList.toggle('has-selection', !!ids.length);
         document.getElementById('bulk-selection').hidden = !ids.length;
-        document.getElementById('bulk-actions').hidden = !ids.length;
+        document.getElementById('selection-file-open').hidden = !selecting || !!ids.length;
+        if (!ids.length) {
+          moreActions.open = false;
+          queueFeedback.textContent = '';
+        }
         document.getElementById('bulk-group-actions').hidden = !ids.length;
-        document.getElementById('group-panel').hidden = !ids.length;
         document.getElementById('bulk-group-fields').hidden = !ids.length;
+        const canPublish = bulkPublicationEligible('publish', ids);
+        const canUnpublish = bulkPublicationEligible('unpublish', ids);
         for (const action of ['publish','unpublish']) {
           const button = document.getElementById('bulk-' + action);
-          const eligible = bulkPublicationEligible(action, ids);
+          const eligible = action === 'publish' ? canPublish : canUnpublish;
           button.disabled = bulkBusy || !eligible;
+          button.classList.toggle('primary-action', eligible);
+          button.hidden = !eligible && (canPublish || canUnpublish);
           button.title = eligible ? '' : action === 'publish'
             ? 'All selected sources must be unpublished and ready to publish.'
             : 'All selected sources must be published.';
         }
+        const blockedByPublication = ids.some(id => {
+          const card = groupChecks.find(item => item.value === id).closest('.source-row').querySelector('.source-card');
+          const published = card.querySelector('[data-field="publication-toggle"]')?.dataset.enabled === 'true';
+          return published && !card.querySelector('[data-zim-replacement="download"]:not([hidden])');
+        });
+        previewButton.disabled = bulkBusy || !ids.length || blockedByPublication;
+        previewButton.classList.toggle('primary-action', !previewButton.disabled &&
+          !canPublish && !canUnpublish);
+        document.getElementById('bulk-action-note').textContent = blockedByPublication ?
+          'Unpublish selected sources before downloading them again.' :
+          ids.length && !canPublish && !canUnpublish ?
+            'Publish and Unpublish require all selected sources to be eligible for the same action.' : '';
+        if (blockedByPublication && !preview.hidden) closePreview();
         document.getElementById('bulk-remove').disabled = bulkBusy || !ids.length;
         for (const option of groupExisting.options) {
           option.hidden = !!option.dataset.kind && option.dataset.kind !== kind;
@@ -2031,7 +2120,7 @@
         retrying: 'Waiting to retry', failed: 'Failed', interrupted: 'Interrupted',
         paused: 'Paused', pausing: 'Pausing', cancelling: 'Cancelling', cancelled: 'Cancelled',
         not_started: 'Not downloaded', unavailable: 'Service not installed', unknown: 'Status unknown'};
-      const gib = bytes => (bytes / 1073741824).toFixed(2) + ' GiB';
+
       function checksumSample(job) {
         if (job?.state !== 'verifying' ||
             !Number.isFinite(job.checksum_bytes) || job.checksum_bytes < 0 ||
@@ -2046,10 +2135,10 @@
         sample.percent.toFixed(1) + '% read (digest not yet confirmed).';
       function size(bytes) {
         if (!Number.isFinite(bytes) || bytes < 0) return 'Installed';
-        const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+        const units = ['B', 'kB', 'MB', 'GB', 'TB', 'PB'];
         let i = 0;
-        while (bytes >= 1024 && i < units.length - 1) { bytes /= 1024; i++; }
-        return bytes.toFixed(i ? 1 : 0) + ' ' + units[i];
+        while (bytes >= 1000 && i < units.length - 1) { bytes /= 1000; i++; }
+        return bytes.toLocaleString(undefined, {maximumFractionDigits: 2}) + ' ' + units[i];
       }
       function render(card, job, stale, unavailable = false) {
         const field = name => card.querySelector('[data-field="' + name + '"]');
@@ -2074,7 +2163,7 @@
         compact.hidden = !valid;
         compact.value = progress.value;
         put('metrics', valid ? (stale ? 'Last observed download: ' : 'Download: ') +
-          progress.value.toFixed(2) + '% · ' + gib(job.downloaded_bytes) + ' / ' + gib(job.expected_bytes) :
+          progress.value.toFixed(2) + '% · ' + size(job.downloaded_bytes) + ' / ' + size(job.expected_bytes) :
           !stale && job?.active && Number.isFinite(job.downloaded_bytes) ? size(job.downloaded_bytes) + ' downloaded' : '');
         const checking = !stale && (job?.state === 'verifying' || job?.state === 'publishing');
         const verify = field('verification');
@@ -2089,7 +2178,7 @@
         put('verification-label', checking ? (sample ? checksumLabel(sample) :
           'Checksum / publishing in progress — percentage unavailable.') : '');
         const rate = !stale && job?.state === 'downloading' && job.speed_bytes_per_second > 0 ?
-          (job.speed_bytes_per_second / 1048576).toFixed(2) + ' MiB/s' +
+          size(job.speed_bytes_per_second) + '/s' +
           (Number.isFinite(job.eta_seconds) ? ' · ' + Math.ceil(job.eta_seconds / 60) + ' min remaining (transfer only)' : '') : '';
         put('rate', rate);
         put('detail', verified ? '' : job?.detail || '');

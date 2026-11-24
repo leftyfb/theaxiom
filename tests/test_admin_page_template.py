@@ -109,11 +109,11 @@ def test_candidate_storage_estimate_includes_verified_installed_bytes_only():
     source.update(update_check={"state": "update_available", "candidate_bytes": 1048576},
                   artifact={"bytes": 2097152})
     output = render([source])
-    assert "Estimated transfer and staging: 1.0 MiB" in output
+    assert "Estimated transfer and staging: 1.0 MB" in output
     assert "Installed and candidate archives together: unknown" in " ".join(output.split())
     source["installed_verified"] = True
     output = render([source])
-    assert "Installed and candidate archives together: 3.0 MiB" in " ".join(output.split())
+    assert "Installed and candidate archives together: 3.1 MB" in " ".join(output.split())
 
 
 def test_admin_branding_and_favicon():
@@ -171,8 +171,8 @@ def test_source_filter_toolbar():
 def test_selection_mode_and_bulk_lifecycle_controls():
     page = render([profile("field-guide", "Field guide")])
     for marker in ('id="source-select-mode" aria-pressed="false"',
-                   'class="group-select" hidden', 'id="bulk-selection" aria-label="Selected source actions" hidden',
-                   'id="bulk-actions" hidden', 'id="bulk-publish"',
+                   'class="group-select" hidden', 'id="bulk-selection" hidden',
+                   'id="bulk-actions"', 'id="bulk-publish"',
                    'id="bulk-unpublish"', 'id="bulk-remove"'):
         assert marker in page
     assert "Confirm you have permission to make these documents available to library users" in page
@@ -212,7 +212,7 @@ def test_bulk_group_multi_select_and_replace_controls():
 def test_compact_source_layout_and_checkbox_editor():
     page = render([profile()])
     assert '<section class="source-filters" id="source-filters-panel" aria-label="Filter and sort sources" hidden>' in page
-    assert page.index('id="source-filter-search"') < page.index('id="source-selection-bar"') < page.index('id="source-select-mode"') < page.index('id="source-filter-toggle"') < page.index('id="bulk-selection"') < page.index('id="group-panel"') < page.index('id="source-filters-panel"') < page.index('id="source-cards"')
+    assert page.index('id="source-filter-search"') < page.index('id="source-filter-toggle"') < page.index('id="source-selection-bar"') < page.index('id="source-select-mode"') < page.index('id="bulk-selection"') < page.index('id="group-panel"') < page.index('id="source-filters-panel"') < page.index('id="source-cards"')
     assert '<details id="source-editor-groups" hidden>' in page
     assert 'No categories available.' in page
     assert 'Add starter categories and tags' in page

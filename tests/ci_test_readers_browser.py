@@ -488,6 +488,7 @@ def exercise_bulk(browser, base, artifacts, catalog):
 
         select("bulk-ineligible-a", "bulk-ineligible-b")
         expect(page.locator("#bulk-publish")).to_be_disabled()
+        page.locator("#bulk-more-actions summary").click()
         expect(page.locator("#bulk-remove")).to_be_enabled()
         with page.expect_navigation(wait_until="domcontentloaded", timeout=30000):
             page.locator("#bulk-remove").click()

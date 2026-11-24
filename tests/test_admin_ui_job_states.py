@@ -160,8 +160,8 @@ def test_update_available_badge_only_when_cached_evidence_confirms_it():
     assert states[0]["[data-review-zim-update]"]["dataset"]["updateBytes"] == "123456"
     assert not states[0]["update-details"]["hidden"]
     assert "2026-11" in states[0]["update-details"]["textContent"]
-    assert "Estimated transfer and staging: 120.6 KiB" in states[0]["update-details"]["textContent"]
-    assert "Installed and candidate archives together: 1.1 MiB" in states[0]["update-details"]["textContent"]
+    assert "Estimated transfer and staging: 123.46 kB" in states[0]["update-details"]["textContent"]
+    assert "Installed and candidate archives together: 1.17 MB" in states[0]["update-details"]["textContent"]
     assert states[1]["update-status"]["hidden"] is True
     assert states[1]["[data-review-zim-update]"]["hidden"] is True
     assert states[1]["update-details"]["hidden"] is True

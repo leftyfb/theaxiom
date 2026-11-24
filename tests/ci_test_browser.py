@@ -272,8 +272,8 @@ def exercise(browser, base, name, viewport, artifacts):
         expect(page.locator("#group-count")).to_contain_text("1 selected")
         expect(page.locator("#bulk-publish")).to_be_disabled()
         expect(page.locator("#bulk-unpublish")).to_be_disabled()
-        page.get_by_role("button", name="Preview storage").click()
-        expect(page.locator("#bulk-preview-summary")).to_contain_text("Installed unknown")
+        page.get_by_role("button", name="Batch download").click()
+        expect(page.locator("#bulk-preview-summary")).to_contain_text("1 download")
         expect(page.locator("#bulk-preview-capacity")).to_have_text("Current storage capacity is unavailable.")
 
         def bounded_preview(route):
@@ -283,11 +283,15 @@ def exercise(browser, base, name, viewport, artifacts):
             response["sources"][0].update(installed_bytes=1000, peak_bytes=1000000000)
             route.fulfill(json=response)
 
+        page.get_by_role("button", name="Batch download").click()  # Collapse the first preview.
         page.route("**/api/acquisition-preview", bounded_preview)
-        page.get_by_role("button", name="Preview storage").click()
-        expect(page.locator("#bulk-preview-capacity")).to_contain_text("Staging could use up to 16.78 MB")
-        expect(page.locator("#bulk-preview-summary")).to_contain_text("Installed 1 kB")
-        expect(page.locator("#bulk-preview-summary")).to_contain_text("Peak 1 GB")
+        page.get_by_role("button", name="Batch download").click()
+        expect(page.locator("#bulk-preview-capacity")).to_contain_text("Enough space")
+        expect(page.locator("#bulk-preview-sources")).to_be_hidden()
+        page.get_by_text("Storage details", exact=True).click()
+        expect(page.locator("#bulk-preview-storage")).to_contain_text("Staging could use up to 16.78 MB")
+        expect(page.locator("#bulk-preview-sources")).to_contain_text("Installed 1 kB")
+        expect(page.locator("#bulk-preview-sources")).to_contain_text("Peak 1 GB")
         page.unroute("**/api/acquisition-preview", bounded_preview)
         batch_jobs = []
         job_id = "a" * 32
@@ -307,11 +311,10 @@ def exercise(browser, base, name, viewport, artifacts):
             route.fulfill(status=202, json={"job_ids": [job_id]})
 
         page.route("**/api/acquisition-batch", batch_downloads)
-        page.once("dialog", lambda dialog: dialog.accept())
-        page.get_by_role("button", name="Queue selected downloads").click()
+        page.get_by_role("button", name="Start downloads").click()
         queued_card = page.locator(f'.source-card[data-source-id="{sid}"]')
         expect(page.get_by_text("Batch downloads", exact=True)).to_have_count(0)
-        expect(queued_card.locator("[data-batch-status]")).to_have_text("Download queued")
+        expect(queued_card.locator("[data-batch-status]")).to_have_text("Waiting to download")
         if not queued_card.evaluate("(card) => card.open"):
             queued_card.locator(".source-header").click()
         queued_card.get_by_role("button", name="Cancel queued download").click()
@@ -328,6 +331,7 @@ def exercise(browser, base, name, viewport, artifacts):
         expect(page.get_by_role("button", name="Reload sources")).to_be_visible(timeout=10000)
         page.get_by_role("button", name="Reload sources").click()
         expect(page.locator('[data-group-select][value="' + sid + '"]')).to_be_checked()
+        page.locator("#bulk-more-actions summary").click()
         page.get_by_role("button", name="Export ZIM verification manifest").click()
         expect(page.locator("#catalog-feedback")).to_contain_text("Choose only installed, verified ZIM sources")
         with page.expect_download() as download:
@@ -589,8 +593,8 @@ def exercise_history_poll(browser, viewport):
         expect(technical.locator('[data-field="acquisition-history"]')).to_contain_text("Succeeded")
         expect(technical.locator('[data-field="last-acquisition"]')).not_to_have_text("—")
         details = technical.locator('[data-field="update-details"]')
-        expect(details).to_contain_text("Estimated transfer and staging: 1.0 MiB")
-        expect(details).to_contain_text("Installed and candidate archives together: 3.0 MiB")
+        expect(details).to_contain_text("Estimated transfer and staging: 1.05 MB")
+        expect(details).to_contain_text("Installed and candidate archives together: 3.15 MB")
         changed = True
         expect(technical.locator('[data-field="acquisition-history"]')).to_contain_text("Failed")
         expect(details).to_be_hidden()
@@ -684,7 +688,7 @@ def exercise_source_actions(browser, viewport):
         expect(feedback).to_have_text("Fixture download failed")
         expect(download).to_be_focused()
         page.keyboard.press("Enter")
-        expect(card.locator('[data-field="status"]')).to_have_text("2.0 KiB")
+        expect(card.locator('[data-field="status"]')).to_have_text("2.05 kB")
         expect(card).to_have_attribute("open", "")
         expect(selected).to_be_checked()
         expect(search).to_have_value("Fixture")
