@@ -1003,8 +1003,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 self._snapshot(), source_id=query.get("source_id", [None])[0])
             self._send_json(400 if "error" in result else 200, result)
         elif self.path.rstrip("/") == "/api/acquisitions":
-            monitor = getattr(self.server, "acquisition_monitor", None)
-            self._send_json(200, monitor.snapshot() if monitor else {"acquisitions": [], "stale": True})
+            self._send_json(200, self._snapshot())
         elif self.path.rstrip("/") == "/api/storage-status":
             try:
                 self._send_json(200, STORAGE_PROBE.status(storage_settings.load_settings()))
@@ -1374,6 +1373,10 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                         and all(isinstance(job, dict) and isinstance(job.get("source_id"), str)
                                 for job in jobs)):
                     return snap
+            elif getattr(self.server, "manage_external_monitor", False):
+                # No sampler is required for managed ZIMs. Recheck the
+                # compatibility selection so in-process rollback fails closed.
+                return {"acquisitions": [], "stale": configured_external_monitor_entries() != []}
         except Exception:
             pass
         return {"acquisitions": [], "stale": True}
@@ -1992,7 +1995,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
     def _check_storage_change(self):
         """Check local acquisition records without probing the managed mount."""
         monitor = getattr(self.server, "acquisition_monitor", None)
-        if monitor is not None:
+        if monitor is not None or getattr(self.server, "manage_external_monitor", False):
             snapshot = self._snapshot()
             if snapshot["stale"] or any(
                     job.get("active") is not False or
@@ -2443,8 +2446,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         return
 
 
-def configured_external_monitor_entry():
-    """Find a single configured pre-ledger ZIM requiring external monitoring.
+def configured_external_monitor_entries():
+    """Find configured pre-ledger ZIMs requiring external monitoring.
 
     This compatibility monitor is optional and never re-adds a removed seed,
     reads an archive, downloads content, or changes publication state.
@@ -2453,10 +2456,14 @@ def configured_external_monitor_entry():
         configured = {record["source_id"] for record in SOURCE_CATALOG.get()["sources"]}
     except (OSError, catalog_store.CatalogError):
         return None
-    entries = [entry for sid, entry in zim_catalog.legacy_pinned_entries().items()
-               if sid in configured]
+    return [entry for sid, entry in zim_catalog.legacy_pinned_entries().items()
+            if sid in configured and not publication.managed_installation(sid)]
+
+
+def configured_external_monitor_entry():
+    entries = configured_external_monitor_entries()
     # One sampler only: never spawn extra potentially stalled NFS workers.
-    return entries[0] if len(entries) == 1 else None
+    return entries[0] if entries and len(entries) == 1 else None
 
 
 def main() -> None:
@@ -2465,6 +2472,7 @@ def main() -> None:
     server = ThreadingHTTPServer((config.host, config.port), AdminAPIHandler)
     server.axiom_config = config
     legacy = configured_external_monitor_entry()
+    server.manage_external_monitor = True
     server.acquisition_monitor = monitoring.Monitor(legacy) if legacy else None
     if server.acquisition_monitor:
         server.acquisition_monitor.start()

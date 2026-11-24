@@ -111,6 +111,23 @@ class ExternalMonitorSelectionTests(unittest.TestCase):
                            return_value={"another-legacy": pinned})):
             self.assertIsNone(admin_api.configured_external_monitor_entry())
 
+    def test_managed_wikipedia_skips_sampler_and_rollback_is_fail_closed(self):
+        from types import SimpleNamespace
+
+        sid = admin_api.WIKIPEDIA_SOURCE["source_id"]
+        catalog = {"sources": [{"source_id": sid}]}
+        handler = SimpleNamespace(server=SimpleNamespace(
+            acquisition_monitor=None, manage_external_monitor=True))
+        with (patch.object(admin_api.SOURCE_CATALOG, "get", return_value=catalog),
+              patch.object(admin_api.publication, "managed_installation", return_value=True) as adopted):
+            self.assertIsNone(admin_api.configured_external_monitor_entry())
+            self.assertEqual(admin_api.AdminAPIHandler._snapshot(handler),
+                             {"acquisitions": [], "stale": False})
+            adopted.return_value = False
+            self.assertEqual(admin_api.configured_external_monitor_entry()["source_id"], sid)
+            self.assertEqual(admin_api.AdminAPIHandler._snapshot(handler),
+                             {"acquisitions": [], "stale": True})
+
     def test_multiple_legacy_monitors_fail_closed_without_parallel_nfs_sampling(self):
         from theaxiom import source_catalog
         seed = source_catalog.WIKIPEDIA_SOURCE

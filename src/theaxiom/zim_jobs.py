@@ -512,9 +512,7 @@ def downloaded_zim(sid):
             raise ValueError("Installed ZIM is missing or invalid; deletion refused")
         name, size = artifact["filename"], artifact["bytes"]
         with pdf_source._directory("library", writing=True, format_name="zim") as (directory, mount, _):
-            with pdf_source._file(directory, mount, name, size) as stream:
-                if adopted_filename(job, artifact) and archive_identity(os.fstat(stream.fileno())) != job["adopted_from_legacy"]["identity"]:
-                    raise ValueError("Adopted archive changed; deletion refused")
+            with open_installed_archive(directory, mount, job, artifact) as stream:
                 yield directory, [(name, stream, size)]
 
 
@@ -785,20 +783,27 @@ def adopted_filename(job, artifact):
                 and artifact.get("source_url") == zim_adoption.PINNED_SOURCE_URL)
 
 
+@contextmanager
+def open_installed_archive(directory, mount, job, artifact):
+    """Open a managed ZIM and enforce any recorded in-place file identity."""
+    digest = artifact["sha256"]
+    filename = artifact["filename"]
+    preserved_name = filename != f'{job["source_id"]}.{digest}.zim'
+    if not re.fullmatch("[a-f0-9]{64}", digest) or (preserved_name and not adopted_filename(job, artifact)):
+        raise ValueError("Invalid installed archive metadata")
+    with pdf_source._file(directory, mount, filename, artifact["bytes"]) as stream:
+        if preserved_name and archive_identity(os.fstat(stream.fileno())) != job["adopted_from_legacy"]["identity"]:
+            raise ValueError("Installed archive identity changed")
+        yield stream
+
+
 def installed(job, config):
     if not matches(job, config) or job["state"] != "completed":
         return None
     try:
         artifact = job["artifact"]
-        expected_name = job["source_id"] + "." + artifact["sha256"] + ".zim"
-        filename = artifact["filename"]
-        adopted = filename != expected_name
-        if not re.fullmatch("[a-f0-9]{64}", artifact["sha256"]) or (adopted and not adopted_filename(job, artifact)):
-            return None
         with pdf_source._directory("library", format_name="zim") as (fd, mount, _):
-            with pdf_source._file(fd, mount, filename, artifact["bytes"]) as stream:
-                if adopted and archive_identity(os.fstat(stream.fileno())) != job["adopted_from_legacy"]["identity"]:
-                    return None
+            with open_installed_archive(fd, mount, job, artifact):
                 return artifact
     except (OSError, ValueError, KeyError, TypeError):
         return None
