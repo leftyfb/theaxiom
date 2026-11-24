@@ -12,7 +12,7 @@ Owner approved the English Ready.gov ZIM edition October 2026 on 2026-11-20.
 - Exact byte count and SHA-256 are not verified. Do not treat the directory's rounded size as an integrity pin.
 - Default catalog contains this candidate instead of the former placeholder; an unchanged existing placeholder is upgraded atomically. Edited/deleted records are preserved.
 
-The existing Wikipedia-specific trusted acquisition manifest, monitor, Kiwix route and publication authorization do not constitute generic ZIM support. Before acquisition and publication, implement a reusable per-source verified ZIM lifecycle, preserve the existing Wikipedia service, and obtain exact archive integrity metadata. Do not grant publication merely based on a filename or a reachable Kiwix service. Review redistribution conditions and archive-specific third-party content; do not imply endorsement. Validate offline navigation, embedded documents, and search where supported.
+Ready.gov uses the shared ZIM workflow. In **Administration → Sources**, open the Ready.gov card and select **Download**. After verification, review redistribution conditions and archive-specific credits before selecting **Publish**. Open the source from the library homepage and verify offline navigation, embedded documents, and search where supported.
 
 ## Earlier PDF collection proposal
 
