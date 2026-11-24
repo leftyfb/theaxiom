@@ -46,9 +46,10 @@ def legacy_pinned_entries():
     result = {}
     for entry in source_catalog.builtin_sources():
         unit_name = source_catalog.LEGACY_ACQUISITION_UNITS.get(entry.get("source_id"))
-        if (entry.get("kind") != "zim" or not isinstance(unit_name, str)
-                or not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_.@-]{0,119}\.service", unit_name)
-                or ".." in unit_name):
+        has_unit = (isinstance(unit_name, str) and ".." not in unit_name
+                    and re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_.@-]{0,119}\.service", unit_name))
+        if (entry.get("kind") != "zim" or
+                (entry.get("source_id") not in source_catalog.LEGACY_READER_ROUTES and not has_unit)):
             continue
         sid, filename, digest, size = (entry.get("source_id"), entry.get("filename"),
                                        entry.get("sha256"), entry.get("bytes"))

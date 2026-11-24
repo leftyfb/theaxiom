@@ -2,7 +2,7 @@ import json
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
-from theaxiom import acquisition_monitor as m
+from theaxiom import acquisition_monitor as m, source_catalog
 from theaxiom.admin_api import WIKIPEDIA_SOURCE
 
 
@@ -29,6 +29,8 @@ class MonitorTests(unittest.TestCase):
     @patch.object(m, "unit_state", return_value={"LoadState": "loaded", "ActiveState": "activating"})
     @patch.object(m.storage_settings, "load_settings", return_value={"storage_root": "/tmp"})
     @patch.object(m, "metadata")
+    @patch.object(source_catalog, "LEGACY_ACQUISITION_UNITS",
+                  {"wikipedia-en": "fixture-acquisition.service"})
     def test_wrong_storage_does_not_stat(self, metadata, *_):
         self.assertEqual(m.collect(WIKIPEDIA_SOURCE)["state"], "unknown")
         metadata.assert_not_called()
@@ -69,7 +71,7 @@ class MonitorTests(unittest.TestCase):
               patch.object(m, "command", return_value=json.dumps(
                   {"MESSAGE": marker, "__REALTIME_TIMESTAMP": "11000000"}) + "\n") as command):
             evidence = m.pinned_invocation_evidence(
-                WIKIPEDIA_SOURCE, path, final_stat, unit)
+                WIKIPEDIA_SOURCE, path, final_stat, unit, "fixture-acquisition.service")
         self.assertEqual(evidence, {"timestamp": 11.0, "timestamp_ns": 11000000000,
                                     "marker": marker, "invocation_id": invocation})
         self.assertIn("-n", command.call_args.args)
@@ -86,7 +88,7 @@ class MonitorTests(unittest.TestCase):
               patch.object(m, "command", return_value=json.dumps(
                   {"MESSAGE": marker, "__REALTIME_TIMESTAMP": "10000000"}))):
             self.assertIsNone(m.pinned_invocation_evidence(
-                {"bytes": 7, "sha256": "c" * 64}, "/exact.zim", final_stat, unit))
+                {"bytes": 7, "sha256": "c" * 64}, "/exact.zim", final_stat, unit, "fixture-acquisition.service"))
 
     def test_pinned_invocation_evidence_rejects_unit_change_after_query(self):
         invocation = "d" * 32
@@ -97,7 +99,7 @@ class MonitorTests(unittest.TestCase):
               patch.object(m, "command", return_value="")):
             self.assertIsNone(m.pinned_invocation_evidence(
                 {"bytes": 1, "sha256": "f" * 64}, "/exact.zim",
-                SimpleNamespace(st_mtime_ns=1_000_000_000, st_ctime_ns=1_000_000_000), unit))
+                SimpleNamespace(st_mtime_ns=1_000_000_000, st_ctime_ns=1_000_000_000), unit, "fixture-acquisition.service"))
 
 
 class ChecksumProgressTests(unittest.TestCase):

@@ -286,9 +286,9 @@ def test_legacy_pinned_capability_selected_by_metadata_not_wikipedia_id(monkeypa
     monkeypatch.setattr(source_catalog, "builtin_sources",
                         lambda: [original, second, untrusted, unmarked])
     monkeypatch.setattr(source_catalog, "LEGACY_ACQUISITION_UNITS",
-                        {"wikipedia-en": "acquire-wikipedia-zim.service",
-                         "archive-two": "acquire-wikipedia-zim.service",
-                         "untrusted": "acquire-wikipedia-zim.service"})
+                        {"wikipedia-en": "fixture-acquisition.service",
+                         "archive-two": "fixture-acquisition.service",
+                         "untrusted": "fixture-acquisition.service"})
     entries = zim_catalog.legacy_pinned_entries()
     assert set(entries) == {"wikipedia-en", "archive-two"}
     assert entries["archive-two"]["filename"] == second["filename"]

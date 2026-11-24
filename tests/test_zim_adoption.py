@@ -36,10 +36,10 @@ def adoption_disk(tmp_path, monkeypatch):
             "Result": "success", "ExecMainStatus": "0"}
     evidence = {"timestamp": 1234.5, "timestamp_ns": 1234500000000,
                 "marker": "synthetic native evidence", "invocation_id": "a" * 32}
-    monkeypatch.setattr(zim_adoption.acquisition_monitor, "unit_state", lambda: unit)
+    monkeypatch.setattr(zim_adoption.acquisition_monitor, "unit_state", lambda name: unit)
     monkeypatch.setattr(zim_adoption.acquisition_monitor,
                         "pinned_invocation_evidence",
-                        lambda entry, path, final_stat, current_unit: evidence)
+                        lambda entry, path, final_stat, current_unit, name: evidence)
     return tmp_path, root, archive, payload
 
 
@@ -47,10 +47,10 @@ def adopt_fixture(disk):
     _, _, archive, _ = disk
     return zim_adoption.adopt(archive, dict(
         format="zim", source_url=zim_adoption.PINNED_SOURCE_URL,
-        expected_size_bytes=str(zim_adoption.PINNED_BYTES), sha256=zim_adoption.PINNED_SHA256))
+        expected_size_bytes=str(zim_adoption.PINNED_BYTES), sha256=zim_adoption.PINNED_SHA256), evidence_unit="fixture-acquisition.service")
 
 
-def test_adopt_and_rollback_in_place_on_shared_parent(adoption_disk):
+def test_adopt_in_place_on_shared_parent(adoption_disk):
     _, _, archive, payload = adoption_disk
     archive.parent.chmod(0o777)
     before = zim_jobs.archive_identity(archive.stat())
@@ -61,10 +61,6 @@ def test_adopt_and_rollback_in_place_on_shared_parent(adoption_disk):
     assert zim_jobs.installed(job, job["configuration"]) == job["artifact"]
     assert job["artifact"]["filename"] == archive.name
     assert admin_api.select_lifecycle("wikipedia-en", job["configuration"])["zim_download"]
-    assert zim_adoption.rollback()["state"] == "rolled_back"
-    assert zim_adoption.rollback()["state"] == "rolled_back"
-    assert zim_jobs.read("wikipedia-en") is None
-    assert not zim_adoption.managed()
     assert archive.read_bytes() == payload
     assert zim_jobs.archive_identity(archive.stat()) == before
     assert set(archive.parent.iterdir()) == {archive}
@@ -109,8 +105,6 @@ def test_managed_transition_survives_removal_of_installed_job(adoption_disk):
     adopt_fixture(adoption_disk)
     zim_jobs.path_for("wikipedia-en").unlink()
     assert zim_adoption.managed()
-    with pytest.raises(zim_adoption.AdoptionError, match="acquisition state changed"):
-        zim_adoption.rollback()
 
 
 def test_shared_manifest_keeps_existing_book_id_once(adoption_disk):

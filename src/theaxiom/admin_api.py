@@ -2457,7 +2457,8 @@ def configured_external_monitor_entries():
     except (OSError, catalog_store.CatalogError):
         return None
     return [entry for sid, entry in zim_catalog.legacy_pinned_entries().items()
-            if sid in configured and not publication.managed_installation(sid)]
+            if sid in configured and sid in source_catalog.LEGACY_ACQUISITION_UNITS
+            and not publication.managed_installation(sid)]
 
 
 def configured_external_monitor_entry():

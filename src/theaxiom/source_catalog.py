@@ -45,9 +45,7 @@ READY_GOV_SOURCE: dict[str, Any] = {
 # Keep this separate from mutable seed records and the historical draft catalog
 # schema: adding arbitrary fields to seeds would break strict v2 conversion.
 # New ZIMs always use the normal zim_jobs lifecycle.
-LEGACY_ACQUISITION_UNITS = {
-    "wikipedia-en": "acquire-wikipedia-zim.service",
-}
+LEGACY_ACQUISITION_UNITS: dict[str, str] = {}
 
 LEGACY_READER_ROUTES = {
     # Compatibility bookmark and presentation metadata for pre-ledger archives.

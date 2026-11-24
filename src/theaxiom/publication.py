@@ -19,8 +19,7 @@ def legacy_reader_routes():
     routes = {}
     for sid, config in source_catalog.LEGACY_READER_ROUTES.items():
         seed = seeds.get(sid)
-        if (sid not in source_catalog.LEGACY_ACQUISITION_UNITS
-                or not seed or seed.get("kind") != "zim"
+        if (not seed or seed.get("kind") != "zim"
                 or not isinstance(seed.get("filename"), str)
                 or not valid_book_id_from_seed(seed)):
             continue

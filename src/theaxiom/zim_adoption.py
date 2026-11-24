@@ -85,13 +85,13 @@ def managed() -> bool:
             return False
         if record["state"] == "completed":
             return True
-        return (record["state"] in {"prepared", "rolling_back"}
+        return (record["state"] in {"prepared"}
                 and zim_jobs.read(SOURCE_ID) == job)
     except (OSError, ValueError, KeyError, TypeError):
         return False
 
 
-def adopt(legacy_path: str | Path, config: dict) -> dict:
+def adopt(legacy_path: str | Path, config: dict, *, evidence_unit: str | None = None) -> dict:
 
     legacy = Path(legacy_path)
     journal = journal_path()
@@ -121,9 +121,11 @@ def adopt(legacy_path: str | Path, config: dict) -> dict:
                 info = os.fstat(stream.fileno())
                 identity = zim_jobs.archive_identity(info)
                 if record is None:
-                    unit = acquisition_monitor.unit_state()
+                    if not acquisition_monitor.valid_unit_name(evidence_unit):
+                        raise AdoptionError("An explicit evidence unit is required for a new adoption")
+                    unit = acquisition_monitor.unit_state(evidence_unit)
                     evidence = acquisition_monitor.pinned_invocation_evidence(
-                        artifact | {"source_id": SOURCE_ID}, str(legacy), info, unit)
+                        artifact | {"source_id": SOURCE_ID}, str(legacy), info, unit, evidence_unit)
                     if evidence is None:
                         raise AdoptionError("current acquisition evidence is unavailable")
                     job = dict(source_id=SOURCE_ID, state="completed", active=False,
@@ -146,56 +148,24 @@ def adopt(legacy_path: str | Path, config: dict) -> dict:
     return record
 
 
-def rollback() -> dict:
-    journal = journal_path()
-    with zim_jobs.LOCK, zim_jobs.worker_lock():
-        record = _read_json(journal)
-        job = record.get("job")
-        if (record.get("state") not in {"prepared", "completed", "rolling_back", "rolled_back"}
-                or not isinstance(job, dict) or job.get("source_id") != SOURCE_ID
-                or job.get("artifact", {}).get("filename") != PINNED_FILENAME
-                or not isinstance(job.get("adopted_from_legacy"), dict)):
-            raise AdoptionError("journal is not an in-place adoption record")
-        current = zim_jobs.read(SOURCE_ID)
-        if (zim_jobs.read_candidate(SOURCE_ID) or (current is not None and current != job)
-                or (record["state"] == "completed" and current is None)):
-            raise AdoptionError("managed acquisition state changed")
-        record["state"] = "rolling_back"
-        _json_atomic(journal, record)
-        if current is not None:
-            path = zim_jobs.path_for(SOURCE_ID)
-            path.unlink()
-            fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
-            try:
-                os.fsync(fd)
-            finally:
-                os.close(fd)
-        record["state"] = "rolled_back"
-        _json_atomic(journal, record)
-    return record
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     a = sub.add_parser("adopt")
     a.add_argument("legacy_path")
-    sub.add_parser("rollback")
+    a.add_argument("--evidence-unit")
     args = parser.parse_args()
     try:
-        if args.command == "adopt":
-            from . import admin_api, publication
+        from . import admin_api, publication
 
-            record = next((item for item in admin_api.SOURCE_CATALOG.get()["sources"]
-                           if item["source_id"] == SOURCE_ID), None)
-            if record is None:
-                raise AdoptionError("saved Wikipedia source is missing")
-            config = record["configuration"]
-            if publication.load().get(SOURCE_ID) and not config.get("license", "").strip():
-                raise AdoptionError("published source has no saved license")
-            result = adopt(args.legacy_path, config)
-        else:
-            result = rollback()
+        record = next((item for item in admin_api.SOURCE_CATALOG.get()["sources"]
+                       if item["source_id"] == SOURCE_ID), None)
+        if record is None:
+            raise AdoptionError("saved Wikipedia source is missing")
+        config = record["configuration"]
+        if publication.load().get(SOURCE_ID) and not config.get("license", "").strip():
+            raise AdoptionError("published source has no saved license")
+        result = adopt(args.legacy_path, config, evidence_unit=args.evidence_unit)
     except (OSError, ValueError) as exc:
         parser.error(str(exc))
     print(result["state"])

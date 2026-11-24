@@ -97,6 +97,19 @@ class ReleaseRevisionTests(unittest.TestCase):
 
 
 class ExternalMonitorSelectionTests(unittest.TestCase):
+    def setUp(self):
+        units = dict.fromkeys(("wikipedia-en", "another-legacy", "first", "second"),
+                             "fixture-acquisition.service")
+        registry = patch.object(admin_api.source_catalog, "LEGACY_ACQUISITION_UNITS", units)
+        registry.start()
+        self.addCleanup(registry.stop)
+
+    def test_unregistered_pinned_source_never_starts_sampler(self):
+        sid = admin_api.WIKIPEDIA_SOURCE["source_id"]
+        with (patch.object(admin_api.source_catalog, "LEGACY_ACQUISITION_UNITS", {}),
+              patch.object(admin_api.SOURCE_CATALOG, "get", return_value={"sources": [{"source_id": sid}]})):
+            self.assertIsNone(admin_api.configured_external_monitor_entry())
+
     def test_configured_external_monitor_is_selected_by_capability(self):
         from theaxiom import source_catalog
         pinned = dict(source_catalog.WIKIPEDIA_SOURCE, source_id="another-legacy")

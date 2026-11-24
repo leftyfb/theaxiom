@@ -1,4 +1,4 @@
-"""Read-only adapter for the standalone Wikipedia acquisition service."""
+"""Read-only adapter for explicitly configured external acquisition units."""
 from __future__ import annotations
 
 import copy
@@ -13,7 +13,6 @@ from pathlib import Path
 
 from . import storage, storage_settings
 
-UNIT = "acquire-wikipedia-zim.service"
 INTERVAL = 2
 STALE_AFTER = 10
 
@@ -23,7 +22,14 @@ def command(*args):
                           timeout=3).stdout
 
 
-def unit_state(unit_name=UNIT):
+def valid_unit_name(name):
+    return isinstance(name, str) and ".." not in name and bool(
+        re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_.@-]{0,119}\.service", name))
+
+
+def unit_state(unit_name):
+    if not valid_unit_name(unit_name):
+        return {"LoadState": "not-found"}
     fields = "LoadState,ActiveState,SubState,Result,ExecMainStatus,InvocationID,ControlGroup"
     return dict(line.split("=", 1) for line in command(
         "systemctl", "show", unit_name, "--property=" + fields
@@ -124,7 +130,7 @@ def metadata(root, relative, mount, mounts):
 
 
 def pinned_invocation_evidence(entry, final_path, final_stat, unit,
-                               unit_name=UNIT):
+                               unit_name=None):
     """Return bounded, current-invocation evidence for an exact artifact.
 
     ``final_stat`` must be the stable result of an anchored ``fstat``.  The
@@ -132,6 +138,8 @@ def pinned_invocation_evidence(entry, final_path, final_stat, unit,
     unit reads so a restart or a concurrent invocation cannot be mistaken for
     evidence for the supplied file.
     """
+    if not valid_unit_name(unit_name):
+        return None
     invocation = unit.get("InvocationID", "")
     if (len(invocation) != 32 or
             any(c not in "0123456789abcdef" for c in invocation) or
@@ -169,7 +177,7 @@ def pinned_invocation_evidence(entry, final_path, final_stat, unit,
     return None
 
 
-def success_evidence(unit, entry, final, final_path, unit_name=UNIT):
+def success_evidence(unit, entry, final, final_path, unit_name=None):
     """Compatibility boolean for the normal monitor path."""
     if final is None:
         return False
@@ -183,11 +191,12 @@ def collect(entry):
               "detail": "", "active": False}
     try:
         from . import source_catalog
-        unit_name = source_catalog.LEGACY_ACQUISITION_UNITS.get(entry["source_id"], UNIT)
-        if (not isinstance(unit_name, str) or not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_.@-]{0,119}\.service", unit_name)
-                or ".." in unit_name):
+        unit_name = source_catalog.LEGACY_ACQUISITION_UNITS.get(entry["source_id"])
+        if unit_name is None:
+            return dict(result, state="unavailable", detail="No external acquisition unit configured")
+        if not valid_unit_name(unit_name):
             return dict(result, detail="External acquisition unit unavailable")
-        unit = unit_state() if unit_name == UNIT else unit_state(unit_name)
+        unit = unit_state(unit_name)
         state, sub = unit.get("ActiveState"), unit.get("SubState")
         active = state in {"activating", "active", "deactivating"}
         result["active"] = active
@@ -215,7 +224,7 @@ def collect(entry):
         final = metadata(root, Path("library/zim") / name, mount, mounts)
         if storage._covering(root, storage.read_mounts()) != mount:
             return dict(result, detail="Mount changed during sampling")
-        if (unit_state() if unit_name == UNIT else unit_state(unit_name)) != unit:
+        if unit_state(unit_name) != unit:
             return dict(result, detail="Service changed during sampling")
         total = entry["bytes"]
         if any(x is not None and x.st_size > total for x in (partial, staged, final)):
@@ -249,8 +258,7 @@ def collect(entry):
         if state == "failed" or unit.get("Result") not in {"success", ""}:
             return dict(result, state="failed", detail="Acquisition service reported failure")
         if final:
-            valid = (success_evidence(unit, entry, final, final_path) if unit_name == UNIT
-                     else success_evidence(unit, entry, final, final_path, unit_name))
+            valid = success_evidence(unit, entry, final, final_path, unit_name)
             if unit.get("ExecMainStatus") == "0" and valid:
                 return dict(result, state="completed", verified=True,
                             detail="Successful acquisition service verification")

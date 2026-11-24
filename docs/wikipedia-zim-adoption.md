@@ -7,15 +7,9 @@ identity is checked against the ledger when opening the installed file.
 
 ## Before the cutover
 
-Deploy the exact CI-verified application revision through the approved
-deployment path. Keep the legacy service and old reader working through that
-deployment. Verify the expected live revision, existing Wikipedia and FEMA
-reader and search, and that the legacy acquisition unit is inactive and
-successful. Hold the existing deployment lock for the cutover through
-acceptance or rollback. Pause competing publication changes and prevent the
-legacy acquisition from starting using the approved host procedure. Record
-its original enablement state and preserve the deployed version, publication
-configuration, and Kiwix manifest for rollback.
+Deploy the CI-verified revision. Verify Wikipedia and FEMA reader and search,
+and confirm that the acquisition unit that produced the evidence is inactive.
+Hold the deployment lock and pause changes to publication during adoption.
 
 The cutover runs under the existing Axiom service account and environment.
 Verify that this account can read the current invocation's acquisition
@@ -28,6 +22,7 @@ refuses conflicting jobs and replacement candidates.
 
 Run these on Vancouver under the existing host authorization. Run the
 deployment lock and legacy-unit checks above before entering this sequence.
+Set `EVIDENCE_UNIT` to the actual systemd unit that verified the pre-existing archive.
 The private journal is written beside the existing managed ZIM jobs.
 
 ```bash
@@ -36,7 +31,8 @@ sudo systemd-run --wait --pipe --collect \
   --property=WorkingDirectory=/opt/theaxiom/app \
   --property=EnvironmentFile=/etc/theaxiom/server.env \
   /opt/theaxiom/app/.venv/bin/python -m theaxiom.zim_adoption adopt \
-  /media/offline/library/zim/wikipedia_en_all_maxi_2026-08.zim
+  /media/offline/library/zim/wikipedia_en_all_maxi_2026-08.zim \
+  --evidence-unit "$EVIDENCE_UNIT"
 ```
 
 A successful command prints `completed`. If interrupted after writing a
@@ -61,11 +57,3 @@ adoption. Old book-ID links are tied to that edition and may stop resolving
 if a later replacement changes the Kiwix book ID. Check cross-source search and FEMA. Confirm the original
 inode, file size, and publication intent. Keep the legacy unit from starting
 after acceptance under the authorized host procedure.
-
-## Rollback
-
-If acceptance fails, keep the locks and run the same service-account
-invocation with `-m theaxiom.zim_adoption rollback`. Then run the same
-reconciliation command and check legacy Wikipedia and FEMA. Restore the
-recorded legacy unit enablement without starting it. The rollback removes
-only the exact adoption job. A divergent job or replacement requires review.
