@@ -211,7 +211,8 @@ def exercise(browser, base, name, viewport, artifacts):
         expect(page.locator(".source-card[data-source-id='" + sid + "']")).to_be_visible(timeout=15000)
 
         expect(card.locator(".source-symbol img")).to_be_visible()
-        card.locator("summary.source-header").click()
+        if card.get_attribute("open") is None:
+            card.locator("summary.source-header").click()
         card.locator("[data-catalog-edit]").click()
         page.locator("#source-icon-remove").click()
         expect(page.locator("#source-icon-preview img")).to_have_count(0)
