@@ -879,9 +879,21 @@
       }
 
       let lastSourceAction;
+      let filteredActionTimer;
       function sourceAction(card, status) {
+        window.clearTimeout(filteredActionTimer);
         lastSourceAction = {card, status};
         showFilteredAction();
+        return lastSourceAction;
+      }
+      function finishSourceAction(action) {
+        if (lastSourceAction !== action) return;
+        window.clearTimeout(filteredActionTimer);
+        filteredActionTimer = window.setTimeout(() => {
+          if (lastSourceAction !== action) return;
+          lastSourceAction = undefined;
+          showFilteredAction();
+        }, 5000);
       }
       function showFilteredAction() {
         const notice = document.getElementById('filtered-action-feedback');
@@ -1882,7 +1894,7 @@
         busy.hidden = false;
         const formatLabel = card.dataset.filterFormat.toUpperCase();
         busyText.textContent = (file ? 'Uploading and verifying ' : 'Downloading and verifying ') + formatLabel + '…';
-        sourceAction(card, () => busy.hidden ? feedback.textContent : busyText.textContent);
+        const action = sourceAction(card, () => busy.hidden ? feedback.textContent : busyText.textContent);
         try {
           const response = file
             ? await acquisitionFetch('/api/pdf-upload', {method:'POST', headers:{...((typeof window !== 'undefined' && window.axiomCsrfHeaders?.()) || {}),'Content-Type':card.dataset.filterFormat === 'epub' ? 'application/epub+zip' : 'application/pdf',
@@ -1898,6 +1910,7 @@
           }
           revision = result.revision;
           feedback.textContent = formatLabel + ' downloaded and verified.';
+          finishSourceAction(action);
         } catch (error) {
           feedback.textContent = error.message;
         } finally {
@@ -1928,7 +1941,7 @@
         const localFeedback = card.querySelector('[data-zim-feedback]');
         card.dataset.zimPosting = 'true';
         localFeedback.textContent = 'Starting download…';
-        sourceAction(card, () => localFeedback.textContent ||
+        const action = sourceAction(card, () => localFeedback.textContent ||
           card.querySelector('[data-field="metrics"]:not([hidden])')?.textContent ||
           card.querySelector('[data-field="status"]').textContent);
         try {
@@ -1940,6 +1953,7 @@
           }
           localFeedback.textContent = 'Download accepted. Waiting for progress…';
           card.dataset.zimAccepted = 'true';
+          finishSourceAction(action);
         } catch(error) {
           localFeedback.textContent = error.message;
         } finally {
@@ -2083,7 +2097,7 @@
         button.dataset.posting = 'true';
         button.disabled = true;
         status.textContent = enabled ? 'Publishing…' : 'Unpublishing…';
-        sourceAction(card, () => status.textContent);
+        const action = sourceAction(card, () => status.textContent);
         try {
           const payload = {source_id:card.dataset.sourceId, enabled, revision};
           if (acknowledge) payload.acknowledge_rights = true;
@@ -2094,6 +2108,7 @@
           button.dataset.enabled = String(enabled);
           button.textContent = enabled ? 'Unpublish' : 'Publish';
           status.textContent = enabled ? 'Publication enabled.' : 'Source unpublished.';
+          finishSourceAction(action);
         } catch (error) {
           status.textContent = error.message;
         } finally {
