@@ -332,8 +332,7 @@ def test_published_zim_card_hides_routine_notices():
     assert "Unpublish before changing artifact configuration." not in card
     assert ">Unpublish</button>" in card
     wiki["mutation_blocked"] = True
-    blocked = render([wiki]).split('<div class="source-expanded">', 1)[1].split('</details></div>', 1)[0]
-    assert "Acquisition or publication status unresolved; changes are blocked." in blocked
+    assert "Acquisition or publication status unresolved; changes are blocked." not in render([wiki])
 
 
 def test_zim_download_feedback_is_local_and_does_not_reload():

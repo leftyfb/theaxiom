@@ -748,7 +748,6 @@
         {% elif source.acquisition_reason and source.acquisition_reason != 'acquisition disabled pending storage safety integration' %}<p class="source-note" data-field="acquisition-reason">{{ source.acquisition_reason }}</p>{% endif %}
         {% if pub %}<p class="source-note" data-publication-feedback role="status"></p>{% endif %}
         {% if pub %}<p class="source-note" data-field="publication-status" role="status"{% if pub.published %} hidden{% endif %}>{{ publication_label }}</p>{% endif %}
-        <p class="source-note" data-field="mutation-note">{% if source.mutation_blocked or pub.error %}Acquisition or publication status unresolved; changes are blocked.{% endif %}</p>
         <dl class="source-metadata">
           {% for name in ('author', 'publisher', 'edition', 'language') %}
           <div{% if not source.profile.get(name) %} hidden{% endif %}><dt>{{ name|capitalize }}:</dt><dd data-source-profile="{{ name }}">{{ source.profile.get(name, '') }}</dd></div>
@@ -2188,12 +2187,10 @@
         put('sample', Number.isFinite(job?.sampled_at) ? new Date(job.sampled_at * 1000).toLocaleString() : '—');
       }
       function controls(card, source) {
-        const field = name => card.querySelector('[data-field="' + name + '"]');
         const pub = source?.publication;
         const blocked = source?.mutation_blocked !== false || !!pub?.error;
         card.querySelector('[data-catalog-edit]').disabled = blocked;
         card.querySelector('[data-catalog-remove]').disabled = blocked;
-        field('mutation-note').textContent = blocked ? 'Acquisition or publication status unresolved; changes are blocked.' : '';
         if (['pdf','epub'].includes(card.dataset.filterFormat)) {
           card.dataset.acquisitionBlocked = String(blocked || !!pub?.enabled);
           for (const button of card.querySelectorAll('[data-pdf-download], [data-pdf-upload]')) {
