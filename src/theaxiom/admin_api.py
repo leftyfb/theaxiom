@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import json
 from io import BytesIO
+from itertools import groupby
 import importlib
 import os
 import re
@@ -766,13 +767,13 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             except RuntimeError:
                 error, code = "Search is busy. Try again.", 503
             environment = Environment(loader=FileSystemLoader(ADMIN_TEMPLATE_DIR), autoescape=True)
-            sections = {}
+            sections = []
             if not search_page:
-                for source in sorted(sources, key=lambda source: source.get("homepage_rank", 0)):
-                    section = source.get("homepage_section") if not selected else None
-                    sections.setdefault(section, []).append(source)
-                if len(sections) > 1 and None in sections:
-                    sections[None] = sections.pop(None)
+                sections = self._library_sections(
+                    sorted(sources, key=lambda source: source.get("homepage_rank", 0)),
+                    lambda source: source.get("homepage_section") if not selected else None,
+                    any(source.get("preserve_source_order") for source in sources),
+                )
             body = environment.get_template("search.html.j2" if search_page else "library.html.j2").render(
                 sources=sources, groups=results, filter_groups=groups, selected=selected,
                 query=query, error=error, sections=sections, search_source=search_source).encode("utf-8")
@@ -999,6 +1000,45 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                                         page=page, start_base=start_base)
         return results
 
+    @staticmethod
+    def _library_sections(items, section_for, preserve_order):
+        if preserve_order:
+            return [(section, list(members)) for section, members in groupby(items, section_for)]
+        sections = {}
+        for item in items:
+            sections.setdefault(section_for(item), []).append(item)
+        if len(sections) > 1 and None in sections:
+            sections[None] = sections.pop(None)
+        return list(sections.items())
+
+    @staticmethod
+    def _library_memberships(catalog):
+        kind = catalog.get("library_layout", {}).get("group_by")
+        memberships = {}
+        for group in sorted(catalog.get("groups", []),
+                            key=lambda item: (item["name"].casefold(), item["group_id"])):
+            if group["kind"] == kind:
+                for sid in group["source_ids"]:
+                    memberships.setdefault(sid, (group["group_id"], group["name"]))
+        return memberships
+
+    def _library_order(self, catalog, published_ids=None):
+        layout = catalog.get("library_layout", {})
+        order = list(dict.fromkeys([
+            *layout.get("source_order", []),
+            *(record["source_id"] for record in catalog["sources"]
+              if self._pdf_record(record) or self._epub_record(record)),
+            *(record["source_id"] for record in catalog["sources"] if self._zim_record(record)),
+        ]))
+        if published_ids is not None and not layout.get("preserve_source_order"):
+            memberships = self._library_memberships(catalog)
+            if memberships:
+                sections = self._library_sections(
+                    (sid for sid in order if sid in published_ids), memberships.get, False)
+                return [sid for _, members in sections for sid in members] + [
+                    sid for sid in order if sid not in published_ids]
+        return order
+
     def _public_library(self):
         """Return only published sources and groups containing those sources."""
         with publication.LOCK:
@@ -1030,17 +1070,14 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             groups = sorted((group for group in groups if group["source_ids"]),
                             key=lambda group: (group["name"].casefold(), group["group_id"]))
             layout = catalog.get("library_layout", {})
-            order = {sid: position for position, sid in enumerate(layout.get("source_order", []))}
-            sections = {}
-            for group in groups:
-                if group["kind"] == layout.get("group_by"):
-                    for sid in group["source_ids"]:
-                        sections.setdefault(sid, (group["group_id"], group["name"]))
+            order = {sid: position for position, sid in enumerate(self._library_order(catalog))}
+            sections = self._library_memberships(catalog)
             for source in sources:
                 sid = source["source_id"]
                 source["memberships"] = [group["name"] for group in groups if sid in group["source_ids"]]
                 source["homepage_rank"] = order.get(sid, len(order))
                 source["homepage_section"] = sections.get(sid)
+                source["preserve_source_order"] = layout.get("preserve_source_order", False)
             return sources, groups
 
     def _pdf_publications(self):
@@ -1306,7 +1343,9 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                                 discovery=discovery,
                                 installed_verified=verified, publication=state, mutation_blocked=busy,
                                 publication_filter=publication_filter, download_filter=download_filter))
-        return dict(catalog, sources=sources, acquisition_stale=snapshot["stale"],
+        published_ids = {source["source_id"] for source in sources if source["publication_filter"] == "published"}
+        return dict(catalog, sources=sources, library_order=self._library_order(catalog, published_ids),
+                    acquisition_stale=snapshot["stale"],
                     update_summary=_source_update_summary(sources))
 
     def _send_admin_page(self, page: str = "sources") -> None:
@@ -1718,6 +1757,20 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                             self._send_json(503, {"error": "Could not record publication acknowledgement"})
                             return
                 try:
+                    if enabled and not publication.load().get(source_id):
+                        catalog = SOURCE_CATALOG.get()
+                        layout = catalog.get("library_layout", {})
+                        published_ids = None
+                        if layout.get("group_by", "none") != "none" and not layout.get("preserve_source_order"):
+                            sources, _ = self._public_library()
+                            published_ids = {source["source_id"] for source in sources}
+                        order = [sid for sid in self._library_order(catalog, published_ids) if sid != source_id]
+                        order.append(source_id)
+                        catalog = SOURCE_CATALOG.set_library_layout(catalog["revision"], {
+                            "source_order": order,
+                            "group_by": layout.get("group_by", "none"),
+                            "preserve_source_order": True,
+                        })
                     publication.save(source_id, enabled)
                 except (OSError, ValueError):
                     self._send_json(503, {"error": "could not save publication state"})
@@ -1728,7 +1781,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 zim_refresh.schedule(lambda: SOURCE_CATALOG.get()["sources"])
             if is_document and enabled:
                 library_search.document_search.schedule(artifact, "epub" if is_epub else "pdf")
-            self._send_json(200, {"enabled": enabled})
+            self._send_json(200, {"enabled": enabled, "revision": catalog["revision"]})
         elif self.path.rstrip("/") == "/api/storage-settings":
             data = self._read_body()
             try:

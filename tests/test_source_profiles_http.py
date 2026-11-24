@@ -218,7 +218,7 @@ def test_remove_published_zim_automatically(app, tmp_path, monkeypatch):
         assert "unpublished but profile removal failed" in result["error"]
     assert not publication.load().get(SID, False)
     publish(request, True)
-    removed = mutate(request, catalog, "remove")
+    removed = mutate(request, request("/api/sources"), "remove")
     assert not any(row["source_id"] == SID for row in removed["sources"])
     assert not publication.load().get(SID, False)
     assert request("/read/zim/wikipedia-en", status=403)
@@ -341,6 +341,8 @@ def test_generic_zim_publication_intent_waits_for_verified_reader(app, monkeypat
                         revision=catalog["revision"], acknowledge_rights=True))
     assert result["enabled"] is True
     updated = request("/api/sources")
+    assert updated["revision"] == result["revision"]
+    assert updated["library_order"][-1] == sid
     state = next(s for s in updated["sources"] if s["source_id"] == sid)["publication"]
     assert state["enabled"] and state["verified"] and not state["published"]
     assert "Waiting for Kiwix to acknowledge" in state["publication_reason"]
@@ -929,12 +931,12 @@ def test_public_layout_order_groups_reset_and_publication_boundary(app, monkeypa
     for sid in (SID, "fema-ready", "later"):
         publication.save(sid, True)
 
-    def zim_publications(handler, catalog):
-        for record in catalog["sources"]:
-            sid = record["source_id"]
-            yield record, {"published": publication.load().get(sid, False), "entry_path": "/read/zim/" + sid}
+    def zim_status(record, records):
+        sid = record["source_id"]
+        enabled = publication.load().get(sid, False)
+        return {"published": enabled, "verified": enabled, "entry_path": "/read/zim/" + sid}
 
-    monkeypatch.setattr(admin_api.AdminAPIHandler, "_zim_publications", zim_publications)
+    monkeypatch.setattr(admin_api.zim_catalog, "status", zim_status)
     original = request("/")
     first = 'href="/read/zim/wikipedia-en"'
     second = 'href="/read/zim/fema-ready"'
@@ -964,8 +966,20 @@ def test_public_layout_order_groups_reset_and_publication_boundary(app, monkeypa
     assert second in filtered and first in filtered and later not in filtered
     assert "<h2>Science &amp; Education</h2>" not in filtered
     assert "Private reference" not in filtered
+    admin_order = request("/api/sources")["library_order"]
+    assert admin_order.index("fema-ready") < admin_order.index(SID) < admin_order.index("later")
+    saved = request("/api/library-layout", {
+        "revision": saved["revision"], "layout": {
+            "source_order": ["fema-ready", "later", SID, "private"],
+            "group_by": "categories", "preserve_source_order": True,
+        },
+    })
+    reordered = request("/")
+    assert reordered.index(second) < reordered.index(later) < reordered.index(first)
+    admin_order = request("/api/sources")["library_order"]
+    assert admin_order[:3] == ["fema-ready", "later", SID]
     removed = mutate(request, saved, "remove", sid="private")
-    assert removed["library_layout"]["source_order"] == ["fema-ready", SID]
+    assert removed["library_layout"]["source_order"] == ["fema-ready", "later", SID]
     assert request("/api/library-layout", {"revision": removed["revision"], "layout": None})["layout"] is None
     reset_page = request("/")
     assert reset_page.index(first) < reset_page.index(second) < reset_page.index(later)

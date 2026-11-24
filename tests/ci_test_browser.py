@@ -257,7 +257,7 @@ def exercise(browser, base, name, viewport, artifacts):
         page.locator("#source-cancel").click()
 
         # Closed #78: independent search/format/publication/download filters,
-        # reset, counts and stable alphabetical sorting without duplicates.
+        # reset and counts without a sort selector.
         page.locator("#source-filter-toggle").click()
         page.locator("#source-filter-format").select_option("pdf")
         expect(page.locator(".source-card[data-source-id='" + sid + "']")).to_be_visible()
@@ -275,15 +275,7 @@ def exercise(browser, base, name, viewport, artifacts):
         expect(page.locator("#source-filter-download")).to_have_value("")
         expect(page.locator("#source-filter-publication")).to_have_value("")
         expect(page.locator("#source-filter-search")).to_have_value("")
-        page.locator("#source-filter-sort").select_option("alpha")
-        names = page.locator("#source-cards .source-row:not([hidden]) .source-card").evaluate_all(
-            "(cards) => cards.map(card => card.dataset.filterTitle.toLocaleLowerCase())")
-        assert names == sorted(names), f"{name} alphabetical source order regression"
-        ids = page.locator("#source-cards .source-card").evaluate_all(
-            "(cards) => cards.map(card => card.dataset.sourceId)")
-        assert len(ids) == len(set(ids)), "source cards duplicated during sort"
-        page.locator("#source-filter-reset").click()
-        expect(page.locator("#source-filter-sort")).not_to_have_value("alpha")
+        expect(page.locator("#source-filter-sort")).to_have_count(0)
         page.locator("#source-filter-toggle").click()
 
         # Closed #71: selection checkboxes are opt-in and bulk publication
@@ -658,7 +650,7 @@ def exercise_source_actions(browser, viewport):
             enabled = payload["enabled"]
             target["publication"].update(enabled=enabled, published=enabled)
             target["publication_filter"] = "published" if enabled else "unpublished"
-            route.fulfill(json={"enabled": enabled})
+            route.fulfill(json={"enabled": enabled, "revision": revision})
             return
         assert payload["action"] == "pdf-download"
         downloads += 1
@@ -688,13 +680,11 @@ def exercise_source_actions(browser, viewport):
         feedback = card.locator("[data-pdf-feedback]")
         publish = card.locator('[data-field="publication-toggle"]')
         search = page.locator("#source-filter-search")
-        sort = page.locator("#source-filter-sort")
         page.locator("#source-filter-toggle").click()
         page.locator("#source-filter-format").select_option("pdf")
         expect(card).to_be_visible()
         page.locator("#source-filter-format").select_option("")
         search.fill("Fixture")
-        sort.select_option("alpha")
         page.locator("#source-select-mode").click()
         selected = page.locator('[data-group-select][value="action-target"]')
         selected.check()
@@ -717,13 +707,11 @@ def exercise_source_actions(browser, viewport):
         expect(card).to_have_attribute("open", "")
         expect(selected).to_be_checked()
         expect(search).to_have_value("Fixture")
-        expect(sort).to_have_value("alpha")
 
         # Start below the fold in default order. Other downloaded cards keep
         # the target below the fold until publication moves it to the front.
         for source in fillers[:24]:
             source["download_filter"] = "downloaded"
-        sort.select_option("status")
         expect(page.locator(".source-card").nth(24)).to_have_attribute("data-source-id", "action-target")
         publish.scroll_into_view_if_needed()
         publish.focus()
@@ -745,6 +733,72 @@ def exercise_source_actions(browser, viewport):
         expect(selected).to_be_checked()
         assert len(navigations) == 1, navigations
         assert not errors, errors
+    finally:
+        page.close()
+
+
+def exercise_source_order(browser, viewport):
+    from test_admin_page_template import profile, render
+
+    sources = [
+        dict(profile(sid, title=title), publication_filter=status)
+        for sid, title, status in [
+            ("first", "Zulu", "published"),
+            ("second", "Alpha", "published"),
+            ("third", "Archive", "unpublished"),
+        ]
+    ]
+    order = ["first", "second"]
+    revision = 0
+
+    def admin(route):
+        catalog = dict(sources=sources, revision=revision, library_order=order)
+        route.fulfill(content_type="text/html", body=render(catalog=catalog))
+
+    def api(route):
+        nonlocal order, revision
+        if route.request.method == "GET":
+            route.fulfill(json=dict(revision=revision, sources=sources, library_order=order))
+            return
+        payload = route.request.post_data_json
+        assert payload["revision"] == revision
+        order = payload["layout"]["source_order"]
+        revision += 1
+        route.fulfill(json=dict(revision=revision, layout=payload["layout"]))
+
+    page = browser.new_page(viewport=viewport)
+    try:
+        page.route("http://fixture.local/admin/sources", admin)
+        page.route("http://fixture.local/api/*", api)
+        page.goto("http://fixture.local/admin/sources")
+        cards = page.locator(".source-card")
+        expect(cards.first).to_have_attribute("data-source-id", "first")
+        expect(page.locator(".publication-divider .source-card")).to_have_attribute("data-source-id", "third")
+        cards.first.locator("summary.source-header").click()
+        button = page.get_by_role("button", name="Move Zulu down")
+        button.focus()
+        page.keyboard.press("Enter")
+        expect(page.locator("#source-order-feedback")).to_have_text("Source order saved.")
+        expect(cards.first).to_have_attribute("data-source-id", "second")
+        expect(cards.nth(1)).to_have_attribute("open", "")
+        expect(page.get_by_role("button", name="Move Zulu up")).to_be_focused()
+        page.reload()
+        expect(cards.first).to_have_attribute("data-source-id", "second")
+        page.locator("#source-filter-search").fill("Zulu")
+        expect(page.get_by_role("button", name="Move Zulu up")).to_be_disabled()
+        page.locator("#source-filter-search").clear()
+        expect(cards.first).to_have_attribute("data-source-id", "second")
+        grips = page.locator(".source-order-controls:not([hidden]) [data-order-grip]")
+        grips.nth(1).scroll_into_view_if_needed()
+        origin = grips.first.bounding_box()
+        destination = grips.nth(1).bounding_box()
+        assert origin and destination
+        page.mouse.move(origin["x"] + origin["width"] / 2, origin["y"] + origin["height"] / 2)
+        page.mouse.down()
+        page.mouse.move(destination["x"] + destination["width"] / 2,
+                        destination["y"] + destination["height"] / 2, steps=5)
+        page.mouse.up()
+        expect(cards.first).to_have_attribute("data-source-id", "first")
     finally:
         page.close()
 
@@ -785,6 +839,7 @@ def main():
                                     exercise(browser, f"http://{host}:{port}", name, viewport, artifacts)
                                     exercise_history_poll(browser, viewport)
                                     exercise_source_actions(browser, viewport)
+                                    exercise_source_order(browser, viewport)
                             finally:
                                 browser.close()
                     finally:

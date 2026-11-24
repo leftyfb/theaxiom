@@ -292,7 +292,9 @@ class CatalogStore:
             self._validate_library_layout(state["library_layout"], ids)
 
     def _validate_library_layout(self, layout, known):
-        if not isinstance(layout, dict) or layout.keys() != {"source_order", "group_by"}:
+        if (not isinstance(layout, dict)
+                or layout.keys() - {"preserve_source_order"} != {"source_order", "group_by"}
+                or type(layout.get("preserve_source_order", False)) is not bool):
             raise CatalogError("invalid library layout")
         order = layout["source_order"]
         if not isinstance(order, list) or len(order) > MAX_ENTRIES or layout["group_by"] not in LIBRARY_GROUP_MODES:

@@ -161,7 +161,7 @@ def test_source_filter_toolbar():
     for marker in ('id="source-filter-search"', 'id="source-filter-publication"',
                    'id="source-filter-download"', 'id="source-filter-format"',
                    'id="source-filter-categories"', 'id="source-filter-collections"',
-                   'id="source-filter-tags"', 'id="source-filter-sort"',
+                   'id="source-filter-tags"',
                    'value="published"', 'value="unpublished"', 'value="downloaded"',
                    'value="not-downloaded"', 'id="source-filter-empty"'):
         assert marker in page
@@ -210,7 +210,7 @@ def test_bulk_group_multi_select_and_replace_controls():
 
 def test_compact_source_layout_and_checkbox_editor():
     page = render([profile()])
-    assert '<section class="source-filters" id="source-filters-panel" aria-label="Filter and sort sources" hidden>' in page
+    assert '<section class="source-filters" id="source-filters-panel" aria-label="Filter sources" hidden>' in page
     assert page.index('id="source-filter-search"') < page.index('id="source-filter-toggle"') < page.index('id="source-selection-bar"') < page.index('id="source-select-mode"') < page.index('id="bulk-selection"') < page.index('id="group-panel"') < page.index('id="source-filters-panel"') < page.index('id="source-cards"')
     assert '<details id="source-editor-groups" hidden>' in page
     assert 'No categories available.' in page
@@ -247,8 +247,8 @@ def test_bulk_publication_requires_all_selected_sources_eligible():
     assert "card.dataset.filterPublication === 'unknown'" in page
     assert "toggle.dataset.acknowledgeRights === 'false'" not in page
     assert "if (rightsIds.has(source_id)) payload.acknowledge_rights = true" in page
-    assert "else if (rightsIds.has(source_id))" in page
-    assert "currentRevision += 1" in page
+    assert "else if (Number.isInteger(result.revision))" in page
+    assert "currentRevision = result.revision" in page
     assert "card.dataset.filterPublication === 'published' && toggle.dataset.enabled === 'true'" in page
     assert "action !== 'remove' && !bulkPublicationEligible(action, ids)" in page
 

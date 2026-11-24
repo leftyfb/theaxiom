@@ -81,7 +81,8 @@ def test_pdf_lifecycle(pdf_app, disk, tmp_path, monkeypatch):  # noqa: F811
     assert not list(inbox.parent.glob(".import-*"))
     request(READER + "/document.pdf", status=403)
     assert READER not in request("/")
-    request("/api/publication", publication)
+    published = request("/api/publication", publication)
+    action["revision"] = catalog["revision"] = published["revision"]
     monkeypatch.setattr(admin_api, "SOURCE_CATALOG", catalog_store.CatalogStore(tmp_path / "sources.json"))
     assert ('href="' + READER + '/document.pdf"') not in request("/")
     assert ('href="' + READER + '"') in request("/")
