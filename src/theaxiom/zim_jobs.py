@@ -1,4 +1,4 @@
-"""Durable ZIM jobs with serial acquisition, explicit controls, and restart recovery."""
+"""Durable ZIM jobs with concurrent source acquisition, explicit controls, and restart recovery."""
 from contextlib import contextmanager
 import fcntl
 import json
@@ -607,12 +607,34 @@ def save(job):
 
 
 @contextmanager
-def worker_lock():
+def worker_lock(*, source_id=None):
     root = directory()
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
     fd = os.open(root / ".worker.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        mode = fcntl.LOCK_SH if source_id is not None else fcntl.LOCK_EX
+        fcntl.flock(fd, mode | fcntl.LOCK_NB)
+        if source_id is None:
+            yield
+            return
+        catalog_store.CatalogStore._validate_id(source_id)
+        source_fd = os.open(root / f".worker-{source_id}.lock",
+                            os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        try:
+            fcntl.flock(source_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            yield
+        finally:
+            os.close(source_fd)
+    finally:
+        os.close(fd)
+
+
+@contextmanager
+def _write_lock():
+    fd = os.open(directory() / ".storage-write.lock",
+                 os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
         yield
     finally:
         os.close(fd)
@@ -700,7 +722,7 @@ def status(sid):
     with LOCK:
         job = read(sid)
         if job and job["state"] == "publishing" and "promotion_intent" in job:
-            guard = worker_lock()
+            guard = worker_lock(source_id=sid)
             try:
                 guard.__enter__()
             except BlockingIOError:
@@ -714,7 +736,7 @@ def status(sid):
             return job
         if job and job["state"] in ACTIVE:
             try:
-                with worker_lock():
+                with worker_lock(source_id=sid):
                     try:
                         job["downloaded_bytes"] = staged_size(sid)
                     except (OSError, ValueError):
@@ -828,7 +850,7 @@ def start(sid, config, *, resume=False, restart=False, retry=False):
         raise ValueError("Restart and resume are mutually exclusive")
     configuration = identity(config)
     with LOCK:
-        guard = worker_lock()
+        guard = worker_lock(source_id=sid)
         guard.__enter__()
         try:
             old = read(sid)
@@ -970,10 +992,10 @@ def control(sid, config, action):
             signal.set()
             return {"accepted": True, "state": job["state"]}
         if action == "cancel-keep" and job["state"] in {"paused", "failed", "interrupted"}:
-            with worker_lock():
+            with worker_lock(source_id=sid):
                 return _retain_cancelled(job, sid)
         if action == "cancel" and job["state"] in {"paused", "failed", "interrupted"}:
-            with worker_lock():
+            with worker_lock(source_id=sid):
                 if staged_present(sid):
                     zim_source.discard_partial(sid)
                 job.update(state="cancelled", active=False, verified=False, downloaded_bytes=0,
@@ -1036,7 +1058,7 @@ def _run(job, guard, signal, offset, validator, *, local=False):
             artifact = zim_source.download_resumable(
                 sid, job["configuration"], offset=offset,
                 validator=validator, progress=progress, stopped=signal.is_set,
-                promote_lock=LOCK, promoting=promoting)
+                promote_lock=LOCK, promoting=promoting, write_lock=_write_lock)
         job.pop("promotion_intent", None)
         job.update(state="completed", active=False, verified=True, artifact=artifact,
                    downloaded_bytes=artifact["bytes"], expected_bytes=artifact["bytes"], sampled_at=time.time())

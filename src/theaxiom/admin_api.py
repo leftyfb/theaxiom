@@ -2184,7 +2184,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 else:
                     result = zim_jobs.start(sid, record["configuration"])
             except BlockingIOError:
-                self._send_json(409, {"error": "Another ZIM acquisition is active"})
+                self._send_json(409, {"error": "This ZIM already has an active job or storage maintenance is running"})
                 return
             except ValueError as exc:
                 self._send_json(409, {"error": str(exc)})

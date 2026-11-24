@@ -1,4 +1,5 @@
 """Streaming ZIM installation primitive; no HTTP routes or publication side effects."""
+from contextlib import nullcontext
 import hashlib
 import os
 import re
@@ -161,7 +162,7 @@ def discard_partial(source_id):
 def download_resumable(source_id, config, *, offset=0, validator=None,
                        progress=lambda current, total, metadata: None,
                        stopped=lambda: False, promote_lock=None, promoting=lambda artifact, identity: None,
-                       staging_id=None):
+                       staging_id=None, write_lock=nullcontext):
     """Persist source-scoped staged bytes and validate any resumed response before appending.
 
     Only the caller may delete a partial, on an explicit cancellation. A failed
@@ -245,11 +246,13 @@ def download_resumable(source_id, config, *, offset=0, validator=None,
                             break
                         if count + len(block) > (total or MAX_BYTES):
                             raise ValueError("ZIM exceeds download limit or expected size")
-                        check_mount()
-                        if len(block) > available():
-                            raise ValueError("ZIM storage reserve would be exceeded")
-                        target.write(block)
-                        target.flush()
+                        # Keep the capacity check and write together across ZIM workers.
+                        with write_lock():
+                            check_mount()
+                            if len(block) > available():
+                                raise ValueError("ZIM storage reserve would be exceeded")
+                            target.write(block)
+                            target.flush()
                         count += len(block)
                         progress(count, total, {"etag": stream.etag, "last_modified": stream.last_modified})
                     if stopped():

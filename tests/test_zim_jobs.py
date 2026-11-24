@@ -16,11 +16,12 @@ def join_worker():
             assert not thread.is_alive()
 
 
-def test_job_records_url_only_and_rejects_concurrent_start(disk):
-    entered, release = threading.Event(), threading.Event()
+def test_distinct_zim_downloads_run_concurrently_and_duplicate_is_rejected(disk):
+    entered = {sid: threading.Event() for sid in ("ready", "other")}
+    release = threading.Event()
 
     def download(sid, config, *, progress, stopped, **kwargs):
-        entered.set()
+        entered[sid].set()
         assert release.wait(5)
         return zim_source.install_stream(sid, config, BytesIO(fixture_bytes()),
                                          progress=lambda n, total: progress(n, total, {}))
@@ -28,16 +29,21 @@ def test_job_records_url_only_and_rejects_concurrent_start(disk):
     with patch.object(zim_source, "download_resumable", download):
         try:
             assert zim_jobs.start("ready", CONFIG)["accepted"]
-            assert entered.wait(5)
+            assert entered["ready"].wait(5)
             job = zim_jobs.status("ready")
             assert job["active"] and job["configuration"]["sha256"] == ""
+            assert zim_jobs.start("other", CONFIG)["accepted"]
+            assert entered["other"].wait(5)
+            assert zim_jobs.status("other")["active"]
+            assert zim_jobs.status("ready")["active"]
             with pytest.raises(BlockingIOError):
-                zim_jobs.start("other", CONFIG)
+                zim_jobs.start("ready", CONFIG)
         finally:
             release.set()
         join_worker()
     job = zim_jobs.status("ready")
     assert job["state"] == "completed"
+    assert zim_jobs.status("other")["state"] == "completed"
     assert zim_jobs.installed(job, CONFIG)["bytes"] == len(fixture_bytes())
     assert not zim_jobs.installed(job, CONFIG | {"source_url": "https://example.org/other.zim"})
     with pytest.raises(ValueError, match="already installed"):
