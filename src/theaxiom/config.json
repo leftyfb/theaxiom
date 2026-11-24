@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "sources": [
     {
       "source_id": "wikipedia-en",
@@ -142,7 +142,18 @@
       "kind": "planned",
       "issue": 25,
       "availability": "planned",
-      "icon_png": "iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAEdUlEQVR42pWWW2xUVRSGv7X3nHZOq/RGqW1jpJQaIK2FJo2YctGoPBgMNMgl0ZDok5EYH1RABJqgCCIE4+UFDSohYFItL+gDxogPJIBGjWBKArW0UEmZS6elM2fOzDln+zAltGUo8Cf7Ya+s8/9Z/1p77yNMgjFGASHAcH8QwBORYHwwNI5Yi4gPrO25ePH1a4ODKUtrHRjQWiMieJ6X+ygUwhiD7/sogazv+9VVVUX1DQ2fAkfHcd0S6OzsBMD3/foDB7544vvOTsrLyzFAOpUinXYpKi4GY0ilkoRtm7BtI0A8HmfV6tV8sHvXj+O5JgjchOd5mXgsFsSiUV9EVCKRYHZDAy+uX0F5RQUCRK5HONbVxeXeXkpLS4lFo0E8FtOe52Um86nbAkqJZVnKtm3luq5+dtkyva2jQw9cHdDfHjmivz1yVEciEb1j5/t6ydKl2nVdbdu2sixLKaVkMl8of7uEVCrFvMZG1qxby/atW7nQ3U1JSQkAZ06f5uzZM7z19kb6+/q4dOlSrsV5oPIGRXAzLivb2/n97G9cHxykqbGRiooKpk+voLGpiSt9/fxz/hzPr1yB4ziI6LwCoTwW4bouM+vqWLNuLVf6+3l84UKMQNWMSoIAotEomIDplZXMqKrim4NfkXFdlFJ3FwjGRBLDI1z+t5d9e/dyubeXVDLFpi2bcZw0n+zfj11kM3fuPF7d8Bo3RkbQWhEEwT1UAIgIvufhOA6JRIKheJxkMsXQUAI37TA0NISTTpMYTuCkHHw/QETyOh6a6lgqpQiFQliWhVVgYVkWvu9hFRRgWRahkJWzRe58vNXdzr8xZsp1N0wpkCt74n58bPL+3sdUqdzdk/UwxqC0RimF7/t4nodSCqU1QRCQzWYRkbwTdMceOKNJTNajuqaaorDN6PAwrpuhrKyMYtsmnUziuxnswkJqamvA83BGk+TTuE1Aa81D9XU0L2lj5qw6Zjc3Es+kEaC5ZT6xaIxZC5qxLIuWRW3U1c2ifkEz1Y/Wo3X+YZlwXRtjNsVPnt6V6BsIalc/p3uOn8AaGgVjeHjFMmKRCImTZygsDDNtbj3F8+fR/eURv761RZUtbn1HRD7Me12Pd2j4s8Py30+/UrOoFTl0nGs/nAAUpSWlFGQyxN/YgcGQXbWckt0bcbd+TGL5M1K2uNWZqgIlIoExZsH1Q8dOXXh5Y2HBzFrxko4YJ53zc9qDYAK8G6M5O4uKkKKwyfZeNXO+/sidsb69TUT+vMk1oYIxcjWWsMfqu9bx9/ZdgdHhIDTtASUi4idGQEBZIYwxJhOJBeKn5bEdW1TZ+vY9k8knVDDpTVbAtsjB796NfH5YR/46TxD4ni4MC4Dvpo1SOlQ5v5HKDS/5la+8sBN4Dwgmv8n5BAQBQYwx5ul038Cbw8d/eTJ96g87ee4CAMVNcwi3tTgly586GX6kdp+I/GwwggERubefBdPRoW4KGmNajTGbne6eLqe7p8sYs3ksJuNz7xtjdt2qUqvcGufAWM4d8T8tax+ggWBHZgAAAABJRU5ErkJggg=="
+      "icon_png": "iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAEdUlEQVR42pWWW2xUVRSGv7X3nHZOq/RGqW1jpJQaIK2FJo2YctGoPBgMNMgl0ZDok5EYH1RABJqgCCIE4+UFDSohYFItL+gDxogPJIBGjWBKArW0UEmZS6elM2fOzDln+zAltGUo8Cf7Ya+s8/9Z/1p77yNMgjFGASHAcH8QwBORYHwwNI5Yi4gPrO25ePH1a4ODKUtrHRjQWiMieJ6X+ygUwhiD7/sogazv+9VVVUX1DQ2fAkfHcd0S6OzsBMD3/foDB7544vvOTsrLyzFAOpUinXYpKi4GY0ilkoRtm7BtI0A8HmfV6tV8sHvXj+O5JgjchOd5mXgsFsSiUV9EVCKRYHZDAy+uX0F5RQUCRK5HONbVxeXeXkpLS4lFo0E8FtOe52Um86nbAkqJZVnKtm3luq5+dtkyva2jQw9cHdDfHjmivz1yVEciEb1j5/t6ydKl2nVdbdu2sixLKaVkMl8of7uEVCrFvMZG1qxby/atW7nQ3U1JSQkAZ06f5uzZM7z19kb6+/q4dOlSrsV5oPIGRXAzLivb2/n97G9cHxykqbGRiooKpk+voLGpiSt9/fxz/hzPr1yB4ziI6LwCoTwW4bouM+vqWLNuLVf6+3l84UKMQNWMSoIAotEomIDplZXMqKrim4NfkXFdlFJ3FwjGRBLDI1z+t5d9e/dyubeXVDLFpi2bcZw0n+zfj11kM3fuPF7d8Bo3RkbQWhEEwT1UAIgIvufhOA6JRIKheJxkMsXQUAI37TA0NISTTpMYTuCkHHw/QETyOh6a6lgqpQiFQliWhVVgYVkWvu9hFRRgWRahkJWzRe58vNXdzr8xZsp1N0wpkCt74n58bPL+3sdUqdzdk/UwxqC0RimF7/t4nodSCqU1QRCQzWYRkbwTdMceOKNJTNajuqaaorDN6PAwrpuhrKyMYtsmnUziuxnswkJqamvA83BGk+TTuE1Aa81D9XU0L2lj5qw6Zjc3Es+kEaC5ZT6xaIxZC5qxLIuWRW3U1c2ifkEz1Y/Wo3X+YZlwXRtjNsVPnt6V6BsIalc/p3uOn8AaGgVjeHjFMmKRCImTZygsDDNtbj3F8+fR/eURv761RZUtbn1HRD7Me12Pd2j4s8Py30+/UrOoFTl0nGs/nAAUpSWlFGQyxN/YgcGQXbWckt0bcbd+TGL5M1K2uNWZqgIlIoExZsH1Q8dOXXh5Y2HBzFrxko4YJ53zc9qDYAK8G6M5O4uKkKKwyfZeNXO+/sidsb69TUT+vMk1oYIxcjWWsMfqu9bx9/ZdgdHhIDTtASUi4idGQEBZIYwxJhOJBeKn5bEdW1TZ+vY9k8knVDDpTVbAtsjB796NfH5YR/46TxD4ni4MC4Dvpo1SOlQ5v5HKDS/5la+8sBN4Dwgmv8n5BAQBQYwx5ul038Cbw8d/eTJ96g87ee4CAMVNcwi3tTgly586GX6kdp+I/GwwggERubefBdPRoW4KGmNajTGbne6eLqe7p8sYs3ksJuNz7xtjdt2qUqvcGufAWM4d8T8tax+ggWBHZgAAAABJRU5ErkJggg==",
+      "setup": {
+        "format": "pdf",
+        "title": "USDA — Principles of Home Canning",
+        "description": "USDA Complete Guide to Home Canning, Guide 1.",
+        "publisher": "USDA / National Center for Home Food Preservation",
+        "language": "eng",
+        "source_url": "https://nchfp.uga.edu/papers/guide/GUIDE01_HomeCan_rev0715.pdf",
+        "expected_size_bytes": "3794234",
+        "sha256": "60d1e1a74a9fe61c19e6f5312a76d291905a8ca51b28d0def04c677294416d86",
+        "provenance": "PDF downloaded from the publisher or its designated repository and verified locally."
+      }
     },
     {
       "source_id": "usda-extension",
@@ -151,7 +162,18 @@
       "kind": "planned",
       "issue": 26,
       "availability": "planned",
-      "icon_png": "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAC+ElEQVR42lWSy28bVRSHv3vn2vEjTgJOcB5Oa6mVQJAKGoFEeYhV/gOEhNjBovwDXUArWiF2RSBeZY3KomJVwZ5WEW0igRqJR2KVlBDSBFPbjO1xZjyeufewMEHiJx3p6Lf4Fuc7yqUinQ4Ui2AMKM3/ksSQzQIKwhAKeegHwnhJIQ7Uzz82xBhDrVZmc3OP+fk56vU6pVKJSqXCH7u7DAYhS0tLzMxkEAGloNcVJiYV+t7OHm+dv4jfhXs7e3xx9RpWDHv7D0CPceHCu8RD4Z2L7/Hdrbug4O3zH2CMIoxAz88do9XsMDMNp5ZOs772Ax9/dIXqQo1sRpHPlzj91DKL1RN8efUrELh54zZXPr+GONCtVpvZ2TlEYGfndy5ffh9rHWfPvkm3myDK0PYj5haO0fq7y+4evPzKa3x74xa5AuhSscAgPMRToLVi97cdrl//lJdeeJHV1VUymQxRFLG1tcXKygrra9/zxOOniOOYb77+Ce+zTz681Gr5NBo9zpxZZuPOHZJhlqmpEs8/9yxBr0OxkKP88CTPPL1Mmg5ZWXmU4dBQO15FSSqCAgTSdKTSWvA8EDXaoxgKBYhjGBsb6Y3j0ag4TsQYg9YgR+4Ti+d5oCH9F3YU68A50AYUoFIJRYCUFJERwinw8FCMvuoIbBH4rxMsDvX6uVclk81SLpepVqssLi4yuzBPpVJhMjtB4AI6vS7N5l+0Oz79fp9u0MP3fYIgwEyffIRCMc/ExAQ2Y/nlYJPbW2vEyQClBeV5xMmANE3xsobx8XHyxQK6rCg9VMTUnjxJNDgkCEOSYYAzDj2dZapQIl8Yw8toDqM+nY6P3+vS8Bv09w8Jwz6DZIiZfew47XaTpOOjhgMOo5CDg/v8unGX+3/u0wl8LAkiQupSnHOgQWvQHpibG+tsb29Tr9d50GwwTGPA4ZTFYckVc6O7iaBEocVicTgtWCWo8TeqIiJ4RpHJeIhWOFI8o/BymigKsTLEIijtUFqjtMWKw7mUfwCAZXKuwQdqrQAAAABJRU5ErkJggg=="
+      "icon_png": "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAC+ElEQVR42lWSy28bVRSHv3vn2vEjTgJOcB5Oa6mVQJAKGoFEeYhV/gOEhNjBovwDXUArWiF2RSBeZY3KomJVwZ5WEW0igRqJR2KVlBDSBFPbjO1xZjyeufewMEHiJx3p6Lf4Fuc7yqUinQ4Ui2AMKM3/ksSQzQIKwhAKeegHwnhJIQ7Uzz82xBhDrVZmc3OP+fk56vU6pVKJSqXCH7u7DAYhS0tLzMxkEAGloNcVJiYV+t7OHm+dv4jfhXs7e3xx9RpWDHv7D0CPceHCu8RD4Z2L7/Hdrbug4O3zH2CMIoxAz88do9XsMDMNp5ZOs772Ax9/dIXqQo1sRpHPlzj91DKL1RN8efUrELh54zZXPr+GONCtVpvZ2TlEYGfndy5ffh9rHWfPvkm3myDK0PYj5haO0fq7y+4evPzKa3x74xa5AuhSscAgPMRToLVi97cdrl//lJdeeJHV1VUymQxRFLG1tcXKygrra9/zxOOniOOYb77+Ce+zTz681Gr5NBo9zpxZZuPOHZJhlqmpEs8/9yxBr0OxkKP88CTPPL1Mmg5ZWXmU4dBQO15FSSqCAgTSdKTSWvA8EDXaoxgKBYhjGBsb6Y3j0ag4TsQYg9YgR+4Ti+d5oCH9F3YU68A50AYUoFIJRYCUFJERwinw8FCMvuoIbBH4rxMsDvX6uVclk81SLpepVqssLi4yuzBPpVJhMjtB4AI6vS7N5l+0Oz79fp9u0MP3fYIgwEyffIRCMc/ExAQ2Y/nlYJPbW2vEyQClBeV5xMmANE3xsobx8XHyxQK6rCg9VMTUnjxJNDgkCEOSYYAzDj2dZapQIl8Yw8toDqM+nY6P3+vS8Bv09w8Jwz6DZIiZfew47XaTpOOjhgMOo5CDg/v8unGX+3/u0wl8LAkiQupSnHOgQWvQHpibG+tsb29Tr9d50GwwTGPA4ZTFYckVc6O7iaBEocVicTgtWCWo8TeqIiJ4RpHJeIhWOFI8o/BymigKsTLEIijtUFqjtMWKw7mUfwCAZXKuwQdqrQAAAABJRU5ErkJggg==",
+      "setup": {
+        "format": "pdf",
+        "title": "Texas A&M Extension — Vegetable Planting Guide",
+        "description": "English vegetable planting calendar for Travis County, Texas.",
+        "publisher": "Texas A&M AgriLife Extension",
+        "language": "eng",
+        "source_url": "https://agrilifeextension.tamu.edu/wp-content/uploads/2025/01/VegetableGardenPlantingGuide-Jan2025-English.pdf",
+        "expected_size_bytes": "223610",
+        "sha256": "3390720a29dbabf09ddbee9d8b1ce5ec833a2e13593ffb6eacb6affc0762f843",
+        "provenance": "PDF downloaded from the publisher or its designated repository and verified locally."
+      }
     },
     {
       "source_id": "wiktionary",
@@ -236,7 +258,17 @@
       "description": "offline public-domain ebook library",
       "kind": "planned",
       "issue": 32,
-      "availability": "planned"
+      "availability": "planned",
+      "setup": {
+        "format": "zim",
+        "title": "Project Gutenberg — English Collection",
+        "description": "English ebook collection packaged by Kiwix.",
+        "publisher": "Project Gutenberg via Kiwix",
+        "language": "eng",
+        "source_url": "https://download.kiwix.org/zim/gutenberg/gutenberg_en_all_2025-11.zim",
+        "edition": "2025-11",
+        "provenance": "Archive listed in the official Kiwix download index."
+      }
     },
     {
       "source_id": "standard-ebooks",
@@ -269,7 +301,17 @@
       "description": "technical Q&A archives",
       "kind": "planned",
       "issue": 36,
-      "availability": "planned"
+      "availability": "planned",
+      "setup": {
+        "format": "zim",
+        "title": "Stack Exchange — Ask Ubuntu",
+        "description": "English Ask Ubuntu questions and answers.",
+        "publisher": "Stack Exchange via Kiwix",
+        "language": "eng",
+        "source_url": "https://download.kiwix.org/zim/stack_exchange/askubuntu.com_en_all_2026-10.zim",
+        "edition": "2026-10",
+        "provenance": "Archive listed in the official Kiwix download index."
+      }
     },
     {
       "source_id": "linux-docs",
@@ -277,7 +319,17 @@
       "description": "Linux administration and open-source software manuals",
       "kind": "planned",
       "issue": 37,
-      "availability": "planned"
+      "availability": "planned",
+      "setup": {
+        "format": "zim",
+        "title": "Linux Documentation — ArchWiki",
+        "description": "English ArchWiki technical documentation.",
+        "publisher": "ArchWiki contributors via Kiwix",
+        "language": "eng",
+        "source_url": "https://download.kiwix.org/zim/other/archlinux_en_all_maxi_2026-10.zim",
+        "edition": "2026-10",
+        "provenance": "Archive listed in the official Kiwix download index."
+      }
     },
     {
       "source_id": "ifixit",
@@ -303,7 +355,18 @@
       "kind": "planned",
       "issue": 39,
       "availability": "planned",
-      "icon_png": "iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAD8klEQVR42p1VQWtcVRg957v3vTFga5Jaa4ixie4CosVFk9fFCGKhSxdvoSgIQnXjvguhBH+B1YUrNwYqjhVXtRupsSVTRiJUNAhSpDq0lYaCmyYzc+89Lua9ZBIVmn7wNvfe993vO+d85xL7CwLQwsLCNICXSMbtDVIAvKSr7Xb7Zn3W9pO9LMvhebNTWZYtm9myOXfenDsPctl5vwyzcvSsx0OEB44KQJJEQAAgqe7kKAC0Wi0BgD3MBSKnK0i45xOBp+tjNab7wR/NZtMNQrhkZi/HGCNJV+0nM7OU0k+Z98dXVla2AHC/HajX6x1EVSXJ0QJZwXRkC3iyXrP9dgBgEsBEjfmu2yVIOmT9fg3Tg3NQliUBwPJ8CsABpbQXYgKQc84DmK7/2TfJSmnazBogEwAKkKp2JCWSEDm3rbiyLN3/JZufn9fS0tK2IqokczSDJJkZkNKtJOVmdliSSMLMnt2L6wPKH6Eoik98lr0TQhiYWZZSuiRp2jn3XEpp4JzLYozf9ra2Tq2trQ384uLim2bWAxBCCDCzhpnlMguI8a73/s+NjY0b6+vrfQCk2VRNKEmA/FXDDpBSqtefyrLsAIB7BmBS0jmaXcgbjQsi35Z0EDG+IvLrEGNnYnLyclEUJyspzqaKYJIgeZNSd1RJAA5VaoO12+0PAfwoCZBgZpdXV1c/Wl1dfYvSOTN7lGRB8tOiKI4DmBjRJRTjbQB3quTUMMZry7CyLHOZuZEKxirimVL6RtIgxhgBPC7yVQB5BYOloe5/AfDHyMzJzDzJmZq4uGuaSLVarVgJYBNAADlGs/uMcRbkwQoGSykJZqclzcQYQdLVUmUlVf8f07hjXOSEpIxASin1AGwBaIzW483eE4C0Z/Bq0/vXoJHsA1BZlg7ka34YJvJzSredcyYp1fXElAYxxrBroiVEafbF06czP5IYaUj0ycUTJ9Ttdo+ZWTOGsC7yq7+npj54rNv9zA2x1raZmWWVB23nGfo0Z/z165N+j7wA6VYM4Tt4f9WR74cQ7ly7du1es9l8pE8eraCoYzPGeFekJ3CYQFa7KoHxLMuOeABu5x0hBNzodDpXduF29qzdv3hxPG80nqh8R845hcHgi5DnZ7i5OZbl+Zckj8UYkyQjeSD2+zPWarX6BAbbr5INaWk2m77iyGFpKZGclDQhiSAlgIn87YeVlTudTud3SLeqAlUVmyvL5qwoineV0gs7KtbJhYWF1weDwRiAVJYlAMA59wzJcZIiYATgyY26MEl/kaSRMFJmBgLPe0k9OndmRAljZsZer2fV450wlOHPIt8wIEhilBzJKyOEf9wP4XuTegIQQ8gI3PwHpZwW7bE+1mwAAAAASUVORK5CYII="
+      "icon_png": "iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAD8klEQVR42p1VQWtcVRg957v3vTFga5Jaa4ixie4CosVFk9fFCGKhSxdvoSgIQnXjvguhBH+B1YUrNwYqjhVXtRupsSVTRiJUNAhSpDq0lYaCmyYzc+89Lua9ZBIVmn7wNvfe993vO+d85xL7CwLQwsLCNICXSMbtDVIAvKSr7Xb7Zn3W9pO9LMvhebNTWZYtm9myOXfenDsPctl5vwyzcvSsx0OEB44KQJJEQAAgqe7kKAC0Wi0BgD3MBSKnK0i45xOBp+tjNab7wR/NZtMNQrhkZi/HGCNJV+0nM7OU0k+Z98dXVla2AHC/HajX6x1EVSXJ0QJZwXRkC3iyXrP9dgBgEsBEjfmu2yVIOmT9fg3Tg3NQliUBwPJ8CsABpbQXYgKQc84DmK7/2TfJSmnazBogEwAKkKp2JCWSEDm3rbiyLN3/JZufn9fS0tK2IqokczSDJJkZkNKtJOVmdliSSMLMnt2L6wPKH6Eoik98lr0TQhiYWZZSuiRp2jn3XEpp4JzLYozf9ra2Tq2trQ384uLim2bWAxBCCDCzhpnlMguI8a73/s+NjY0b6+vrfQCk2VRNKEmA/FXDDpBSqtefyrLsAIB7BmBS0jmaXcgbjQsi35Z0EDG+IvLrEGNnYnLyclEUJyspzqaKYJIgeZNSd1RJAA5VaoO12+0PAfwoCZBgZpdXV1c/Wl1dfYvSOTN7lGRB8tOiKI4DmBjRJRTjbQB3quTUMMZry7CyLHOZuZEKxirimVL6RtIgxhgBPC7yVQB5BYOloe5/AfDHyMzJzDzJmZq4uGuaSLVarVgJYBNAADlGs/uMcRbkwQoGSykJZqclzcQYQdLVUmUlVf8f07hjXOSEpIxASin1AGwBaIzW483eE4C0Z/Bq0/vXoJHsA1BZlg7ka34YJvJzSredcyYp1fXElAYxxrBroiVEafbF06czP5IYaUj0ycUTJ9Ttdo+ZWTOGsC7yq7+npj54rNv9zA2x1raZmWWVB23nGfo0Z/z165N+j7wA6VYM4Tt4f9WR74cQ7ly7du1es9l8pE8eraCoYzPGeFekJ3CYQFa7KoHxLMuOeABu5x0hBNzodDpXduF29qzdv3hxPG80nqh8R845hcHgi5DnZ7i5OZbl+Zckj8UYkyQjeSD2+zPWarX6BAbbr5INaWk2m77iyGFpKZGclDQhiSAlgIn87YeVlTudTud3SLeqAlUVmyvL5qwoineV0gs7KtbJhYWF1weDwRiAVJYlAMA59wzJcZIiYATgyY26MEl/kaSRMFJmBgLPe0k9OndmRAljZsZer2fV450wlOHPIt8wIEhilBzJKyOEf9wP4XuTegIQQ8gI3PwHpZwW7bE+1mwAAAAASUVORK5CYII=",
+      "setup": {
+        "format": "pdf",
+        "title": "Practical Action — Rainwater Harvesting",
+        "description": "Practical Action technical brief on rainwater harvesting.",
+        "publisher": "Practical Action",
+        "language": "eng",
+        "source_url": "https://christopheradignam.com/wp-content/uploads/2021/10/Rainwater-Harvesting-Practical-Action.pdf",
+        "expected_size_bytes": "652708",
+        "sha256": "36e2050fc9ab3f5bae697e89fbdc484e58d21436500798286e6742559888ed43",
+        "provenance": "PDF downloaded and checked against the identified publication. Third-party mirror of the Practical Action brief."
+      }
     },
     {
       "source_id": "noaa",
@@ -311,7 +374,18 @@
       "description": "weather and hazard reference",
       "kind": "planned",
       "issue": 40,
-      "availability": "planned"
+      "availability": "planned",
+      "setup": {
+        "format": "pdf",
+        "title": "NOAA — Thunderstorms, Tornadoes, and Lightning",
+        "description": "National Weather Service severe-weather preparedness guide.",
+        "publisher": "NOAA National Weather Service",
+        "language": "eng",
+        "source_url": "https://www.weather.gov/media/owlie/ttl6-10.pdf",
+        "expected_size_bytes": "14573890",
+        "sha256": "ea0c073826bb64386712d322a547bce1592a7f9e9c5edae5cf3ae8261180466a",
+        "provenance": "PDF downloaded from the publisher or its designated repository and verified locally."
+      }
     },
     {
       "source_id": "amateur-radio",
@@ -319,7 +393,18 @@
       "description": "radio operation and emergency communications guidance",
       "kind": "planned",
       "issue": 41,
-      "availability": "planned"
+      "availability": "planned",
+      "setup": {
+        "format": "pdf",
+        "title": "FCC — Amateur Radio Service Rules",
+        "description": "47 CFR Part 97, October 2025 edition.",
+        "publisher": "Federal Communications Commission via GovInfo",
+        "language": "eng",
+        "source_url": "https://www.govinfo.gov/content/pkg/CFR-2025-title47-vol5/pdf/CFR-2025-title47-vol5-part97.pdf",
+        "expected_size_bytes": "355690",
+        "sha256": "4e8f45e96995535627470506db9e2d2ba698e74c9ea170010b88c740c00b8653",
+        "provenance": "PDF downloaded from the publisher or its designated repository and verified locally."
+      }
     },
     {
       "source_id": "food-reference",
