@@ -155,7 +155,8 @@ class HTTPAuthTests(unittest.TestCase):
         status, headers, body = self.request("/")
         self.assertEqual(status, 200)
         self.assertNotIn("WWW-Authenticate", headers)
-        self.assertIn(b"Your offline reference library", body)
+        self.assertIn(b'aria-label="Search library"', body)
+        self.assertNotIn(b"Your offline reference library", body)
         for path in ("/admin", "/admin/", "/admin/sources", "/admin/settings",
                      "/admin/sources/", "/admin/settings/", "/admin/groupings", "/admin/groupings/"):
             with self.subTest(path=path):
