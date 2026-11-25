@@ -5,6 +5,7 @@ generated library into a dedicated, publication-gated reader later. Only
 explicitly published, locally verified completed ZIMs may enter the manifest.
 """
 import argparse
+from functools import cache
 import hashlib
 import os
 from pathlib import Path
@@ -139,7 +140,7 @@ RUNTIME_ACK = Path("/run/theaxiom-kiwix/manifest.sha256")
 MAX_MANIFEST_BYTES = 256 * 1024
 
 
-def active_manifest_matches(records, enabled=None, *, acknowledgement=None):
+def active_manifest_matches(records, enabled=None, *, acknowledgement=None, expected_manifest=None):
     """Fail closed unless the reader acknowledged the exact current book set.
 
     This deliberately checks durable publisher intent on every call. An
@@ -147,7 +148,8 @@ def active_manifest_matches(records, enabled=None, *, acknowledgement=None):
     instance immediately, even if its server process has not restarted.
     """
     try:
-        expected = render_xml(records, enabled)
+        expected = (expected_manifest() if expected_manifest is not None
+                    else render_xml(records, enabled))
         if b"<book " not in expected or len(expected) > MAX_MANIFEST_BYTES:
             return False
         stored = manifest_path().read_bytes()
@@ -269,7 +271,21 @@ GENERIC_READER = generic_reader()
 activation_failure = None
 
 
-def status(record, records):
+def status_for_catalog(records):
+    """Build a status reader whose manifest snapshot lives for one catalog pass."""
+    @cache
+    def expected_manifest():
+        return render_xml(records)
+
+    @cache
+    def manifest_matches():
+        return active_manifest_matches(records, expected_manifest=expected_manifest)
+
+    return lambda record: status(record, records, manifest_matches=manifest_matches,
+                                 expected_manifest=expected_manifest)
+
+
+def status(record, records, *, manifest_matches=None, expected_manifest=None):
     """User-visible publication state for a generic, acquired ZIM."""
     sid = record["source_id"]
     path = "/read/zim/" + sid
@@ -290,16 +306,19 @@ def status(record, records):
         verified = artifact is not None
         rights = bool(config.get("license", "").strip())
         # Distinguish missing prerequisites from a reader that has not yet
-        # acknowledged the current manifest. Do not probe archives or services.
-        acknowledged = (active_manifest_matches(records)
-                        if verified and rights and enabled else False)
-        location = (publication.reader_location(GENERIC_READER, source_content_name(record))
+        # acknowledged the current manifest.
+        acknowledged = False
+        if verified and rights and enabled:
+            acknowledged = (manifest_matches() if manifest_matches is not None
+                            else active_manifest_matches(records))
+        location = (publication.reader_location(GENERIC_READER, Path(artifact["filename"]).stem)
                     if acknowledged else None)
         ready = bool(location)
         diagnostic = activation_failure
         activation_reason = (
             diagnostic[1] if enabled and verified and rights and not acknowledged
-            and diagnostic and diagnostic[0] == render_xml(records) else ""
+            and diagnostic and diagnostic[0] == (expected_manifest() if expected_manifest is not None
+                                                 else render_xml(records)) else ""
         )
         reason = ("Confirm permission to share this archive" if verified and not rights
                   else "Download and verify the archive before publishing" if enabled and not verified

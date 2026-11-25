@@ -141,6 +141,41 @@ def test_generic_zim_publication_is_pending_until_acknowledged_reader(disk, tmp_
     assert not zim_catalog.status(record("other"), [rec])["published"]
 
 
+def test_catalog_status_reuses_manifest_and_checks_next_snapshot(disk, tmp_path, monkeypatch):
+    import hashlib
+    from unittest.mock import Mock
+
+    config = CONFIG | {"license": "CC-BY"}
+    records = [record(sid, config=config) for sid in ("first", "second")]
+    for rec in records:
+        sid = rec["source_id"]
+        artifact = zim_source.install_stream(sid, config, BytesIO(fixture_bytes()))
+        zim_jobs.save(dict(source_id=sid, state="completed", active=False,
+                           verified=True, configuration=zim_jobs.identity(config),
+                           artifact=artifact))
+        publication.save(sid, True)
+    manifest = zim_catalog.write_manifest(records).read_bytes()
+    ack = tmp_path / "manifest.sha256"
+    ack.write_text(hashlib.sha256(manifest).hexdigest() + "\n")
+    monkeypatch.setattr(zim_catalog, "RUNTIME_ACK", ack)
+    monkeypatch.setattr(publication, "reader_location", lambda *_: "/zim/viewer")
+    render = Mock(wraps=zim_catalog.render_xml)
+    monkeypatch.setattr(zim_catalog, "render_xml", render)
+
+    read_status = zim_catalog.status_for_catalog(records)
+    assert all(item["published"] for item in map(read_status, records))
+    render.assert_called_once_with(records)
+
+    ack.unlink()
+    monkeypatch.setattr(zim_catalog, "activation_failure", (manifest, "Reader reload failed"))
+    render.reset_mock()
+    read_status = zim_catalog.status_for_catalog(records)
+    states = list(map(read_status, records))
+    assert all(not item["published"] for item in states)
+    assert all(item["publication_reason"] == "Reader reload failed" for item in states)
+    render.assert_called_once_with(records)
+
+
 def test_reader_content_auth_requires_specific_published_book(disk):
     from unittest.mock import patch
     artifact = zim_source.install_stream("ready", CONFIG, BytesIO(fixture_bytes()))

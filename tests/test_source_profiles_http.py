@@ -34,7 +34,7 @@ def app(tmp_path, monkeypatch):
     monkeypatch.setattr(admin_api.zim_jobs, "installed",
                         lambda current, config: artifact if current is job and
                         admin_api.zim_jobs.matches(job, config) else original_installed(current, config))
-    monkeypatch.setattr(admin_api.zim_catalog, "active_manifest_matches", lambda _: True)
+    monkeypatch.setattr(admin_api.zim_catalog, "active_manifest_matches", lambda _, **kwargs: True)
     monkeypatch.setattr(admin_api.zim_catalog, "acknowledged_reader_books",
                         lambda _: {filename[:-4]: SID} if publication.load().get(SID) else {})
     snapshot = {"stale": False, "acquisitions": [{
@@ -324,7 +324,7 @@ def test_zim_preflight_error_returns_actionable_message(app, monkeypatch):
 
 def test_generic_zim_publication_intent_waits_for_verified_reader(app, monkeypatch):
     request, _ = app
-    monkeypatch.setattr(admin_api.zim_catalog, "active_manifest_matches", lambda _: False)
+    monkeypatch.setattr(admin_api.zim_catalog, "active_manifest_matches", lambda _, **kwargs: False)
     sid = "fema-ready"
     catalog = request("/api/sources")
     assert next(s for s in catalog["sources"] if s["source_id"] == sid)["adapter"] == "kiwix"
@@ -931,7 +931,7 @@ def test_public_layout_order_groups_reset_and_publication_boundary(app, monkeypa
     for sid in (SID, "fema-ready", "later"):
         publication.save(sid, True)
 
-    def zim_status(record, records):
+    def zim_status(record, records, **kwargs):
         sid = record["source_id"]
         enabled = publication.load().get(sid, False)
         return {"published": enabled, "verified": enabled, "entry_path": "/read/zim/" + sid}

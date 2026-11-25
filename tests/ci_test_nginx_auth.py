@@ -93,6 +93,8 @@ def main():
         with tempfile.TemporaryDirectory(prefix="axiom-nginx-auth-") as tmp:
             base = Path(tmp)
             (base / "logs").mkdir()
+            site = site.replace("/var/log/nginx/theaxiom-sources-timing.log",
+                                str(base / "logs" / "theaxiom-sources-timing.log"))
             conf = base / "nginx.conf"
             conf.write_text(f"pid {base / 'nginx.pid'};\nevents {{ worker_connections 64; }}\n"
                             f"http {{ access_log off; error_log {base / 'logs' / 'error.log'} warn;\n"
@@ -112,6 +114,8 @@ def main():
                         time.sleep(0.1)
                 else:
                     raise RuntimeError("isolated nginx failed to listen")
+                for path in ("/api/sources", "/api/sources/"):
+                    assert request(front_port, path) == (200, b"archive reached")
                 for icon, magic in [
                     ("favicon.svg", b"<svg"),
                     ("favicon.png", bytes.fromhex("89504e470d0a1a0a")),
@@ -130,7 +134,11 @@ def main():
                 assert status == 200 and b'<script src="/zim/axiom-navigation.js"></script>' in viewer
                 status, script = request(front_port, "/zim/axiom-navigation.js")
                 assert status == 200 and b"followArticle" in script
-                print("PASS real Nginx icons, publication gate, unpublished denial and reader")
+                timing = (base / "logs" / "theaxiom-sources-timing.log").read_text().splitlines()
+                assert len(timing) == 2, timing
+                assert all("GET 200 request=" in line and "upstream_header=" in line
+                           and "upstream=" in line for line in timing), timing
+                print("PASS real Nginx icons, publication gate, reader and source timings")
             finally:
                 process.terminate()
                 try:

@@ -24,6 +24,8 @@ def main():
     with tempfile.TemporaryDirectory(prefix="axiom-nginx-ci-") as temp:
         base = Path(temp)
         (base / "logs").mkdir()
+        site = site.replace("/var/log/nginx/theaxiom-sources-timing.log",
+                            str(base / "logs" / "theaxiom-sources-timing.log"))
         config = base / "nginx.conf"
         config.write_text("pid " + str(base / "nginx.pid") + ";\n"
                           "events { worker_connections 16; }\n"

@@ -959,9 +959,10 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
 
     def _zim_publications(self, catalog=None):
         catalog = catalog or SOURCE_CATALOG.get()
+        zim_status = zim_catalog.status_for_catalog(catalog["sources"])
         for record in catalog["sources"]:
             if self._zim_record(record):
-                yield record, zim_catalog.status(record, catalog["sources"])
+                yield record, zim_status(record)
 
     def _search_published_content(self, query, sources, *, page=1, start_base=1):
         names = {source["source_id"]: source["name"] for source in sources
@@ -1270,6 +1271,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         artifacts = {sid: life["artifact"] for sid, life in lifecycles.items()}
         matched = self._matched_snapshot(snapshot, artifacts)
         jobs = {job["source_id"]: job for job in matched["acquisitions"]}
+        zim_status = zim_catalog.status_for_catalog(catalog["sources"])
         sources = []
         for record in catalog["sources"]:
             sid = record["source_id"]
@@ -1313,7 +1315,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 except (ValueError, OSError):
                     busy = True
             if self._zim_record(record):
-                state = zim_catalog.status(record, catalog["sources"])
+                state = zim_status(record)
                 verified = bool(state["verified"])
             publication_filter = ("unknown" if state and state.get("error") else
                                   "published" if state and state["published"] else "unpublished")
