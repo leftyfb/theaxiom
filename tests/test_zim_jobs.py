@@ -1686,12 +1686,18 @@ def test_download_discovered_update_then_publish(download_app, disk, monkeypatch
     assert zim_jobs.read(sid)["artifact"] == original
     assert publication.load()[sid] and not refreshes
     catalog = request("/api/sources")
-    assert source(catalog, sid)["profile"]["edition"] == "2026-10"
+    staged = source(catalog, sid)
+    assert staged["profile"]["edition"] == "2026-10"
+    assert staged["installed_verified"]
+    assert staged["artifact"] == original
+    assert staged["update_check"]["state"] == "update_available"
+    assert staged["replacement"]["state"] == "verified"
     request("/api/action", dict(action="zim-replacement-activate", source_id=sid,
                                revision=catalog["revision"], confirm_restart=True), status=202)
     assert zim_jobs.read(sid)["artifact"]["sha256"] == digest
     assert publication.load()[sid]
     assert refreshes[0]["activated_source"] == sid
+    assert source(request("/api/sources"), sid)["artifact"]["sha256"] == digest
 
 
 def test_delete_published_zim_from_source_action(download_app, disk, monkeypatch):

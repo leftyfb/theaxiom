@@ -1294,25 +1294,33 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 update_check = update_check_store.load(sid, update_discovery_config.cache_identity(
                     record["configuration"], artifacts[sid]["sha256"]))
             job = jobs.get(sid)
+            replacement_available = False
             if lifecycles[sid].get("zim_download"):
                 try:
                     local_job = zim_jobs.status(sid)
-                    if zim_jobs.matches(local_job, record["configuration"]):
-                        job = local_job
-                        busy = bool(local_job.get("active")) or (local_job["state"] in {"paused", "failed", "interrupted"}
+                    matches_profile = zim_jobs.matches(local_job, record["configuration"])
+                    if local_job:
+                        busy = bool(local_job.get("active")) or (matches_profile
+                            and local_job["state"] in {"paused", "failed", "interrupted"}
                             and zim_jobs.staged_size(sid) > 0)
-                        artifact = zim_jobs.installed(local_job, record["configuration"])
+                        if matches_profile:
+                            job = local_job
+                        # The profile can describe a staged update. The serving
+                        # ledger still owns the installed archive and its size.
+                        artifact = (zim_jobs.installed(local_job, local_job["configuration"])
+                                    if local_job.get("verified") is True
+                                    and local_job.get("active") is False else None)
                         if artifact:
+                            job = local_job
                             lifecycles[sid]["artifact"] = artifact
                             verified = True
+                            replacement_available = not matches_profile
                             update_check = update_check_store.load(sid, artifact["sha256"])
-                        elif local_job["state"] == "completed":
+                        elif matches_profile and local_job["state"] == "completed":
                             job = dict(local_job, state="unavailable", verified=False, detail="Installed archive unavailable")
-                    elif local_job and local_job.get("active"):
-                        busy = True
                     else:
                         busy = False
-                except (ValueError, OSError):
+                except (ValueError, OSError, KeyError, TypeError):
                     busy = True
             if self._zim_record(record):
                 state = zim_status(record)
@@ -1335,18 +1343,6 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 elif not snapshot["stale"] and not busy and (not artifacts[sid]
                         or (job and job.get("state") == "not_started")):
                     download_filter = "not-downloaded"
-            replacement_available = False
-            if lifecycles[sid].get("zim_download"):
-                try:
-                    serving_job = zim_jobs.status(sid)
-                    replacement_available = bool(
-                        serving_job and serving_job.get("state") == "completed"
-                        and serving_job.get("verified") is True
-                        and serving_job.get("configuration") != zim_jobs.identity(record["configuration"])
-                        and zim_jobs.installed(serving_job, serving_job["configuration"])
-                    )
-                except (ValueError, OSError, KeyError, TypeError):
-                    replacement_available = False
             replacement = None
             if lifecycles[sid].get("zim_download"):
                 try:
