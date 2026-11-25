@@ -130,6 +130,18 @@ class AdminAPIValidationTests(unittest.TestCase):
         except urllib.error.HTTPError as exc:
             return exc.code, json.loads(exc.read())
 
+    def test_client_disconnect_does_not_write_a_second_source_status_response(self):
+        handler = AdminAPIHandler.__new__(AdminAPIHandler)
+        handler.path = "/api/sources"
+        handler._guard = mock.Mock(return_value=True)
+        handler._require_admin = mock.Mock(return_value=True)
+        handler._source_profiles = mock.Mock(return_value={"sources": []})
+        handler._send_json = mock.Mock(side_effect=BrokenPipeError)
+
+        handler.do_GET()
+
+        handler._send_json.assert_called_once_with(200, {"sources": []})
+
     def test_source_catalog_api_crud_persists_and_preserves_content(self):
         from tempfile import TemporaryDirectory
         from pathlib import Path

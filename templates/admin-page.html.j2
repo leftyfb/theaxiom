@@ -450,6 +450,7 @@
         <span id="source-filter-count" class="source-note" role="status"></span>
       </div>
     </div>
+    <p class="source-note" id="source-refresh-feedback" role="status" hidden>Source status refresh delayed. Showing the last available information.</p>
     <p id="catalog-feedback" role="status" aria-live="polite"></p>
     <dialog id="selection-file-dialog" aria-labelledby="selection-file-title">
       <h3 id="selection-file-title">Preview a library selection</h3>
@@ -2295,6 +2296,7 @@
       if (!cards.length) return;
       const editableFields = {{ editable_fields|list|tojson }};
       const artifactLabels = {filename: 'Artifact filename', bytes: 'Artifact size (bytes)', sha256: 'Artifact SHA-256'};
+      const refreshFeedback = document.getElementById('source-refresh-feedback');
       const updateSummary = document.getElementById('source-update-summary');
       const showUpdateSummary = text => {
         if (!updateSummary) return;
@@ -2326,7 +2328,7 @@
         while (bytes >= 1000 && i < units.length - 1) { bytes /= 1000; i++; }
         return bytes.toLocaleString(undefined, {maximumFractionDigits: 2}) + ' ' + units[i];
       }
-      function render(card, job, stale, unavailable = false, installedSource = null) {
+      function render(card, job, stale, installedSource = null) {
         const field = name => card.querySelector('[data-field="' + name + '"]');
         const put = (name, value) => {
           const node = field(name);
@@ -2338,7 +2340,7 @@
         const installedBytes = installedSource?.artifact?.bytes;
         const status = installedSource ?
           (Number.isSafeInteger(installedBytes) && installedBytes > 0 ? size(installedBytes) : 'Installed · size unavailable') :
-          unavailable ? 'Status unavailable' : stale ? 'Stale sample — status unknown' :
+          stale ? 'Stale sample — status unknown' :
           !job ? 'Waiting for status' : (labels[job.state] || 'Status unknown');
         put('status', status);
         field('status').className = 'badge' + (installedSource || verified ?
@@ -2508,7 +2510,8 @@
             // A document install can commit before its POST response arrives.
             if (data.revision === revision + 1 && cards.some(card => card.dataset.acquiring === 'true')) return;
             window.axiomHandleStaleSources?.();
-            throw new Error('Catalog revision changed');
+            refreshFeedback.hidden = true;
+            return;
           }
           showUpdateSummary(data.update_summary || '');
           const sources = new Map(data.sources.map(source => [source.source_id, source]));
@@ -2526,7 +2529,7 @@
               card.querySelector('[data-field="status"]').textContent = source.installed_verified ? size(source.artifact?.bytes) : (source.artifact ? 'Not installed or invalid' : 'Not downloaded');
               card.querySelector('[data-field="status"]').className = 'badge' + (source.installed_verified ? ' enabled' : '');
             } else if (source?.installed_verified) {
-              render(card, source.acquisition, false, false, source);
+              render(card, source.acquisition, false, source);
             } else if (source?.zim_download) {
               if (source.acquisition) render(card, source.acquisition, false);
               else card.querySelector('[data-field="status"]').textContent = 'Not downloaded';
@@ -2638,17 +2641,9 @@
             const offset = anchor.getBoundingClientRect().top - anchorTop;
             if (offset) window.scrollBy(0, offset);
           }
+          refreshFeedback.hidden = true;
         } catch (_) {
-          showUpdateSummary('');
-          cards.forEach(card => {
-            if (card.querySelector('[data-action="download"]') || card.querySelector('[data-zim-download]')) render(card, null, true, true);
-            else card.querySelector('[data-field="status"]').textContent = 'Status unavailable';
-            card.querySelector('[data-field="summary-progress"]').hidden = true;
-            controls(card, null);
-            card.dataset.filterPublication = "unknown";
-            card.dataset.filterDownload = "unknown";
-          });
-          window.axiomSourceFilters?.apply(false);
+          refreshFeedback.hidden = false;
         } finally {
           window.clearTimeout(timer);
           if (!sessionExpired) window.setTimeout(refresh, 2000);

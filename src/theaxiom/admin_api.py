@@ -850,9 +850,17 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 self._send_json(500, {"error": "stored settings are invalid"})
         elif self.path.rstrip("/") == "/api/sources":
             try:
-                self._send_json(200, self._source_profiles(SOURCE_CATALOG.get()))
+                payload = self._source_profiles(SOURCE_CATALOG.get())
             except (catalog_store.CatalogError, OSError):
-                self._send_json(503, {"error": "source catalog unavailable; stored data was not replaced"})
+                status = 503
+                payload = {"error": "source catalog unavailable; stored data was not replaced"}
+            else:
+                status = 200
+            try:
+                self._send_json(status, payload)
+            except (BrokenPipeError, ConnectionResetError):
+                # The client disconnected before receiving the status response.
+                return
         elif re.fullmatch(r"/api/jobs/[a-f0-9]{32}", self.path.rstrip("/")):
             job_id = self.path.rstrip("/").rsplit("/", 1)[-1]
             response = job_status_response(job_id)

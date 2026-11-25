@@ -680,18 +680,24 @@ def exercise_history_poll(browser, viewport):
     from test_admin_page_template import profile, render
 
     first = dict(profile("history-first", format="zim", source_url="https://publisher.org/first.zim"),
-                 publication={}, acquisition=None, installed_verified=True, artifact={"bytes": 2097152})
+                 publication={"enabled": True, "published": True}, publication_filter="published",
+                 acquisition=None, installed_verified=True, artifact={"bytes": 2097152})
     second = dict(profile("history-second", format="zim", source_url="https://publisher.org/second.zim"),
                   publication={}, acquisition=None)
     page = browser.new_page(viewport=viewport)
     changed = False
+    fail_poll = False
 
     def poll(route):
+        if fail_poll:
+            route.abort()
+            return
         update = ({"state": "unable_to_determine", "last_known_candidate_edition": "2026-11", "stale": True}
                   if changed else {"state": "update_available", "installed_edition": "2026-10",
                                    "candidate_edition": "2026-11", "candidate_bytes": 1048576})
         sources = [dict(first, update_check=update, acquisition={
             "state": "failed" if changed else "downloading",
+            "active": not changed, "downloaded_bytes": 50, "expected_bytes": 100,
             "attempt_history": [
                 {"state": "completed", "finished_at": 1700000000},
                 *([{"state": "failed", "finished_at": 1700000100}] if changed else []),
@@ -721,7 +727,19 @@ def exercise_history_poll(browser, viewport):
         details = technical.locator('[data-field="update-details"]')
         expect(details).to_contain_text("Estimated transfer and staging: 1.05 MB")
         expect(details).to_contain_text("Installed and candidate archives together: 3.15 MB")
+        progress = card.locator('[data-field="summary-progress"]')
+        feedback = page.locator("#source-refresh-feedback")
+        expect(progress).to_have_attribute("value", "50")
+        expect(feedback).to_be_hidden()
+        fail_poll = True
+        expect(feedback).to_be_visible()
+        expect(progress).to_be_visible()
+        expect(progress).to_have_attribute("value", "50")
+        expect(other.locator('[data-field="status"]')).to_have_text("Paused")
+        expect(card).to_have_attribute("data-filter-publication", "published")
+        fail_poll = False
         changed = True
+        expect(feedback).to_be_hidden()
         expect(technical.locator('[data-field="acquisition-history"]')).to_contain_text("Failed")
         expect(details).to_be_hidden()
         expect(technical.locator('[data-field="update-evidence"]')).to_contain_text("Last known candidate 2026-11")

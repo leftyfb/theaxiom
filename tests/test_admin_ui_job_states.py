@@ -20,7 +20,7 @@ const requests = [];
 let next;
 global.document = {activeElement:{closest(){return null;}},
   querySelectorAll: selector => selector === '.source-row' ? [] : [card], getElementById: id =>
-  id === 'source-update-summary' ? (fields[id] ??= {}) : ({})};
+  ['source-update-summary', 'source-refresh-feedback'].includes(id) ? (fields[id] ??= {}) : ({})};
 global.window = {axiomSourceRevision: () => 0, setTimeout(fn, ms) {if(ms===2000) next=fn; return 1;}, clearTimeout(){}};
 global.fetch = async (url, options) => {
   requests.push({url, method:options.method || 'GET'});
@@ -57,8 +57,13 @@ def test_live_states_and_read_only_polling():
     complete = job("completed")
     complete["sources"][0]["acquisition"]["verified"] = True
     stale = dict(complete, acquisition_stale=True)
-    result = run_ui([downloading, job("verifying"), job("publishing"), complete, stale, None])
+    result = run_ui([downloading, None, job("verifying"), job("publishing"), complete, stale])
     states = result["states"]
+    failure = states.pop(1)
+    assert not failure["source-refresh-feedback"]["hidden"]
+    assert failure["summary-progress"] == states[0]["summary-progress"]
+    assert failure["status"] == states[0]["status"]
+    assert states[1]["source-refresh-feedback"]["hidden"]
     assert states[0]["transfer"]["value"] == 50
     assert states[0]["summary-progress"]["value"] == 50
     assert not states[0]["summary-progress"]["hidden"]
@@ -70,7 +75,6 @@ def test_live_states_and_read_only_polling():
     assert states[3]["summary-progress"]["hidden"]
     assert states[4]["summary-progress"]["hidden"]
     assert states[4]["verification"]["hidden"]
-    assert states[5]["status"]["textContent"] == "Status unavailable"
     assert all(r == {"url": "/api/sources", "method": "GET"} for r in result["requests"])
 
 
@@ -124,13 +128,16 @@ def test_replacement_checksum_percent_is_separate_from_transfer_completion():
     assert "100.0%" not in state
 
 
-def test_admin_update_summary_refreshes_and_clears_after_poll_failure():
+def test_admin_update_summary_survives_poll_failure_and_refreshes_on_recovery():
     sample = job("completed")
     sample["update_summary"] = "1 source has an update available"
-    first, failure = run_ui([sample, None])["states"]
+    first, failure, recovered = run_ui([sample, None, job("completed")])["states"]
     assert first["source-update-summary"]["textContent"] == sample["update_summary"]
     assert not first["source-update-summary"]["hidden"]
-    assert failure["source-update-summary"]["hidden"]
+    assert failure["source-update-summary"] == first["source-update-summary"]
+    assert not failure["source-refresh-feedback"]["hidden"]
+    assert recovered["source-refresh-feedback"]["hidden"]
+    assert recovered["source-update-summary"]["hidden"]
 
 
 def test_publication_refresh_updates_summary_and_controls():
@@ -145,10 +152,8 @@ def test_publication_refresh_updates_summary_and_controls():
     assert not success["[data-catalog-remove]"]["disabled"]
     assert "mutation-note" not in success
     assert "mutation-note" not in failure
-    assert failure["[data-catalog-remove]"]["disabled"]
-    assert failure["publication-summary"]["textContent"] == "Publication status unavailable"
-    assert failure["publication-toggle"]["disabled"]
-    assert failure["publication-browse"]["hidden"]
+    for field in ("[data-catalog-remove]", "publication-summary", "publication-toggle", "publication-browse"):
+        assert failure[field] == success[field]
 
 
 def test_planned_source_keeps_unsupported_label_during_polling():
