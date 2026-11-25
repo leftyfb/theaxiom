@@ -1,0 +1,142 @@
+<p id="search-status" role="status" class="search-wait"><span aria-hidden="true"></span>Searching library…</p>
+<noscript>
+  <style>#search-status{display:none}</style>
+  <p><a href="/search?{{ dict(selected, q=query)|urlencode }}">Load results in one page</a></p>
+</noscript>
+<div id="search-results">
+{% for source in sources %}
+  <section data-source="{{ source.source_id }}" hidden>
+    <details class="result-group" open>
+      <summary>{{ source.name }} <span class="result-count"></span></summary>
+      <ol></ol>
+      <button type="button" class="result-action" hidden>Show more from {{ source.name }}</button>
+    </details>
+    <p class="result-status" role="status"></p>
+    <button type="button" class="result-retry" hidden>Retry {{ source.name }}</button>
+  </section>
+{% endfor %}
+</div>
+<script>
+(() => {
+  const status = document.getElementById('search-status');
+  const container = document.getElementById('search-results');
+  const params = new URLSearchParams(window.location.search);
+  params.set('mode', 'source');
+  const messages = {
+    timeout: 'Search timed out.',
+    unavailable: 'Search unavailable.',
+    indexing: 'Indexing in progress.',
+    partial: 'Only part of this source is indexed.',
+    unsupported: 'Search unsupported.'
+  };
+  const previewSize = 4;
+
+  const states = Array.from(container.children, section => ({
+    section, page: 0, base: 1, waiting: false, buffer: [], hasMore: true,
+    list: section.querySelector('ol'), count: section.querySelector('.result-count'),
+    more: section.querySelector('.result-action'), retry: section.querySelector('.result-retry'),
+    feedback: section.querySelector('.result-status')
+  }));
+
+  function showMore(state) {
+    for (const result of state.buffer.splice(0, previewSize)) {
+      const row = document.createElement('li');
+      const link = document.createElement('a');
+      link.setAttribute('href', result.href);
+      link.textContent = result.title;
+      row.append(link);
+      if (result.snippet) {
+        const snippet = document.createElement('p');
+        snippet.textContent = result.snippet;
+        row.append(snippet);
+      }
+      state.list.append(row);
+    }
+    const shown = state.list.children.length;
+    state.count.textContent = shown ? `· ${shown} shown` : '';
+    state.more.hidden = !state.buffer.length && !state.hasMore;
+    state.section.hidden = false;
+  }
+
+  async function load(state) {
+    const query = new URLSearchParams(params);
+    query.set('source', state.section.dataset.source);
+    query.set('page', state.page + 1);
+    query.set('base', state.base);
+    try {
+      const response = await fetch('/search?' + query, {cache: 'no-store'});
+      if (!response.ok) throw new Error('Search unavailable.');
+      const group = await response.json();
+      if (['timeout', 'unavailable', 'indexing'].includes(group.status)) {
+        throw new Error(messages[group.status]);
+      }
+      state.feedback.textContent = messages[group.status] || '';
+      state.retry.hidden = true;
+      state.page = group.page;
+      state.base = group.start_base;
+      state.hasMore = group.has_more;
+      state.buffer = group.results;
+      if (group.results.length || group.has_more || state.list.children.length || state.feedback.textContent) {
+        showMore(state);
+      } else {
+        state.section.hidden = true;
+      }
+    } catch (error) {
+      state.section.hidden = false;
+      state.more.hidden = true;
+      state.feedback.textContent = error.message;
+      state.retry.hidden = false;
+    } finally {
+      state.waiting = false;
+      state.more.disabled = state.retry.disabled = false;
+    }
+  }
+
+  for (const state of states) {
+    state.more.addEventListener('click', () => {
+      if (state.buffer.length) showMore(state);
+      else run(state);
+    });
+    state.retry.addEventListener('click', () => run(state));
+  }
+
+  // Keep at most three source queries in flight, including manual retries.
+  // Queue source actions through the same workers as the initial search.
+  let active = 0;
+  const queue = [];
+  function run(state) {
+    if (state.waiting) return;
+    state.waiting = true;
+    state.more.disabled = state.retry.disabled = true;
+    return new Promise(resolve => {
+      queue.push({state, resolve});
+      drain();
+    });
+  }
+  function drain() {
+    while (active < 3 && queue.length) {
+      const {state, resolve} = queue.shift();
+      active++;
+      load(state).finally(() => {
+        active--;
+        resolve();
+        drain();
+      });
+    }
+  }
+  let remaining = states.length;
+  for (const state of states) {
+    run(state).then(() => {
+      remaining--;
+      if (remaining) {
+        status.lastChild.textContent = `Searching ${remaining} more ${remaining === 1 ? 'source' : 'sources'}…`;
+      } else {
+        const empty = states.every(item => item.section.hidden);
+        status.classList.remove('search-wait');
+        status.textContent = empty ? 'No matching results.' : '';
+        status.hidden = !empty;
+      }
+    });
+  }
+})();
+</script>

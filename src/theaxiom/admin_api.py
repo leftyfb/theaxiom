@@ -15,6 +15,7 @@ import subprocess
 import threading
 import time
 from contextlib import ExitStack
+from dataclasses import asdict
 from urllib.parse import parse_qs, urlsplit, unquote
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -720,14 +721,15 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             sources, groups, results, selected = [], [], [], {}
             query, error, code = "", "", 200
             search_source, search_number, start_base = "", 1, 1
+            search_mode = ""
             try:
                 if len(self.path) > 4096:
                     raise ValueError("Request too long")
                 params = parse_qs(urlsplit(self.path).query, keep_blank_values=True,
-                                  max_num_fields=7 if search_page else 4, errors="strict")
+                                  max_num_fields=8 if search_page else 4, errors="strict")
                 allowed = {"category", "collection", "tag", "q"}
                 if search_page:
-                    allowed.update({"source", "page", "base"})
+                    allowed.update({"source", "page", "base", "mode"})
                 if set(params) - allowed or any(len(values) != 1 for values in params.values()):
                     raise ValueError("Invalid filters")
                 query = library_search.validate_query(params.get("q", [""])[0])
@@ -737,6 +739,11 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     raise ValueError("Invalid filter ID")
                 if search_page:
                     search_source = params.get("source", [""])[0]
+                    search_mode = params.get("mode", [""])[0]
+                    if (search_mode not in {"", "progressive", "source"}
+                            or search_mode == "source" and not search_source
+                            or search_mode == "progressive" and search_source):
+                        raise ValueError("Invalid search mode")
                     raw_page = params.get("page", ["1"])[0]
                     raw_base = params.get("base", ["1"])[0]
                     if ("source" in params and not catalog_store.ID_RE.fullmatch(search_source)
@@ -756,12 +763,21 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 sources = [source for source in sources if source["source_id"] in eligible]
                 if search_source:
                     sources = [source for source in sources if source["source_id"] == search_source]
-                if search_page and query:
+                if search_page and query and search_mode != "progressive":
                     results = self._search_published_content(query, sources, page=search_number, start_base=start_base)
             except (ValueError, UnicodeError):
                 error, code = "Invalid search or filter request.", 400
             except RuntimeError:
                 error, code = "Search is busy. Try again.", 503
+            if search_mode == "source":
+                if error:
+                    self._send_json(code, {"error": error})
+                elif not results:
+                    self._send_json(404, {"error": "Search source unavailable"})
+                else:
+                    group = results[0]
+                    self._send_json(200, dict(group, results=[asdict(result) for result in group["results"]]))
+                return
             environment = Environment(loader=FileSystemLoader(ADMIN_TEMPLATE_DIR), autoescape=True)
             sections = []
             if not search_page:
@@ -772,7 +788,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 )
             body = environment.get_template("search.html.j2" if search_page else "library.html.j2").render(
                 sources=sources, groups=results, filter_groups=groups, selected=selected,
-                query=query, error=error, sections=sections, search_source=search_source).encode("utf-8")
+                query=query, error=error, sections=sections, search_source=search_source,
+                progressive=search_mode == "progressive").encode("utf-8")
             self.send_response(code)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             if search_page:

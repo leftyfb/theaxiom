@@ -13,7 +13,7 @@ from . import document_search, publication
 MAX_QUERY = 160
 MAX_RESULTS = 20
 MAX_RSS_BYTES = 512 * 1024
-MAX_SEARCH_SECONDS = 20
+MAX_SEARCH_SECONDS = 25
 KIWIX_SEARCH_SECONDS = 8
 MAX_PAGE = 50_000
 KIWIX_CAPABILITY = "Kiwix full-text search"
@@ -82,15 +82,29 @@ def search(query: str, snapshot: Callable[[], dict], *, source_ids=None, targets
     if not _SEARCH_SLOTS.acquire(blocking=False):
         raise RuntimeError("Search is busy; try again")
     try:
-        groups = []
+        groups = {}
         deadline = time.monotonic() + MAX_SEARCH_SECONDS
         if targets is None:
             targets = {}
         check = allowed or (lambda sid, route: False)
-        for source_id, (route, adapter) in targets.items():
-            if source_ids is not None and source_id not in source_ids:
-                continue
-            if not check(source_id, route):
+        eligible = {
+            sid: (route, adapter)
+            for sid, (route, adapter) in targets.items()
+            if source_ids is None or sid in source_ids
+        }
+        # Query local document indexes before waiting on Kiwix. Divide the
+        # remaining time among Kiwix books so one slow book cannot consume it.
+        ordered = sorted(eligible, key=lambda sid: eligible[sid][1] is KIWIX_ADAPTER)
+        remaining_books = sum(adapter is KIWIX_ADAPTER for _, adapter in eligible.values())
+        for source_id in ordered:
+            route, adapter = eligible[source_id]
+            permitted = check(source_id, route)
+            now = time.monotonic()
+            source_deadline = deadline
+            if adapter is KIWIX_ADAPTER:
+                source_deadline = now + (deadline - now) / remaining_books
+                remaining_books -= 1
+            if not permitted:
                 continue
             results = []
             status = "unsupported"
@@ -98,10 +112,10 @@ def search(query: str, snapshot: Callable[[], dict], *, source_ids=None, targets
             result_base = start_base
             if adapter:
                 try:
-                    if time.monotonic() >= deadline:
+                    if now >= source_deadline:
                         raise TimeoutError("Search time budget used")
                     answer = adapter.search(
-                        dict(route, deadline=deadline, offset=(page - 1) * MAX_RESULTS,
+                        dict(route, deadline=source_deadline, offset=(page - 1) * MAX_RESULTS,
                              start_base=start_base), query)
                     answer = answer if isinstance(answer, Page) else Page(answer)
                     results = [Result(r.title[:300], r.href, r.snippet[:600])
@@ -118,12 +132,11 @@ def search(query: str, snapshot: Callable[[], dict], *, source_ids=None, targets
                     status = "timeout"
                 except (OSError, ValueError, RuntimeError):
                     status = "unavailable"
-            groups.append(dict(source_id=source_id, name=route["name"],
+            groups[source_id] = dict(source_id=source_id, name=route["name"],
                                capability=adapter.capability if adapter else "",
                                status=status, results=results, page=page, has_more=has_more,
-                               start_base=result_base))
-        return [group for group in groups
-                if check(group["source_id"], targets[group["source_id"]][0])]
+                               start_base=result_base)
+        return [groups[sid] for sid in eligible if sid in groups and check(sid, eligible[sid][0])]
     finally:
         _SEARCH_SLOTS.release()
 

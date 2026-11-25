@@ -1,4 +1,3 @@
-from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -192,3 +191,37 @@ def test_timeout_does_not_hide_other_sources():
     slow, fast = search.search("cambridge", dict, targets=targets, allowed=lambda *_: True)
     assert slow["status"] == "timeout" and not slow["results"]
     assert fast["status"] == "ok" and len(fast["results"]) == 1
+
+
+def test_slow_kiwix_book_leaves_time_for_other_books_and_documents(monkeypatch):
+    now = 100
+    calls = []
+    monkeypatch.setattr(search.time, "monotonic", lambda: now)
+
+    def kiwix(route, query):
+        nonlocal now
+        calls.append(route["name"])
+        if route["name"] == "Slow":
+            now = route["deadline"]
+            raise TimeoutError
+        assert route["deadline"] > now
+        return [search.Result("Knots", "/fixture/article")]
+
+    def document(route, query):
+        calls.append(route["name"])
+        return [search.Result("Knots", "/fixture/page")]
+
+    kiwix_adapter = search.Adapter("Kiwix", kiwix)
+    monkeypatch.setattr(search, "KIWIX_ADAPTER", kiwix_adapter)
+    targets = {
+        "slow": (dict(ROUTE, name="Slow"), kiwix_adapter),
+        "fast": (dict(ROUTE, name="Fast"), kiwix_adapter),
+        "document": (dict(ROUTE, name="Document"), search.Adapter("Document", document)),
+    }
+
+    results = search.search("knots", dict, targets=targets, allowed=lambda *_: True)
+
+    assert calls == ["Document", "Slow", "Fast"]
+    assert [(group["source_id"], group["status"]) for group in results] == [
+        ("slow", "timeout"), ("fast", "ok"), ("document", "ok"),
+    ]

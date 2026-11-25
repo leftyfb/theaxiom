@@ -36,7 +36,7 @@ def exercise(browser, base, name, viewport, artifacts):
         expect(search_input).to_be_visible()
         search_input.fill("emergency")
         search_input.press("Enter")
-        expect(page).to_have_url(base + "/search?q=emergency")
+        expect(page).to_have_url(base + "/search?q=emergency&mode=progressive")
         expect(page.locator("body")).to_be_visible()
         # Public pages are the primary mobile entry points. Protect their
         # layout independently of the authenticated administrator pages.
@@ -56,6 +56,7 @@ def exercise(browser, base, name, viewport, artifacts):
                      page=page, has_more=page == 1, start_base=start_base,
                      results=[dict(title=f"Water result {i}", href=f"/fixture/article/{i}", snippet="Water")
                               for i in range(first, min(first + 20, 23))]),
+                dict(source_id="timeout", name="Slow source", status="timeout", results=[]),
                 dict(source_id="no-text", name="Image-only document", status="no_text", results=[]),
                 dict(source_id="no-match", name="Unrelated source", status="ok", results=[]),
             ]
@@ -65,7 +66,16 @@ def exercise(browser, base, name, viewport, artifacts):
             section = page.get_by_role("region", name="Matching source")
             expect(section.get_by_role("listitem")).to_have_count(20)
             expect(section.get_by_role("link", name="Water result 20")).to_be_visible()
-            expect(section.locator("summary")).to_have_count(0)
+            disclosure = section.locator("summary")
+            disclosure.focus()
+            page.keyboard.press("Enter")
+            expect(section.get_by_role("link", name="Water result 20")).to_be_hidden()
+            page.keyboard.press("Enter")
+            expect(section.get_by_role("link", name="Water result 20")).to_be_visible()
+            issue = page.get_by_text("Slow source — Search timed out")
+            expect(issue).to_be_hidden()
+            page.get_by_text("Search incomplete · 1 affected source").click()
+            expect(issue).to_be_visible()
             expect(page.get_by_text("Image-only document")).to_have_count(0)
             expect(page.get_by_text("Unrelated source")).to_have_count(0)
             section.get_by_role("link", name="Next page").click()
@@ -74,6 +84,42 @@ def exercise(browser, base, name, viewport, artifacts):
             expect(section.get_by_role("link", name="Next page")).to_have_count(0)
             section.get_by_role("link", name="Previous page").click()
             expect(section.get_by_role("link", name="Water result 20")).to_be_visible()
+
+        progressive_calls = []
+
+        def progressive_results(query, sources, *, page, start_base):
+            source_id = sources[0]["source_id"]
+            progressive_calls.append((source_id, page))
+            failed = source_id == "slow" and progressive_calls.count(("slow", 1)) == 1
+            start = (page - 1) * 20 + 1
+            return [dict(source_id=source_id, status="timeout" if failed else "ok",
+                         page=page, has_more=page == 1 and not failed, start_base=start_base,
+                         results=[] if failed else [
+                             admin_api.library_search.Result(f"{source_id} result {i}", f"/fixture/{i}")
+                             for i in range(start, min(start + 20, 23))
+                         ])]
+
+        with patch.object(admin_api.AdminAPIHandler, "_public_library", return_value=(
+                [dict(source_id="matching", name="Matching source"), dict(source_id="slow", name="Slow source")], []
+        )), patch.object(admin_api.AdminAPIHandler, "_search_published_content", side_effect=progressive_results):
+            page.goto(base + "/search?q=water&mode=progressive")
+            section = page.locator('[data-source="matching"]')
+            expect(section.get_by_role("listitem")).to_have_count(4)
+            retry = page.get_by_role("button", name="Retry Slow source")
+            expect(retry).to_be_visible()
+            section.locator("summary").click()
+            expect(section.get_by_role("link", name="matching result 1")).to_be_hidden()
+            retry.click()
+            expect(page.get_by_role("link", name="slow result 1")).to_be_visible()
+            expect(section.get_by_role("link", name="matching result 1")).to_be_hidden()
+            section.locator("summary").click()
+            more = section.get_by_role("button", name="Show more from Matching source")
+            for _ in range(5):
+                more.click()
+            expect(section.get_by_role("link", name="matching result 22")).to_be_visible()
+            expect(more).to_be_hidden()
+            expect(page).to_have_url(base + "/search?q=water&mode=progressive")
+            assert sorted(progressive_calls) == [("matching", 1), ("matching", 2), ("slow", 1), ("slow", 1)]
 
         # Browser navigation must not bypass the sign-in boundary.
         page.goto(base + "/admin/sources")

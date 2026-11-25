@@ -265,7 +265,7 @@ def test_public_group_filters_hide_unpublished_members(app):
     request("/?tag=../bad", status=400)
     search_page = request("/search?q=water&tag=mixed")
     assert "No matching results." not in search_page
-    assert "Results may be incomplete." in search_page
+    assert "Search incomplete" in search_page
     assert '<h2 id="source-wikipedia-en">' not in search_page
     assert "Wikipedia" not in request("/search?q=water&tag=missing")
     publish(request, False)
@@ -1049,7 +1049,7 @@ def test_public_search_paginates_only_selected_published_source(app, monkeypatch
         calls.append((query, [source["source_id"] for source in eligible], page, start_base))
         return [
             dict(source_id=source["source_id"], name=source["name"], status="ok",
-                 results=[dict(title=f"Hit on page {page}", href="/article")],
+                 results=[admin_api.library_search.Result(f"Hit on page {page}", "/article")],
                  has_more=page == 1, page=page, start_base=0)
             for source in eligible
         ]
@@ -1067,6 +1067,15 @@ def test_public_search_paginates_only_selected_published_source(app, monkeypatch
                      ("food&water", ["reference"], 2, 0)]
     assert "No published collections" in request("/search?q=water&source=private&page=2")
     assert calls[-1][1] == []
+    calls.clear()
+    shell = request("/search?q=water&tag=safety&mode=progressive")
+    assert 'data-source="reference"' in shell and 'data-source="guide"' in shell
+    assert 'data-source="private"' not in shell and calls == []
+    payload = request("/search?q=water&tag=safety&mode=source&source=guide&page=2&base=0")
+    assert payload["results"][0]["title"] == "Hit on page 2"
+    assert calls == [("water", ["guide"], 2, 0)]
+    request("/search?q=water&tag=safety&mode=source&source=private", status=404)
+    request("/search?q=water&mode=source", status=400)
     request("/search?q=water&page=2", status=400)
     request("/search?q=water&source=reference&page=0", status=400)
     request("/search?q=water&source=reference&page=2&base=3", status=400)

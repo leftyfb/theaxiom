@@ -1,0 +1,29 @@
+<style>
+.search-wait{width:100%;margin:4px 0}
+.search-wait span{display:inline-block;width:1em;height:1em;margin-right:.5em;vertical-align:-.1em;border:2px solid currentColor;border-right-color:transparent;border-radius:50%}
+@media(prefers-reduced-motion:no-preference){.search-wait:not([hidden]) span{animation:search-spin .7s linear infinite}}
+@keyframes search-spin{to{transform:rotate(360deg)}}
+</style>
+<script>
+(() => {
+  const form = document.querySelector('form[action="/search"]');
+  const status = form.querySelector('.search-wait');
+  form.addEventListener('submit', event => {
+    if (!status.hidden) {
+      event.preventDefault();
+      return;
+    }
+    const mode = document.createElement('input');
+    mode.type = 'hidden';
+    mode.name = 'mode';
+    mode.value = 'progressive';
+    mode.className = 'search-mode';
+    form.append(mode);
+    status.hidden = false;
+  });
+  window.addEventListener('pageshow', () => {
+    status.hidden = true;
+    form.querySelector('.search-mode')?.remove();
+  });
+})();
+</script>
