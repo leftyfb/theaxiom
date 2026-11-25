@@ -911,6 +911,12 @@ def exercise_source_order(browser, viewport):
         cards = page.locator(".source-card")
         expect(cards.first).to_have_attribute("data-source-id", "first")
         expect(page.locator(".publication-divider .source-card")).to_have_attribute("data-source-id", "third")
+        def open_reorder_tools():
+            if viewport["width"] <= 640:
+                page.get_by_label("More source tools").click()
+                page.get_by_role("button", name="Reorder published sources").click()
+
+        open_reorder_tools()
         cards.first.locator("summary.source-header").click()
         button = page.get_by_role("button", name="Move Zulu down")
         button.focus()
@@ -921,6 +927,9 @@ def exercise_source_order(browser, viewport):
         expect(page.get_by_role("button", name="Move Zulu up")).to_be_focused()
         page.reload()
         expect(cards.first).to_have_attribute("data-source-id", "second")
+        open_reorder_tools()
+        if viewport["width"] <= 640:
+            page.locator("#mobile-search-toggle").click()
         page.locator("#source-filter-search").fill("Zulu")
         expect(page.get_by_role("button", name="Move Zulu up")).to_be_disabled()
         page.locator("#source-filter-search").clear()
@@ -938,6 +947,82 @@ def exercise_source_order(browser, viewport):
         expect(cards.first).to_have_attribute("data-source-id", "first")
     finally:
         page.close()
+
+
+def exercise_compact_sources(browser, viewport):
+    """Exercise the mobile toolbar and sheets with enough rows to scroll."""
+    from test_admin_page_template import profile, render
+
+    sources = [dict(profile(f"source-{i:02}", title=f"Source {i:02}"),
+                    publication_filter="published" if i < 20 else "unpublished",
+                    download_filter="not-downloaded") for i in range(40)]
+    page = browser.new_page(viewport=viewport, has_touch=True, is_mobile=True)
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    try:
+        page.route("**/admin/sources", lambda route: route.fulfill(
+            content_type="text/html", body=render(sources)))
+        page.route("**/api/sources", lambda route: route.fulfill(json={"sources": sources, "revision": 0}))
+        page.goto("http://fixture.local/admin/sources")
+        toolbar = page.get_by_role("navigation", name="Source tools")
+        cards = page.locator(".source-card")
+        menu = toolbar.get_by_label("More source tools")
+        expect(toolbar).to_be_visible()
+        assert cards.first.bounding_box()["y"] < 160
+        assert page.evaluate("document.documentElement.scrollWidth === window.innerWidth")
+
+        toolbar.get_by_text("Sources ▾").click()
+        expect(toolbar.get_by_role("link", name="Groupings")).to_be_visible()
+        expect(toolbar.get_by_role("link", name="Settings")).to_be_visible()
+        expect(toolbar.get_by_role("link", name="Back to library")).to_be_visible()
+        toolbar.get_by_text("Sources ▾").click()
+        toolbar.get_by_role("button", name="Add Source").click()
+        expect(page.locator("#source-dialog")).to_be_visible()
+        page.keyboard.press("Escape")
+        menu.click()
+        page.get_by_role("button", name="Content source guide").click()
+        expect(page.locator("#source-guide")).to_be_visible()
+        page.keyboard.press("Escape")
+
+        page.evaluate("window.scrollTo(0, 700)")
+        assert toolbar.bounding_box()["y"] == 0
+        start_y = page.evaluate("window.scrollY")
+        page.get_by_role("button", name="Filter sources").click()
+        sheet = page.get_by_role("dialog", name="Filters")
+        sheet.get_by_label("Publication").select_option("published")
+        expect(sheet.get_by_role("button", name="Show 20 sources")).to_be_visible()
+        assert cards.filter(visible=True).count() == 40
+        sheet.get_by_role("button", name="Close").click()
+        expect(sheet).to_be_hidden()
+        assert page.evaluate("window.scrollY") == start_y
+        page.get_by_role("button", name="Filter sources").click()
+        expect(sheet.get_by_label("Publication")).to_have_value("")
+        sheet.get_by_label("Publication").select_option("published")
+        sheet.get_by_role("button", name="Show 20 sources").click()
+        expect(page.locator("#source-filter-count")).to_have_text("20 of 40 sources")
+
+        toolbar.get_by_role("button", name="Search sources").click()
+        search = page.get_by_role("searchbox")
+        search.fill("Source 10")
+        expect(page.locator("#source-filter-count")).to_have_text("1 of 40 sources")
+        menu.click()
+        page.get_by_role("button", name="Select", exact=True).click()
+        bar = page.locator("#mobile-selection")
+        expect(bar.get_by_text("Select all 1")).to_be_visible()
+        bar.get_by_role("checkbox").check()
+        expect(bar.get_by_text("1 selected")).to_be_visible()
+        bar.get_by_role("button", name="Actions").click()
+        actions = page.get_by_role("dialog", name="Actions")
+        expect(actions.get_by_role("button", name="Publish", exact=True)).to_be_disabled()
+        actions.get_by_text("Organize sources", exact=False).click()
+        expect(actions.get_by_label("Grouping type")).to_be_visible()
+        actions.get_by_role("button", name="Close").click()
+        bar.get_by_role("button", name="Done").click()
+        expect(bar).to_be_hidden()
+        assert not errors, errors
+    finally:
+        page.close()
+
 
 
 def main():
@@ -973,9 +1058,12 @@ def main():
                                     ("mobile", {"width": 390, "height": 844}),
                                     ("narrow", {"width": 320, "height": 640}),
                                 ):
-                                    exercise(browser, f"http://{host}:{port}", name, viewport, artifacts)
+                                    if name == "desktop":
+                                        exercise(browser, f"http://{host}:{port}", name, viewport, artifacts)
+                                        exercise_source_actions(browser, viewport)
+                                    else:
+                                        exercise_compact_sources(browser, viewport)
                                     exercise_history_poll(browser, viewport)
-                                    exercise_source_actions(browser, viewport)
                                     exercise_source_order(browser, viewport)
                             finally:
                                 browser.close()

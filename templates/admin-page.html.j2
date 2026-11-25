@@ -195,6 +195,54 @@
     #source-form-feedback { color: #a12820; overflow-wrap: anywhere; }
     #source-help { border-top: 1px solid var(--line); margin-top: 1rem; padding-top: .75rem; font-size: .9rem; }
     @media (max-width: 550px) { .editor-grid { grid-template-columns: minmax(0,1fr); } }
+
+    .mobile-source-toolbar, .mobile-selection, .mobile-sheet { display:none; }
+    @media (max-width: 640px) {
+      .compact-sources .site-header, .compact-sources .admin-nav, .compact-sources .sources-heading,
+      .compact-sources .source-search-row, .compact-sources #source-selection-panel,
+      .compact-sources > main > #group-panel { display:none; }
+      .compact-sources main { width:calc(100% - 1rem); padding:0 0 5rem; }
+      .compact-sources .mobile-source-toolbar { position:sticky; top:0; z-index:10; display:flex;
+        flex-wrap:wrap; align-items:center; gap:.25rem; margin:0 -.5rem; padding:.35rem .5rem;
+        border-bottom:1px solid var(--line); background:var(--paper); }
+      .mobile-source-toolbar > details:first-child { margin-right:auto; }
+      .mobile-source-toolbar .button, .mobile-selection .button { padding:.35rem .45rem; }
+      .mobile-source-toolbar button, #mobile-source-menu > summary { min-width:44px; }
+      #mobile-source-menu > summary { font-size:1.25rem; }
+      #mobile-filter-control #source-filter-toggle[aria-expanded="false"] { background:var(--accent); }
+      .compact-sources:has(.mobile-selection:not([hidden])) main { padding-bottom:8rem; }
+      .mobile-source-toolbar svg { width:1.15rem; height:1.15rem; }
+      .mobile-source-toolbar details { position:relative; }
+      .mobile-source-toolbar details > div { position:absolute; top:100%; left:0; display:grid;
+        min-width:10rem; padding:.35rem; gap:.25rem; border:1px solid var(--line);
+        border-radius:.5rem; background:var(--paper); box-shadow:0 4px 15px #123c3226; }
+      .mobile-source-toolbar details:last-of-type > div { left:auto; right:0; }
+      #mobile-source-search { flex-basis:100%; }
+      #mobile-source-search input { width:100%; min-height:44px; font:inherit; padding:.5rem;
+        border:1px solid #aac5b7; border-radius:.5rem; }
+      .compact-sources #source-filter-count { display:block; margin:.4rem 0; }
+      .compact-sources .source-row .source-card { margin:.4rem 0; }
+      .compact-sources:not(.reordering) .source-order-controls { display:none; }
+      .compact-sources:not(.reordering) .source-row > .group-select { top:.55rem; }
+      .mobile-selection label { display:flex; align-items:center; gap:.25rem; min-height:44px; font-size:.85rem; }
+      .mobile-selection input { width:1.2rem; height:1.2rem; accent-color:var(--green); }
+      .mobile-selection .primary-action { background:var(--dark); color:white; }
+      .compact-sources .mobile-selection { display:flex; position:fixed; z-index:11; bottom:0; inset-inline:0;
+        align-items:center; flex-wrap:wrap; gap:.35rem; background:var(--paper); border-top:1px solid var(--line);
+        padding:.35rem .5rem calc(.35rem + env(safe-area-inset-bottom)); }
+      .mobile-selection #group-count { flex:1; min-width:4rem; }
+      .compact-sources .mobile-sheet[open] { display:block; position:fixed; inset:auto 0 0;
+        width:100%; max-width:none; max-height:85dvh; margin:0; overflow:auto;
+        padding:1rem 1rem calc(1rem + env(safe-area-inset-bottom)); color:var(--dark);
+        border:1px solid var(--line); border-radius:1rem 1rem 0 0; background:var(--paper); }
+      .mobile-sheet::backdrop { background:#123c3266; }
+      .mobile-sheet-header { display:flex; align-items:center; justify-content:space-between; gap:.5rem; }
+      .mobile-sheet-header h2 { margin:0; }
+      #mobile-filters-apply { width:100%; background:var(--dark); color:white; }
+      #mobile-actions-sheet > .group-panel:not(:has(#bulk-group-fields:not([hidden]))) { display:none; }
+      .mobile-sheet .source-filters, .mobile-sheet .group-panel { margin:.5rem 0; padding:.5rem; }
+      .mobile-sheet #bulk-more-actions > div { position:static; }
+    }
   </style>
 </head>
 <body>
@@ -438,7 +486,32 @@
     })();
     </script>
     {% else %}
-    <h1>Manage offline sources</h1>
+    <h1 class="sources-heading">Manage offline sources</h1>
+    <nav class="mobile-source-toolbar" aria-label="Source tools">
+      <details><summary class="button">Sources ▾</summary><div>
+        <a class="button" href="/">Back to library</a>
+        <a class="button" href="/admin/sources" aria-current="page">Sources</a>
+        <a class="button" href="/admin/groupings">Groupings</a>
+        <a class="button" href="/admin/settings">Settings</a>
+      </div></details>
+      <button type="button" class="button" id="mobile-search-toggle" aria-label="Search sources" aria-controls="mobile-source-search" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="10" cy="10" r="6"/><path d="m15 15 6 6"/></svg></button>
+      <span id="mobile-filter-control"></span>
+      <span id="mobile-add-control"></span>
+      <details id="mobile-source-menu"><summary class="button" aria-label="More source tools">⋯</summary><div id="mobile-source-tools"><button type="button" class="button" id="mobile-reorder" aria-pressed="false">Reorder published sources</button></div></details>
+      <div id="mobile-source-search" hidden></div>
+    </nav>
+    <div id="mobile-source-count"></div>
+    <div class="mobile-selection" id="mobile-selection" hidden>
+      <button class="button primary-action" type="button" id="mobile-actions-open">Actions</button>
+      <button class="button" type="button" id="mobile-selection-done">Done</button>
+    </div>
+    <dialog class="mobile-sheet" id="mobile-actions-sheet" aria-labelledby="mobile-actions-title">
+      <div class="mobile-sheet-header"><h2 id="mobile-actions-title">Actions</h2><form method="dialog"><button class="button">Close</button></form></div>
+    </dialog>
+    <dialog class="mobile-sheet" id="mobile-filters-sheet" aria-labelledby="mobile-filters-title">
+      <div class="mobile-sheet-header"><h2 id="mobile-filters-title">Filters</h2><form method="dialog"><button class="button">Close</button></form></div>
+      <button class="button primary-action" type="button" id="mobile-filters-apply">Show sources</button>
+    </dialog>
     {% set update_summary = catalog.update_summary|default("") %}
     <p class="source-note" id="source-update-summary" role="status"{% if not update_summary %} hidden{% endif %}>{{ update_summary }}</p>
     <div class="source-search-row">
@@ -576,7 +649,7 @@
     </dialog>
     <section class="group-panel" id="source-selection-panel" aria-label="Source selection">
       <div class="source-selection-bar" id="source-selection-bar">
-        <label id="select-all-label" hidden><input type="checkbox" id="group-select-all" aria-label="Select all visible sources">Select all</label>
+        <label id="select-all-label" hidden><input type="checkbox" id="group-select-all" aria-label="Select all visible sources"><span id="select-all-text">Select all</span></label>
         <span id="group-count" class="source-note" aria-live="polite" hidden>0 selected</span>
         <button class="button" type="button" id="source-select-mode" aria-pressed="false">Select</button>
         <button class="button" type="button" id="selection-file-open" hidden>Presets and saved selections</button>
@@ -1381,6 +1454,10 @@
           option.disabled = option.hidden;
         }
         for (const option of groupExisting.options) if (option.disabled) option.selected = false;
+        const mobileSelection = document.getElementById('mobile-selection');
+        mobileSelection.hidden = !selecting;
+        document.getElementById('mobile-selection-done').disabled = bulkBusy;
+        document.getElementById('select-all-text').textContent = 'Select all ' + visible.length;
         document.getElementById('group-count').textContent = ids.length + ' selected' + (hiddenSelected ? ' (' + hiddenSelected + ' hidden by filters)' : '');
         document.getElementById('group-defaults').hidden = true;
         document.getElementById('group-create-assign').hidden = kind !== 'tags';
@@ -2131,6 +2208,11 @@
       const cards = Array.from(root.querySelectorAll('.source-card'));
       const groups = {{ ((catalog|default({})).groups|default([]))|tojson }};
       const values = () => Object.fromEntries(fields.map(key => [key,nodes[key].value]));
+      const mobile = matchMedia('(max-width: 640px)');
+      const filterSheet = document.getElementById('mobile-filters-sheet');
+      const filterApply = document.getElementById('mobile-filters-apply');
+      let applied;
+      const effectiveValues = () => applied ? {...applied, search: nodes.search.value} : values();
       const defaults = {};
       const layout = {{ ((catalog|default({})).library_layout|default({}))|tojson }};
       let order = {{ ((catalog|default({})).library_order|default([]))|tojson }};
@@ -2142,23 +2224,39 @@
       const filterToggle = document.getElementById('source-filter-toggle');
       const filterPanel = document.getElementById('source-filters-panel');
       filterToggle.addEventListener('click', () => {
+        if (mobile.matches) {
+          applied = values();
+          filterPanel.hidden = false;
+          updatePreview();
+          filterSheet.showModal();
+          filterToggle.setAttribute('aria-expanded', 'true');
+          return;
+        }
         filterPanel.hidden = !filterPanel.hidden;
         filterToggle.setAttribute('aria-expanded', String(!filterPanel.hidden));
       });
       function rank(card) {
         return card.dataset.filterPublication === 'published' ? 0 : card.dataset.filterDownload === 'downloaded' ? 1 : 2;
       }
-      function apply(reorder = false) {
-        const v = values(), query = v.search.trim().toLocaleLowerCase();
-        let visible = 0;
-        for (const card of cards) {
-          const data = card.dataset;
-          const matches = (!query || data.filterTitle.toLocaleLowerCase().includes(query)) &&
+      function matchesFilters(card, v, query) {
+        const data = card.dataset;
+        return (!query || data.filterTitle.toLocaleLowerCase().includes(query)) &&
             (!v.publication || data.filterPublication === v.publication) &&
             (!v.download || data.filterDownload === v.download) &&
             (!v.format || data.filterFormat === v.format) &&
             ['categories','collections','tags'].every(kind => !v[kind] ||
               groups.some(g => g.kind === kind && g.group_id === v[kind] && g.source_ids.includes(data.sourceId)));
+      }
+      function updatePreview() {
+        const draft = values();
+        const count = cards.filter(card => matchesFilters(card, draft, draft.search.trim().toLocaleLowerCase())).length;
+        filterApply.textContent = 'Show ' + count + (count === 1 ? ' source' : ' sources');
+      }
+      function apply(reorder = false) {
+        const v = effectiveValues(), query = v.search.trim().toLocaleLowerCase();
+        let visible = 0;
+        for (const card of cards) {
+          const matches = matchesFilters(card, v, query);
           card.hidden = !matches;
           card.closest('.source-row').hidden = !matches;
           if (matches) visible++;
@@ -2196,6 +2294,7 @@
         indicator.hidden = !active;
         indicator.textContent = String(active);
         document.getElementById('source-filter-empty').hidden = visible !== 0 || cards.length === 0;
+        if (applied) updatePreview();
         document.dispatchEvent(new Event('axiom-source-filters-changed'));
       }
       const storageKey = 'theaxiom-source-filters';
@@ -2206,14 +2305,34 @@
         }
       } catch (_) { /* Filtering still works without storage. */ }
       function save() {
-        try { sessionStorage.setItem(storageKey, JSON.stringify(values())); } catch (_) {}
+        try { sessionStorage.setItem(storageKey, JSON.stringify(effectiveValues())); } catch (_) {}
       }
       fields.forEach(key => nodes[key].addEventListener(key === 'search' ? 'input' : 'change', () => {
+        if (applied && key !== 'search') { updatePreview(); return; }
         save(); apply();
       }));
       document.getElementById('source-filter-reset').addEventListener('click', () => {
-        fields.forEach(key => { nodes[key].value = defaults[key] || ''; });
+        fields.forEach(key => { if (!applied || key !== 'search') nodes[key].value = defaults[key] || ''; });
+        if (applied) { updatePreview(); return; }
         save(); apply(true);
+      });
+      filterApply.addEventListener('click', () => {
+        const top = filterToggle.getBoundingClientRect().bottom;
+        const anchor = Array.from(root.children).find(row => !row.hidden && row.getBoundingClientRect().bottom > top);
+        const offset = anchor?.getBoundingClientRect().top;
+        applied = undefined;
+        save();
+        apply();
+        filterSheet.close();
+        if (anchor && !anchor.hidden) window.scrollBy(0, anchor.getBoundingClientRect().top - offset);
+      });
+      filterSheet.addEventListener('close', () => {
+        if (applied) {
+          for (const key of fields) if (key !== 'search') nodes[key].value = applied[key];
+          applied = undefined;
+        }
+        filterPanel.hidden = true;
+        filterToggle.setAttribute('aria-expanded', 'false');
       });
       async function move(card, target, button) {
         const items = visiblePublished();
@@ -2286,8 +2405,88 @@
         move(card, target);
       });
       root.addEventListener('lostpointercapture', clearDrag);
-      window.axiomSourceFilters = {values, apply, setOrder(next) { order = next; }};
+      window.axiomSourceFilters = {values: effectiveValues, apply, setOrder(next) { order = next; }};
       apply(true);
+    })();
+  </script>
+  <script id="mobile-sources-script">
+    (() => {
+      const media = matchMedia('(max-width: 640px)');
+      const byId = id => document.getElementById(id);
+      const menu = byId('mobile-source-menu');
+      const search = byId('source-filter-search');
+      const searchToggle = byId('mobile-search-toggle');
+      const searchSlot = byId('mobile-source-search');
+      const filters = byId('mobile-filters-sheet');
+      const actions = byId('mobile-actions-sheet');
+      const done = byId('mobile-selection-done');
+      const add = byId('source-add');
+      const selection = byId('source-select-mode');
+      const moves = [
+        ['admin-logout', byId('mobile-source-tools')], ['source-guide-open', byId('mobile-source-tools')],
+        ['source-select-mode', byId('mobile-source-tools')], ['source-add', byId('mobile-add-control')],
+        ['source-filter-toggle', byId('mobile-filter-control')], ['source-filter-search', searchSlot],
+        ['source-filter-count', byId('mobile-source-count')], ['group-count', byId('mobile-selection')],
+        ['select-all-label', byId('mobile-selection')], ['selection-file-open', actions],
+        ['bulk-selection', actions], ['group-panel', actions], ['source-filters-panel', filters],
+      ].map(([id, target]) => {
+        const node = byId(id);
+        const slot = document.createComment(id);
+        node.before(slot);
+        return {node, target, slot};
+      });
+      function setSearch(open) {
+        searchSlot.hidden = !open;
+        searchToggle.setAttribute('aria-expanded', String(open));
+      }
+      function layout() {
+        if (!media.matches) {
+          if (filters.open) filters.close();
+          if (actions.open) actions.close();
+        }
+        for (const {node, target, slot} of moves) {
+          if (media.matches) target.append(node);
+          else slot.after(node);
+        }
+        if (media.matches) {
+          filters.append(byId('mobile-filters-apply'));
+          byId('mobile-selection').append(byId('mobile-actions-open'), done);
+          add.textContent = '+';
+          add.setAttribute('aria-label', 'Add Source');
+          setSearch(!!search.value);
+          byId('source-filters-panel').hidden = true;
+          byId('source-filter-toggle').setAttribute('aria-expanded', 'false');
+        } else {
+          add.textContent = 'Add Source';
+          menu.open = false;
+        }
+        document.body.classList.toggle('compact-sources', media.matches);
+      }
+      searchToggle.addEventListener('click', () => {
+        setSearch(searchSlot.hidden);
+        if (!searchSlot.hidden) search.focus();
+      });
+      done.addEventListener('click', () => {
+        selection.click();
+        menu.querySelector('summary').focus({preventScroll:true});
+      });
+      const reorder = byId('mobile-reorder');
+      reorder.addEventListener('click', () => {
+        const active = document.body.classList.toggle('reordering');
+        reorder.textContent = active ? 'Finish reordering' : 'Reorder published sources';
+        reorder.setAttribute('aria-pressed', String(active));
+      });
+      byId('mobile-actions-open').addEventListener('click', () => actions.showModal());
+      menu.querySelector('div').addEventListener('click', () => {
+        menu.open = false;
+        if (!document.querySelector('dialog[open]')) menu.querySelector('summary').focus({preventScroll:true});
+      });
+      const menus = [...document.querySelectorAll('.mobile-source-toolbar > details')];
+      document.addEventListener('click', event => {
+        for (const item of menus) if (!item.contains(event.target)) item.open = false;
+      });
+      media.addEventListener('change', layout);
+      layout();
     })();
   </script>
   <script id="acquisition-monitor-script">
