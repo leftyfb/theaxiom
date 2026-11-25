@@ -91,6 +91,16 @@ def exercise(browser, base, name, viewport, artifacts):
         page.locator("#submit").click()
         expect(page).to_have_url(base + "/admin")
         expect(page.locator("h1")).to_contain_text("Manage offline sources")
+        other_tab = context.new_page()
+        try:
+            other_tab.goto(base + "/")
+            other_tab.bring_to_front()
+            page.bring_to_front()
+            page.reload()
+            expect(page).to_have_url(base + "/admin")
+            expect(page.locator("h1")).to_contain_text("Manage offline sources")
+        finally:
+            other_tab.close()
         # The settings page polls storage status. A local import inside
         # do_GET previously shadowed WIKIPEDIA_SOURCE and crashed this API.
         storage_status = context.request.get(base + "/api/storage-status")

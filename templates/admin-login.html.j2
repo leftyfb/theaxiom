@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="application-name" content="The Axiom"><meta name="robots" content="noindex,nofollow">
+<meta name="referrer" content="same-origin">
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon.png">
 <link rel="shortcut icon" href="/favicon.ico" sizes="any">
@@ -18,43 +19,16 @@ h1{font-size:1.8rem;margin:.3rem 0 .4rem}p{line-height:1.5;color:#587067}label{d
 <div class="brand">The Axiom</div>
 <h1>Administrator sign in</h1>
 <p>Sign in to manage your offline library.</p>
-<form id="login-form" autocomplete="on">
+<form method="post" action="/admin/login" autocomplete="on">
 <label for="username">Username</label>
-<input id="username" name="username" type="text" autocomplete="username" required maxlength="64" autofocus>
+<input id="username" name="username" type="text" autocomplete="username" required maxlength="64">
 <label for="password">Password</label>
 <input id="password" name="password" type="password" autocomplete="current-password" required maxlength="256">
 <button id="submit" type="submit">Sign in</button>
-<p id="feedback" role="status" aria-live="polite"></p>
+<p id="feedback" role="status" aria-live="polite">{{ error }}</p>
 </form>
 <p><a href="/">Back to library</a></p>
 <p>HTTP does not encrypt passwords. Use HTTPS outside a trusted LAN.</p>
 </main>
-<script>
-(() => {
- const form = document.getElementById('login-form');
- const button = document.getElementById('submit');
- const feedback = document.getElementById('feedback');
- form.addEventListener('submit', async event => {
-  event.preventDefault();
-  button.disabled = true;
-  feedback.textContent = '';
-  try {
-   const response = await fetch('/api/admin/login', {
-    method: 'POST', headers: {'Content-Type': 'application/json'},
-    credentials: 'same-origin', cache: 'no-store',
-    body: JSON.stringify({username: form.elements.username.value, password: form.elements.password.value})
-   });
-   if (!response.ok) {
-    feedback.textContent = response.status === 429 ? 'Too many attempts. Try again later.' : 'Invalid username or password.';
-    return;
-   }
-   window.location.assign('/admin');
-  } catch (_) {
-   feedback.textContent = 'Could not connect to the library. Try again.';
-  } finally {
-   button.disabled = false;
-  }
- });
-})();
-</script>
-</body></html>
+</body>
+</html>

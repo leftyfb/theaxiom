@@ -98,11 +98,11 @@ def cookie_header(token, *, secure=False):
     """A single root-scoped HttpOnly session cookie. Never log this header."""
     suffix = "; Secure" if secure else ""
     return (f"{COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Strict; "
-            f"Max-Age={IDLE_SECONDS}{suffix}")
+            f"Max-Age={ABSOLUTE_SECONDS}{suffix}")
 
 
 def clear_cookie_header(*, secure=False):
-    return cookie_header("", secure=secure).replace(f"Max-Age={IDLE_SECONDS}", "Max-Age=0")
+    return cookie_header("", secure=secure).replace(f"Max-Age={ABSOLUTE_SECONDS}", "Max-Age=0")
 
 
 def token_from_headers(headers):

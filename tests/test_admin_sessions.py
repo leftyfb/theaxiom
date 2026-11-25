@@ -58,6 +58,7 @@ def test_cookie_is_http_only_same_site_and_strictly_parsed():
     assert admin_sessions.token_from_headers(headers) == token
     assert "HttpOnly" in admin_sessions.cookie_header(token)
     assert "SameSite=Strict" in admin_sessions.cookie_header(token)
+    assert f"Max-Age={admin_sessions.ABSOLUTE_SECONDS}" in admin_sessions.cookie_header(token)
     assert "Secure" in admin_sessions.cookie_header(token, secure=True)
     assert "Secure" not in admin_sessions.cookie_header(token, secure=False)
     assert "Max-Age=0" in admin_sessions.clear_cookie_header()

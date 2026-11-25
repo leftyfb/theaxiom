@@ -543,7 +543,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
 
         # The login submission is public, but still passes all content-type,
         # size, host, fetch-site and mandatory same-origin checks below.
-        login = post and self.path == "/api/admin/login"
+        form_login = post and self.path == "/admin/login"
+        login = form_login or (post and self.path == "/api/admin/login")
         auth = self.headers.get_all("Authorization", [])
         local_hosts = {f"{config.host}:{config.port}", f"localhost:{config.port}"}
         if config.port == 80:
@@ -622,7 +623,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 if not origins:
                     self._send_json(403, {"error": "same-origin request required"})
                     return False
-            if self._session_csrf is not None:
+            # Native login has no session CSRF header and requires an exact Origin.
+            if self._session_csrf is not None and not form_login:
                 provided = self.headers.get_all("X-Axiom-CSRF", [])
                 if (len(provided) != 1 or len(provided[0]) > 256 or
                         not hmac.compare_digest(provided[0], self._session_csrf)):
@@ -631,6 +633,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             upload = self.path == "/api/pdf-upload"
             formats = self.headers.get_all("X-Document-Format", []) if upload else []
             content_type = ("application/epub+zip" if formats == ["epub"] else "application/pdf") if upload else "application/json"
+            if form_login:
+                content_type = "application/x-www-form-urlencoded"
             if self.headers.get_content_type() != content_type:
                 self._send_json(415, {"error": content_type + " required"})
                 return False
@@ -675,15 +679,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 self._send_json(503, {"error": "Batch queue unavailable"})
             return
         if self.path == "/admin/login":
-            environment = Environment(loader=FileSystemLoader(ADMIN_TEMPLATE_DIR), autoescape=True)
-            body = environment.get_template("admin-login.html.j2").render().encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("X-Frame-Options", "DENY")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            self._send_admin_login()
             return
         if self.path in PUBLIC_ICON_PATHS:
             filename, mime = PUBLIC_ICON_PATHS[self.path]
@@ -1376,37 +1372,68 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_admin_login(self, status=200, error=""):
+        environment = Environment(loader=FileSystemLoader(ADMIN_TEMPLATE_DIR), autoescape=True)
+        body = environment.get_template("admin-login.html.j2").render(error=error).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_login_error(self, form_login, status, error):
+        if form_login:
+            self._send_admin_login(status, error)
+        else:
+            self._send_json(status, {"error": error.rstrip(".").lower()})
+
+    def _sign_in_admin(self, *, form_login):
+        import hmac
+        config = getattr(self.server, "axiom_config", None)
+        if config is None or config.store is None:
+            self._send_login_error(form_login, 503, "Administrator authentication unavailable.")
+            return
+        if form_login:
+            raw = self.rfile.read(int(self.headers["Content-Length"]))
+            try:
+                fields = parse_qs(raw.decode("ascii"), keep_blank_values=True,
+                                  strict_parsing=True, errors="strict", max_num_fields=2)
+            except ValueError:
+                fields = {}
+            data = {key: values[0] for key, values in fields.items() if len(values) == 1}
+        else:
+            data = self._read_body()
+        if (set(data) != {"username", "password"} or
+                not all(isinstance(data[k], str) for k in data) or
+                len(data["username"]) > 64 or len(data["password"]) > 256):
+            self._send_login_error(form_login, 400, "Invalid sign-in request.")
+            return
+        if not (data["username"].isascii() and hmac.compare_digest(data["username"], config.username) and
+                config.store.verify(data["password"])):
+            self._send_login_error(form_login, 403, "Invalid username or password.")
+            return
+        try:
+            token, _ = ADMIN_SESSIONS.issue(config.store)
+        except (OSError, ValueError):
+            self._send_login_error(form_login, 503, "Authentication state unavailable.")
+            return
+        secure = config.proxied and self.headers.get("X-Forwarded-Proto") == "https"
+        self.send_response(303 if form_login else 204)
+        if form_login:
+            self.send_header("Location", "/admin")
+        self.send_header("Set-Cookie", admin_sessions.cookie_header(token, secure=secure))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def do_POST(self) -> None:  # noqa: N802 - http.server convention
         global ENDPOINT_TEST_NEXT
         if not self._guard(post=True):
             return
-        if self.path == "/api/admin/login":
-            import hmac
-            config = getattr(self.server, "axiom_config", None)
-            if config is None or config.store is None:
-                self._send_json(503, {"error": "administrator authentication unavailable"})
-                return
-            data = self._read_body()
-            if (set(data) != {"username", "password"} or
-                    not all(isinstance(data[k], str) for k in data) or
-                    len(data["username"]) > 64 or len(data["password"]) > 256):
-                self._send_json(400, {"error": "invalid sign-in request"})
-                return
-            if not (hmac.compare_digest(data["username"], config.username) and
-                    config.store.verify(data["password"])):
-                self._send_json(403, {"error": "invalid username or password"})
-                return
-            try:
-                token, _ = ADMIN_SESSIONS.issue(config.store)
-            except (OSError, ValueError):
-                self._send_json(503, {"error": "authentication state unavailable"})
-                return
-            secure = config.proxied and self.headers.get("X-Forwarded-Proto") == "https"
-            self.send_response(204)
-            self.send_header("Set-Cookie", admin_sessions.cookie_header(token, secure=secure))
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("Content-Length", "0")
-            self.end_headers()
+        if self.path in {"/admin/login", "/api/admin/login"}:
+            self._sign_in_admin(form_login=self.path == "/admin/login")
             return
         if self.path == "/api/admin/logout":
             ADMIN_SESSIONS.revoke(getattr(self, "_session_token", None))

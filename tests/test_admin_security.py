@@ -241,6 +241,30 @@ class HTTPAuthTests(unittest.TestCase):
         self.assertIn("Max-Age=0", response_headers["Set-Cookie"])
         self.assertEqual(self.request("/admin", headers={"Cookie": cookie, "Accept": "text/html"})[0], 303)
 
+    def test_native_sign_in_form(self):
+        path = "/admin/login"
+        self.assertIn(b'<form method="post" action="/admin/login"', self.request(path)[2])
+        headers = {"Origin": "http://" + self.host,
+                   "Content-Type": "application/x-www-form-urlencoded"}
+        body = "username=admin&password=fixture%2Dpassword%2Donly"
+        for origin in ("http://other.invalid", None):
+            rejected = {**headers, "Origin": origin} if origin else {"Content-Type": headers["Content-Type"]}
+            status, response_headers, _ = self.request(path, "POST", headers=rejected, body=body)
+            self.assertEqual(status, 403)
+            self.assertNotIn("Set-Cookie", response_headers)
+
+        status, response_headers, html = self.request(
+            path, "POST", headers=headers, body="username=admin&password=incorrect")
+        self.assertEqual(status, 403)
+        self.assertIn(b"Invalid username or password.", html)
+        self.assertNotIn("Set-Cookie", response_headers)
+
+        status, response_headers, _ = self.request(path, "POST", headers=headers, body=body)
+        self.assertEqual(status, 303)
+        self.assertEqual(response_headers["Location"], "/admin")
+        cookie = response_headers["Set-Cookie"].split(";", 1)[0]
+        self.assertEqual(self.request("/admin", headers={"Cookie": cookie})[0], 200)
+
     def test_browser_cannot_bypass_sign_out_with_cached_basic_credentials(self):
         """Browser navigation uses revocable sessions, even with cached Basic auth."""
         browser = {"Accept": "text/html", "Sec-Fetch-Mode": "navigate"}
