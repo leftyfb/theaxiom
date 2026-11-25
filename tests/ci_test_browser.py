@@ -913,7 +913,7 @@ def exercise_source_order(browser, viewport):
         expect(page.locator(".publication-divider .source-card")).to_have_attribute("data-source-id", "third")
         def open_reorder_tools():
             if viewport["width"] <= 640:
-                page.get_by_label("More source tools").click()
+                page.get_by_label("More admin tools").click()
                 page.get_by_role("button", name="Reorder published sources").click()
 
         open_reorder_tools()
@@ -964,9 +964,9 @@ def exercise_compact_sources(browser, viewport):
             content_type="text/html", body=render(sources)))
         page.route("**/api/sources", lambda route: route.fulfill(json={"sources": sources, "revision": 0}))
         page.goto("http://fixture.local/admin/sources")
-        toolbar = page.get_by_role("navigation", name="Source tools")
+        toolbar = page.get_by_role("navigation", name="Administration tools")
         cards = page.locator(".source-card")
-        menu = toolbar.get_by_label("More source tools")
+        menu = toolbar.get_by_label("More admin tools")
         expect(toolbar).to_be_visible()
         assert cards.first.bounding_box()["y"] < 160
         assert page.evaluate("document.documentElement.scrollWidth === window.innerWidth")
@@ -1025,6 +1025,37 @@ def exercise_compact_sources(browser, viewport):
 
 
 
+def exercise_mobile_admin_navigation(browser, viewport):
+    from test_admin_page_template import render
+
+    page = browser.new_page(viewport=viewport, has_touch=True, is_mobile=True)
+    try:
+        def admin(route):
+            section = route.request.url.rsplit("/", 1)[-1]
+            route.fulfill(content_type="text/html", body=render(
+                admin_page=section, session_csrf_token="fixture"))
+        page.route("http://fixture.local/admin/*", admin)
+        page.route("http://fixture.local/api/**", lambda route: route.fulfill(json={}))
+        page.goto("http://fixture.local/admin/sources")
+        toolbar = page.get_by_role("navigation", name="Administration tools")
+        for current, next_page in (("Sources", "Settings"), ("Settings", "Groupings"),
+                                   ("Groupings", "Sources")):
+            expect(toolbar).to_be_visible()
+            expect(page.locator(".site-header")).to_be_hidden()
+            toolbar.get_by_label("More admin tools").click()
+            expect(toolbar.get_by_role("button", name="Sign out")).to_be_visible()
+            toolbar.get_by_text(current + " ▾").click()
+            expect(toolbar.get_by_role("link", name=current)).to_have_attribute("aria-current", "page")
+            expect(toolbar.get_by_role("link", name="Back to library")).to_have_attribute("href", "/")
+            toolbar.get_by_role("link", name=next_page).click()
+            expect(page).to_have_url("http://fixture.local/admin/" + next_page.lower())
+            assert toolbar.bounding_box()["y"] == 0
+        expect(toolbar.get_by_role("button", name="Filter sources")).to_be_visible()
+    finally:
+        page.close()
+
+
+
 def main():
     artifacts = Path(os.environ.get("AXIOM_BROWSER_ARTIFACTS", "/tmp/axiom-browser-artifacts"))
     with tempfile.TemporaryDirectory(prefix="axiom-browser-fixtures-") as tmp:
@@ -1063,6 +1094,7 @@ def main():
                                         exercise_source_actions(browser, viewport)
                                     else:
                                         exercise_compact_sources(browser, viewport)
+                                        exercise_mobile_admin_navigation(browser, viewport)
                                     exercise_history_poll(browser, viewport)
                                     exercise_source_order(browser, viewport)
                             finally:

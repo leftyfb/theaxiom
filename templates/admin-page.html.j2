@@ -196,42 +196,44 @@
     #source-help { border-top: 1px solid var(--line); margin-top: 1rem; padding-top: .75rem; font-size: .9rem; }
     @media (max-width: 550px) { .editor-grid { grid-template-columns: minmax(0,1fr); } }
 
-    .mobile-source-toolbar, .mobile-selection, .mobile-sheet { display:none; }
+    .mobile-admin-toolbar, .mobile-selection, .mobile-sheet { display:none; }
     @media (max-width: 640px) {
-      .compact-sources .site-header, .compact-sources .admin-nav, .compact-sources .sources-heading,
-      .compact-sources .source-search-row, .compact-sources #source-selection-panel,
-      .compact-sources > main > #group-panel { display:none; }
-      .compact-sources main { width:calc(100% - 1rem); padding:0 0 5rem; }
-      .compact-sources .mobile-source-toolbar { position:sticky; top:0; z-index:10; display:flex;
+      .compact-admin .site-header, .compact-admin .admin-nav, .compact-admin .sources-heading,
+      .compact-admin .source-search-row, .compact-admin #source-selection-panel,
+      .compact-admin > main > #group-panel { display:none; }
+      .compact-admin main { width:calc(100% - 1rem); padding:0 0 3rem; }
+      .compact-admin main > h1 { margin:.7rem 0; font-size:1.4rem; }
+      .compact-admin .settings-panel { margin:.6rem 0 1rem; padding:.85rem; }
+      .compact-admin .mobile-admin-toolbar { position:sticky; top:0; z-index:10; display:flex;
         flex-wrap:wrap; align-items:center; gap:.25rem; margin:0 -.5rem; padding:.35rem .5rem;
         border-bottom:1px solid var(--line); background:var(--paper); }
-      .mobile-source-toolbar > details:first-child { margin-right:auto; }
-      .mobile-source-toolbar .button, .mobile-selection .button { padding:.35rem .45rem; }
-      .mobile-source-toolbar button, #mobile-source-menu > summary { min-width:44px; }
-      #mobile-source-menu > summary { font-size:1.25rem; }
+      .mobile-admin-toolbar > details:first-child { margin-right:auto; }
+      .mobile-admin-toolbar .button, .mobile-selection .button { padding:.35rem .45rem; }
+      .mobile-admin-toolbar button, #mobile-admin-menu > summary { min-width:44px; }
+      #mobile-admin-menu > summary { font-size:1.25rem; }
       #mobile-filter-control #source-filter-toggle[aria-expanded="false"] { background:var(--accent); }
-      .compact-sources:has(.mobile-selection:not([hidden])) main { padding-bottom:8rem; }
-      .mobile-source-toolbar svg { width:1.15rem; height:1.15rem; }
-      .mobile-source-toolbar details { position:relative; }
-      .mobile-source-toolbar details > div { position:absolute; top:100%; left:0; display:grid;
+      .compact-admin:has(.mobile-selection:not([hidden])) main { padding-bottom:8rem; }
+      .mobile-admin-toolbar svg { width:1.15rem; height:1.15rem; }
+      .mobile-admin-toolbar details { position:relative; }
+      .mobile-admin-toolbar details > div { position:absolute; top:100%; left:0; display:grid;
         min-width:10rem; padding:.35rem; gap:.25rem; border:1px solid var(--line);
         border-radius:.5rem; background:var(--paper); box-shadow:0 4px 15px #123c3226; }
-      .mobile-source-toolbar details:last-of-type > div { left:auto; right:0; }
+      .mobile-admin-toolbar details:last-of-type > div { left:auto; right:0; }
       #mobile-source-search { flex-basis:100%; }
       #mobile-source-search input { width:100%; min-height:44px; font:inherit; padding:.5rem;
         border:1px solid #aac5b7; border-radius:.5rem; }
-      .compact-sources #source-filter-count { display:block; margin:.4rem 0; }
-      .compact-sources .source-row .source-card { margin:.4rem 0; }
-      .compact-sources:not(.reordering) .source-order-controls { display:none; }
-      .compact-sources:not(.reordering) .source-row > .group-select { top:.55rem; }
+      .compact-admin #source-filter-count { display:block; margin:.4rem 0; }
+      .compact-admin .source-row .source-card { margin:.4rem 0; }
+      .compact-admin:not(.reordering) .source-order-controls { display:none; }
+      .compact-admin:not(.reordering) .source-row > .group-select { top:.55rem; }
       .mobile-selection label { display:flex; align-items:center; gap:.25rem; min-height:44px; font-size:.85rem; }
       .mobile-selection input { width:1.2rem; height:1.2rem; accent-color:var(--green); }
       .mobile-selection .primary-action { background:var(--dark); color:white; }
-      .compact-sources .mobile-selection { display:flex; position:fixed; z-index:11; bottom:0; inset-inline:0;
+      .compact-admin .mobile-selection { display:flex; position:fixed; z-index:11; bottom:0; inset-inline:0;
         align-items:center; flex-wrap:wrap; gap:.35rem; background:var(--paper); border-top:1px solid var(--line);
         padding:.35rem .5rem calc(.35rem + env(safe-area-inset-bottom)); }
       .mobile-selection #group-count { flex:1; min-width:4rem; }
-      .compact-sources .mobile-sheet[open] { display:block; position:fixed; inset:auto 0 0;
+      .compact-admin .mobile-sheet[open] { display:block; position:fixed; inset:auto 0 0;
         width:100%; max-width:none; max-height:85dvh; margin:0; overflow:auto;
         padding:1rem 1rem calc(1rem + env(safe-area-inset-bottom)); color:var(--dark);
         border:1px solid var(--line); border-radius:1rem 1rem 0 0; background:var(--paper); }
@@ -254,6 +256,28 @@
   </header>
   <main id="main-content">
     <nav class="admin-nav" aria-label="Administration"><a class="button" href="/admin/sources"{% if page == "sources" %} aria-current="page"{% endif %}>Sources</a><a class="button" href="/admin/groupings"{% if page == "groupings" %} aria-current="page"{% endif %}>Groupings</a><a class="button" href="/admin/settings"{% if page == "settings" %} aria-current="page"{% endif %}>Settings</a></nav>
+    <nav class="mobile-admin-toolbar" aria-label="Administration tools">
+      <details><summary class="button">{{ page|capitalize }} ▾</summary><div>
+        <a class="button" href="/">Back to library</a>
+        {% for section in ['sources', 'groupings', 'settings'] %}
+        <a class="button" href="/admin/{{ section }}"{% if section == page %} aria-current="page"{% endif %}>{{ section|capitalize }}</a>
+        {% endfor %}
+      </div></details>
+      {% if page == "sources" %}
+      <button type="button" class="button" id="mobile-search-toggle" aria-label="Search sources" aria-controls="mobile-source-search" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="10" cy="10" r="6"/><path d="m15 15 6 6"/></svg></button>
+      <span id="mobile-filter-control"></span>
+      <span id="mobile-add-control"></span>
+      {% endif %}
+      <details id="mobile-admin-menu"{% if page != "sources" and not session_csrf_token %} hidden{% endif %}>
+        <summary class="button" aria-label="More admin tools">⋯</summary>
+        <div id="mobile-admin-tools">
+          {% if page == "sources" %}
+          <button type="button" class="button" id="mobile-reorder" aria-pressed="false">Reorder published sources</button>
+          {% endif %}
+        </div>
+      </details>
+      {% if page == "sources" %}<div id="mobile-source-search" hidden></div>{% endif %}
+    </nav>
     {% if page == "settings" %}
     <h1>Settings</h1>
     <section class="settings-panel" id="storage-settings" aria-labelledby="storage-title">
@@ -487,19 +511,6 @@
     </script>
     {% else %}
     <h1 class="sources-heading">Manage offline sources</h1>
-    <nav class="mobile-source-toolbar" aria-label="Source tools">
-      <details><summary class="button">Sources ▾</summary><div>
-        <a class="button" href="/">Back to library</a>
-        <a class="button" href="/admin/sources" aria-current="page">Sources</a>
-        <a class="button" href="/admin/groupings">Groupings</a>
-        <a class="button" href="/admin/settings">Settings</a>
-      </div></details>
-      <button type="button" class="button" id="mobile-search-toggle" aria-label="Search sources" aria-controls="mobile-source-search" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="10" cy="10" r="6"/><path d="m15 15 6 6"/></svg></button>
-      <span id="mobile-filter-control"></span>
-      <span id="mobile-add-control"></span>
-      <details id="mobile-source-menu"><summary class="button" aria-label="More source tools">⋯</summary><div id="mobile-source-tools"><button type="button" class="button" id="mobile-reorder" aria-pressed="false">Reorder published sources</button></div></details>
-      <div id="mobile-source-search" hidden></div>
-    </nav>
     <div id="mobile-source-count"></div>
     <div class="mobile-selection" id="mobile-selection" hidden>
       <button class="button primary-action" type="button" id="mobile-actions-open">Actions</button>
@@ -916,6 +927,32 @@
       });
       if (response.ok) window.location.assign('/admin/login');
     });
+  </script>
+  <script id="mobile-admin-script">
+    (() => {
+      const media = matchMedia('(max-width: 640px)');
+      const menu = document.getElementById('mobile-admin-menu');
+      const logout = document.getElementById('admin-logout');
+      const header = logout.parentElement;
+      function layout() {
+        document.body.classList.toggle('compact-admin', media.matches);
+        if (media.matches) document.getElementById('mobile-admin-tools').append(logout);
+        else {
+          header.append(logout);
+          menu.open = false;
+        }
+      }
+      menu.querySelector('div').addEventListener('click', () => {
+        menu.open = false;
+        if (!document.querySelector('dialog[open]')) menu.querySelector('summary').focus({preventScroll:true});
+      });
+      const menus = [...document.querySelectorAll('.mobile-admin-toolbar > details')];
+      document.addEventListener('click', event => {
+        for (const item of menus) if (!item.contains(event.target)) item.open = false;
+      });
+      media.addEventListener('change', layout);
+      layout();
+    })();
   </script>
   {% if page == "sources" %}
   <script id="source-catalog-script">
@@ -2413,7 +2450,7 @@
     (() => {
       const media = matchMedia('(max-width: 640px)');
       const byId = id => document.getElementById(id);
-      const menu = byId('mobile-source-menu');
+      const menu = byId('mobile-admin-menu');
       const search = byId('source-filter-search');
       const searchToggle = byId('mobile-search-toggle');
       const searchSlot = byId('mobile-source-search');
@@ -2423,8 +2460,8 @@
       const add = byId('source-add');
       const selection = byId('source-select-mode');
       const moves = [
-        ['admin-logout', byId('mobile-source-tools')], ['source-guide-open', byId('mobile-source-tools')],
-        ['source-select-mode', byId('mobile-source-tools')], ['source-add', byId('mobile-add-control')],
+        ['source-guide-open', byId('mobile-admin-tools')],
+        ['source-select-mode', byId('mobile-admin-tools')], ['source-add', byId('mobile-add-control')],
         ['source-filter-toggle', byId('mobile-filter-control')], ['source-filter-search', searchSlot],
         ['source-filter-count', byId('mobile-source-count')], ['group-count', byId('mobile-selection')],
         ['select-all-label', byId('mobile-selection')], ['selection-file-open', actions],
@@ -2458,9 +2495,7 @@
           byId('source-filter-toggle').setAttribute('aria-expanded', 'false');
         } else {
           add.textContent = 'Add Source';
-          menu.open = false;
         }
-        document.body.classList.toggle('compact-sources', media.matches);
       }
       searchToggle.addEventListener('click', () => {
         setSearch(searchSlot.hidden);
@@ -2477,14 +2512,6 @@
         reorder.setAttribute('aria-pressed', String(active));
       });
       byId('mobile-actions-open').addEventListener('click', () => actions.showModal());
-      menu.querySelector('div').addEventListener('click', () => {
-        menu.open = false;
-        if (!document.querySelector('dialog[open]')) menu.querySelector('summary').focus({preventScroll:true});
-      });
-      const menus = [...document.querySelectorAll('.mobile-source-toolbar > details')];
-      document.addEventListener('click', event => {
-        for (const item of menus) if (!item.contains(event.target)) item.open = false;
-      });
       media.addEventListener('change', layout);
       layout();
     })();
