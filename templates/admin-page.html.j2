@@ -793,12 +793,10 @@
              masquerade as Download/Re-download/Update controls. #}
           {% if source.zim_download %}
           <button class="button" type="button" data-review-zim-update
-                  {% if not source.update_check or source.update_check.state != "update_available" %} hidden{% endif %}
-                  data-update-url="{{ source.update_check.candidate_url if source.update_check else '' }}"
+                  {% if not source.update_check or source.update_check.state != "update_available" or not source.update_check.candidate_bytes or (source.replacement and source.replacement.state != "activated") %} hidden{% endif %}
                   data-update-sha256="{{ source.update_check.candidate_sha256 if source.update_check else '' }}"
-                  data-update-bytes="{{ source.update_check.candidate_bytes if source.update_check else '' }}"
-                  data-update-edition="{{ source.update_check.candidate_edition if source.update_check else '' }}">
-            Review newer edition
+                  data-update-bytes="{{ source.update_check.candidate_bytes if source.update_check else '' }}">
+            Download update
           </button>
           {% endif %}
           {% if source.zim_download and discovery.get("method") != "manual" %}<button class="button" type="button" data-zim-update-check{% if not source.installed_verified %} hidden disabled{% endif %}>Check for updates</button>{% endif %}
@@ -810,7 +808,7 @@
           <button class="button" type="button" data-zim-replacement="prepare" hidden>Prepare replacement</button>
           <button class="button" type="button" data-zim-replacement="download" hidden>Download replacement</button>
           <button class="button" type="button" data-zim-replacement="cancel" hidden>Cancel replacement · keep partial</button>
-          <button class="button" type="button" data-zim-replacement="activate" hidden>Activate verified replacement</button>
+          <button class="button" type="button" data-zim-replacement="activate" hidden>Publish update</button>
           <button class="button" type="button" data-zim-replacement="rollback" hidden>Roll back replacement</button>
           <button class="button" type="button" data-zim-replacement="discard" hidden>Discard preparation</button>
           <p class="source-note" data-zim-replacement-status role="status" aria-live="polite"></p>
@@ -881,7 +879,7 @@
           {% endif %}
           · Check recorded: {{ source.update_check.checked_at }}
           · Candidate: {{ source.update_check.candidate_url }}
-          · No download started; replacement requires separate explicit review.
+          · The installed edition remains in service until you publish the verified update.
         {% endif %}
         </p>
         {% endif %}
@@ -1868,28 +1866,25 @@
         input('title').focus();
       }
       document.querySelectorAll('[data-review-zim-update]').forEach(button => {
-        button.addEventListener('click', () => {
+        button.addEventListener('click', async () => {
           if (button.hidden || button.disabled) return;
           const card = button.closest('.source-card');
-          const expected = card?.getAttribute('data-catalog-sha256') || '';
-          const candidateUrl = button.dataset.updateUrl || '';
-          const candidateDigest = button.dataset.updateSha256 || '';
           const candidateBytes = Number(button.dataset.updateBytes);
-          if (!/^https:\/\/[^\s]+\.zim$/.test(candidateUrl) ||
-              !/^[a-f0-9]{64}$/.test(candidateDigest) ||
-              !Number.isSafeInteger(candidateBytes) || candidateBytes < 96 ||
-              candidateDigest === expected) return;
-          // This only opens a normal edit dialog: no catalog mutation or
-          // archive acquisition is performed without a separate user submit.
-          openForm('edit', card);
-          input('source_url').value = candidateUrl;
-          input('sha256').value = candidateDigest;
-          input('expected_size_bytes').value = String(candidateBytes);
-          advanced.open = true;
-          formFeedback.textContent = 'Review publisher candidate ' +
-            (button.dataset.updateEdition || '') +
-            '. Saving metadata does not download or activate an archive. ' +
-            'The existing installed version remains in service until separate verified replacement.';
+          if (!Number.isSafeInteger(candidateBytes) || candidateBytes < 96) return;
+          const feedback = card.querySelector('[data-zim-replacement-status]');
+          button.disabled = true;
+          try {
+            const response = await acquisitionFetch('/api/action', {method:'POST',
+              headers:{...(window.axiomCsrfHeaders?.() || {}), 'Content-Type':'application/json'},
+              body:JSON.stringify({source_id:card.dataset.sourceId, action:'zim-replacement-update', revision,
+                candidate_sha256:button.dataset.updateSha256})});
+            const result = await response.json().catch(() => ({}));
+            if (!response.ok) throw acquisitionError(response, result, 'Update download failed');
+            reloadSources();
+          } catch (error) {
+            feedback.textContent = error.message;
+            button.disabled = false;
+          }
         });
       });
       async function updateEditorGroups(source_id, currentRevision) {
@@ -2158,7 +2153,7 @@
         const card = button.closest('.source-card');
         const operation = button.dataset.zimReplacement;
         if (['activate','rollback'].includes(operation) &&
-            !window.confirm(operation === 'activate' ? 'Activate the verified replacement archive?' : 'Restore the previous verified archive?')) return;
+            !window.confirm(operation === 'activate' ? 'Switch to the verified update? The source will keep its current publication setting.' : 'Restore the previous verified archive?')) return;
         const feedback = card.querySelector('[data-zim-replacement-status]');
         card.dataset.zimReplacementPosting = 'true';
         card.querySelectorAll('[data-zim-replacement]').forEach(b => b.disabled = true);
@@ -2170,7 +2165,6 @@
           const result = await response.json().catch(() => ({}));
           if (!response.ok) throw acquisitionError(response, result, 'Replacement operation failed');
           feedback.textContent = 'Replacement ' + operation + ' accepted; refreshing status…';
-          await refresh();
         } catch(error) {
           feedback.textContent = error.message;
         } finally {
@@ -2826,17 +2820,16 @@
                 ? 'Installed edition: ' + (update.installed_edition || 'unknown') +
                   ' · Publisher edition: ' + (update.candidate_edition || 'unknown') +
                   estimate + ' · Candidate: ' + (update.candidate_url || 'unavailable') +
-                  ' · No download started; replacement requires separate explicit review.'
+                  ' · The installed edition remains in service until you publish the verified update.'
                 : '';
             }
             const review = card.querySelector('[data-review-zim-update]');
             if (review) {
-              review.hidden = !hasUpdate || !Number.isSafeInteger(update?.candidate_bytes);
+              review.hidden = !hasUpdate || !Number.isSafeInteger(update?.candidate_bytes) ||
+                (!!source?.replacement && source.replacement.state !== 'activated');
               if (!review.hidden) {
-                review.dataset.updateUrl = update.candidate_url || '';
                 review.dataset.updateSha256 = update.candidate_sha256 || '';
                 review.dataset.updateBytes = String(update.candidate_bytes);
-                review.dataset.updateEdition = update.candidate_edition || '';
               }
             }
             controls(card, source);

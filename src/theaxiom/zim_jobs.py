@@ -114,7 +114,7 @@ def candidate_status(sid):
     return candidate
 
 
-def prepare_candidate(sid, config):
+def prepare_candidate(sid, config, *, replace_activated=False):
     """Persist replacement intent only; do not download or activate it."""
     configuration = identity(config)
     with LOCK:
@@ -127,11 +127,18 @@ def prepare_candidate(sid, config):
             if configuration == live["configuration"]:
                 raise ValueError("Replacement candidate must differ from installed archive")
             target = candidate_path_for(sid)
-            if target.exists() or target.is_symlink():
+            previous = read_candidate(sid) if replace_activated else None
+            can_replace = (previous and previous["state"] == "activated"
+                           and live["artifact"] == previous["artifact"]
+                           and live["configuration"] == previous["configuration"])
+            if target.is_symlink() or (target.exists() and not can_replace):
                 raise ValueError("Replacement candidate already exists")
             candidate = {"source_id": sid, "state": "prepared",
                          "configuration": configuration, "base_artifact": live["artifact"],
                          "created_at": time.time()}
+            if can_replace:
+                _save_candidate(candidate)
+                return candidate
             target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
             fd, name = tempfile.mkstemp(prefix=".candidate-", dir=target.parent)
             try:

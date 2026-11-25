@@ -1862,7 +1862,9 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             self._send_json(200, settings)
         elif self.path.rstrip("/") == "/api/action":
             data = self._read_body()
-            if data.get("action") in {"zim-download", "zim-resume", "zim-pause", "zim-cancel", "zim-cancel-keep", "zim-restart", "zim-retry", "zim-revalidate", "zim-replacement-prepare", "zim-replacement-discard", "zim-replacement-activate", "zim-replacement-rollback", "zim-replacement-download", "zim-replacement-cancel", "zim-delete-installed"}:
+            if data.get("action") == "zim-replacement-update":
+                self._download_zim_update(data)
+            elif data.get("action") in {"zim-download", "zim-resume", "zim-pause", "zim-cancel", "zim-cancel-keep", "zim-restart", "zim-retry", "zim-revalidate", "zim-replacement-prepare", "zim-replacement-discard", "zim-replacement-activate", "zim-replacement-rollback", "zim-replacement-download", "zim-replacement-cancel", "zim-delete-installed"}:
                 self._start_zim(data)
             elif data.get("action") == "delete-downloaded-files":
                 self._delete_downloaded_files(data)
@@ -2184,6 +2186,60 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             self._send_json(409, {"error": reason})
             return
         self._send_json(200, result)
+
+    def _download_zim_update(self, data):
+        """Start an operator-selected replacement using server-side update evidence."""
+        if not self.headers.get("Origin"):
+            self._send_json(403, {"error": "same-origin request required"})
+            return
+        sid, digest = data.get("source_id"), data.get("candidate_sha256")
+        revision = data.get("revision")
+        if (set(data) != {"action", "source_id", "revision", "candidate_sha256"}
+                or not isinstance(sid, str) or not catalog_store.ID_RE.fullmatch(sid)
+                or not self._valid_revision(revision) or not isinstance(digest, str)
+                or not re.fullmatch(r"[a-f0-9]{64}", digest)):
+            self._send_json(400, {"error": "Invalid ZIM update request"})
+            return
+        with publication.LOCK:
+            try:
+                catalog = SOURCE_CATALOG.get()
+                if revision != catalog["revision"]:
+                    raise ValueError("Catalog changed. Reload and review the update again.")
+                record = next((row for row in catalog["sources"] if row["source_id"] == sid), None)
+                if not record or not self._zim_record(record):
+                    raise ValueError("Source does not support ZIM updates")
+                config = record["configuration"]
+                if update_discovery_config.settings(config)["method"] != "kiwix":
+                    raise ValueError("Source does not use Kiwix update discovery")
+                update = kiwix_update_discovery.cached_checked_source(sid)
+                if (update["state"] != "update_available"
+                        or update.get("candidate_sha256") != digest or not update.get("candidate_bytes")):
+                    raise ValueError("Update evidence changed. Check for updates again.")
+                fields = {
+                    "source_url": update["candidate_url"],
+                    "sha256": digest,
+                    "expected_size_bytes": str(update["candidate_bytes"]),
+                    "edition": update["candidate_edition"],
+                }
+                replacement_config = config | fields
+                current = zim_jobs.candidate_status(sid)
+                if current and current["state"] != "activated":
+                    raise ValueError("Finish or discard the current replacement first.")
+                # The serving job remains authoritative until explicit activation.
+                # A prepared candidate survives a failed attempt to start the worker.
+                SOURCE_CATALOG.mutate("edit", sid, fields, revision)
+                zim_jobs.prepare_candidate(sid, replacement_config, replace_activated=True)
+                result = zim_jobs.start_candidate_acquisition(sid, replacement_config)
+            except BlockingIOError:
+                self._send_json(409, {"error": "This ZIM already has an active job or storage maintenance is running"})
+                return
+            except ValueError as exc:
+                self._send_json(409, {"error": str(exc)})
+                return
+            except OSError:
+                self._send_json(503, {"error": "ZIM update storage unavailable"})
+                return
+        self._send_json(202, result)
 
     def _start_zim(self, data):
         sid = data.get("source_id")

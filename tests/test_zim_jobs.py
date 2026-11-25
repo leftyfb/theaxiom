@@ -1,6 +1,8 @@
 """Regression tests for durable ZIM lifecycle and safe cross-process serialization."""
+import hashlib
 from io import BytesIO
 import threading
+import time
 from unittest.mock import patch
 
 import pytest
@@ -1643,6 +1645,53 @@ def test_interrupted_promotion_recovers_only_verified_library_and_staging_links(
 
 
 from test_source_profiles_http import app as download_app, mutate, source  # noqa: E402,F401
+
+
+def test_download_discovered_update_then_publish(download_app, disk, monkeypatch):
+    from theaxiom import publication, update_check_store, zim_refresh
+
+    request, _ = download_app
+    sid = "fixture-update"
+    old = CONFIG | {"source_url": "https://lb.download.kiwix.org/zim/devdocs/devdocs_en_markdown_2026-07.zim"}
+    new_url = old["source_url"].replace("2026-07", "2026-10")
+    catalog = mutate(request, request("/api/sources"), "add",
+                     dict(title="Fixture update", edition="2026-07", **old), sid=sid)
+    data = fixture_bytes()
+    original = zim_source.install_stream(sid, old, BytesIO(data))
+    zim_jobs.save(dict(source_id=sid, state="completed", active=False, verified=True,
+                       configuration=zim_jobs.identity(old), artifact=original))
+    publication.save(sid, True)
+    body = data[:-16]
+    body = body[:8] + b"\x01" + body[9:]
+    updated = body + hashlib.md5(body, usedforsecurity=False).digest()
+    digest = hashlib.sha256(updated).hexdigest()
+    update_check_store.save(sid, original["sha256"], {
+        "state": "update_available", "evidence": "publisher fixture",
+        "installed_edition": "2026-07", "candidate_edition": "2026-10",
+        "candidate_url": new_url, "candidate_sha256": digest, "candidate_bytes": len(updated),
+    })
+    monkeypatch.setattr(zim_source, "download_resumable",
+                        lambda identifier, config, **_: zim_source.install_stream(identifier, config, BytesIO(updated)))
+    refreshes = []
+    monkeypatch.setattr(zim_refresh, "schedule", lambda loader, **options: refreshes.append(options))
+    payload = dict(action="zim-replacement-update", source_id=sid, revision=catalog["revision"],
+                   candidate_sha256=digest)
+    request("/api/action", dict(payload, candidate_sha256="0" * 64), status=409)
+    assert zim_jobs.read_candidate(sid) is None
+    assert request("/api/action", payload, status=202)["state"] == "downloading"
+    deadline = time.monotonic() + 5
+    while zim_jobs.candidate_status(sid)["state"] == "downloading" and time.monotonic() < deadline:
+        time.sleep(.01)
+    assert zim_jobs.candidate_status(sid)["state"] == "verified"
+    assert zim_jobs.read(sid)["artifact"] == original
+    assert publication.load()[sid] and not refreshes
+    catalog = request("/api/sources")
+    assert source(catalog, sid)["profile"]["edition"] == "2026-10"
+    request("/api/action", dict(action="zim-replacement-activate", source_id=sid,
+                               revision=catalog["revision"], confirm_restart=True), status=202)
+    assert zim_jobs.read(sid)["artifact"]["sha256"] == digest
+    assert publication.load()[sid]
+    assert refreshes[0]["activated_source"] == sid
 
 
 def test_delete_published_zim_from_source_action(download_app, disk, monkeypatch):
