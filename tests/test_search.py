@@ -157,6 +157,7 @@ def test_kiwix_search_pages_and_escapes_query(query, base, monkeypatch):
     assert calls == [(base, 21), (20 + base, 21)]
     assert first["has_more"] and first["page"] == 1
     assert [hit.title for hit in first["results"]] == [f"Hit {n}" for n in range(20)]
+    assert first["results"][0].href == f"/zim/viewer#{book}/0"
     assert not second["has_more"] and second["page"] == 2
     assert [hit.title for hit in second["results"]] == ["Hit 20", "Hit 21"]
 

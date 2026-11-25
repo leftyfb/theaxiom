@@ -118,7 +118,12 @@ def search(query: str, snapshot: Callable[[], dict], *, source_ids=None, targets
                         dict(route, deadline=source_deadline, offset=(page - 1) * MAX_RESULTS,
                              start_base=start_base), query)
                     answer = answer if isinstance(answer, Page) else Page(answer)
-                    results = [Result(r.title[:300], r.href, r.snippet[:600])
+                    # Keep the verified book/article path intact inside the
+                    # shared viewer so its library navigation stays visible.
+                    results = [Result(r.title[:300],
+                                      "/zim/viewer#" + r.href.removeprefix("/zim/content/")
+                                      if adapter is KIWIX_ADAPTER and r.href.startswith("/zim/content/") else r.href,
+                                      r.snippet[:600])
                                for r in answer.results[:MAX_RESULTS]
                                if r.title and valid_link(r.href, route)]
                     status = "partial" if answer.partial else "ok"

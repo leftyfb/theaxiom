@@ -1010,8 +1010,10 @@ def test_public_search_groups_two_published_zims_and_hides_unpublished(app, monk
     monkeypatch.setattr(zim_catalog, "acknowledged_reader_books", acknowledged)
     monkeypatch.setattr(search, "KIWIX_ADAPTER", search.Adapter(search.KIWIX_CAPABILITY, adapter))
     page = request("/search?q=water")
-    assert f'href="/zim/content/{legacy}/water"' in page
-    assert f'href="/zim/content/{second}/water"' in page
+    assert f'href="/zim/viewer#{legacy}/water"' in page
+    assert f'href="/zim/viewer#{second}/water"' in page
+    progressive = request(f"/search?q=water&mode=source&source={SID}")
+    assert progressive["results"][0]["href"] == f"/zim/viewer#{legacy}/water"
     publication.save("second-book", False)
     assert "Emergency reference article" not in request("/search?q=water")
 
