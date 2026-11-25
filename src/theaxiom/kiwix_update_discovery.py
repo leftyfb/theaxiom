@@ -146,6 +146,7 @@ def check_kiwix_update(installed: dict, *, fetch=None) -> dict:
         metadata = kiwix_opds.parse_metalink(
             raw_metalink, expected_filename=name,
             preferred_host=urlsplit(installed["source_url"]).hostname,
+            catalog_metalink_url=link,
         )
         stage = "publisher candidate identity comparison"
         update_diagnostics.mark("edition_comparison")

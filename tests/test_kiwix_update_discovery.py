@@ -350,7 +350,7 @@ def test_discovery_accepts_one_same_publisher_mirror_in_multi_mirror_metalink():
     assert [kind for kind, _ in calls] == ["catalog", "metalink"]
 
 
-def test_discovery_never_uses_untrusted_alternate_mirror_when_origin_missing():
+def test_discovery_uses_same_host_opds_url_when_metalink_lists_only_mirrors():
     calls = []
     doc = metalink("2026-11").replace(
         ("https://download.kiwix.org/zim/wikipedia/" + FAMILY + "_2026-11.zim").encode(),
@@ -358,6 +358,14 @@ def test_discovery_never_uses_untrusted_alternate_mirror_when_origin_missing():
     )
     result = discovery.check_kiwix_update(
         INSTALLED, fetch=fetcher(feed(atom("2026-11")), doc, calls))
+    assert result["state"] == "update_available"
+    assert result["candidate_url"] == ROOT + FAMILY + "_2026-11.zim"
+    assert result["candidate_sha256"] == "b" * 64
+    assert result["candidate_bytes"] == 123456
+
+    alternate = atom("2026-11").replace("download.kiwix.org", "lb.download.kiwix.org")
+    result = discovery.check_kiwix_update(
+        INSTALLED, fetch=fetcher(feed(alternate), doc, []))
     assert result["state"] == "unable_to_determine"
 
 

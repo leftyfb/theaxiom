@@ -6,6 +6,7 @@ allowlisted, TLS-verified, rate-limited transport before trusting its input.
 """
 from __future__ import annotations
 
+import re
 from urllib.parse import urlsplit
 import xml.etree.ElementTree as ET
 
@@ -97,7 +98,6 @@ MAX_INSPECTION_BYTES = 4 * 1024 * 1024  # Some official Metalinks list tens of t
 
 
 def _metalink_file(raw, expected_filename, cap):
-    import re
     if (not isinstance(expected_filename, str)
             or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9._-]{1,240}\.zim", expected_filename)
             or ".." in expected_filename):
@@ -144,6 +144,7 @@ def inspect_metalink(raw, *, expected_filename, publisher_url=None):
 
 def parse_metalink(
     raw: bytes, *, expected_filename: str, preferred_host: str | None = None,
+    catalog_metalink_url: str | None = None,
 ) -> dict[str, object]:
     """Validate a known Metalink4 file digest and HTTPS mirror without I/O."""
     if preferred_host is not None and preferred_host not in DOWNLOAD_HOSTS:
@@ -165,12 +166,21 @@ def parse_metalink(
         except ValueError:
             continue
         urls.append(href)
-    # The installed and verified job supplies the preferred publisher host.
-    # Reject ambiguity within that host; never silently select an alternate.
+    # Use an explicit same-host URL when present. A trusted OPDS acquisition
+    # link can supply the canonical URL when MirrorBrain lists only mirrors.
     approved = sorted(set(
         url for url in urls
         if preferred_host is None or urlsplit(url).hostname == preferred_host
     ))
+    if not approved and preferred_host and catalog_metalink_url:
+        location = urlsplit(catalog_metalink_url)
+        if (location.scheme == "https" and location.hostname == preferred_host
+                and location.netloc in (preferred_host, preferred_host + ":443")
+                and not location.query and not location.fragment
+                and re.fullmatch(r"/zim/[a-zA-Z0-9._/-]+\.zim\.meta4", location.path)
+                and not any(part in {".", "..", ""} for part in location.path[1:].split("/"))
+                and location.path.rsplit("/", 1)[-1] == expected_filename + ".meta4"):
+            approved.append(location._replace(path=location.path.removesuffix(".meta4")).geturl())
     if len(approved) != 1:
         raise ValueError("No unique same-publisher ZIM URL in Metalink")
     return {
@@ -192,7 +202,6 @@ def resolve_catalog_candidate(
     to the exact OPDS acquisition link before calling this function. This is
     a conservative identity check, not an update permission.
     """
-    import re
     if (not isinstance(entry, dict) or not isinstance(metalink, dict)
             or not isinstance(installed, dict)
             or entry.get("acquisition_kind") != "metalink"
@@ -207,7 +216,7 @@ def resolve_catalog_candidate(
             or not location.path.endswith(".zim.meta4")
             or location.query or location.fragment):
         raise ValueError("Invalid OPDS acquisition link")
-    filename = location.path.rsplit("/", 1)[-1][:-6]  # remove .meta4, never synthesize a URL
+    filename = location.path.rsplit("/", 1)[-1][:-6]  # exact filename expected from the catalog
     if not isinstance(metalink.get("filename"), str) or metalink["filename"] != filename:
         raise ValueError("OPDS and Metalink file identities disagree")
     family = installed.get("family")
