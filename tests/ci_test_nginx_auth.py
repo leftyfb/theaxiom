@@ -43,6 +43,9 @@ class Archive(BaseHTTPRequestHandler):
         body = ((SITE.parent.parent.parent / "templates" / self.path.lstrip("/")).read_bytes()
                 if self.path in ("/favicon.png","/favicon.ico") else b"archive reached")
         self.send_response(200)
+        if self.path == "/zim/viewer":
+            body = b"<html><body>archive reached</body></html>"
+            self.send_header("Content-Type", "text/html")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -80,6 +83,8 @@ def main():
         # any deployed host path. This runner must never contact Vancouver.
         site = site.replace("/opt/theaxiom/app/deploy/www",
                             str(SITE.parent.parent / "www"))
+        site = site.replace("/opt/theaxiom/app/templates/kiwix-navigation.js",
+                            str(SITE.parents[2] / "templates/kiwix-navigation.js"))
         site = site.replace("include /opt/theaxiom/app/templates/theaxiom-backend.conf;", f"proxy_pass http://127.0.0.1:{content_port};")
         site = site.replace("proxy_pass http://127.0.0.1:8080/internal/publication/zim;",
                             f"proxy_pass http://127.0.0.1:{gate_port}/internal/publication/zim;")
@@ -121,7 +126,10 @@ def main():
                 denied = request(front_port, "/zim/content/other." + "b" * 64 + "/index.html")
                 assert denied[0] == 403, denied
                 assert len(Archive.requests) == calls, "unpublished archive reached upstream"
-                assert request(front_port, "/zim/viewer") == (200, b"archive reached")
+                status, viewer = request(front_port, "/zim/viewer")
+                assert status == 200 and b'<script src="/zim/axiom-navigation.js"></script>' in viewer
+                status, script = request(front_port, "/zim/axiom-navigation.js")
+                assert status == 200 and b"followArticle" in script
                 print("PASS real Nginx icons, publication gate, unpublished denial and reader")
             finally:
                 process.terminate()

@@ -17,6 +17,58 @@ from theaxiom import admin_api, admin_sessions, catalog_store
 from theaxiom.admin_security import PasswordStore, ServerConfig
 
 
+def check_kiwix_article_navigation(page, base):
+    book = "wikibooks." + "a" * 64
+    viewer = base + "/zim/viewer"
+    category = book + "/Category%3ABook%3AKnots"
+    bowline = book + "/Knots/Loop_knots/Bowline"
+    basic = book + "/Category%3ABook%3AKnots/Basic_knots"
+    content = base + "/zim/content/"
+    script = Path(__file__).resolve().parents[1] / "templates/kiwix-navigation.js"
+
+    def serve(route):
+        url = route.request.url
+        if url == viewer:
+            body = """<a href="/">Back to library</a><iframe id="content_iframe"></iframe>
+                <script>
+                  const load = () => document.querySelector('iframe').contentWindow.location.replace('/zim/content/' + location.hash.slice(1));
+                  window.addEventListener('hashchange', load);
+                  load();
+                </script><script src="/zim/axiom-navigation.js"></script>"""
+        elif url == content + category:
+            body = (f'<a href="/zim/content/{bowline}"><span>Bowline</span></a>'
+                    f'<a href="/zim/viewer#{basic}">Basic knots</a>'
+                    '<script>document.addEventListener("click", e => e.preventDefault())</script>')
+        elif url == content + bowline:
+            body = '<h1>Bowline</h1>'
+        elif url == content + basic:
+            body = '<h1>Basic knots</h1>'
+        elif url == base + "/zim/axiom-navigation.js":
+            route.fulfill(content_type="text/javascript", body=script.read_text())
+            return
+        else:
+            route.abort()
+            return
+        route.fulfill(content_type="text/html", body=body)
+
+    page.route("**/zim/**", serve)
+    try:
+        page.goto(viewer + "#" + category)
+        frame = page.frame_locator("#content_iframe")
+        frame.get_by_text("Bowline").click()
+        expect(page).to_have_url(viewer + "#" + bowline)
+        expect(frame.get_by_role("heading", name="Bowline")).to_be_visible()
+        expect(page.get_by_role("link", name="Back to library")).to_be_visible()
+        page.evaluate("history.back()")
+        expect(page).to_have_url(viewer + "#" + category)
+        frame.get_by_role("link", name="Basic knots").focus()
+        page.keyboard.press("Enter")
+        expect(page).to_have_url(viewer + "#" + basic)
+        expect(frame.get_by_role("heading", name="Basic knots")).to_be_visible()
+    finally:
+        page.unroute("**/zim/**", serve)
+
+
 def exercise(browser, base, name, viewport, artifacts):
     context = browser.new_context(viewport=viewport, accept_downloads=True)
     page = context.new_page()
@@ -25,6 +77,7 @@ def exercise(browser, base, name, viewport, artifacts):
     page.on("pageerror", lambda error: errors.append(
         f"{page.url}: {error}\\n{getattr(error, 'stack', '')}"))
     try:
+        check_kiwix_article_navigation(page, base)
         # Test the application through real browser requests, not mock HTML.
         page.goto(base + "/")
         expect(page.get_by_role("link", name="Getting Started")).to_be_visible()
