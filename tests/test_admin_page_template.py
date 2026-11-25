@@ -211,7 +211,11 @@ def test_bulk_group_multi_select_and_replace_controls():
 def test_compact_source_layout_and_checkbox_editor():
     page = render([profile()])
     assert '<section class="source-filters" id="source-filters-panel" aria-label="Filter sources" hidden>' in page
-    assert page.index('id="source-filter-search"') < page.index('id="source-filter-toggle"') < page.index('id="source-selection-bar"') < page.index('id="source-select-mode"') < page.index('id="bulk-selection"') < page.index('id="group-panel"') < page.index('id="source-filters-panel"') < page.index('id="source-cards"')
+    controls = ("source-filter-search", "source-filter-toggle", "source-filters-panel",
+                "source-selection-bar", "source-select-mode", "source-filter-count",
+                "bulk-selection", "group-panel", "source-cards")
+    positions = [page.index(f'id="{control}"') for control in controls]
+    assert positions == sorted(positions)
     assert '<details id="source-editor-groups" hidden>' in page
     assert 'No categories available.' in page
     assert 'Add starter categories and tags' in page

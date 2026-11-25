@@ -137,7 +137,13 @@
     .source-browse-tools input { flex:1 1 12rem; min-width:0; width:20rem; min-height:44px; padding:.55rem .7rem; font:inherit; border:1px solid #aac5b7; border-radius:.4rem; background:white; color:var(--dark); }
     #source-selection-panel { margin:.5rem 0; padding:.65rem .8rem; }
     #source-selection-panel:not(.has-selection) { background:transparent; border-color:transparent; padding:0; }
-    #source-selection-panel .source-selection-bar { padding:.15rem 0; }
+    #source-selection-panel .source-selection-bar { padding:0; margin:0; }
+    #source-selection-panel #source-filter-count { margin-left:auto; }
+    #source-selection-panel #bulk-actions { margin-top:.65rem; }
+    #source-selection-panel #group-panel { margin:.65rem 0 0; padding:.6rem .7rem; }
+    #source-order-feedback:empty { display:none; }
+    .sources-heading { margin-bottom:.75rem; }
+    .source-search-row #source-add { background:var(--dark); color:white; }
     #source-selection-panel .source-actions { margin:0; }
     #source-selection-panel .primary-action { background:var(--dark); color:white; }
     #bulk-actions { align-items:flex-start; }
@@ -531,7 +537,6 @@
       <div class="source-browse-tools">
         <input id="source-filter-search" type="search" aria-label="Search source names" placeholder="Search sources…" maxlength="512">
         <button class="button source-filter-toggle" type="button" id="source-filter-toggle" aria-label="Filter sources" title="Filter sources" aria-controls="source-filters-panel" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg> Filters<span id="source-filter-active" hidden></span></button>
-        <span id="source-filter-count" class="source-note" role="status"></span>
       </div>
     </div>
     <p class="source-note" id="source-refresh-feedback" role="status" hidden>Source status refresh delayed. Showing the last available information.</p>
@@ -658,12 +663,26 @@
 </section>
       <form method="dialog"><button class="button">Close guide</button></form>
     </dialog>
+    <section class="source-filters" id="source-filters-panel" aria-label="Filter sources" hidden>
+      <div class="editor-grid">
+        <div><label for="source-filter-publication">Publication</label><select id="source-filter-publication"><option value="">All</option><option value="published">Published</option><option value="unpublished">Unpublished</option><option value="unknown">Unknown</option></select></div>
+        <div><label for="source-filter-download">Download</label><select id="source-filter-download"><option value="">All</option><option value="downloaded">Downloaded</option><option value="not-downloaded">Not downloaded</option><option value="unknown">Unknown / unverified</option></select></div>
+        <div><label for="source-filter-format">Format</label><select id="source-filter-format"><option value="">All formats</option>{% for source_format in (catalog|default({})).sources|default([])|map(attribute="configuration.format")|unique|sort %}<option value="{{ source_format }}">{{ source_format|upper }}</option>{% endfor %}</select></div>
+        {% for kind,label in [("categories","Category"),("collections","Collection"),("tags","Tag")] %}
+        <div><label for="source-filter-{{ kind }}">{{ label }}</label><select id="source-filter-{{ kind }}"><option value="">All</option>{% for group in groups|selectattr("kind","equalto",kind)|sort(attribute="name") %}<option value="{{ group.group_id }}">{{ group.name }}</option>{% endfor %}</select></div>
+        {% endfor %}
+      </div>
+      <div class="source-actions"><button class="button" type="button" id="source-filter-reset">Clear filters</button></div>
+    </section>
+    <p id="filtered-action-feedback" role="status" hidden></p>
+    <p id="source-order-feedback" role="status"></p>
     <section class="group-panel" id="source-selection-panel" aria-label="Source selection">
       <div class="source-selection-bar" id="source-selection-bar">
         <label id="select-all-label" hidden><input type="checkbox" id="group-select-all" aria-label="Select all visible sources"><span id="select-all-text">Select all</span></label>
         <span id="group-count" class="source-note" aria-live="polite" hidden>0 selected</span>
         <button class="button" type="button" id="source-select-mode" aria-pressed="false">Select</button>
         <button class="button" type="button" id="selection-file-open" hidden>Presets and saved selections</button>
+        <span id="source-filter-count" class="source-note" role="status"></span>
       </div>
       <div id="bulk-selection" hidden>
       <div class="source-actions" id="bulk-actions">
@@ -696,46 +715,33 @@
         </details>
       </div>
       <p id="bulk-queue-feedback" role="status"></p>
-      </div>
-    </section>
-    <details class="group-panel" id="group-panel">
-      <summary>Organize sources · Categories, collections &amp; tags</summary>
-      <p class="source-note">Select source cards to assign groupings. <a href="/admin/groupings">Manage categories, tags and collections separately.</a></p>
-      <div class="editor-grid" id="bulk-group-fields" hidden>
-        <div><label for="group-kind">Grouping type</label><select id="group-kind"><option value="categories">Categories</option><option value="collections">Collections</option><option value="tags">Tags</option></select></div>
-        <div><label for="group-existing">Choose groupings (Ctrl/Command to select multiple)</label><select id="group-existing" multiple size="6">{% for group in groups|sort(attribute="name") %}<option data-kind="{{ group.kind }}" value="{{ group.group_id }}">{{ group.name }}</option>{% endfor %}</select></div>
-        <div class="editor-wide"><label for="group-name">New tag name</label><input id="group-name" maxlength="100" autocomplete="off"></div>
-      </div>
-      <div class="source-actions">
-        <button class="button" type="button" id="group-defaults" hidden>Add predefined categories</button>
-        <button class="button" type="button" id="group-create" hidden>Create group</button>
-        <button class="button" type="button" id="group-rename" hidden>Rename</button>
-        <button class="button" type="button" id="group-delete" hidden>Delete group</button>
-      </div>
-      <div class="source-actions" id="bulk-group-actions" hidden>
-        <button class="button" type="button" id="group-assign">Add groupings</button>
-        <button class="button" type="button" id="group-unassign">Remove groupings</button>
-        <button class="button" type="button" id="group-replace">Replace groupings</button>
-        <button class="button" type="button" id="group-create-assign">Create tag &amp; assign</button>
-      </div>
+        <details class="group-panel" id="group-panel">
+          <summary>Organize sources</summary>
+          <p class="source-note">Select source cards to assign groupings. <a href="/admin/groupings">Manage categories, tags and collections separately.</a></p>
+          <div class="editor-grid" id="bulk-group-fields" hidden>
+            <div><label for="group-kind">Grouping type</label><select id="group-kind"><option value="categories">Categories</option><option value="collections">Collections</option><option value="tags">Tags</option></select></div>
+            <div><label for="group-existing">Choose groupings (Ctrl/Command to select multiple)</label><select id="group-existing" multiple size="6">{% for group in groups|sort(attribute="name") %}<option data-kind="{{ group.kind }}" value="{{ group.group_id }}">{{ group.name }}</option>{% endfor %}</select></div>
+            <div class="editor-wide"><label for="group-name">New tag name</label><input id="group-name" maxlength="100" autocomplete="off"></div>
+          </div>
+          <div class="source-actions">
+            <button class="button" type="button" id="group-defaults" hidden>Add predefined categories</button>
+            <button class="button" type="button" id="group-create" hidden>Create group</button>
+            <button class="button" type="button" id="group-rename" hidden>Rename</button>
+            <button class="button" type="button" id="group-delete" hidden>Delete group</button>
+          </div>
+          <div class="source-actions" id="bulk-group-actions" hidden>
+            <button class="button" type="button" id="group-assign">Add groupings</button>
+            <button class="button" type="button" id="group-unassign">Remove groupings</button>
+            <button class="button" type="button" id="group-replace">Replace groupings</button>
+            <button class="button" type="button" id="group-create-assign">Create tag &amp; assign</button>
+          </div>
 
-      <p id="group-feedback" role="status" aria-live="polite"></p>
-      {% if not groups %}<p class="source-note">No groupings available yet. <a href="/admin/groupings">Add starter categories and tags</a>.</p>{% endif %}
-    </details>
-    <section class="source-filters" id="source-filters-panel" aria-label="Filter sources" hidden>
-      <div class="editor-grid">
-        <div><label for="source-filter-publication">Publication</label><select id="source-filter-publication"><option value="">All</option><option value="published">Published</option><option value="unpublished">Unpublished</option><option value="unknown">Unknown</option></select></div>
-        <div><label for="source-filter-download">Download</label><select id="source-filter-download"><option value="">All</option><option value="downloaded">Downloaded</option><option value="not-downloaded">Not downloaded</option><option value="unknown">Unknown / unverified</option></select></div>
-        <div><label for="source-filter-format">Format</label><select id="source-filter-format"><option value="">All formats</option>{% for source_format in (catalog|default({})).sources|default([])|map(attribute="configuration.format")|unique|sort %}<option value="{{ source_format }}">{{ source_format|upper }}</option>{% endfor %}</select></div>
-        {% for kind,label in [("categories","Category"),("collections","Collection"),("tags","Tag")] %}
-        <div><label for="source-filter-{{ kind }}">{{ label }}</label><select id="source-filter-{{ kind }}"><option value="">All</option>{% for group in groups|selectattr("kind","equalto",kind)|sort(attribute="name") %}<option value="{{ group.group_id }}">{{ group.name }}</option>{% endfor %}</select></div>
-        {% endfor %}
+          <p id="group-feedback" role="status" aria-live="polite"></p>
+          {% if not groups %}<p class="source-note">No groupings available yet. <a href="/admin/groupings">Add starter categories and tags</a>.</p>{% endif %}
+        </details>
       </div>
-      <div class="source-actions"><button class="button" type="button" id="source-filter-reset">Clear filters</button></div>
     </section>
     <p id="source-filter-empty" class="empty" hidden>No sources match the selected filters.</p>
-    <p id="filtered-action-feedback" role="status" hidden></p>
-    <p id="source-order-feedback" role="status"></p>
     <div id="source-cards">
     {% for source in (catalog|default({})).sources|default([]) %}
       {% set pub = source.publication %}

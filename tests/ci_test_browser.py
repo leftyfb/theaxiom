@@ -247,6 +247,12 @@ def exercise(browser, base, name, viewport, artifacts):
         expect(filter_toggle).to_be_focused()
         page.keyboard.press("Enter")
         expect(page.locator("#source-filters-panel")).to_be_visible()
+        filters = page.locator("#source-filters-panel")
+        selection_bar = page.locator("#source-selection-bar")
+        first_source = page.locator(".source-card").first
+        assert filters.bounding_box()["y"] < selection_bar.bounding_box()["y"] < first_source.bounding_box()["y"]
+        expect(selection_bar.locator("#source-filter-count")).to_be_visible()
+        expect(page.locator("#group-panel")).to_be_hidden()
         expect(page.locator("#source-filter-toggle")).to_have_attribute("aria-expanded", "true")
         expect(page.locator("#source-filter-search")).to_be_visible()
         filter_toggle.focus()
