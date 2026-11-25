@@ -45,6 +45,8 @@
     .source-symbol img { width: 2rem; height: 2rem; object-fit: contain; vertical-align: middle; }
     .source-symbol { background: var(--accent); border-radius: .6rem; padding: .65rem; font-weight: 800; }
     .source-subtitle, .source-note { color: var(--muted); margin: .35rem 0; }
+    [data-zim-replacement-status]:empty { display:none; }
+    [data-zim-replacement="activate"] { background:var(--dark); color:white; }
     .source-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .75rem; }
     .button:disabled { opacity: .55; cursor: not-allowed; }
     .source-card progress { width: 100%; accent-color: var(--green); height: .9rem; }
@@ -788,6 +790,9 @@
           {% endif %}
         </p>
         <p class="source-note" data-field="discovery-evidence" role="status" aria-live="polite"></p>
+        {% if source.zim_download %}
+        <p class="source-note" data-zim-replacement-status role="status" aria-live="polite"></p>
+        {% endif %}
         <div class="source-actions" aria-label="Source actions">
           {# Legacy pinned-action placeholders cannot execute and must not
              masquerade as Download/Re-download/Update controls. #}
@@ -811,7 +816,6 @@
           <button class="button" type="button" data-zim-replacement="activate" hidden>Publish update</button>
           <button class="button" type="button" data-zim-replacement="rollback" hidden>Roll back replacement</button>
           <button class="button" type="button" data-zim-replacement="discard" hidden>Discard preparation</button>
-          <p class="source-note" data-zim-replacement-status role="status" aria-live="polite"></p>
           {% endif %}
           {% if source.zim_download %}
           <button class="button" type="button" data-zim-control="pause" hidden>Pause</button>
@@ -2676,8 +2680,18 @@
           const sample = checksumSample(replacement);
           const verification = replacementState === 'verifying' ?
             ' · ' + (sample ? checksumLabel(sample) : 'Checksum percentage unavailable.') : '';
-          replacementStatus.textContent = replacementState ?
-            'Replacement: ' + replacementState + percent + verification + (replacement.error ? ' · ' + replacement.error : '') : '';
+          const replacementLabels = {
+            prepared: 'Update ready to download', downloading: 'Downloading update',
+            verifying: 'Verifying update', cancelling: 'Cancelling update download',
+            verified: 'Update verified and ready to publish', activated: 'Update activated',
+            rolled_back: 'Previous edition restored', failed: 'Update download failed',
+            cancelled: 'Update download cancelled', interrupted: 'Update download interrupted',
+            unavailable: 'Update status unavailable'
+          };
+          const replacementText = replacementState ?
+            (replacementLabels[replacementState] || 'Update status unavailable') + percent +
+            verification + (replacement.error ? ' · ' + replacement.error : '') : '';
+          if (replacementStatus.textContent !== replacementText) replacementStatus.textContent = replacementText;
           for (const button of (card.querySelectorAll?.('[data-zim-replacement]') || [])) {
             const op = button.dataset.zimReplacement;
             button.hidden = op === 'prepare' ? !source?.replacement_available || !!replacement :

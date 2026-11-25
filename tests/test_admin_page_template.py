@@ -429,7 +429,7 @@ def test_zim_replacement_preparation_uses_server_eligibility():
     page = render([profile("replacement", format="zim",
                            source_url="https://example.org/new.zim")])
     assert "!source?.replacement_available || !!replacement" in page
-    assert "Replacement: " in page
+    assert "Update verified and ready to publish" in page
     assert "data-zim-replacement-status" in page
 
 
@@ -487,3 +487,11 @@ def test_preconfigured_source_artwork_and_custom_override():
     wiki["profile"]["icon_png"] = "custom-fixture"
     assert '<img src="data:image/png;base64,custom-fixture" alt="">' in render([wiki])
     assert '🚦' in render([profile("custom-rail", title="railroad signals")])
+
+
+def test_zim_update_status_precedes_the_source_buttons():
+    page = render([profile(format="zim", source_url="https://example.org/fixture.zim")])
+    status = page.index("data-zim-replacement-status role=")
+    actions = page.index('aria-label="Source actions"')
+    publish = page.index('data-zim-replacement="activate" hidden>Publish update')
+    assert status < actions < publish
