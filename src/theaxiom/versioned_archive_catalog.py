@@ -104,3 +104,48 @@ def protomaps_latest(raw, *, version_major=4):
                                      "blake3", family="", extension="pmtiles",
                                      base="https://build.protomaps.com/", compact=True))
     return _latest(candidates)
+
+
+def internet_archive_identity(source_url):
+    """Return the stable item endpoint and edition family for a dated ZIM URL."""
+    url = urlsplit(source_url)
+    match = re.fullmatch(r"/download/([a-zA-Z0-9_-]{1,128})/([a-zA-Z0-9_-]{1,120}?)(20\d{2}-\d{2}-\d{2})([a-z]?)\.zim", url.path)
+    if url.scheme != "https" or url.netloc != "archive.org" or not match or url.query or url.fragment:
+        return None
+    item, family, day, revision = match.groups()
+    try:
+        date.fromisoformat(day)
+    except ValueError:
+        return None
+    return dict(endpoint=f"https://archive.org/metadata/{item}", family=family, edition=day + revision)
+
+
+def fetch_metadata(endpoint):
+    """Bounded HTTPS JSON transfer using the existing pinned transport."""
+    from . import pdf_transport
+    with pdf_transport.open_pdf(endpoint, format_name="zim", limit=MAX_METADATA_BYTES,
+                                total_seconds=25) as stream:
+        blocks = bytearray()
+        while block := stream.read(65536):
+            blocks.extend(block)
+        return bytes(blocks)
+
+
+def check_archive_update(installed, *, fetch=None):
+    unknown = dict(state="unable_to_determine", evidence="Publisher archive metadata could not be verified")
+    try:
+        identity = internet_archive_identity(installed["source_url"])
+        if not identity or installed.get("verified") is not True or not re.fullmatch(r"[a-f0-9]{40}", installed["publisher_sha1"]):
+            return unknown
+        endpoint = identity["endpoint"]
+        latest = internet_archive_latest((fetch or fetch_metadata)(endpoint), endpoint=endpoint, family=identity["family"])
+        common = dict(installed_edition=identity["edition"], candidate_edition=latest["edition"])
+        if latest["edition"] < identity["edition"]:
+            return dict(common, state="older_candidate", evidence="Publisher listed an older edition")
+        if latest["edition"] == identity["edition"]:
+            if latest["digest"] == installed["publisher_sha1"]:
+                return dict(common, state="up_to_date", evidence="Publisher edition and SHA-1 match installed archive")
+            return dict(unknown, evidence="Publisher changed the digest of the same dated edition")
+        return dict(common, state="update_available", evidence="Publisher listed a newer dated archive with SHA-1", candidate_url=latest["source_url"], candidate_bytes=latest["bytes"], candidate_sha1=latest["digest"])
+    except (ValueError, TypeError, KeyError, OSError):
+        return unknown

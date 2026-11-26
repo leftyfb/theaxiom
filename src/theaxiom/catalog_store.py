@@ -369,7 +369,7 @@ class CatalogStore:
             raise CatalogError("invalid source field")
         if key == "title" and not value.strip():
             raise CatalogError("title is required")
-        if key == "search_enabled" and value not in {"yes", "no"}:
+        if key == "search_enabled" and value not in {"", "yes", "no"}:
             raise CatalogError("search_enabled must be yes or no")
         if key == "format" and not ID_RE.fullmatch(value):
             raise CatalogError("invalid source format")

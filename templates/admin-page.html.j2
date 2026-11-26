@@ -695,6 +695,7 @@
             <select id="catalog-update-method" name="update_method">
               <option value="">Automatic by format</option>
               <option value="kiwix">Kiwix OPDS / Metalink (ZIM)</option>
+              <option value="archive">Internet Archive editions (ZIM)</option>
               <option value="head">HTTPS HEAD / ETag (PDF, EPUB)</option>
               <option value="manual">Manual / unsupported</option>
             </select>
@@ -742,6 +743,8 @@
             <div><label for="catalog-edition">Edition / release</label><input id="catalog-edition" name="edition" maxlength="512"></div>
             <div><label for="catalog-language">Language</label><input id="catalog-language" name="language" maxlength="512"></div>
             <div><label for="catalog-size">Expected size in bytes (candidate metadata)</label><input id="catalog-size" name="expected_size_bytes" inputmode="numeric" pattern="[1-9][0-9]{0,19}" maxlength="20"></div>
+            <div><label for="catalog-search-enabled">Include in global search</label><select id="catalog-search-enabled" name="search_enabled"><option value="">Default (enabled)</option><option value="yes">Enabled</option><option value="no">Disabled</option></select></div>
+            <div class="editor-wide"><label for="catalog-publisher-sha1">Publisher SHA-1 (optional ZIM checksum)</label><input id="catalog-publisher-sha1" name="publisher_sha1" pattern="[a-fA-F0-9]{40}" maxlength="40"></div>
             <div class="editor-wide"><label for="catalog-sha256">Expected SHA-256 (candidate metadata)</label><input id="catalog-sha256" name="sha256" pattern="[a-fA-F0-9]{64}" maxlength="64"></div>
             <div class="editor-wide"><label for="catalog-provenance">Provenance / source of metadata</label><textarea id="catalog-provenance" name="provenance" maxlength="512"></textarea></div>
             <div class="editor-wide"><label for="catalog-license">License / rights note</label><input id="catalog-license" name="license" maxlength="512"></div>
@@ -907,7 +910,7 @@
           {% if source.zim_download %}
           <button class="button" type="button" data-review-zim-update
                   {% if not source.update_check or source.update_check.state != "update_available" or not source.update_check.candidate_bytes or (source.replacement and source.replacement.state != "activated") %} hidden{% endif %}
-                  data-update-sha256="{{ source.update_check.candidate_sha256 if source.update_check else '' }}"
+                  data-update-sha256="{{ (source.update_check.candidate_sha256 or source.update_check.candidate_sha1) if source.update_check else '' }}"
                   data-update-bytes="{{ source.update_check.candidate_bytes if source.update_check else '' }}">
             Download update
           </button>
@@ -979,7 +982,7 @@
         <details class="source-technical">
           <summary>Technical details</summary>
           {% if discovery %}
-          <p class="source-note">Update discovery: {{ {'head': 'HTTPS / ETag', 'kiwix': 'Kiwix OPDS / Metalink', 'manual': 'Manual update discovery'}.get(discovery.method, 'Unknown') }} · Periodic checks {{ 'enabled' if discovery.periodic else 'disabled' }}</p>
+          <p class="source-note">Update discovery: {{ {'head': 'HTTPS / ETag', 'kiwix': 'Kiwix OPDS / Metalink', 'archive': 'Internet Archive editions', 'manual': 'Manual update discovery'}.get(discovery.method, 'Unknown') }} · Periodic checks {{ 'enabled' if discovery.periodic else 'disabled' }}</p>
           {% endif %}
           <p class="source-note" data-field="update-evidence">
             {% if source.update_check %}{{ source.update_check.evidence }}{% endif %}
@@ -1837,7 +1840,7 @@
         const method = input('update_method');
         const endpoint = input('update_endpoint');
         for (const option of method.options) {
-          option.disabled = (option.value === 'kiwix' && format.value !== 'zim') ||
+          option.disabled = (['kiwix', 'archive'].includes(option.value) && format.value !== 'zim') ||
             (option.value === 'head' && !['pdf', 'epub'].includes(format.value));
         }
         if (method.selectedOptions[0]?.disabled) method.value = '';
@@ -2987,7 +2990,7 @@
                   'Last successful check ' + new Date(update.last_successful_check_at * 1000).toLocaleString() : '',
                 update.last_known_candidate_edition ? 'Last known candidate ' + update.last_known_candidate_edition : '',
                 update.candidate_edition ? 'Candidate ' + update.candidate_edition : '',
-                update.candidate_sha256 ? 'SHA-256 ' + update.candidate_sha256 : ''
+                update.candidate_sha256 ? 'SHA-256 ' + update.candidate_sha256 : update.candidate_sha1 ? 'SHA-1 ' + update.candidate_sha1 : ''
               ].filter(Boolean).join(' · ') : '';
             }
             const hasUpdate = update?.state === "update_available";
@@ -3013,7 +3016,7 @@
               review.hidden = !hasUpdate || !Number.isSafeInteger(update?.candidate_bytes) ||
                 (!!source?.replacement && source.replacement.state !== 'activated');
               if (!review.hidden) {
-                review.dataset.updateSha256 = update.candidate_sha256 || '';
+                review.dataset.updateSha256 = update.candidate_sha256 || update.candidate_sha1 || '';
                 review.dataset.updateBytes = String(update.candidate_bytes);
               }
             }
@@ -3182,7 +3185,7 @@
           if (!(verified || available || job || rejected.has(sid) || inconclusive || update.state === 'representation_changed')) return [];
           const operation = pending ? null : verified ? 'publish-update' : available ? 'download-update' : null;
           return [{sid, title:source.profile.title, operation, job, replacement, problem:rejected.get(sid),
-            digest: verified ? replacement.sha256 : update.candidate_sha256,
+            digest: verified ? replacement.sha256 : (update.candidate_sha256 || update.candidate_sha1),
             installed: source.installed_edition || 'Unknown',
             edition: verified ? source.configuration.edition : update.candidate_edition,
             bytes: verified ? 0 : update.candidate_bytes,

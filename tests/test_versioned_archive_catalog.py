@@ -45,3 +45,35 @@ def test_bad_metadata_and_mismatched_item_fail_closed():
             endpoint="https://archive.org/metadata/right", family="map-")
     with pytest.raises(ValueError):
         catalog.protomaps_latest(b"x" * (catalog.MAX_METADATA_BYTES + 1))
+
+
+def test_archive_check_distinguishes_matching_newer_and_changed_editions():
+    from theaxiom import update_discovery_config, admin_api
+    url = "https://archive.org/download/example-map/map-2026-06-01.zim"
+    config = dict(format="zim", source_url=url, publisher_sha1="a" * 40)
+    settings = update_discovery_config.settings(config)
+    assert settings == dict(method="archive", endpoint="https://archive.org/metadata/example-map", periodic=True)
+    installed = dict(verified=True, source_url=url, publisher_sha1="a" * 40)
+    def check(name, digest):
+        return catalog.check_archive_update(installed, fetch=lambda endpoint: encoded(dict(
+            metadata=dict(identifier="example-map"), files=[dict(name=name, size="12345", sha1=digest, source="original")])))
+    assert check("map-2026-06-01.zim", "a" * 40)["state"] == "up_to_date"
+    assert check("map-2026-06-01.zim", "b" * 40)["state"] == "unable_to_determine"
+    update = check("map-2026-07-01.zim", "b" * 40)
+    assert update["state"] == "update_available"
+    assert admin_api._reviewed_update_fields(update, "b" * 40)["publisher_sha1"] == "b" * 40
+    assert admin_api._reviewed_update_fields(update, "b" * 40)["sha256"] == ""
+    with pytest.raises(ValueError):
+        admin_api._reviewed_update_fields(update, "c" * 40)
+
+
+def test_official_streetzim_seed_is_configured_without_extra_map_sources(tmp_path):
+    from theaxiom import catalog_store
+    records = catalog_store.CatalogStore(tmp_path / "catalog.json").get()["sources"]
+    record = next(record for record in records if record["source_id"] == "openstreetmap")
+    assert record["profile"]["title"] == "OpenStreetMap — United States"
+    config = record["configuration"]
+    assert config["format"] == "zim" and config["update_method"] == "archive"
+    assert config["search_enabled"] == "no"
+    assert config["expected_size_bytes"] == "34883793295"
+    assert "noncommercial" in config["license"]

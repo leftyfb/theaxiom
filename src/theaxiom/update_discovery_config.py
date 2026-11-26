@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from hashlib import sha256
 from urllib.parse import urlsplit
 
-from . import kiwix_metadata_transport as kiwix, kiwix_opds, pdf_source, pdf_transport
+from . import kiwix_metadata_transport as kiwix, kiwix_opds, pdf_source, pdf_transport, versioned_archive_catalog as archives
 
 from .catalog_store import DISCOVERY_FIELDS as FIELDS
 OPDS = f"https://{kiwix.CATALOG_HOST}{kiwix.CATALOG_PATH}"
@@ -15,11 +15,14 @@ def settings(config):
     method = config.get("update_method") or "auto"
     endpoint = config.get("update_endpoint", "")
     periodic = config.get("update_periodic", "")
-    if method not in {"auto", "kiwix", "head", "manual"} or periodic not in {"", "yes", "no"}:
+    archive = archives.internet_archive_identity(download) if isinstance(download, str) else None
+    if method not in {"auto", "kiwix", "head", "archive", "manual"} or periodic not in {"", "yes", "no"}:
         raise ValueError("Invalid update discovery settings")
     if method == "auto":
         if kind == "zim" and (not download or urlsplit(download).hostname in kiwix_opds.DOWNLOAD_HOSTS):
             resolved = "kiwix"
+        elif kind == "zim" and archive:
+            resolved = "archive"
         elif kind in {"pdf", "epub"} and pdf_source.valid_source_url(endpoint or download):
             resolved = "head"
         else:
@@ -33,6 +36,10 @@ def settings(config):
         if endpoint and endpoint != OPDS:
             raise ValueError("Select the approved Kiwix OPDS catalog")
         endpoint = OPDS
+    elif resolved == "archive":
+        if kind != "zim" or not archive or (endpoint and endpoint != archive["endpoint"]):
+            raise ValueError("Archive discovery requires the matching dated Internet Archive item")
+        endpoint = archive["endpoint"]
     elif resolved == "head":
         endpoint = endpoint or download
         if not pdf_source.valid_source_url(endpoint):
@@ -60,6 +67,12 @@ def probe_endpoint(selected):
             raw = kiwix.fetch_metadata(endpoint, kind="catalog")
             kiwix_opds.parse_acquisition_feed(raw)
             return dict(result, state="reachable", evidence="Approved Kiwix OPDS catalog returned valid metadata")
+        if method == "archive":
+            import json
+            metadata = json.loads(archives.fetch_metadata(endpoint))
+            if metadata["metadata"]["identifier"] != endpoint.rsplit("/", 1)[-1] or not isinstance(metadata["files"], list):
+                raise ValueError("Archive metadata identity mismatch")
+            return dict(result, state="reachable", evidence="Internet Archive item returned valid metadata")
         if method == "head":
             response = pdf_transport.probe_document_metadata(endpoint)
             if not response["reachable"]:
@@ -67,7 +80,7 @@ def probe_endpoint(selected):
             evidence = ("HTTPS HEAD returned a strong ETag" if response["etag"]
                         else "HTTPS HEAD succeeded without a strong ETag")
             return dict(result, state="reachable", evidence=evidence)
-    except (ValueError, OSError):
+    except (ValueError, OSError, KeyError, TypeError):
         return dict(result, state="failed",
                     evidence="Endpoint failed HTTPS, public address, response, or timeout checks")
     return dict(result, state="unsupported", evidence="Manual discovery has no metadata endpoint")

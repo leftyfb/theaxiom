@@ -48,7 +48,7 @@ def _validated(source_id: str, installed_sha256: str, checked_at: float, result:
     if type(checked_at) not in (int, float) or not 0 < checked_at < 4102444800:
         raise ValueError("Invalid update-check timestamp")
     allowed = {"state", "evidence", "installed_edition", "candidate_edition",
-               "candidate_url", "candidate_sha256", "candidate_bytes"}
+               "candidate_url", "candidate_sha256", "candidate_sha1", "candidate_bytes"}
     if set(result) - allowed:
         raise ValueError("Unexpected update-check fields")
     for field, value in result.items():
@@ -59,7 +59,10 @@ def _validated(source_id: str, installed_sha256: str, checked_at: float, result:
         if not isinstance(value, str) or len(value) > 2048 or any(ord(c) < 32 for c in value):
             raise ValueError("Invalid update-check value")
     if result["state"] == "update_available":
-        if not _digest(result.get("candidate_sha256")):
+        sha1 = result.get("candidate_sha1")
+        if (("candidate_sha256" in result) == ("candidate_sha1" in result)
+                or not (_digest(result.get("candidate_sha256"))
+                        or isinstance(sha1, str) and re.fullmatch(r"[a-f0-9]{40}", sha1))):
             raise ValueError("Update requires a candidate digest")
         if (not isinstance(result.get("candidate_url"), str)
                 or not result["candidate_url"].startswith("https://")):

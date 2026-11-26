@@ -13,7 +13,7 @@ import time
 import xml.etree.ElementTree as ET
 from urllib.parse import urlsplit
 
-from . import freshness_probe, kiwix_metadata_transport, kiwix_opds, update_diagnostics
+from . import freshness_probe, kiwix_metadata_transport, kiwix_opds, update_diagnostics, versioned_archive_catalog as archives
 
 CATALOG_URL = "https://opds.library.kiwix.org/catalog/v2/entries"
 CHECK_LOCK = threading.Lock()
@@ -54,6 +54,8 @@ def check_kiwix_update(installed: dict, *, fetch=None) -> dict:
     never built from the catalog or a user-edited source card. Only the
     transport's pinned TLS, checked DNS and allowlisted endpoints are trusted.
     """
+    if isinstance(installed, dict) and installed.get("publisher") == "archive":
+        return archives.check_archive_update(installed, fetch=fetch)
     stage = "installed identity validation"
     if not isinstance(installed, dict) or installed.get("verified") is not True:
         return dict(UNKNOWN, evidence="installed identity is not independently verified")
@@ -189,6 +191,10 @@ def installed_identity_from_job(job: dict, artifact: dict) -> dict | None:
     url = config.get("source_url")
     if not isinstance(url, str):
         return None
+    archive = archives.internet_archive_identity(url)
+    if archive and re.fullmatch(r"[a-f0-9]{40}", config.get("publisher_sha1", "")):
+        return dict(archive, verified=True, sha256=digest, source_url=url, publisher="archive",
+                    publisher_sha1=config["publisher_sha1"])
     try:
         parts = urlsplit(url)
         if (parts.scheme != "https" or parts.hostname not in kiwix_opds.DOWNLOAD_HOSTS

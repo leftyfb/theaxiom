@@ -431,6 +431,18 @@ def _batch_available(settings, formats):
     return max(0, sample["free_bytes"] - settings["minimum_free_bytes"])
 
 
+def _reviewed_update_fields(update, reviewed_digest):
+    """Resolve a reviewed publisher digest to its actual algorithm."""
+    if (update.get("state") != "update_available" or not update.get("candidate_bytes")
+            or (update.get("candidate_sha256") or update.get("candidate_sha1")) != reviewed_digest):
+        raise ValueError("Update evidence changed; check for updates again")
+    fields = {"source_url": update["candidate_url"], "sha256": update.get("candidate_sha256", ""),
+              "expected_size_bytes": str(update["candidate_bytes"]), "edition": update["candidate_edition"]}
+    if update.get("candidate_sha1"):
+        fields["publisher_sha1"] = update["candidate_sha1"]
+    return fields
+
+
 def _publisher_update_job(record, reviewed_digest, operation):
     sid = record["source_id"]
     config = record["configuration"]
@@ -444,14 +456,10 @@ def _publisher_update_job(record, reviewed_digest, operation):
         payload = config
     else:
         catalog_store.CatalogStore._validate_id(sid + "-candidate")
-        if update_discovery_config.settings(config)["method"] != "kiwix":
-            raise ValueError("Source does not use Kiwix update discovery")
+        if update_discovery_config.settings(config)["method"] not in {"kiwix", "archive"}:
+            raise ValueError("Source does not use a versioned archive update method")
         update = kiwix_update_discovery.cached_checked_source(sid)
-        if (update.get("state") != "update_available" or update.get("candidate_sha256") != reviewed_digest
-                or not update.get("candidate_bytes")):
-            raise ValueError("Update evidence changed; check for updates again")
-        fields = {"source_url": update["candidate_url"], "sha256": reviewed_digest,
-                  "expected_size_bytes": str(update["candidate_bytes"]), "edition": update["candidate_edition"]}
+        fields = _reviewed_update_fields(update, reviewed_digest)
         if current and current["state"] != "activated":
             raise ValueError("Resolve the existing replacement on its source card")
         live = zim_jobs.read(sid)
@@ -1062,7 +1070,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 or not self._valid_revision(data["revision"])
                 or not isinstance(selection, dict) or not 1 <= len(selection) <= catalog_store.MAX_ENTRIES
                 or any(not catalog_store.ID_RE.fullmatch(sid) or not isinstance(digest, str)
-                       or not re.fullmatch(r"[a-f0-9]{64}", digest) for sid, digest in selection.items())):
+                       or not re.fullmatch(r"[a-f0-9]{40}|[a-f0-9]{64}", digest) for sid, digest in selection.items())):
             self._send_json(400, {"error": "Invalid update selection"})
             return
         rejected = {}
@@ -2415,6 +2423,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     update_check_store.require_recheck(sid)
                     fields = {key: live["configuration"][key] for key in
                               ("source_url", "sha256", "expected_size_bytes")}
+                    if "publisher_sha1" in live["configuration"] or "publisher_sha1" in record["configuration"]:
+                        fields["publisher_sha1"] = live["configuration"].get("publisher_sha1", "")
                     installed = kiwix_update_discovery.installed_identity_from_job(live, live["artifact"])
                     if installed:
                         fields["edition"] = installed["edition"]
@@ -2443,7 +2453,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         if (set(data) != {"action", "source_id", "revision", "candidate_sha256"}
                 or not isinstance(sid, str) or not catalog_store.ID_RE.fullmatch(sid)
                 or not self._valid_revision(revision) or not isinstance(digest, str)
-                or not re.fullmatch(r"[a-f0-9]{64}", digest)):
+                or not re.fullmatch(r"[a-f0-9]{40}|[a-f0-9]{64}", digest)):
             self._send_json(400, {"error": "Invalid ZIM update request"})
             return
         with publication.LOCK:
@@ -2455,18 +2465,10 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 if not record or not self._zim_record(record):
                     raise ValueError("Source does not support ZIM updates")
                 config = record["configuration"]
-                if update_discovery_config.settings(config)["method"] != "kiwix":
-                    raise ValueError("Source does not use Kiwix update discovery")
+                if update_discovery_config.settings(config)["method"] not in {"kiwix", "archive"}:
+                    raise ValueError("Source does not use a versioned archive update method")
                 update = kiwix_update_discovery.cached_checked_source(sid)
-                if (update["state"] != "update_available"
-                        or update.get("candidate_sha256") != digest or not update.get("candidate_bytes")):
-                    raise ValueError("Update evidence changed. Check for updates again.")
-                fields = {
-                    "source_url": update["candidate_url"],
-                    "sha256": digest,
-                    "expected_size_bytes": str(update["candidate_bytes"]),
-                    "edition": update["candidate_edition"],
-                }
+                fields = _reviewed_update_fields(update, digest)
                 replacement_config = config | fields
                 current = zim_jobs.candidate_status(sid)
                 if current and current["state"] != "activated":
@@ -2621,7 +2623,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             if record:
                 config = record["configuration"]
                 proposed = config | fields
-                if any(proposed.get(k) != config.get(k) for k in guarded_fields):
+                if any(proposed.get(k, "") != config.get(k, "") for k in guarded_fields):
                     raise catalog_store.RevisionConflict("unpublish source before changing artifact configuration")
 
     def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
