@@ -246,7 +246,7 @@ def _public_zim_replacement(candidate):
     if candidate is None:
         return None
     result = {key: candidate[key] for key in (
-        "state", "downloaded_bytes", "expected_bytes", "error"
+        "state", "downloaded_bytes", "expected_bytes", "error", "automatic_retry_count", "retry_delay_seconds"
     ) if key in candidate}
     if candidate["state"] in {"verified", "rolled_back"}:
         result["sha256"] = candidate["artifact"].get("sha256")
@@ -349,6 +349,10 @@ def _preview_document_acquisition(configuration, *, byte_limit):
     return estimate
 
 
+_DOCUMENT_RETRIES = {}
+_DOCUMENT_RETRIES_LOCK = threading.Lock()
+
+
 def _acquire_document(sid, record, config, revision, is_epub, fields, *, adding=False,
                       auto_title=False, stop=None):
     """Acquire and commit a document using the caller's publication lock."""
@@ -359,19 +363,39 @@ def _acquire_document(sid, record, config, revision, is_epub, fields, *, adding=
         raise ValueError("A direct HTTPS PDF URL is required")
     size = config.get("expected_size_bytes") or None
     digest = config.get("sha256") or None
-    extracted = {}
-    installed_etag = None
     if stopping():
         raise acquisition_queue.Cancelled()
-    if is_epub:
-        with pdf_transport.open_pdf(url, format_name="epub") as stream:
-            observed, extracted = epub_source.install_stream(sid, stream,
-                expected_size=int(size) if size else None, expected_sha256=digest, **stop_options)
-            installed_etag = getattr(stream, "etag", None)
-    else:
-        observed, installed_etag = pdf_transport.download(
+    settings = storage_settings.load_settings()
+
+    def transfer():
+        with _DOCUMENT_RETRIES_LOCK:
+            if sid in _DOCUMENT_RETRIES:
+                _DOCUMENT_RETRIES[sid]["state"] = "downloading"
+                _DOCUMENT_RETRIES[sid].pop("retry_delay_seconds", None)
+        if storage_settings.load_settings() != settings:
+            raise ValueError("Document storage settings changed during acquisition")
+        if is_epub:
+            with pdf_transport.open_pdf(url, format_name="epub") as stream:
+                observed, extracted = epub_source.install_stream(sid, stream,
+                    expected_size=int(size) if size else None, expected_sha256=digest, **stop_options)
+                return observed, extracted, getattr(stream, "etag", None)
+        observed, etag = pdf_transport.download(
             sid, url, expected_size=int(size) if size else None,
             expected_sha256=digest, capture_validator=True, **stop_options)
+        return observed, {}, etag
+
+    def on_retry(count, delay, _error):
+        with _DOCUMENT_RETRIES_LOCK:
+            _DOCUMENT_RETRIES[sid] = dict(state="retrying", automatic_retry_count=count,
+                                          retry_delay_seconds=delay)
+
+    try:
+        observed, extracted, installed_etag = pdf_transport.run_with_download_retries(
+            transfer, stopped=stop, on_retry=on_retry)
+    finally:
+        with _DOCUMENT_RETRIES_LOCK:
+            _DOCUMENT_RETRIES.pop(sid, None)
+    if not is_epub:
         if not record["profile"].get("language"):
             language = pdf_language.installed_language(observed)
             if language:
@@ -807,7 +831,12 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/acquisition-batch":
             try:
-                self._send_json(200, {"jobs": acquisition_queue.status()})
+                with _DOCUMENT_RETRIES_LOCK:
+                    retries = {sid: dict(status) for sid, status in _DOCUMENT_RETRIES.items()}
+                result = {"jobs": acquisition_queue.status()}
+                if retries:
+                    result["document_retries"] = retries
+                self._send_json(200, result)
             except (OSError, sqlite3.Error):
                 self._send_json(503, {"error": "Batch queue unavailable"})
             return

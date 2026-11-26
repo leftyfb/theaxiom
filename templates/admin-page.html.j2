@@ -1408,7 +1408,7 @@
         try {
           const response = await fetch('/api/acquisition-batch', {cache: 'no-store'});
           if (!response.ok) return;
-          const {jobs} = await response.json();
+          const {jobs, document_retries: documentRetries} = await response.json();
           if (!Array.isArray(jobs)) return;
           if (batchJobIds.length) {
             const watchedJobs = jobs.filter(job => batchJobIds.includes(job.id));
@@ -1425,13 +1425,15 @@
             const badge = card.querySelector('[data-batch-status]');
             const cancel = card.querySelector('[data-batch-cancel]');
             const detail = card.querySelector('[data-batch-feedback]');
+            const retry = documentRetries?.[card.dataset.sourceId];
             const label = job?.stop && job.state === 'running' ? 'Stopping batch download' :
-              queueStates[job?.state] || '';
+              retry ? (retry.state === 'retrying' ? 'Waiting to retry' : 'Downloading') +
+                ' · automatic retry ' + retry.automatic_retry_count + ' of 3' : queueStates[job?.state] || '';
             if (badge.textContent !== label) badge.textContent = label;
             badge.hidden = !label;
             cancel.hidden = !job || !!job.stop || !['queued', 'running'].includes(job.state);
             cancel.dataset.jobId = job?.id || '';
-            const message = detail.dataset.error || (label ? job.detail || '' : '');
+            const message = detail.dataset.error || (label ? job?.detail || '' : '');
             detail.hidden = !message;
             if (detail.textContent !== message) detail.textContent = message;
           }
@@ -2733,7 +2735,8 @@
         const status = installedSource ?
           (Number.isSafeInteger(installedBytes) && installedBytes > 0 ? size(installedBytes) : 'Installed · size unavailable') :
           stale ? 'Stale sample — status unknown' :
-          !job ? 'Waiting for status' : (labels[job.state] || 'Status unknown');
+          !job ? 'Waiting for status' : (labels[job.state] || 'Status unknown') +
+            (job.automatic_retry_count ? ' · automatic retries: ' + job.automatic_retry_count + ' of 3' : '');
         put('status', status);
         field('status').className = 'badge' + (installedSource || verified ?
           ' enabled' : !stale && job?.state === 'failed' ? ' disabled' : '');
@@ -2799,7 +2802,7 @@
           }
           const state = source?.acquisition?.state || '';
           const hasPartial = Number(source?.acquisition?.downloaded_bytes || 0) > 0;
-          const running = ['queued','downloading','verifying','pausing','cancelling','publishing'].includes(state);
+          const running = ['queued','downloading','retrying','verifying','pausing','cancelling','publishing'].includes(state);
           const recoverable = ['paused','interrupted','failed'].includes(state) && hasPartial;
           const expected = Number(source?.acquisition?.expected_bytes);
           const complete = Number.isSafeInteger(expected) && expected >= 96 &&
@@ -2810,19 +2813,19 @@
           const canRestart = ['paused','interrupted','failed','cancelled'].includes(state) && !hasPartial;
           const retries = source?.acquisition?.retry_count ?? (source?.acquisition?.attempt_history || []).filter(a => a.operation === 'retry').length;
           const canRetry = state === 'failed' && retries < 3 &&
-            (!hasPartial || !!(source?.acquisition?.etag || source?.acquisition?.last_modified));
+            (!hasPartial || !!(source?.acquisition?.etag || source?.acquisition?.last_modified || source?.acquisition?.retry_exhausted));
           zim.hidden = !!source?.installed_verified || recoverable || running;
           zim.disabled = card.dataset.zimBlocked === 'true' || card.dataset.zimPosting === 'true' || card.dataset.zimAccepted === 'true';
           for (const control of card.querySelectorAll('[data-zim-control]')) {
             const op = control.dataset.zimControl;
-            control.hidden = op === 'pause' ? !['queued','downloading','verifying'].includes(state) :
+            control.hidden = op === 'pause' ? !['queued','downloading','retrying','verifying'].includes(state) :
               op === 'resume' ? !canResume :
               op === 'revalidate' ? !canRevalidate :
               op === 'restart' ? !canRestart :
               op === 'retry' ? !canRetry :
               op === 'cancel-keep' ? !canCancel : !canCancel;
             control.disabled = card.dataset.zimPosting === 'true' || card.dataset.zimAccepted === 'true' ||
-              (op === 'pause' && !['queued','downloading','verifying'].includes(state));
+              (op === 'pause' && !['queued','downloading','retrying','verifying'].includes(state));
           }
         }
         const deleteButton = card.querySelector('[data-delete-downloads]');
@@ -2852,7 +2855,7 @@
           const verification = replacementState === 'verifying' ?
             ' · ' + (sample ? checksumLabel(sample) : 'Checksum percentage unavailable.') : '';
           const replacementLabels = {
-            prepared: 'Update ready to download', downloading: 'Downloading update',
+            prepared: 'Update ready to download', downloading: 'Downloading update', retrying: 'Waiting to retry update',
             verifying: 'Verifying update', cancelling: 'Cancelling update download',
             verified: 'Update verified and ready to publish', activated: 'Update activated',
             rolled_back: 'Previous edition restored. Update files retained.', failed: 'Update download failed',
@@ -2861,14 +2864,15 @@
           };
           const replacementText = replacementState ?
             (replacementLabels[replacementState] || 'Update status unavailable') + percent +
-            verification + (replacement.error ? ' · ' + replacement.error : '') : '';
+            verification + (replacement.automatic_retry_count ? ' · automatic retries: ' + replacement.automatic_retry_count + ' of 3' : '') +
+            (replacement.error ? ' · ' + replacement.error : '') : '';
           if (replacementStatus.textContent !== replacementText) replacementStatus.textContent = replacementText;
           for (const button of (card.querySelectorAll?.('[data-zim-replacement]') || [])) {
             const op = button.dataset.zimReplacement;
             button.hidden = op === 'prepare' ? !source?.replacement_available || !!replacement ||
               source?.update_check?.state === 'update_available' :
               op === 'download' ? !['prepared','failed','interrupted','cancelled'].includes(replacementState) :
-              op === 'cancel' ? !['downloading','verifying'].includes(replacementState) :
+              op === 'cancel' ? !['downloading','retrying','verifying'].includes(replacementState) :
               op === 'activate' ? replacementState !== 'verified' :
               op === 'rollback' ? replacementState !== 'activated' :
               !['prepared','failed','cancelled','interrupted'].includes(replacementState) ||

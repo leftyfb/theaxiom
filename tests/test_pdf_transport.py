@@ -2,6 +2,7 @@
 from email.message import Message
 from io import BytesIO
 import socket
+import ssl
 
 import pytest
 
@@ -99,8 +100,54 @@ def test_direct_response_and_truncated_body(monkeypatch):
     mock_response(monkeypatch, 200, [("Content-Length", "4")])
     with pdf_transport.open_pdf("https://publisher.org/guide.pdf") as body:
         assert body.read(10) == b"abc"
-        with pytest.raises(ValueError, match="incomplete"):
+        with pytest.raises(pdf_transport.RetryableDownloadError, match="incomplete"):
             body.read(10)
+
+
+@pytest.mark.parametrize("status,retryable", [(408, True), (429, True), (500, True), (599, True), (403, False), (404, False)])
+def test_retryable_http_statuses(monkeypatch, status, retryable):
+    mock_response(monkeypatch, status, [("Retry-After", "900")])
+    with pytest.raises(ValueError) as raised:
+        with pdf_transport.open_pdf("https://publisher.org/guide.pdf"):
+            pytest.fail("HTTP errors must not open a stream")
+    assert isinstance(raised.value, pdf_transport.RetryableDownloadError) == retryable
+    if isinstance(raised.value, pdf_transport.RetryableDownloadError):
+        assert raised.value.retry_after == 30
+
+
+@pytest.mark.parametrize("value,delay", [("2", 2), ("-1", 0), ("1.5", 0),
+    ("Thu, 01 Jan 1970 00:00:17 GMT", 7), ("Thu, 01 Jan 1970 00:00:05 GMT", 0)])
+def test_retry_after(monkeypatch, value, delay):
+    monkeypatch.setattr(pdf_transport.time, "time", lambda: 10)
+    headers = Message()
+    headers["Retry-After"] = value
+    assert pdf_transport._retry_after(headers) == delay
+    headers["Retry-After"] = "10"
+    assert pdf_transport._retry_after(headers) == 0
+
+
+@pytest.mark.parametrize("error,retryable", [(TimeoutError(), True), (ConnectionResetError(), True),
+    (ssl.SSLCertVerificationError(), False), (socket.gaierror(socket.EAI_NONAME, "unknown"), False),
+    (socket.gaierror(socket.EAI_AGAIN, "temporary"), True)])
+def test_transport_network_classification(monkeypatch, error, retryable):
+    def failing_dns(*args, **kwargs):
+        raise error
+    monkeypatch.setattr(socket, "getaddrinfo", failing_dns)
+    with pytest.raises(pdf_transport.DownloadError) as raised:
+        with pdf_transport.open_pdf("https://publisher.org/guide.pdf"):
+            pytest.fail("Expected connection failure")
+    assert isinstance(raised.value, pdf_transport.RetryableDownloadError) == retryable
+
+
+def test_retry_policy_exhaustion_and_final_error():
+    attempts, waits = [], []
+    def fail():
+        attempts.append(len(attempts) + 1)
+        raise pdf_transport.RetryableDownloadError(f"failure {attempts[-1]}")
+    with pytest.raises(pdf_transport.RetryableDownloadError, match="failure 4"):
+        pdf_transport.run_with_download_retries(fail, wait=waits.append)
+    assert attempts == [1, 2, 3, 4]
+    assert waits == [1, 2, 4]
 
 
 def test_redirects_revalidate_each_host_and_close_responses(monkeypatch):

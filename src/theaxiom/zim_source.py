@@ -198,11 +198,11 @@ def discard_partial(source_id):
 def download_resumable(source_id, config, *, offset=0, validator=None,
                        progress=lambda current, total, metadata: None,
                        stopped=lambda: False, promote_lock=None, promoting=lambda artifact, identity: None,
-                       staging_id=None, write_lock=nullcontext):
+                       staging_id=None, write_lock=nullcontext, restart_from=0):
     """Persist source-scoped staged bytes and validate any resumed response before appending.
 
-    Only the caller may delete a partial, on an explicit cancellation. A failed
-    or paused transfer retains it. No archive is published until full validation.
+    An automatic restart without a validator may truncate only its matching,
+    private staging file. No archive is published until full validation.
     """
     url, expected, expected_digest = candidate(config)
     kind = config["format"]
@@ -245,7 +245,7 @@ def download_resumable(source_id, config, *, offset=0, validator=None,
             if (not stat_module.S_ISREG(stat.st_mode) or stat.st_nlink != 1
                     or stat.st_uid != os.geteuid() or stat.st_mode & 0o077):
                 raise ValueError("Unsafe staged ZIM file")
-            if stat.st_size != offset:
+            if stat.st_size != (restart_from or offset):
                 raise ValueError("Saved ZIM offset disagrees with staged file; manual recovery required")
             if expected and offset >= expected:
                 raise ValueError("Staged ZIM offset exceeds expected total")
@@ -271,6 +271,12 @@ def download_resumable(source_id, config, *, offset=0, validator=None,
                     # explicit response check in the transport is authoritative.
                     if validator not in (stream.etag, stream.last_modified):
                         raise ValueError("Publisher validator changed")
+                if restart_from:
+                    with write_lock():
+                        check_mount()
+                        if stopped():
+                            raise TransferStopped()
+                        os.ftruncate(fd, 0)
                 progress(offset, total, {"etag": stream.etag, "last_modified": stream.last_modified})
                 count = offset
                 with os.fdopen(os.dup(fd), "r+b") as target:

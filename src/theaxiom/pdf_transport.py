@@ -1,22 +1,122 @@
 """Bounded, direct HTTPS PDF transport. No proxies; every redirect is independently validated."""
 from contextlib import contextmanager
+from email.utils import parsedate_to_datetime
+import errno
 import http.client
 import ipaddress
 import re
 import socket
 import ssl
 import time
+from typing import Callable, TypeVar
 from urllib.parse import urlsplit, urljoin
 
 from . import pdf_source
+from .acquisition_queue import Cancelled
 
 TIMEOUT = 10
 TOTAL_SECONDS = 25
 MAX_REDIRECTS = 3
+RETRY_DELAYS = (1, 2, 4)
+MAX_RETRY_AFTER = 30
+STRONG_ETAG = re.compile(r'"[\x21\x23-\x7e]{1,200}"')
+T = TypeVar("T")
 
 
 class DownloadError(ValueError):
     """Sanitized remote transport failure, distinct from local storage errors."""
+
+
+class RetryableDownloadError(DownloadError):
+    def __init__(self, message, *, retry_after: float = 0):
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
+def _retry_after(headers):
+    values = headers.get_all("Retry-After", [])
+    if len(values) != 1 or len(values[0]) > 128:
+        return 0
+    value = values[0].strip()
+    if re.fullmatch(r"[0-9]+", value):
+        return min(MAX_RETRY_AFTER, int(value))
+    stamp = _http_date(value)
+    return min(MAX_RETRY_AFTER, max(0, stamp - time.time())) if stamp is not None else 0
+
+
+def _http_date(value):
+    try:
+        date = parsedate_to_datetime(value)
+        return date.timestamp() if date.tzinfo is not None else None
+    except (ValueError, TypeError, OverflowError, OSError):
+        return None
+
+
+def resume_validator(etag, last_modified):
+    if isinstance(etag, str) and STRONG_ETAG.fullmatch(etag):
+        return etag
+    if (isinstance(last_modified, str) and re.fullmatch(r"[\x20-\x7e]{1,200}", last_modified)
+            and _http_date(last_modified) is not None):
+        return last_modified
+    return None
+
+
+def _wait_for_retry(delay, stopped):
+    if stopped is None:
+        time.sleep(delay)
+        return
+    deadline = time.monotonic() + delay
+    while not stopped():
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return
+        time.sleep(min(0.1, remaining))
+    raise Cancelled()
+
+
+def run_with_download_retries(attempt: Callable[[], T], *, stopped=None, on_retry=None, wait=None) -> T:
+    """Run a transfer in the caller's existing job/lock, never retrying publication."""
+    for count in range(len(RETRY_DELAYS) + 1):
+        if stopped is not None and stopped():
+            raise Cancelled()
+        try:
+            return attempt()
+        except RetryableDownloadError as exc:
+            if stopped is not None and stopped():
+                raise Cancelled() from exc
+            if count == len(RETRY_DELAYS):
+                raise
+            delay = max(RETRY_DELAYS[count], min(MAX_RETRY_AFTER, exc.retry_after))
+            if on_retry is not None:
+                on_retry(count + 1, delay, exc)
+            if wait is None:
+                _wait_for_retry(delay, stopped)
+            elif wait(delay):  # threading.Event.wait for ZIM workers
+                raise Cancelled() from exc
+    raise AssertionError("Download retry loop did not terminate")
+
+
+@contextmanager
+def _network_errors():
+    """Classify only exceptions raised by network operations, not by consumers."""
+    try:
+        yield
+    except socket.gaierror as exc:
+        error = RetryableDownloadError if exc.errno == socket.EAI_AGAIN else DownloadError
+        raise error("Publisher DNS lookup failed") from exc
+    except ssl.SSLEOFError as exc:
+        raise RetryableDownloadError("Publisher interrupted the TLS connection") from exc
+    except ssl.SSLError as exc:
+        raise DownloadError("Publisher TLS validation or handshake failed") from exc
+    except (TimeoutError, ConnectionError, http.client.IncompleteRead) as exc:
+        raise RetryableDownloadError("Publisher connection interrupted or timed out") from exc
+    except OSError as exc:
+        error = (RetryableDownloadError if exc.errno in {
+            errno.ETIMEDOUT, errno.ENETDOWN, errno.ENETUNREACH, errno.ENETRESET, errno.EHOSTUNREACH,
+        } else DownloadError)
+        raise error("Publisher network connection failed") from exc
+    except http.client.HTTPException as exc:
+        raise DownloadError("Invalid publisher HTTP response") from exc
 
 
 def _public_addresses(host):
@@ -75,18 +175,16 @@ class _BoundedBody:
         self.limit = pdf_source.MAX_BYTES if limit is None else limit
 
     def read(self, size):
-        _remaining(self.deadline)
         # read1 avoids waiting to fill a large buffer under a slow-drip response.
-        try:
+        with _network_errors():
+            _remaining(self.deadline)
             data = self.response.read1(size)
-        except (OSError, http.client.HTTPException) as exc:
-            raise DownloadError("PDF network response interrupted or timed out") from exc
-        _remaining(self.deadline)
+            _remaining(self.deadline)
         self.count += len(data)
         if self.count > self.limit:
             raise ValueError("PDF exceeds download limit")
-        if not data and self.length is not None and self.count != self.length:
-            raise ValueError("PDF response body is incomplete")
+        if not data and self.length is not None and self.count < self.length:
+            raise RetryableDownloadError("Publisher response body is incomplete")
         return data
 
 
@@ -96,7 +194,7 @@ def open_pdf(url, *, format_name="pdf", limit=None, total_seconds=None, offset=0
         raise ValueError("Unsupported document format")
     if offset and (format_name != "zim" or type(offset) is not int or not 0 < offset < limit
                    or not isinstance(validator, str) or not validator
-                   or "\\r" in validator or "\\n" in validator or len(validator) > 256):
+                   or not re.fullmatch(r"[\x20-\x7e]{1,202}", validator)):
         raise ValueError("Safe ZIM resume requires a validated offset and upstream validator")
     limit = pdf_source.MAX_BYTES if limit is None else limit
     deadline = time.monotonic() + (TOTAL_SECONDS if total_seconds is None else total_seconds)
@@ -109,9 +207,10 @@ def open_pdf(url, *, format_name="pdf", limit=None, total_seconds=None, offset=0
         if key in visited:
             raise ValueError("PDF redirect loop")
         visited.add(key)
-        _remaining(deadline)
-        addresses = _public_addresses(canonical.hostname)
-        _remaining(deadline)
+        with _network_errors():
+            _remaining(deadline)
+            addresses = _public_addresses(canonical.hostname)
+            _remaining(deadline)
         # Each hop has its own DNS validation, numeric socket pin and TLS identity.
         connection = _PinnedHTTPS(canonical.hostname, addresses[0], deadline)
         try:
@@ -123,10 +222,12 @@ def open_pdf(url, *, format_name="pdf", limit=None, total_seconds=None, offset=0
             if offset:
                 headers["Range"] = f"bytes={offset}-"
                 headers["If-Range"] = validator
-            connection.request("GET", canonical.path, headers=headers)
-            response = connection.getresponse()
+            with _network_errors():
+                connection.request("GET", canonical.path, headers=headers)
+                response = connection.getresponse()
             try:
-                _remaining(deadline)
+                with _network_errors():
+                    _remaining(deadline)
                 if response.status in (301, 302, 303, 307, 308):
                     locations = response.headers.get_all("Location", [])
                     if hop == MAX_REDIRECTS:
@@ -137,6 +238,9 @@ def open_pdf(url, *, format_name="pdf", limit=None, total_seconds=None, offset=0
                         raise ValueError("Invalid PDF redirect location")
                     url = urljoin(url, locations[0])
                     continue
+                if response.status in (408, 429) or 500 <= response.status <= 599:
+                    raise RetryableDownloadError(f"Publisher returned HTTP {response.status}",
+                                                 retry_after=_retry_after(response.headers))
                 if offset:
                     if response.status == 200:
                         raise ValueError("Publisher ignored HTTP Range; partial archive preserved")
@@ -162,8 +266,10 @@ def open_pdf(url, *, format_name="pdf", limit=None, total_seconds=None, offset=0
                 modified = response.headers.get_all("Last-Modified", [])
                 if len(etags) > 1 or len(modified) > 1:
                     raise ValueError("Ambiguous publisher validator")
-                etag = etags[0] if etags and re.fullmatch(r'"[\x21\x23-\x7e]{1,200}"', etags[0]) else None
+                etag = etags[0] if etags and STRONG_ETAG.fullmatch(etags[0]) else None
                 last_modified = modified[0] if modified and re.fullmatch(r"[\x20-\x7e]{1,200}", modified[0]) else None
+                if format_name == "zim" and last_modified and _http_date(last_modified) is None:
+                    last_modified = None
                 total_size = length
                 if offset:
                     ranges = response.headers.get_all("Content-Range", [])
@@ -175,6 +281,7 @@ def open_pdf(url, *, format_name="pdf", limit=None, total_seconds=None, offset=0
                         raise ValueError("ZIM Content-Range does not match saved offset")
                     if length is not None and length != last - first + 1:
                         raise ValueError("ZIM Content-Range length mismatch")
+                    length = last - first + 1
                     if validator != etag and validator != last_modified:
                         raise ValueError("Publisher changed ZIM identity since partial download")
                 yield _BoundedBody(response, deadline, length, limit - offset,
@@ -187,18 +294,7 @@ def open_pdf(url, *, format_name="pdf", limit=None, total_seconds=None, offset=0
 
 
 def download(source_id, url, *, expected_size=None, expected_sha256=None, capture_validator=False, stop=None):
-    from contextlib import ExitStack
-    with ExitStack() as stack:
-        try:
-            stream = stack.enter_context(open_pdf(url))
-        except socket.gaierror as exc:
-            raise DownloadError("PDF publisher DNS lookup failed") from exc
-        except ssl.SSLError as exc:
-            raise DownloadError("PDF publisher TLS validation or handshake failed") from exc
-        except TimeoutError as exc:
-            raise DownloadError("PDF publisher connection timed out") from exc
-        except (OSError, http.client.HTTPException) as exc:
-            raise DownloadError("PDF publisher network connection or HTTP response failed") from exc
+    with open_pdf(url) as stream:
         artifact = pdf_source.install_stream(source_id, stream, expected_size=expected_size,
                                              expected_sha256=expected_sha256, **({"stop": stop} if stop else {}))
         # Only expose the validator from the exact successful GET that was

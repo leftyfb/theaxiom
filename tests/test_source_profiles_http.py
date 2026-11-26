@@ -9,7 +9,8 @@ import pytest
 
 from theaxiom import admin_api, catalog_store, publication, source_catalog, storage_settings
 from test_admin_page_template import Parser
-from test_zim_source import disk, fixture_bytes
+from test_zim_source import fixture_bytes
+from test_zim_source import disk as disk
 
 
 SID = "wikipedia-en"
@@ -1135,6 +1136,66 @@ def test_confirmed_batch_reuses_document_acquisition_and_revalidates_capacity(ap
     assert [(job["source_id"], job["state"]) for job in jobs] == [
         ("second", "failed"), ("first", "completed"),
     ]
+
+
+@pytest.mark.parametrize("format_name", ["pdf", "epub"])
+def test_document_batch_retries_inside_the_same_job(app, monkeypatch, format_name):
+    from contextlib import contextmanager
+
+    request, _ = app
+    catalog = request("/api/sources")
+    sid = "retry-fixture"
+    url = f"https://example.org/fixture.{format_name}"
+    catalog = mutate(request, catalog, "add", {
+        "title": "Fixture", "format": format_name, "source_url": url,
+        "expected_size_bytes": "100", "language": "en",
+    }, sid=sid)
+    transport = admin_api.pdf_transport
+    progress = []
+    attempts = []
+    artifact = {"bytes": 100, "sha256": "a" * 64}
+
+    def transfer():
+        attempts.append(None)
+        if len(attempts) == 1:
+            raise transport.RetryableDownloadError("fixture HTTP 503", retry_after=3)
+
+    if format_name == "pdf":
+        def download(*args, **kwargs):
+            transfer()
+            return artifact, None
+        monkeypatch.setattr(transport, "download", download)
+    else:
+        @contextmanager
+        def open_fixture(*args, **kwargs):
+            transfer()
+            yield object()
+        monkeypatch.setattr(transport, "open_pdf", open_fixture)
+        monkeypatch.setattr(admin_api.epub_source, "install_stream", Mock(return_value=(artifact, {})))
+
+    monkeypatch.setattr(admin_api, "_batch_available", Mock(return_value=300))
+    batch = request("/api/acquisition-batch", {
+        "revision": catalog["revision"], "source_ids": [sid], "confirm": True,
+    }, status=202)
+
+    def wait(delay, stopped):
+        progress.append(delay)
+        status = request("/api/acquisition-batch")
+        assert [job["id"] for job in status["jobs"]] == batch["job_ids"]
+        assert status["jobs"][0]["state"] == "running"
+        assert status["document_retries"][sid] == {
+            "state": "retrying", "automatic_retry_count": 1, "retry_delay_seconds": 3,
+        }
+        assert not stopped()
+
+    monkeypatch.setattr(transport, "_wait_for_retry", wait)
+    assert admin_api.acquisition_queue.run_next(admin_api._execute_batch_job, threading.Event())
+    status = request("/api/acquisition-batch")
+    assert [job["id"] for job in status["jobs"]] == batch["job_ids"]
+    assert status["jobs"][0]["state"] == "completed"
+    assert "document_retries" not in status
+    assert source(request("/api/sources"), sid)["configuration"]["sha256"] == artifact["sha256"]
+    assert len(attempts) == 2 and progress == [3]
 
 
 def test_batch_restarts_zim_from_retained_bytes(app, monkeypatch):

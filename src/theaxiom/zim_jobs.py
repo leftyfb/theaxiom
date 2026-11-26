@@ -9,12 +9,13 @@ import tempfile
 import threading
 import time
 
-from . import catalog_store, storage_settings, zim_source, pdf_source
+from . import acquisition_queue, catalog_store, storage_settings, zim_source, pdf_source, pdf_transport
 
 HISTORY_LIMIT = 12
 MAX_RETRIES = 3
 
-ACTIVE = {"queued", "downloading", "verifying", "pausing", "cancelling", "publishing"}
+ACTIVE = {"queued", "downloading", "retrying", "verifying", "pausing", "cancelling", "publishing"}
+CANDIDATE_ACTIVE = {"downloading", "retrying", "verifying", "cancelling"}
 CHECKSUM_FIELDS = ("checksum_bytes", "checksum_pass", "checksum_passes")
 CHECKSUM_SAMPLE_MAX_AGE = 10
 CONTROLS = {}
@@ -76,7 +77,7 @@ def read_candidate(sid):
     except (ValueError, TypeError) as exc:
         raise ValueError("Invalid ZIM candidate record") from exc
     if (not isinstance(candidate, dict) or candidate.get("source_id") != sid
-            or candidate.get("state") not in {"prepared", "downloading", "verifying", "cancelling", "interrupted", "cancelled", "failed", "verified", "activated", "rolled_back"}
+            or candidate.get("state") not in CANDIDATE_ACTIVE | {"prepared", "interrupted", "cancelled", "failed", "verified", "activated", "rolled_back"}
             or not isinstance(candidate.get("configuration"), dict)
             or not isinstance(candidate.get("base_artifact"), dict)):
         raise ValueError("Invalid ZIM candidate record")
@@ -99,13 +100,13 @@ def candidate_status(sid):
     acquisition may still be running, so do not mark it interrupted.
     """
     candidate = read_candidate(sid)
-    if not candidate or candidate["state"] not in {"downloading", "verifying", "cancelling"}:
+    if not candidate or candidate["state"] not in CANDIDATE_ACTIVE:
         return candidate
     with LOCK:
         try:
             with worker_lock():
                 candidate = read_candidate(sid)
-                if candidate and candidate["state"] in {"downloading", "verifying", "cancelling"}:
+                if candidate and candidate["state"] in CANDIDATE_ACTIVE:
                     candidate["state"] = "interrupted"
                     candidate["error"] = "Replacement worker stopped; staged bytes retained for review"
                     _save_candidate(candidate)
@@ -226,21 +227,28 @@ def start_candidate_acquisition(sid, config):
             staging_id = sid + "-candidate"
             catalog_store.CatalogStore._validate_id(staging_id)
             offset = staged_size(staging_id)
-            if offset and not (candidate.get("etag") or candidate.get("last_modified")):
+            validator = pdf_transport.resume_validator(candidate.get("etag"), candidate.get("last_modified")) if offset else None
+            restart_from = 0
+            if offset and not validator and candidate["state"] == "failed" and candidate.get("retry_exhausted") and offset == candidate.get("downloaded_bytes"):
+                restart_from, offset = offset, 0
+            elif offset and not validator:
                 raise ValueError("Cannot safely resume without publisher validator; cancel and discard staging first")
-            validator = (candidate.get("etag") or candidate.get("last_modified")) if offset else None
             if not offset:
                 # A fresh transfer must not inherit validators from an earlier
                 # failed attempt; those headers describe a different response.
                 candidate.pop("etag", None)
                 candidate.pop("last_modified", None)
-            candidate["state"] = "downloading"
+            candidate.update(state="downloading", automatic_retry_count=0)
+            candidate.pop("error", None)
+            candidate.pop("retry_delay_seconds", None)
+            candidate.pop("retry_exhausted", None)
             candidate["downloaded_bytes"] = offset
             signal = threading.Event()
             CANDIDATE_CONTROLS[sid] = signal
             _save_candidate(candidate)
             try:
                 threading.Thread(target=_run_candidate, args=(sid, configuration, guard, signal, offset, validator),
+                                 kwargs={"restart_from": restart_from} if restart_from else {},
                                  daemon=True, name="zim-replacement").start()
             except BaseException:
                 candidate["state"] = "prepared"
@@ -254,29 +262,71 @@ def start_candidate_acquisition(sid, config):
     return {"accepted": True, "source_id": sid, "state": "downloading"}
 
 
-def _run_candidate(sid, configuration, guard, signal, offset, validator):
+def _retry_archive(transfer, staging_id, signal, offset, validator, load, persist, *, restart_from=0) -> dict:
+    """Keep retries within the existing worker lock and matching staging file."""
+    settings = storage_settings.load_settings()
+    retrying = False
+
+    def attempt():
+        if not retrying:
+            return transfer(offset, validator, **({"restart_from": restart_from} if restart_from else {}))
+        with LOCK:
+            if signal.is_set():
+                raise zim_source.TransferStopped()
+            if storage_settings.load_settings() != settings:
+                raise ValueError("ZIM storage settings changed during retry")
+            job = load()
+            retained = staged_size(staging_id)
+            if retained != job["downloaded_bytes"]:
+                raise ValueError("Staged ZIM size changed during retry backoff")
+            stable = pdf_transport.resume_validator(job.get("etag"), job.get("last_modified")) if retained else None
+            job.update(state="downloading", speed_bytes_per_second=0)
+            job.pop("retry_delay_seconds", None)
+            persist(job)
+        return transfer(retained if stable else 0, stable,
+                        **({"restart_from": retained} if retained and not stable else {}))
+
+    def on_retry(count, delay, _error):
+        nonlocal retrying
+        with LOCK:
+            if signal.is_set():
+                raise zim_source.TransferStopped()
+            if storage_settings.load_settings() != settings:
+                raise ValueError("ZIM storage settings changed during retry")
+            job = load()
+            job.update(state="retrying", automatic_retry_count=count, retry_delay_seconds=delay,
+                       downloaded_bytes=staged_size(staging_id), sampled_at=time.time())
+            persist(job)
+            retrying = True
+
+    return pdf_transport.run_with_download_retries(attempt, stopped=signal.is_set,
+                                                    on_retry=on_retry, wait=signal.wait)
+
+
+def _run_candidate(sid, configuration, guard, signal, offset, validator, *, restart_from=0):
     last = 0.0
+
+    def load():
+        candidate = read_candidate(sid)
+        if not candidate or candidate["configuration"] != configuration:
+            raise ValueError("Replacement candidate changed during acquisition")
+        return candidate
 
     def progress(current, total, metadata):
         nonlocal last
         now = time.monotonic()
         with LOCK:
             candidate = read_candidate(sid)
-            if not candidate or candidate["state"] not in {"downloading", "verifying", "cancelling"}:
+            if not candidate or candidate["state"] not in CANDIDATE_ACTIVE:
                 return
-            validator_changed = (
-                (metadata.get("etag") and metadata["etag"] != candidate.get("etag")) or
-                (metadata.get("last_modified") and metadata["last_modified"] != candidate.get("last_modified"))
-            )
+            validator_changed = any(key in metadata and metadata[key] != candidate.get(key)
+                                    for key in ("etag", "last_modified"))
             if now - last < 0.5 and not metadata.get("verifying") and not validator_changed:
                 return
             candidate["downloaded_bytes"] = current
             if total is not None:
                 candidate["expected_bytes"] = total
-            if metadata.get("etag"):
-                candidate["etag"] = metadata["etag"]
-            if metadata.get("last_modified"):
-                candidate["last_modified"] = metadata["last_modified"]
+            _update_validators(candidate, metadata)
             if metadata.get("verifying") and candidate["state"] != "cancelling":
                 # A verification callback must not erase a pending stop request.
                 candidate["state"] = "verifying"
@@ -285,10 +335,16 @@ def _run_candidate(sid, configuration, guard, signal, offset, validator):
             _save_candidate(candidate)
         last = now
 
+    def transfer(start, stable, **kwargs):
+        nonlocal last
+        last = 0.0
+        return zim_source.download_resumable(
+            sid, configuration, offset=start, validator=stable, promote_lock=LOCK,
+            staging_id=sid + "-candidate", progress=progress, stopped=signal.is_set, **kwargs)
+
     try:
-        artifact = zim_source.download_resumable(
-            sid, configuration, offset=offset, validator=validator, promote_lock=LOCK,
-            staging_id=sid + "-candidate", progress=progress, stopped=signal.is_set)
+        artifact = _retry_archive(transfer, sid + "-candidate", signal, offset, validator, load, _save_candidate,
+                                  restart_from=restart_from)
         with LOCK:
             candidate = read_candidate(sid)
             if not candidate or candidate["configuration"] != configuration:
@@ -304,11 +360,12 @@ def _run_candidate(sid, configuration, guard, signal, offset, validator):
             candidate.update(state="verified", artifact=artifact)
             candidate.pop("error", None)
             _save_candidate(candidate)
-    except zim_source.TransferStopped:
+    except (zim_source.TransferStopped, acquisition_queue.Cancelled):
         with LOCK:
             candidate = read_candidate(sid)
             if candidate and candidate["configuration"] == configuration:
                 candidate["state"] = "cancelled"
+                candidate.pop("retry_delay_seconds", None)
                 candidate["error"] = "Replacement download cancelled; staged bytes retained"
                 _save_candidate(candidate)
     except Exception as exc:
@@ -316,6 +373,12 @@ def _run_candidate(sid, configuration, guard, signal, offset, validator):
             candidate = read_candidate(sid)
             if candidate and candidate["configuration"] == configuration:
                 candidate["state"] = "failed"
+                candidate["retry_exhausted"] = isinstance(exc, pdf_transport.RetryableDownloadError)
+                candidate.pop("retry_delay_seconds", None)
+                try:
+                    candidate["downloaded_bytes"] = staged_size(sid + "-candidate")
+                except (OSError, ValueError):
+                    pass
                 candidate["error"] = str(exc)[:512]
                 _save_candidate(candidate)
     finally:
@@ -331,7 +394,7 @@ def cancel_candidate_acquisition(sid, config):
         candidate = read_candidate(sid)
         if not candidate or candidate["configuration"] != configuration:
             raise ValueError("No matching replacement candidate")
-        if candidate["state"] not in {"downloading", "verifying", "cancelling"}:
+        if candidate["state"] not in CANDIDATE_ACTIVE:
             raise ValueError("Replacement download is not running")
         signal = CANDIDATE_CONTROLS.get(sid)
         if signal is None:
@@ -921,12 +984,17 @@ def start(sid, config, *, resume=False, restart=False, retry=False):
                 for entry in old.get("attempt_history", []))) if old else 0)
             if restart and (not old or old["state"] not in {"paused", "failed", "interrupted", "cancelled"}):
                 raise ValueError("Restart requires an existing stopped ZIM job")
-            if resume or (retry and staged_size(sid) > 0):
+            restart_from = 0
+            if resume or (retry and old and old.get("retry_exhausted")) or (retry and staged_size(sid) > 0):
                 if not old or old["state"] not in {"paused", "failed", "interrupted"} or not matches(old, config):
                     raise ValueError("No matching paused ZIM download")
                 offset = staged_size(sid)
-                validator = old.get("etag") or old.get("last_modified")
-                if not offset or not validator:
+                validator = pdf_transport.resume_validator(old.get("etag"), old.get("last_modified")) if offset else None
+                if retry and old.get("retry_exhausted") and offset == old.get("downloaded_bytes") and not validator:
+                    restart_from, offset = offset, 0
+                    old.pop("etag", None)
+                    old.pop("last_modified", None)
+                elif not offset or not validator:
                     raise ValueError("Safe resume requires retained bytes and a publisher validator")
                 if old.get("expected_bytes") and offset >= old["expected_bytes"]:
                     raise ValueError("Invalid resumable offset")
@@ -953,6 +1021,9 @@ def start(sid, config, *, resume=False, restart=False, retry=False):
                 if sm != lm or cap.f_flag & os.ST_RDONLY or cap.f_bavail * cap.f_frsize < reserve + need:
                     raise ValueError("Insufficient writable ZIM storage capacity")
             job.update(state="queued", active=True, detail="", downloaded_bytes=offset, sampled_at=time.time())
+            job.update(automatic_retry_count=0)
+            job.pop("retry_delay_seconds", None)
+            job.pop("retry_exhausted", None)
             _record_attempt(job, started=True)
             if retry:
                 job["attempt_history"][-1]["operation"] = "retry"
@@ -963,6 +1034,7 @@ def start(sid, config, *, resume=False, restart=False, retry=False):
             signal = threading.Event()
             CONTROLS[sid] = (signal, None)
             threading.Thread(target=_run, args=(job, guard, signal, offset, validator),
+                             kwargs={"restart_from": restart_from} if restart_from else {},
                              daemon=True, name="zim-acquisition").start()
         except BaseException:
             guard.__exit__(None, None, None)
@@ -1057,7 +1129,16 @@ def control(sid, config, action):
         raise ValueError("ZIM job cannot be " + action + "d in current state")
 
 
-def _run(job, guard, signal, offset, validator, *, local=False):
+def _update_validators(job, metadata):
+    for key in ("etag", "last_modified"):
+        if key in metadata:
+            if metadata[key]:
+                job[key] = metadata[key]
+            else:
+                job.pop(key, None)
+
+
+def _run(job, guard, signal, offset, validator, *, local=False, restart_from=0):
     sid = job["source_id"]
     last = 0.0
     begun = time.monotonic()
@@ -1069,9 +1150,7 @@ def _run(job, guard, signal, offset, validator, *, local=False):
         # stop. Serialize both writes so a late verification notification
         # cannot replace the durable pausing/cancelling state in the UI.
         with LOCK:
-            for key in ("etag", "last_modified"):
-                if metadata.get(key):
-                    job[key] = metadata[key]
+            _update_validators(job, metadata)
             if total is not None:
                 job["expected_bytes"] = total
             if metadata.get("verifying") and job["state"] not in {"pausing", "cancelling"}:
@@ -1105,19 +1184,25 @@ def _run(job, guard, signal, offset, validator, *, local=False):
                 progress=progress, stopped=signal.is_set,
                 promote_lock=LOCK, promoting=promoting)
         else:
-            artifact = zim_source.download_resumable(
-                sid, job["configuration"], offset=offset,
-                validator=validator, progress=progress, stopped=signal.is_set,
-                promote_lock=LOCK, promoting=promoting, write_lock=_write_lock)
+            def transfer(start, stable, **kwargs):
+                nonlocal offset, begun, last
+                offset, begun, last = start, time.monotonic(), 0.0
+                return zim_source.download_resumable(
+                    sid, job["configuration"], offset=start,
+                    validator=stable, progress=progress, stopped=signal.is_set,
+                    promote_lock=LOCK, promoting=promoting, write_lock=_write_lock, **kwargs)
+            artifact = _retry_archive(transfer, sid, signal, offset, validator, lambda: job, save,
+                                      restart_from=restart_from)
         job.pop("promotion_intent", None)
         job.update(state="completed", active=False, verified=True, artifact=artifact,
                    downloaded_bytes=artifact["bytes"], expected_bytes=artifact["bytes"], sampled_at=time.time())
-    except zim_source.TransferStopped:
+    except (zim_source.TransferStopped, acquisition_queue.Cancelled):
         job.update(state="paused", active=False, verified=False,
                    detail="Download paused; partial retained.", sampled_at=time.time())
     except Exception as exc:
         detail = str(exc)[:240] if isinstance(exc, ValueError) else "ZIM acquisition failed (network or storage I/O)."
         job.update(state="failed", active=False, verified=False, detail=detail, sampled_at=time.time())
+        job["retry_exhausted"] = isinstance(exc, pdf_transport.RetryableDownloadError)
     finally:
         # Serialize the final outcome with control() so a cancellation accepted
         # just as the network fails cannot be overwritten by a stale failure.
@@ -1151,6 +1236,7 @@ def _run(job, guard, signal, offset, validator, *, local=False):
                     except (OSError, ValueError):
                         pass
                 job["retained"] = job["state"] in {"failed", "paused"} and job.get("downloaded_bytes", 0) > 0
+                job.pop("retry_delay_seconds", None)
                 _record_attempt(job)
                 save(job)
             finally:
