@@ -525,7 +525,7 @@ def test_unpinned_sha_verified_fema_can_reach_opds_discovery(monkeypatch, tmp_pa
     assert len(calls) == 1
 
 
-def test_deleted_update_stays_private_until_a_fresh_manual_check(monkeypatch, tmp_path):
+def test_deleted_update_stays_private_until_a_fresh_scheduled_check(monkeypatch, tmp_path):
     from theaxiom import zim_jobs, update_check_store
 
     sid = "wikipedia"
@@ -537,11 +537,10 @@ def test_deleted_update_stays_private_until_a_fresh_manual_check(monkeypatch, tm
     fetch = fetcher(feed(atom("2026-11")), metalink("2026-11"), calls)
     assert discovery.refresh_checked_source(sid, fetch=fetch)["state"] == "update_available"
     saved = update_check_store.record_path(sid).read_bytes()
-    update_check_store.require_manual_recheck(sid)
+    update_check_store.require_recheck(sid)
 
     assert discovery.cached_checked_source(sid) == {
         "state": "unable_to_determine", "evidence": "no current check evidence"}
-    assert discovery.refresh_checked_source(sid, fetch=fetch, manual=False)["state"] == "unable_to_determine"
     assert len(calls) == 2
 
     def offline(*args, **kwargs):
@@ -550,6 +549,10 @@ def test_deleted_update_stays_private_until_a_fresh_manual_check(monkeypatch, tm
     assert discovery.refresh_checked_source(sid, fetch=offline)["state"] == "unable_to_determine"
     assert update_check_store.record_path(sid).read_bytes() == saved
     assert "candidate_edition" not in discovery.cached_checked_source(sid)
-    assert discovery.refresh_checked_source(sid, fetch=fetch)["state"] == "update_available"
+    from theaxiom import kiwix_update_scheduler
+    monkeypatch.setattr(discovery.kiwix_metadata_transport, "fetch_metadata", fetch)
+    assert kiwix_update_scheduler.check_records([
+        {"source_id": sid, "configuration": {"format": "zim", "update_periodic": "yes"}},
+    ]) == [{"source_id": sid, "state": "update_available"}]
     assert len(calls) == 4
     assert discovery.cached_checked_source(sid)["candidate_edition"] == "2026-11"

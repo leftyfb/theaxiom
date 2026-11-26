@@ -80,7 +80,7 @@ def test_url_based_documents_are_checked_but_local_uploads_are_not(monkeypatch):
                         lambda record: (calls.append(("document", record["source_id"])) or
                                         {"state": "representation_changed"}))
     monkeypatch.setattr(kiwix_update_discovery, "refresh_checked_source",
-                        lambda sid, *, manual: (calls.append(("zim", sid)) or
+                        lambda sid: (calls.append(("zim", sid)) or
                                      {"state": "unable_to_determine"}))
     records = [
         {"source_id": "upload-only", "configuration": {"format": "pdf", "source_url": ""}},
@@ -106,8 +106,7 @@ def test_scheduled_zims_use_the_same_managed_checker(monkeypatch):
     records = [{"source_id": sid, "configuration": {"format": "zim"}} for sid in ids]
     calls = []
 
-    def check(source_id, *, manual):
-        assert manual is False
+    def check(source_id):
         calls.append(source_id)
         return {"state": "up_to_date"}
 
