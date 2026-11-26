@@ -404,7 +404,10 @@ def exercise_bulk(browser, base, artifacts, catalog):
         def select(*ids):
             mode = page.locator("#source-select-mode")
             if mode.get_attribute("aria-pressed") != "true":
+                page.get_by_label("More admin tools").click()
                 mode.click()
+            if page.locator("#mobile-actions-open").get_attribute("aria-expanded") != "true":
+                page.locator("#mobile-actions-open").click()
             for sid in ("reader-pdf", "reader-epub", "bulk-ineligible-a", "bulk-ineligible-b"):
                 check = page.locator(f'[data-group-select][value="{sid}"]')
                 if sid in ids:

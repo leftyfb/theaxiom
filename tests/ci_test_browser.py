@@ -5,6 +5,7 @@ Never connects to Vancouver or opens a production archive.
 """
 import json
 import os
+import re
 from pathlib import Path
 import tempfile
 import threading
@@ -226,6 +227,7 @@ def exercise(browser, base, name, viewport, artifacts):
 
         # A real modal and its controls need to be operable at both widths.
         guide_trigger = page.locator("#source-guide-open")
+        page.get_by_label("More admin tools").click()
         guide_trigger.focus()
         expect(guide_trigger).to_be_focused()
         page.keyboard.press("Enter")
@@ -233,14 +235,17 @@ def exercise(browser, base, name, viewport, artifacts):
         page.keyboard.press("Escape")
         expect(page.locator("#source-guide")).to_be_hidden()
         # Opening the guide a second time must work after an Escape dismissal.
+        page.get_by_label("More admin tools").click()
         guide_trigger.focus()
         page.keyboard.press("Enter")
         expect(page.locator("#source-guide")).to_be_visible()
         page.keyboard.press("Escape")
         expect(page.locator("#source-guide")).to_be_hidden()
         # Dismissed guidance must not trap subsequent keyboard navigation.
+        page.get_by_label("More admin tools").click()
         guide_trigger.focus()
         expect(guide_trigger).to_be_focused()
+        page.get_by_label("More admin tools").click()
 
         filter_toggle = page.locator("#source-filter-toggle")
         filter_toggle.focus()
@@ -248,13 +253,12 @@ def exercise(browser, base, name, viewport, artifacts):
         page.keyboard.press("Enter")
         expect(page.locator("#source-filters-panel")).to_be_visible()
         filters = page.locator("#source-filters-panel")
-        selection_bar = page.locator("#source-selection-bar")
         first_source = page.locator(".source-card").first
-        assert filters.bounding_box()["y"] < selection_bar.bounding_box()["y"] < first_source.bounding_box()["y"]
-        expect(selection_bar.locator("#source-filter-count")).to_be_visible()
+        assert filters.bounding_box()["y"] < first_source.bounding_box()["y"]
+        expect(page.locator("#source-filter-count")).to_be_visible()
         expect(page.locator("#group-panel")).to_be_hidden()
         expect(page.locator("#source-filter-toggle")).to_have_attribute("aria-expanded", "true")
-        expect(page.locator("#source-filter-search")).to_be_visible()
+        expect(page.locator("#source-filter-search")).to_be_hidden()
         filter_toggle.focus()
         page.keyboard.press("Enter")
         expect(page.locator("#source-filters-panel")).to_be_hidden()
@@ -289,6 +293,7 @@ def exercise(browser, base, name, viewport, artifacts):
         expect(page.locator(".source-card[data-source-id='" + sid + "']")).to_be_visible(timeout=15000)
 
         search = page.locator("#source-filter-search")
+        page.locator("#mobile-search-toggle").click()
         search.fill("not-a-match-" + name)
         expect(page.locator(".source-card[data-source-id='" + sid + "']")).to_be_hidden()
         # Case-insensitive search and whitespace handling are important for
@@ -299,15 +304,31 @@ def exercise(browser, base, name, viewport, artifacts):
         expect(page.locator(".source-card[data-source-id='" + sid + "']")).to_be_visible()
         search.fill("")
 
+        # The desktop toolbar stays compact, with selected counts and actions
+        # hidden until the operator enters select mode.
+        expect(page.get_by_role("navigation", name="Administration tools")).to_be_visible()
+        expect(page.locator("#mobile-selection")).to_be_hidden()
+        expect(page.locator(".source-order-controls").first).to_be_hidden()
         # Bulk-selection state and keyboard access: no action is executed.
         selection_toggle = page.locator("#source-select-mode")
+        page.get_by_label("More admin tools").click()
         selection_toggle.focus()
         expect(selection_toggle).to_be_focused()
         page.keyboard.press("Enter")
         expect(selection_toggle).to_have_attribute("aria-pressed", "true")
         expect(page.locator("#group-select-all")).to_be_visible()
-        selection_toggle.focus()
-        page.keyboard.press("Enter")
+        expect(page.locator("#group-count")).to_contain_text("0 of ")
+        checks = page.locator("[data-group-select]")
+        total = checks.count()
+        for index in range(3):
+            checks.nth(index).check()
+        expect(page.locator("#group-count")).to_have_text(f"3 of {total} sources selected")
+        expect(page.locator("#source-selection-panel")).to_be_hidden()
+        page.evaluate("window.scrollTo(0, 650)")
+        bar = page.locator("#mobile-selection")
+        toolbar = page.get_by_role("navigation", name="Administration tools")
+        assert abs(bar.bounding_box()["y"] - toolbar.bounding_box()["height"]) < 2
+        page.locator("#mobile-selection-done").click()
         expect(selection_toggle).to_have_attribute("aria-pressed", "false")
         expect(page.locator("#group-select-all")).to_be_hidden()
 
@@ -395,13 +416,15 @@ def exercise(browser, base, name, viewport, artifacts):
 
         # Closed #71: selection checkboxes are opt-in and bulk publication
         # remains gated for the unverified disposable source.
+        page.get_by_label("More admin tools").click()
         page.locator("#source-select-mode").click()
         check = page.locator('[data-group-select][value="' + sid + '"]')
         check.focus()
         expect(check).to_be_focused()
         page.keyboard.press("Space")
         expect(check).to_be_checked()
-        expect(page.locator("#group-count")).to_contain_text("1 selected")
+        expect(page.locator("#group-count")).to_have_text(re.compile(r"^1 of \d+ sources selected$"))
+        page.locator("#mobile-actions-open").click()
         expect(page.locator("#bulk-publish")).to_be_disabled()
         expect(page.locator("#bulk-unpublish")).to_be_disabled()
         page.get_by_role("button", name="Batch download").click()
@@ -510,6 +533,7 @@ def exercise(browser, base, name, viewport, artifacts):
         expect(check).not_to_be_checked()
         expect(page.locator("#bulk-selection")).to_be_hidden()
         expect(page.locator("#bulk-preview-result")).to_be_hidden()
+        page.get_by_label("More admin tools").click()
         page.locator("#source-select-mode").click()
 
         # Closed #3/#76: explicit cancel leaves source intact, confirmed
@@ -630,6 +654,8 @@ def exercise(browser, base, name, viewport, artifacts):
         # Logout must revoke the session and redirect back to sign-in.
         logout = page.locator("#admin-logout")
         if logout.count():
+            if not logout.is_visible():
+                page.get_by_label("More admin tools").click()
             logout.click()
             expect(page).to_have_url(base + "/admin/login")
         else:
@@ -817,7 +843,9 @@ def exercise_source_actions(browser, viewport):
         page.locator("#source-filter-format").select_option("pdf")
         expect(card).to_be_visible()
         page.locator("#source-filter-format").select_option("")
+        page.locator("#mobile-search-toggle").click()
         search.fill("Fixture")
+        page.get_by_label("More admin tools").click()
         page.locator("#source-select-mode").click()
         selected = page.locator('[data-group-select][value="action-target"]')
         selected.check()
@@ -830,7 +858,13 @@ def exercise_source_actions(browser, viewport):
         expect(feedback).to_have_text("PDF downloaded and verified.")
         expect(download).to_have_text("Re-download")
         expect(download).to_be_focused()
-        assert abs(card.evaluate("(node) => node.getBoundingClientRect().top") - top) <= 2
+        after = card.evaluate("(node) => node.getBoundingClientRect().top")
+        # Downloaded sources move to the front. The compact header can put
+        # the new first source above its previous viewport position even
+        # when scroll restoration reaches the top of the document.
+        assert abs(after - top) <= 2 or (
+            page.evaluate("scrollY") == 0 and 0 <= after < top
+        )
 
         page.keyboard.press("Enter")
         expect(feedback).to_have_text("Fixture download failed")
@@ -918,9 +952,9 @@ def exercise_source_order(browser, viewport):
         expect(cards.first).to_have_attribute("data-source-id", "first")
         expect(page.locator(".publication-divider .source-card")).to_have_attribute("data-source-id", "third")
         def open_reorder_tools():
-            if viewport["width"] <= 640:
-                page.get_by_label("More admin tools").click()
-                page.get_by_role("button", name="Reorder published sources").click()
+            expect(page.locator(".source-order-controls").first).to_be_hidden()
+            page.get_by_label("More admin tools").click()
+            page.get_by_role("button", name="Reorder published sources").click()
 
         open_reorder_tools()
         cards.first.locator("summary.source-header").click()
@@ -934,8 +968,7 @@ def exercise_source_order(browser, viewport):
         page.reload()
         expect(cards.first).to_have_attribute("data-source-id", "second")
         open_reorder_tools()
-        if viewport["width"] <= 640:
-            page.locator("#mobile-search-toggle").click()
+        page.locator("#mobile-search-toggle").click()
         page.locator("#source-filter-search").fill("Zulu")
         expect(page.get_by_role("button", name="Move Zulu up")).to_be_disabled()
         page.locator("#source-filter-search").clear()
@@ -1016,7 +1049,7 @@ def exercise_compact_sources(browser, viewport):
         bar = page.locator("#mobile-selection")
         expect(bar.get_by_text("Select all 1")).to_be_visible()
         bar.get_by_role("checkbox").check()
-        expect(bar.get_by_text("1 selected")).to_be_visible()
+        expect(bar.get_by_text("1 of 40 sources selected")).to_be_visible()
         bar.get_by_role("button", name="Actions").click()
         actions = page.get_by_role("dialog", name="Actions")
         expect(actions.get_by_role("button", name="Publish", exact=True)).to_be_disabled()
@@ -1122,8 +1155,7 @@ def exercise_batch_update_journey(browser, viewport):
         page.on("dialog", lambda dialog: dialog.accept())
         page.goto("http://fixture.local/admin/sources")
         action = page.locator("#check-all-updates")
-        if viewport["width"] <= 640:
-            page.get_by_label("More admin tools").click()
+        page.get_by_label("More admin tools").click()
         expect(action).to_be_hidden()
         page.get_by_role("link", name="Review updates").click()
         review = page.locator("#update-review")
@@ -1135,7 +1167,10 @@ def exercise_batch_update_journey(browser, viewport):
         review.get_by_text("Inconclusive publisher checks").click()
         expect(review.get_by_text("No strong ETag was saved", exact=False)).to_be_visible()
         page.get_by_role("link", name="Show all sources").click()
-        expect(page.get_by_text("Updates are available", exact=True)).to_be_visible()
+        if viewport["width"] <= 640:
+            expect(page.get_by_text("Updates are available", exact=True)).to_be_visible()
+        else:
+            expect(page.get_by_role("link", name="Review updates")).to_have_text("2 updates available")
         expect(action).to_be_hidden()
         expect(page.locator("#update-sweep-details")).to_be_hidden()
         page.get_by_role("link", name="Review updates").click()

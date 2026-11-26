@@ -29,7 +29,7 @@
     .badge.disabled { color: #c0392b; background: #fceaea; }
     .empty { padding: 1.5rem; text-align: center; color: var(--muted); }
     @media print { .site-header { display: none; } }
-    body.reviewing-updates #regular-sources, body.reviewing-updates #update-notice { display:none; }
+    body.reviewing-updates #regular-sources, body.reviewing-updates #source-overview { display:none; }
     body.reviewing-updates :is(#mobile-search-toggle, #mobile-filter-control, #mobile-add-control, #mobile-reorder) { display:none; }
     #update-availability:empty, #update-sweep-feedback:empty, #source-update-summary,
     #update-notice:has(> #update-availability:only-child:empty) { display:none; }
@@ -213,7 +213,48 @@
     #source-help { border-top: 1px solid var(--line); margin-top: 1rem; padding-top: .75rem; font-size: .9rem; }
     @media (max-width: 550px) { .editor-grid { grid-template-columns: minmax(0,1fr); } }
 
-    .mobile-admin-toolbar, .mobile-selection, .mobile-sheet { display:none; }
+    .mobile-admin-toolbar, .mobile-selection, .mobile-sheet, .desktop-library-link { display:none; }
+    @media (min-width: 641px) {
+      body:has(.sources-admin) .site-header, .sources-admin .admin-nav,
+      .sources-admin .source-search-row { display:none; }
+      .sources-admin .sources-heading, .sources-admin #update-availability {
+        position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+      .sources-admin { padding-top:0; }
+      .sources-admin .mobile-admin-toolbar { position:sticky; top:0; z-index:10; display:flex;
+        align-items:center; flex-wrap:wrap; gap:.5rem; padding:.55rem .75rem;
+        background:var(--paper); border-bottom:1px solid var(--line); }
+      .sources-admin .desktop-library-link { display:block; margin:0 1rem 0 0; }
+      .sources-admin .mobile-admin-toolbar > details:first-of-type { margin-right:auto; }
+      .sources-admin .mobile-admin-toolbar svg { width:1.2rem; height:1.2rem; }
+      .sources-admin .mobile-admin-toolbar .button { padding:.35rem .65rem; min-height:40px; }
+      .sources-admin .mobile-admin-toolbar details { position:relative; }
+      .sources-admin .mobile-admin-toolbar details > div { position:absolute; top:100%; left:0; display:grid;
+        min-width:12rem; padding:.35rem; gap:.25rem; background:var(--paper); border:1px solid var(--line);
+        border-radius:.5rem; box-shadow:0 4px 15px #123c3226; }
+      .sources-admin #mobile-admin-menu > div { left:auto; right:0; }
+      .sources-admin #mobile-source-search { flex-basis:100%; }
+      .sources-admin #mobile-source-search input { width:100%; min-height:40px; font:inherit; padding:.5rem;
+        border:1px solid #aac5b7; border-radius:.5rem; }
+      .sources-admin #source-overview { display:flex; gap:.75rem; align-items:center; flex-wrap:wrap; padding:.35rem .75rem; }
+      .sources-admin #update-notice { margin:0; }
+      .sources-admin #update-notice .button { min-height:32px; padding:.25rem .65rem; }
+      .sources-admin #mobile-selection:not([hidden]) { position:sticky; top:var(--sources-toolbar-height, 58px);
+        z-index:9; display:flex; gap:.75rem; align-items:center;
+        flex-wrap:wrap; background:var(--paper); padding:.5rem .75rem; border:1px solid var(--line); border-radius:.6rem; }
+      .sources-admin #mobile-selection label { display:flex; align-items:center; gap:.4rem; order:-1; }
+      .sources-admin #mobile-selection input { width:1.2rem; height:1.2rem; accent-color:var(--green); }
+      .sources-admin #mobile-selection .primary-action { background:var(--dark); color:white; }
+      .sources-admin #mobile-selection #group-count { flex:1; }
+      .sources-admin #source-selection-panel { display:none; }
+      .sources-admin .source-header > div { display:grid; grid-template-columns:minmax(0,1fr) auto; column-gap:1rem; }
+      .sources-admin .source-header h3, .sources-admin .source-header .source-subtitle { grid-column:1; }
+      .sources-admin .source-header .compact-publication { grid-column:2; grid-row:1 / span 2;
+        align-self:center; text-align:right; max-width:12rem; }
+      body:not(.reordering) .sources-admin .source-order-controls { display:none; }
+      body:not(.reordering) .sources-admin .source-row > .group-select { top:.75rem; }
+      body.reordering .sources-admin .source-order-controls:not([hidden]) { display:flex; }
+      body.selection-actions-open .sources-admin #source-selection-panel { display:block; }
+    }
     @media (max-width: 640px) {
       .compact-admin .site-header, .compact-admin .admin-nav, .compact-admin .sources-heading,
       .compact-admin .source-search-row, .compact-admin #source-selection-panel,
@@ -271,9 +312,10 @@
     <span class="brand">Admin</span>
     <button id="admin-logout" class="button" type="button"{% if not session_csrf_token %} hidden{% endif %}>Sign out</button>
   </header>
-  <main id="main-content">
+  <main id="main-content"{% if page == "sources" %} class="sources-admin"{% endif %}>
     <nav class="admin-nav" aria-label="Administration"><a class="button" href="/admin/sources"{% if page == "sources" %} aria-current="page"{% endif %}>Sources</a><a class="button" href="/admin/groupings"{% if page == "groupings" %} aria-current="page"{% endif %}>Groupings</a><a class="button" href="/admin/settings"{% if page == "settings" %} aria-current="page"{% endif %}>Settings</a></nav>
     <nav class="mobile-admin-toolbar" aria-label="Administration tools">
+      {% if page == "sources" %}<a href="/" class="brand desktop-library-link">The Axiom</a>{% endif %}
       <details><summary class="button">{{ page|capitalize }} ▾</summary><div>
         <a class="button" href="/">Back to library</a>
         {% for section in ['sources', 'groupings', 'settings'] %}
@@ -556,9 +598,12 @@
     {% else %}
     <h1 class="sources-heading">Manage offline sources</h1>
     {% set available_updates = catalog.available_updates|default(0) %}
+    <div id="source-overview">
+    <div id="desktop-source-count"></div>
     <div class="source-actions" id="update-notice">
       <strong id="update-availability" role="status">{{ "An update is available" if available_updates == 1 else "Updates are available" if available_updates else "" }}</strong>
-      <a class="button" id="review-updates-link" href="/admin/sources#update-review">Review updates</a>
+      <a class="button" id="review-updates-link" href="/admin/sources#update-review" aria-label="Review updates">Review updates</a>
+    </div>
     </div>
     <section class="group-panel" id="update-review" aria-labelledby="update-review-title" hidden>
       <h2 id="update-review-title">Review updates</h2>
@@ -584,7 +629,7 @@
     <div id="regular-sources">
     <div id="mobile-source-count"></div>
     <div class="mobile-selection" id="mobile-selection" hidden>
-      <button class="button primary-action" type="button" id="mobile-actions-open">Actions</button>
+      <button class="button primary-action" type="button" id="mobile-actions-open" aria-expanded="false">Actions</button>
       <button class="button" type="button" id="mobile-selection-done">Done</button>
     </div>
     <dialog class="mobile-sheet" id="mobile-actions-sheet" aria-labelledby="mobile-actions-title">
@@ -1013,7 +1058,7 @@
       const header = logout.parentElement;
       function layout() {
         document.body.classList.toggle('compact-admin', media.matches);
-        if (media.matches) document.getElementById('mobile-admin-tools').append(logout);
+        if (media.matches || document.querySelector('.sources-admin')) document.getElementById('mobile-admin-tools').append(logout);
         else {
           header.append(logout);
           menu.open = false;
@@ -1048,6 +1093,8 @@
           });
           document.querySelectorAll("[data-group-select]").forEach(item => { item.checked = (saved.selected || []).includes(item.value); });
           document.getElementById("group-panel").open = !!saved.groupsOpen;
+          document.body.classList.toggle('selection-actions-open', !!saved.selectionActionsOpen);
+          document.getElementById('mobile-actions-open').setAttribute('aria-expanded', String(!!saved.selectionActionsOpen));
           document.getElementById("source-select-mode").setAttribute("aria-pressed", String(!!saved.selecting));
           requestAnimationFrame(() => window.scrollTo(0, saved.scroll));
         }
@@ -1059,6 +1106,7 @@
             scroll: window.scrollY,
             selected: Array.from(document.querySelectorAll("[data-group-select]:checked"), item => item.value),
             groupsOpen: document.getElementById("group-panel").open,
+            selectionActionsOpen: document.body.classList.contains('selection-actions-open'),
             selecting: document.getElementById("source-select-mode").getAttribute("aria-pressed") === "true",
             filters: window.axiomSourceFilters?.values()
           }));
@@ -1493,6 +1541,10 @@
       });
       function selectionMode() {
         selectMode.textContent = selecting ? 'Cancel selection' : 'Select';
+        if (!selecting) {
+          document.body.classList.remove('selection-actions-open');
+          document.getElementById('mobile-actions-open').setAttribute('aria-expanded', 'false');
+        }
         selectMode.setAttribute('aria-pressed', String(selecting));
         groupChecks.forEach(item => {
           item.closest('.group-select').hidden = !selecting;
@@ -1572,7 +1624,7 @@
         mobileSelection.hidden = !selecting;
         document.getElementById('mobile-selection-done').disabled = bulkBusy;
         document.getElementById('select-all-text').textContent = 'Select all ' + visible.length;
-        document.getElementById('group-count').textContent = ids.length + ' selected' + (hiddenSelected ? ' (' + hiddenSelected + ' hidden by filters)' : '');
+        document.getElementById('group-count').textContent = ids.length + ' of ' + groupChecks.length + ' sources selected' + (hiddenSelected ? ' (' + hiddenSelected + ' hidden by filters)' : '');
         document.getElementById('group-defaults').hidden = true;
         document.getElementById('group-create-assign').hidden = kind !== 'tags';
         groupName.closest('.editor-wide').hidden = kind !== 'tags';
@@ -2556,18 +2608,23 @@
       const done = byId('mobile-selection-done');
       const add = byId('source-add');
       const selection = byId('source-select-mode');
+      const toolbar = menu.closest('nav');
+      new ResizeObserver(() => {
+        document.querySelector('.sources-admin').style.setProperty(
+          '--sources-toolbar-height', toolbar.getBoundingClientRect().height + 'px');
+      }).observe(toolbar);
       const moves = [
         ['source-guide-open', byId('mobile-admin-tools')],
         ['source-select-mode', byId('mobile-admin-tools')], ['source-add', byId('mobile-add-control')],
         ['source-filter-toggle', byId('mobile-filter-control')], ['source-filter-search', searchSlot],
-        ['source-filter-count', byId('mobile-source-count')], ['group-count', byId('mobile-selection')],
-        ['select-all-label', byId('mobile-selection')], ['selection-file-open', actions],
-        ['bulk-selection', actions], ['group-panel', actions], ['source-filters-panel', filters],
-      ].map(([id, target]) => {
+        ['group-count', byId('mobile-selection')], ['select-all-label', byId('mobile-selection')],
+        ['selection-file-open', actions, true], ['bulk-selection', actions, true],
+        ['group-panel', actions, true], ['source-filters-panel', filters, true],
+      ].map(([id, target, mobileOnly = false]) => {
         const node = byId(id);
         const slot = document.createComment(id);
         node.before(slot);
-        return {node, target, slot};
+        return {node, target, slot, mobileOnly};
       });
       function setSearch(open) {
         searchSlot.hidden = !open;
@@ -2578,20 +2635,25 @@
           if (filters.open) filters.close();
           if (actions.open) actions.close();
         }
-        for (const {node, target, slot} of moves) {
-          if (media.matches) target.append(node);
+        for (const {node, target, slot, mobileOnly} of moves) {
+          if (!mobileOnly || media.matches) target.append(node);
           else slot.after(node);
         }
+        (media.matches ? byId('mobile-source-count') : byId('desktop-source-count'))
+          .append(byId('source-filter-count'));
+        byId('mobile-selection').append(byId('mobile-actions-open'), done);
+        add.textContent = '+';
+        add.setAttribute('aria-label', 'Add Source');
+        setSearch(!!search.value || !searchSlot.hidden);
         if (media.matches) {
+          byId('mobile-actions-open').removeAttribute('aria-expanded');
           filters.append(byId('mobile-filters-apply'));
-          byId('mobile-selection').append(byId('mobile-actions-open'), done);
-          add.textContent = '+';
-          add.setAttribute('aria-label', 'Add Source');
           setSearch(!!search.value);
           byId('source-filters-panel').hidden = true;
           byId('source-filter-toggle').setAttribute('aria-expanded', 'false');
         } else {
-          add.textContent = 'Add Source';
+          byId('mobile-actions-open').setAttribute('aria-expanded',
+            String(document.body.classList.contains('selection-actions-open')));
         }
       }
       searchToggle.addEventListener('click', () => {
@@ -2608,7 +2670,13 @@
         reorder.textContent = active ? 'Finish reordering' : 'Reorder published sources';
         reorder.setAttribute('aria-pressed', String(active));
       });
-      byId('mobile-actions-open').addEventListener('click', () => actions.showModal());
+      byId('mobile-actions-open').addEventListener('click', () => {
+        if (media.matches) actions.showModal();
+        else {
+          const opened = document.body.classList.toggle('selection-actions-open');
+          byId('mobile-actions-open').setAttribute('aria-expanded', String(opened));
+        }
+      });
       media.addEventListener('change', layout);
       layout();
     })();
@@ -3082,7 +3150,11 @@
         checkAll.textContent = checking ? 'Checking for updates…' : primaryOperation
           ? actionLabel(primaryOperation, downloadCount || publishCount) : awaitingSelection
             ? 'Select updates' : 'Check for all updates';
-        const menu = mobile.matches && panel.hidden && !counts.download && !counts.publish &&
+        const totalUpdates = counts.download + counts.publish;
+        reviewLink.textContent = !mobile.matches && totalUpdates
+          ? totalUpdates + (totalUpdates === 1 ? ' update available' : ' updates available')
+          : 'Review updates';
+        const menu = panel.hidden && !totalUpdates &&
           sweepState !== 'running' ? byId('mobile-admin-tools') : byId('update-notice');
         if (reviewLink.parentElement !== menu) menu.append(reviewLink);
         alternate.hidden = !alternateOperation;
