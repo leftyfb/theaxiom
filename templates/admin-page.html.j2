@@ -29,6 +29,14 @@
     .badge.disabled { color: #c0392b; background: #fceaea; }
     .empty { padding: 1.5rem; text-align: center; color: var(--muted); }
     @media print { .site-header { display: none; } }
+    body.reviewing-updates #regular-sources, body.reviewing-updates #review-updates-link { display:none; }
+    body.reviewing-updates :is(#mobile-search-toggle, #mobile-filter-control, #mobile-add-control, #mobile-reorder) { display:none; }
+    #update-availability:empty, #update-sweep-feedback:empty,
+    #update-controls:has(> #update-availability:only-child:empty) { display:none; }
+    #update-review:target { scroll-margin-top: 4rem; }
+    #update-review-list { padding-inline-start: 1.4rem; }
+    #update-review-list li { margin-block: .65rem; }
+    #update-review-list p { margin: .25rem 0; }
     .settings-panel { background: var(--paper); border: 1px solid var(--line); border-radius: .8rem; padding: 1.25rem; margin: 1rem 0 2rem; }
     .settings-panel fieldset { border: 0; margin: 0; padding: 0; }
     .settings-panel label { display: block; font-weight: 650; margin: .8rem 0 .35rem; }
@@ -288,6 +296,33 @@
     </nav>
     {% if page == "settings" %}
     <h1>Settings</h1>
+    <section class="settings-panel" aria-labelledby="library-overview-title">
+      <h2 id="library-overview-title">Library overview</h2>
+      <dl class="storage-status">
+        <dt>Installed library size</dt><dd id="overview-size">—</dd>
+        <dt>Total sources</dt><dd id="overview-total">—</dd>
+        <dt>Installed sources</dt><dd id="overview-installed">—</dd>
+        <dt>Publication enabled</dt><dd id="overview-enabled">—</dd>
+        <dt>Publication disabled</dt><dd id="overview-disabled">—</dd>
+        <dt>Running revision</dt><dd><code id="overview-revision">—</code></dd>
+      </dl>
+      <p id="overview-feedback" role="status"></p>
+    </section>
+    <section class="settings-panel" aria-labelledby="update-schedule-title">
+      <h2 id="update-schedule-title">Update check schedule</h2>
+      <form id="update-schedule-form">
+        <fieldset disabled>
+          <label for="update-interval">Check every (days)</label>
+          <input id="update-interval" type="number" min="1" max="365" step="1" required>
+          <label for="update-start">Preferred start time</label>
+          <input id="update-start" type="time" required>
+          <p>Time zone <strong id="update-time-zone"></strong></p>
+          <p>Next scheduled run <strong id="update-next-run"></strong></p>
+          <button class="button" type="submit">Save update schedule</button>
+        </fieldset>
+      </form>
+      <p id="update-schedule-feedback" role="status"></p>
+    </section>
     <section class="settings-panel" id="storage-settings" aria-labelledby="storage-title">
       <h2 id="storage-title">Storage preferences</h2>
       <p>Choose an existing directory on the server. For network or removable storage, require the expected mount so a missing drive cannot redirect downloads to the operating system disk.</p>
@@ -519,6 +554,27 @@
     </script>
     {% else %}
     <h1 class="sources-heading">Manage offline sources</h1>
+    {% set available_updates = catalog.available_updates|default(0) %}
+    <div class="source-actions" id="update-controls">
+      <strong id="update-availability" role="status">{{ "An update is available" if available_updates == 1 else "Updates are available" if available_updates else "" }}</strong>
+      <a class="button" id="review-updates-link" href="/admin/sources#update-review">Review updates</a>
+      <button class="button" id="check-all-updates" type="button">Check for all updates</button>
+      <button class="button" id="check-updates-again" type="button" hidden>Check for all updates</button>
+    </div>
+    <p id="update-sweep-feedback" role="status"></p>
+    <details id="update-sweep-details" hidden><summary>Sources needing attention</summary><ul id="update-sweep-failures"></ul></details>
+    <section class="group-panel" id="update-review" aria-labelledby="update-review-title" hidden>
+      <h2 id="update-review-title">Review updates</h2>
+      <a href="/admin/sources#all-sources">Show all sources</a>
+      <p><label><input type="checkbox" id="select-all-updates" disabled> Select all eligible updates</label></p>
+      <ul id="update-review-list"></ul>
+      <p id="update-selection-size" role="status"></p>
+      <div class="source-actions">
+        <button class="button" id="alternate-update-action" type="button" hidden></button>
+      </div>
+      <p id="update-batch-feedback" role="status"></p>
+    </section>
+    <div id="regular-sources">
     <div id="mobile-source-count"></div>
     <div class="mobile-selection" id="mobile-selection" hidden>
       <button class="button primary-action" type="button" id="mobile-actions-open">Actions</button>
@@ -925,6 +981,7 @@
     {% else %}
       <p class="empty">No managed sources configured.</p>
     {% endfor %}
+    </div>
     </div>
     {% endif %}
   </main>
@@ -2794,6 +2851,7 @@
             return;
           }
           showUpdateSummary(data.update_summary || '');
+          window.axiomShowUpdateAvailability?.(data.available_updates, data.update_stages);
           const sources = new Map(data.sources.map(source => [source.source_id, source]));
           const focused = document.activeElement;
           const focusedCard = focused.closest('.source-card');
@@ -2937,7 +2995,342 @@
     })();
   </script>
 
+  <script id="update-review-script">
+    (() => {
+      const byId = id => document.getElementById(id);
+      const panel = byId('update-review');
+      const list = byId('update-review-list');
+      const all = byId('select-all-updates');
+      const alternate = byId('alternate-update-action');
+      const checkAll = byId('check-all-updates');
+      const checkAgain = byId('check-updates-again');
+      const reviewLink = byId('review-updates-link');
+      const mobile = window.matchMedia('(max-width: 640px)');
+      const sweepFeedback = byId('update-sweep-feedback');
+      const batchFeedback = byId('update-batch-feedback');
+      let choices = [];
+      let revision;
+      let rendered;
+      let posting = false;
+      let sweepState = 'idle';
+      let pendingChecks = false;
+      let startingSweep = false;
+      let counts = {{ catalog.update_stages|default({'download': 0, 'publish': 0})|tojson }};
+      let primaryOperation;
+      let alternateOperation;
+      let selectOnOpen = true;
+      const acceptedDownloads = new Set();
+      let reviewRequest = 0;
+      const rejected = new Map();
+      const byteSize = bytes => {
+        if (!Number.isFinite(bytes)) return 'Unknown';
+        const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+        let unit = 0;
+        while (bytes >= 1024 && unit < units.length - 1) { bytes /= 1024; unit++; }
+        return new Intl.NumberFormat(undefined, {maximumFractionDigits: 1}).format(bytes) + ' ' + units[unit];
+      };
+
+      async function request(path, body) {
+        const response = await fetch(path, body ? {method:'POST', headers:{
+          ...(window.axiomCsrfHeaders?.() || {}), 'Content-Type':'application/json'
+        }, body:JSON.stringify(body)} : {cache:'no-store'});
+        const result = await response.json().catch(() => ({}));
+        if (response.status === 401) window.location.assign('/admin/login');
+        if (!response.ok) throw new Error(result.error || 'Update status is unavailable');
+        return result;
+      }
+
+      window.axiomShowUpdateAvailability = (count, stages) => {
+        byId('update-availability').textContent = count === 1 ? 'An update is available' :
+          count > 1 ? 'Updates are available' : '';
+        if (stages) {
+          counts = stages;
+          selectionChanged();
+        }
+      };
+
+      function actionLabel(operation, count) {
+        const verb = operation === 'download-update' ? 'Download' : 'Publish';
+        return verb + ' ' + count + (count === 1 ? ' update' : ' updates');
+      }
+
+      function selectionChanged() {
+        const eligible = choices.filter(item => !item.control.disabled);
+        const selected = eligible.filter(item => item.control.checked);
+        const downloads = selected.filter(item => item.operation === 'download-update');
+        const publications = selected.length - downloads.length;
+        const bytes = downloads.reduce((sum, item) => sum + item.bytes, 0);
+        all.checked = eligible.length > 0 && selected.length === eligible.length;
+        all.indeterminate = selected.length > 0 && !all.checked;
+        all.disabled = posting || !eligible.length;
+        const downloadCount = panel.hidden || !rendered ? counts.download : downloads.length;
+        const publishCount = panel.hidden || !rendered ? counts.publish : publications;
+        primaryOperation = downloadCount ? 'download-update' : publishCount ? 'publish-update' : null;
+        alternateOperation = downloadCount && publishCount ? 'publish-update' : null;
+        const checking = startingSweep || sweepState === 'running';
+        const awaitingSelection = !panel.hidden && eligible.length > 0 && !selected.length;
+        checkAgain.hidden = !primaryOperation && !awaitingSelection;
+        checkAgain.disabled = checking;
+        checkAll.disabled = posting || checking || awaitingSelection;
+        checkAll.textContent = checking ? 'Checking for updates…' : primaryOperation
+          ? actionLabel(primaryOperation, downloadCount || publishCount) : awaitingSelection
+            ? 'Select updates' : 'Check for all updates';
+        const menu = mobile.matches && panel.hidden && !primaryOperation ? byId('mobile-admin-tools') :
+          byId('update-controls');
+        if (checkAll.parentElement !== menu) menu.append(reviewLink, checkAll, checkAgain);
+        alternate.hidden = !alternateOperation;
+        alternate.disabled = posting || checking;
+        if (alternateOperation) alternate.textContent = actionLabel(alternateOperation, publishCount);
+        byId('update-selection-size').textContent = downloads.length
+          ? 'Selected download estimate and additional storage required: ' + byteSize(bytes)
+          : '';
+      }
+
+      function renderReview(sources, queue) {
+        const jobs = new Map();
+        for (const job of queue) {
+          if (['download-update', 'publish-update'].includes(job.operation) && !jobs.has(job.source_id)) {
+            jobs.set(job.source_id, job);
+          }
+        }
+        const rows = sources.flatMap(source => {
+          const sid = source.source_id;
+          const replacement = source.replacement || {};
+          const update = source.update_check || {};
+          const job = jobs.get(sid);
+          const pending = job && ['running', 'queued'].includes(job.state);
+          const verified = source.installed_verified && replacement.state === 'verified';
+          const available = source.installed_verified && update.state === 'update_available' && update.candidate_bytes &&
+            (!replacement.state || replacement.state === 'activated');
+          if (!(verified || available || job || rejected.has(sid) || update.state === 'representation_changed')) return [];
+          const operation = pending ? null : verified ? 'publish-update' : available ? 'download-update' : null;
+          return [{sid, title:source.profile.title, operation, job, replacement, problem:rejected.get(sid),
+            digest: verified ? replacement.sha256 : update.candidate_sha256,
+            installed: source.installed_edition || 'Unknown',
+            edition: verified ? source.configuration.edition : update.candidate_edition,
+            bytes: verified ? 0 : update.candidate_bytes,
+            installedBytes: source.artifact?.bytes,
+            documentChanged: update.state === 'representation_changed'}];
+        });
+        const signature = JSON.stringify(rows);
+        if (signature === rendered && !selectOnOpen) return;
+        rendered = signature;
+        const selected = new Set(choices.filter(item => item.control.checked).map(item => item.sid + item.digest));
+        const focused = document.activeElement?.dataset.updateSource;
+        list.replaceChildren();
+        choices = [];
+        for (const row of rows) {
+          const item = document.createElement('li');
+          const label = document.createElement('label');
+          if (row.operation && row.digest) {
+            const control = document.createElement('input');
+            control.type = 'checkbox';
+            control.dataset.updateSource = row.sid;
+            const downloaded = row.operation === 'publish-update' && acceptedDownloads.delete(row.sid);
+            control.checked = selectOnOpen || selected.has(row.sid + row.digest) || downloaded;
+            control.addEventListener('change', selectionChanged);
+            label.append(control, ' ');
+            choices.push({...row, control});
+          }
+          label.append(row.title);
+          item.append(label);
+          const detail = document.createElement('p');
+          if (row.edition) {
+            detail.textContent = 'Installed ' + row.installed + ' · Update ' + row.edition +
+              ' · ' + (row.bytes ? byteSize(row.bytes) + ' download and additional storage'
+                + (Number.isFinite(row.installedBytes) ? ' · ' + byteSize(row.installedBytes + row.bytes) +
+                  ' with both editions retained' : '') : 'Verified on disk');
+          } else if (row.documentChanged) {
+            detail.textContent = 'Publisher metadata changed. Review this document on its source card.';
+          }
+          if (detail.textContent) item.append(detail);
+          if (row.problem || row.job || row.replacement.error) {
+            const status = document.createElement('p');
+            const action = row.job?.operation === 'publish-update' ? 'Publication' : 'Download';
+            status.textContent = row.problem || (row.job ? action + ' ' + row.job.state +
+              (row.job.detail ? ' · ' + row.job.detail : '') : row.replacement.error);
+            item.append(status);
+          }
+          list.append(item);
+        }
+        if (!rows.length) {
+          const item = document.createElement('li');
+          item.textContent = 'No updates to review.';
+          list.append(item);
+        }
+        if (focused) choices.find(item => item.sid === focused)?.control.focus({preventScroll:true});
+        selectOnOpen = false;
+        selectionChanged();
+      }
+
+      async function refreshReview() {
+        const seq = ++reviewRequest;
+        try {
+          const [catalog, queue] = await Promise.all([request('/api/sources'), request('/api/acquisition-batch')]);
+          if (seq !== reviewRequest) return;
+          revision = catalog.revision;
+          window.axiomShowUpdateAvailability(catalog.available_updates, catalog.update_stages);
+          renderReview(catalog.sources, queue.jobs);
+        } catch (error) {
+          if (seq === reviewRequest) batchFeedback.textContent = error.message;
+        }
+      }
+
+      async function submit(operation) {
+        if (posting) return;
+        if (panel.hidden) {
+          selectOnOpen = true;
+          window.location.hash = 'update-review';
+          return;
+        }
+        const selected = choices.filter(item => item.control.checked && item.operation === operation);
+        if (!selected.length) {
+          batchFeedback.textContent = 'Select the updates you want to ' +
+            (operation === 'download-update' ? 'download.' : 'publish.');
+          return;
+        }
+        const bytes = selected.reduce((sum, item) => sum + item.bytes, 0);
+        const message = actionLabel(operation, selected.length) + '?' +
+          (operation === 'download-update' ? ' Estimated download and additional storage: ' + byteSize(bytes) + '.'
+            : ' Each source will keep its current publication setting.');
+        if (!window.confirm(message)) return;
+        posting = true;
+        selectionChanged();
+        try {
+          const result = await request('/api/update-batch', {operation, revision,
+            selection:Object.fromEntries(selected.map(item => [item.sid, item.digest]))});
+          for (const item of selected) rejected.delete(item.sid);
+          for (const [sid, message] of Object.entries(result.rejected)) rejected.set(sid, message);
+          const queuedIds = Object.keys(result.queued);
+          if (operation === 'download-update') queuedIds.forEach(sid => acceptedDownloads.add(sid));
+          const queued = queuedIds.length;
+          const failures = Object.keys(result.rejected).length;
+          batchFeedback.textContent = queued + ' queued' + (failures ? ' · ' + failures + ' need attention' : '');
+          await refreshReview();
+        } catch (error) {
+          batchFeedback.textContent = error.message;
+        } finally {
+          posting = false;
+          selectionChanged();
+        }
+      }
+
+      async function refreshSweep() {
+        if (pendingChecks) return;
+        pendingChecks = true;
+        try {
+          const result = await request('/api/update-sweep');
+          if (result.state !== sweepState) {
+            sweepState = result.state;
+            const failures = result.checks.filter(item => item.state === 'unable_to_determine');
+            sweepFeedback.textContent = {
+              running:'Checking publisher metadata…', busy:'An update check is already running.',
+              failed:'Could not check for updates.',
+              completed:'Update check finished. ' + (failures.length === 1 ? '1 source needs attention.' :
+                failures.length ? failures.length + ' sources need attention.' : '')
+            }[sweepState] || '';
+            const detail = byId('update-sweep-details');
+            detail.hidden = !failures.length;
+            const items = failures.map(row => {
+              const item = document.createElement('li');
+              item.textContent = row.source_id;
+              return item;
+            });
+            byId('update-sweep-failures').replaceChildren(...items);
+            if (sweepState === 'completed') {
+              if (panel.hidden) {
+                const catalog = await request('/api/sources');
+                window.axiomShowUpdateAvailability(catalog.available_updates, catalog.update_stages);
+              } else {
+                await refreshReview();
+              }
+            }
+          }
+          selectionChanged();
+        } catch (error) {
+          if (sweepState === 'running' || startingSweep) sweepFeedback.textContent = error.message;
+        } finally {
+          pendingChecks = false;
+        }
+      }
+      async function startSweep() {
+        startingSweep = true;
+        selectionChanged();
+        try {
+          await request('/api/update-sweep', {confirm:true});
+          sweepState = 'running';
+          sweepFeedback.textContent = 'Checking publisher metadata…';
+          await refreshSweep();
+        } catch (error) {
+          sweepFeedback.textContent = error.message;
+        } finally {
+          startingSweep = false;
+          selectionChanged();
+        }
+      }
+      checkAll.addEventListener('click', () => primaryOperation ? submit(primaryOperation) : startSweep());
+      checkAgain.addEventListener('click', startSweep);
+      all.addEventListener('change', () => {
+        choices.forEach(item => { item.control.checked = all.checked; });
+        selectionChanged();
+      });
+      alternate.addEventListener('click', () => submit(alternateOperation));
+      function showReview() {
+        const review = window.location.hash === '#update-review';
+        document.body.classList.toggle('reviewing-updates', review);
+        panel.hidden = !review;
+        if (review) {
+          selectOnOpen = true;
+          refreshReview();
+        }
+        selectionChanged();
+      }
+      window.addEventListener('hashchange', showReview);
+      mobile.addEventListener('change', selectionChanged);
+      showReview();
+      refreshSweep();
+      window.setInterval(() => {
+        if (document.hidden) return;
+        if (!panel.hidden && !posting) refreshReview();
+        refreshSweep();
+      }, 4000);
+    })();
+  </script>
   {% elif page == "settings" %}
+  <script id="update-schedule-script">
+    (() => {
+      const byId = id => document.getElementById(id);
+      const form = byId('update-schedule-form');
+      const fields = form.querySelector('fieldset');
+      const feedback = byId('update-schedule-feedback');
+      async function schedule(settings) {
+        const response = await fetch('/api/update-schedule', settings ? {method:'POST', headers:{
+          ...(window.axiomCsrfHeaders?.() || {}), 'Content-Type':'application/json'
+        }, body:JSON.stringify(settings)} : {cache:'no-store'});
+        const result = await response.json();
+        if (response.status === 401) window.location.assign('/admin/login');
+        if (!response.ok) throw new Error(result.error || 'Update schedule unavailable');
+        byId('update-interval').value = result.interval_days;
+        byId('update-start').value = result.start_time;
+        byId('update-time-zone').textContent = result.time_zone;
+        byId('update-next-run').textContent = result.next_run ?
+          result.next_run.replace('T', ' ') : 'Unavailable';
+        fields.disabled = false;
+      }
+      form.addEventListener('submit', async event => {
+        event.preventDefault();
+        fields.disabled = true;
+        try {
+          await schedule({interval_days:byId('update-interval').valueAsNumber, start_time:byId('update-start').value});
+          feedback.textContent = 'Update schedule saved.';
+        } catch (error) {
+          feedback.textContent = error.message;
+          fields.disabled = false;
+        }
+      });
+      schedule().catch(error => { feedback.textContent = error.message; });
+    })();
+  </script>
   <script id="storage-settings-script">
     (() => {
       const byId = (id) => document.getElementById(id);
@@ -3004,6 +3397,22 @@
         if (!response.ok) throw new Error(body.error || 'Request failed (' + response.status + ')');
         return body;
       }
+      async function loadOverview() {
+        try {
+          const overview = await json('/api/library-overview');
+          byId('overview-size').textContent = size(overview.installed_bytes);
+          byId('overview-total').textContent = overview.total_sources;
+          byId('overview-installed').textContent = overview.installed_sources;
+          byId('overview-enabled').textContent = overview.enabled_sources;
+          byId('overview-disabled').textContent = overview.disabled_sources;
+          const revision = byId('overview-revision');
+          revision.textContent = overview.revision?.slice(0, 12) || 'Unavailable';
+          revision.title = overview.revision || '';
+        } catch (error) {
+          byId('overview-feedback').textContent = error.message;
+        }
+      }
+      loadOverview();
       async function statusCheck() {
         renderStatus({});
         try {

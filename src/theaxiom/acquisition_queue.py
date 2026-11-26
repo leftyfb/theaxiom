@@ -43,11 +43,12 @@ def enqueue(jobs, available, settings):
         db.execute("BEGIN IMMEDIATE")
         pending = db.execute("SELECT source_id, bytes, storage FROM jobs WHERE state IN (?, ?)", PENDING).fetchall()
         snapshot = json.dumps(settings, sort_keys=True)
-        if any(row["storage"] != snapshot for row in pending):
+        if available is not None and any(row["storage"] != snapshot for row in pending):
             raise ValueError("Pending downloads must be resolved after a storage settings change")
         if {row["source_id"] for row in pending}.intersection(job["source_id"] for job in jobs):
             raise ValueError("A selected source already has a pending batch download")
-        if sum(row["bytes"] for row in pending) + sum(job["bytes"] for job in jobs) > available:
+        if (available is not None
+                and sum(row["bytes"] for row in pending) + sum(job["bytes"] for job in jobs) > available):
             raise ValueError("Insufficient space after pending download reservations")
         ids = []
         for job in jobs:
@@ -65,7 +66,7 @@ def enqueue(jobs, available, settings):
 def status():
     with database() as db:
         return [dict(row) for row in db.execute(
-            "SELECT id, source_id, title, bytes, state, stop, detail FROM jobs ORDER BY rowid DESC")]
+            "SELECT id, source_id, title, operation, bytes, state, stop, detail FROM jobs ORDER BY rowid DESC")]
 
 
 def cancel(job_id):

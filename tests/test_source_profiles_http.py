@@ -9,6 +9,7 @@ import pytest
 
 from theaxiom import admin_api, catalog_store, publication, source_catalog, storage_settings
 from test_admin_page_template import Parser
+from test_zim_source import disk, fixture_bytes
 
 
 SID = "wikipedia-en"
@@ -1230,3 +1231,138 @@ def test_configured_defaults_leave_custom_download_pin_intact(app):
     assert loaded["revision"] == saved["revision"]
     config = source(loaded, "cdc")["configuration"]
     assert all(config[key] == value for key, value in custom.items())
+
+
+def test_update_schedule_and_library_overview(app, monkeypatch):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    request, _ = app
+    schedule = admin_api.update_schedule
+    next_legacy = datetime(2026, 11, 27, 3, 22, tzinfo=ZoneInfo("UTC"))
+    monkeypatch.setattr(schedule, "_legacy_next", lambda zone: next_legacy.astimezone(zone))
+    legacy = request("/api/update-schedule")
+    assert legacy["interval_days"] == 1 and legacy["start_time"] == "03:00"
+    assert legacy["time_zone"] and legacy["next_run"]
+    request("/api/update-schedule", {"interval_days": 0, "start_time": "25:00"}, status=400)
+    saved = request("/api/update-schedule", {"interval_days": 3, "start_time": "06:45"})
+    assert request("/api/update-schedule") == saved
+    assert saved["interval_days"] == 3 and "T06:45:00" in saved["next_run"]
+    assert "Update check schedule" in request("/admin/settings")
+
+    publication.save(SID, True)
+    overview = request("/api/library-overview")
+    assert overview["total_sources"] == len(request("/api/sources")["sources"])
+    assert overview["enabled_sources"] == 1
+    assert overview["disabled_sources"] == overview["total_sources"] - 1
+    assert overview["installed_sources"] == 1
+    assert overview["installed_bytes"] == PIN["bytes"]
+    assert overview["revision"] == request("/health")["revision"]
+
+
+def test_manual_update_sweep_is_metadata_only_and_reports_busy(app, monkeypatch):
+    request, _ = app
+    scheduler = admin_api.kiwix_update_scheduler
+    start = Mock(side_effect=[True, False])
+    monkeypatch.setattr(scheduler, "start_manual", start)
+    request("/api/update-sweep", {}, status=400)
+    assert request("/api/update-sweep", {"confirm": True}, status=202) == {"state": "running"}
+    request("/api/update-sweep", {"confirm": True}, status=409)
+    assert request("/api/update-sweep") == {"state": "idle", "checks": []}
+
+
+def test_batch_updates_keep_old_archives_and_isolate_download_and_activation_failures(app, disk, monkeypatch):
+    from contextlib import contextmanager
+    import hashlib
+    from io import BytesIO
+
+    request, _ = app
+    catalog = request("/api/sources")
+    old_data = fixture_bytes()
+    new_body = old_data[:103] + b"x"
+    new_data = new_body + hashlib.md5(new_body, usedforsecurity=False).digest()
+    new_digest = hashlib.sha256(new_data).hexdigest()
+    installed = {}
+    updates = {}
+    jobs, archives = admin_api.zim_jobs, admin_api.zim_source
+    queue = admin_api.acquisition_queue
+
+    for sid in ("bad-download", "bad-reader", "ready-public", "ready-private"):
+        prefix = f"https://download.kiwix.org/zim/zimit/{sid}_2026-10.zim"
+        catalog = mutate(request, catalog, "add", {
+            "title": sid, "format": "zim", "source_url": prefix, "edition": "2026-10",
+        }, sid=sid)
+        config = source(catalog, sid)["configuration"]
+        artifact = archives.install_stream(sid, config, BytesIO(old_data))
+        installed[sid] = dict(source_id=sid, state="completed", active=False, verified=True,
+                              configuration=jobs.identity(config), artifact=artifact)
+        jobs.save(installed[sid])
+        payload = {"state": "update_available", "installed_edition": "2026-10", "candidate_edition": "2026-11",
+                   "candidate_url": prefix.replace("2026-10", "2026-11"),
+                   "candidate_sha256": new_digest, "candidate_bytes": len(new_data)}
+        updates[sid] = payload
+    monkeypatch.setattr(admin_api, "_batch_available", lambda settings, formats: 10_000)
+    monkeypatch.setattr(admin_api.kiwix_update_discovery, "cached_checked_source", updates.__getitem__)
+    first = "bad-download"
+    admin_api.update_check_store.save(first, installed[first]["artifact"]["sha256"], updates[first])
+    assert 'role="status">An update is available</strong>' in request("/admin")
+    for sid in updates:
+        admin_api.update_check_store.save(sid, installed[sid]["artifact"]["sha256"], updates[sid])
+    page = request("/admin/sources")
+    assert 'role="status">Updates are available</strong>' in page
+    assert 'href="/admin/sources#update-review"' in page
+    for sid in ("bad-reader", "ready-public"):
+        publication.save(sid, True)
+
+    class PublisherStream(BytesIO):
+        total_size = len(new_data)
+        etag = '"fixture-update"'
+        last_modified = None
+
+    @contextmanager
+    def download(url, **kwargs):
+        sid = next(sid for sid, update in updates.items() if update["candidate_url"] == url)
+        assert jobs.read(sid) == installed[sid]
+        yield PublisherStream(old_data if sid == "bad-download" else new_data)
+
+    monkeypatch.setattr(archives.pdf_transport, "open_pdf", download)
+    rejected = {"missing-source": new_digest}
+    selection = {sid: new_digest for sid in updates}
+    batch = request("/api/update-batch", {"operation": "download-update", "revision": catalog["revision"],
+                                         "selection": selection | rejected}, status=202)
+    assert set(batch["rejected"]) == rejected.keys()
+    assert batch["queued"].keys() == selection.keys()
+    assert all(jobs.read_candidate(sid) is None for sid in updates)
+    shutdown = threading.Event()
+    for sid in updates:
+        assert queue.run_next(admin_api._execute_batch_job, shutdown)
+        assert jobs.read(sid) == installed[sid]
+    assert {job["source_id"]: job["state"] for job in queue.status()} == {
+        "bad-download": "failed", "bad-reader": "completed", "ready-public": "completed", "ready-private": "completed",
+    }
+
+    def reconcile(*args, source_id, configuration):
+        if source_id == "bad-reader":
+            jobs.rollback_candidate(source_id, configuration, reason="Fixture reader unavailable")
+            return False
+        assert source_id == "ready-public"
+        return True
+
+    monkeypatch.setattr(admin_api.zim_refresh, "reconcile_activation", reconcile)
+    latest = request("/api/sources")
+    batch = request("/api/update-batch", {"operation": "publish-update", "revision": latest["revision"],
+                                         "selection": selection}, status=202)
+    assert set(batch["rejected"]) == {"bad-download"}
+    assert set(batch["queued"]) == {"bad-reader", "ready-public", "ready-private"}
+    for _ in batch["queued"]:
+        assert queue.run_next(admin_api._execute_batch_job, shutdown)
+    assert {job["source_id"]: job["state"] for job in queue.status() if job["operation"] == "publish-update"} == {
+        "bad-reader": "failed", "ready-public": "completed", "ready-private": "completed",
+    }
+    for sid in ("bad-download", "bad-reader"):
+        assert jobs.read(sid) == installed[sid]
+    for sid in ("ready-public", "ready-private"):
+        assert jobs.read(sid)["artifact"]["sha256"] == new_digest
+    assert publication.load() == {"bad-reader": True, "ready-public": True}
+    for old in installed.values():
+        assert (disk / "library/zim" / old["artifact"]["filename"]).read_bytes() == old_data

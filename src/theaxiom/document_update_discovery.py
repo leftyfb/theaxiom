@@ -12,7 +12,7 @@ UNKNOWN = {"state": "unable_to_determine",
            "evidence": "no comparable installed document origin"}
 
 
-def check_installed_document(record, *, probe=None, persist=True):
+def check_installed_document(record, *, probe=None, persist=True, installed_only=False):
     if not isinstance(record, dict) or not isinstance(record.get("configuration"), dict):
         return dict(UNKNOWN)
     sid = record.get("source_id")
@@ -33,7 +33,7 @@ def check_installed_document(record, *, probe=None, persist=True):
             artifact = epub_source.pin(sid, config)
             verified = epub_source.ready(artifact, verify=False)
         if not verified:
-            return dict(UNKNOWN)
+            return None if installed_only else dict(UNKNOWN)
         url = artifact["source_url"]
         digest = artifact["sha256"]
         endpoint = selected["endpoint"]

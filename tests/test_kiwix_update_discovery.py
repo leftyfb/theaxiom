@@ -551,6 +551,8 @@ def test_deleted_update_stays_private_until_a_fresh_scheduled_check(monkeypatch,
     assert "candidate_edition" not in discovery.cached_checked_source(sid)
     from theaxiom import kiwix_update_scheduler
     monkeypatch.setattr(discovery.kiwix_metadata_transport, "fetch_metadata", fetch)
+    monkeypatch.setattr(zim_jobs, "read", lambda _: job)
+    monkeypatch.setattr(kiwix_update_scheduler, "_check_with_deadline", kiwix_update_scheduler._check_source)
     assert kiwix_update_scheduler.check_records([
         {"source_id": sid, "configuration": {"format": "zim", "update_periodic": "yes"}},
     ]) == [{"source_id": sid, "state": "update_available"}]

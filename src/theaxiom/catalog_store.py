@@ -453,11 +453,11 @@ class CatalogStore:
             records.append(self._record(sid, fields | candidate))
         return dict(state, sources=records)
 
-    def get(self):
+    def get(self, *, initialize=True):
         with LOCK:
             fd = self._file_lock()
             try:
-                return self._snapshot(self._read(initialize=True))
+                return self._snapshot(self._read(initialize=initialize))
             finally:
                 os.close(fd)
 

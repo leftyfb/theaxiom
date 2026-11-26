@@ -52,6 +52,8 @@ update_discovery_config = importlib.import_module(f"{__package__}.update_discove
 update_diagnostics = importlib.import_module(f"{__package__}.update_diagnostics" if __package__ else "theaxiom.update_diagnostics")
 update_check_store = importlib.import_module(f"{__package__}.update_check_store" if __package__ else "theaxiom.update_check_store")
 kiwix_update_discovery = importlib.import_module(f"{__package__}.kiwix_update_discovery" if __package__ else "theaxiom.kiwix_update_discovery")
+kiwix_update_scheduler = importlib.import_module(f"{__package__ or 'theaxiom'}.kiwix_update_scheduler")
+update_schedule = importlib.import_module(f"{__package__ or 'theaxiom'}.update_schedule")
 library_search = importlib.import_module(f"{__package__}.search" if __package__ else "theaxiom.search")
 library_selection = importlib.import_module(f"{__package__}.library_selection" if __package__ else "theaxiom.library_selection")
 local_transfer = importlib.import_module(f"{__package__}.local_transfer" if __package__ else "theaxiom.local_transfer")
@@ -231,6 +233,19 @@ def _public_zim_replacement(candidate):
     if candidate["state"] in {"verified", "rolled_back"}:
         result["sha256"] = candidate["artifact"].get("sha256")
     return result | zim_jobs.current_checksum(candidate)
+
+
+def _update_stage(source):
+    if not source["installed_verified"]:
+        return None
+    check = source["update_check"] or {}
+    replacement = source["replacement"] or {}
+    if replacement.get("state") == "verified":
+        return "publish"
+    if (check.get("state") == "update_available" and check.get("candidate_bytes")
+            and replacement.get("state") in (None, "activated")):
+        return "download"
+    return None
 
 
 def _source_update_summary(sources):
@@ -416,11 +431,76 @@ def _batch_available(settings, formats):
     return max(0, sample["free_bytes"] - settings["minimum_free_bytes"])
 
 
+def _publisher_update_job(record, reviewed_digest, operation):
+    sid = record["source_id"]
+    config = record["configuration"]
+    if config["format"] != "zim":
+        raise ValueError("This source has no verifiable replacement workflow")
+    current = zim_jobs.candidate_status(sid)
+    reservation = 0
+    if operation == "publish-update":
+        if not current or current["state"] != "verified" or current["artifact"]["sha256"] != reviewed_digest:
+            raise ValueError("The verified candidate changed; review it again")
+        payload = config
+    else:
+        catalog_store.CatalogStore._validate_id(sid + "-candidate")
+        if update_discovery_config.settings(config)["method"] != "kiwix":
+            raise ValueError("Source does not use Kiwix update discovery")
+        update = kiwix_update_discovery.cached_checked_source(sid)
+        if (update.get("state") != "update_available" or update.get("candidate_sha256") != reviewed_digest
+                or not update.get("candidate_bytes")):
+            raise ValueError("Update evidence changed; check for updates again")
+        fields = {"source_url": update["candidate_url"], "sha256": reviewed_digest,
+                  "expected_size_bytes": str(update["candidate_bytes"]), "edition": update["candidate_edition"]}
+        if current and current["state"] != "activated":
+            raise ValueError("Resolve the existing replacement on its source card")
+        live = zim_jobs.read(sid)
+        payload = {"original": config, "fields": fields, "base": live["artifact"]}
+        reservation = update["candidate_bytes"]
+    return dict(source_id=sid, title=record["profile"]["title"], operation=operation,
+                configuration=payload, bytes=reservation)
+
+
+def _prepare_queued_update(sid, record, revision, payload):
+    original, fields = payload["original"], payload["fields"]
+    config = original | fields
+    if record["configuration"] not in (original, config):
+        raise ValueError("Source configuration changed after queuing")
+    current = zim_jobs.candidate_status(sid)
+    if (current and current["configuration"] == zim_jobs.identity(config)
+            and current["base_artifact"] == payload["base"]):
+        if record["configuration"] == original:
+            SOURCE_CATALOG.mutate("edit", sid, fields, revision)
+        return config, current
+    live = zim_jobs.read(sid)
+    if not live or live.get("artifact") != payload["base"]:
+        raise ValueError("Installed archive changed after queuing")
+    if current and current["state"] != "activated":
+        raise ValueError("Another replacement already exists")
+    if current and current["configuration"] == zim_jobs.identity(config):
+        raise ValueError("The reviewed edition is already installed")
+    with zim_jobs.LOCK:
+        # Serialize the base check and candidate preparation with manual ZIM actions.
+        candidate = zim_jobs.prepare_candidate(sid, config, replace_activated=True)
+        SOURCE_CATALOG.mutate("edit", sid, fields, revision)
+    return config, candidate
+
+
+def _publish_queued_update(sid, config, recovering):
+    candidate = zim_jobs.candidate_status(sid)
+    if not candidate or candidate["configuration"] != zim_jobs.identity(config):
+        raise ValueError("The verified candidate changed; review it again")
+    enabled = publication.load().get(sid, False)
+    if candidate["state"] != "activated" or not recovering:
+        zim_jobs.activate_candidate(sid, config)
+    return enabled
+
+
 def _execute_batch_job(job, stopping, shutdown):
     sid, operation = job["source_id"], job["operation"]
     recovering = job["state"] == "running"
     config = json.loads(job["configuration"])
-    kind = config["format"]
+    kind = "zim" if operation == "download-update" else config["format"]
 
     def stop_document():
         return stopping() or shutdown.is_set()
@@ -431,9 +511,16 @@ def _execute_batch_job(job, stopping, shutdown):
             raise ValueError("Storage settings changed; review and queue again")
         catalog = SOURCE_CATALOG.get()
         record = next((item for item in catalog["sources"] if item["source_id"] == sid), None)
-        if not record or record["configuration"] != config:
+        if not record or (operation != "download-update" and record["configuration"] != config):
             raise ValueError("Source configuration changed; review the catalog before retrying")
-        if operation in {"pdf", "epub"}:
+        if operation == "publish-update":
+            if stopping():
+                raise acquisition_queue.Cancelled()
+            try:
+                is_published = _publish_queued_update(sid, config, recovering)
+            except BlockingIOError:
+                return "running" if recovering else "queued", ""
+        elif operation in {"pdf", "epub"}:
             if stopping():
                 raise acquisition_queue.Cancelled()
             if recovering:
@@ -451,40 +538,54 @@ def _execute_batch_job(job, stopping, shutdown):
                     return "running", ""
                 raise
             return "completed", ""
-        replacement = operation == "replacement"
-        inspect = zim_jobs.candidate_status if replacement else zim_jobs.status
-        current = inspect(sid) if recovering else None
-        finished = "verified" if replacement else "completed"
-        if current and current["configuration"] != zim_jobs.identity(config):
-            raise ValueError("ZIM job configuration changed")
-        if current and current["state"] == finished:
-            return "completed", "Replacement ready for activation" if replacement else ""
-        if stopping() and not (current and current["state"] in zim_jobs.ACTIVE):
-            raise acquisition_queue.Cancelled()
-        if not replacement and publication.load().get(sid):
-            raise ValueError("Source was published after the download was queued")
-        if not recovering:
-            _batch_job(record, publication.load())
-        if not current or current["state"] not in zim_jobs.ACTIVE:
-            if current and current["state"] not in {"prepared", "paused", "interrupted"}:
-                return current["state"] if current["state"] in {"failed", "cancelled"} else "interrupted", "Review the existing ZIM job"
-            try:
-                with zim_jobs.worker_lock():
-                    pass
-            except BlockingIOError:
-                return "running" if recovering else "queued", ""
-            staging_id = sid + "-candidate" if replacement else sid
-            retained = zim_jobs.staged_size(staging_id) if current else 0
-            if _batch_available(settings, {kind}) < max(0, job["bytes"] - retained):
-                raise ValueError("Free space fell below the reserved download size")
-            try:
-                if replacement:
-                    zim_jobs.start_candidate_acquisition(sid, config)
-                else:
-                    zim_jobs.start(sid, config, resume=bool(retained),
-                                   restart=current is not None and not retained)
-            except BlockingIOError:
-                return "running" if recovering else "queued", ""
+        if operation != "publish-update":
+            replacement = operation in {"replacement", "download-update"}
+            inspect = zim_jobs.candidate_status if replacement else zim_jobs.status
+            if operation == "download-update":
+                if stopping() and not recovering:
+                    raise acquisition_queue.Cancelled()
+                try:
+                    config, current = _prepare_queued_update(sid, record, catalog["revision"], config)
+                except BlockingIOError:
+                    return "running" if recovering else "queued", ""
+            else:
+                current = inspect(sid) if recovering else None
+            finished = "verified" if replacement else "completed"
+            if current and current["configuration"] != zim_jobs.identity(config):
+                raise ValueError("ZIM job configuration changed")
+            if current and current["state"] == finished:
+                return "completed", "Replacement ready for activation" if replacement else ""
+            if stopping() and not (current and current["state"] in zim_jobs.ACTIVE):
+                raise acquisition_queue.Cancelled()
+            if not replacement and publication.load().get(sid):
+                raise ValueError("Source was published after the download was queued")
+            if not recovering and operation != "download-update":
+                _batch_job(record, publication.load())
+            if not current or current["state"] not in zim_jobs.ACTIVE:
+                if current and current["state"] not in {"prepared", "paused", "interrupted"}:
+                    return current["state"] if current["state"] in {"failed", "cancelled"} else "interrupted", "Review the existing ZIM job"
+                try:
+                    with zim_jobs.worker_lock():
+                        pass
+                except BlockingIOError:
+                    return "running" if recovering else "queued", ""
+                staging_id = sid + "-candidate" if replacement else sid
+                retained = zim_jobs.staged_size(staging_id) if current else 0
+                if _batch_available(settings, {kind}) < max(0, job["bytes"] - retained):
+                    raise ValueError("Free space fell below the reserved download size")
+                try:
+                    if replacement:
+                        zim_jobs.start_candidate_acquisition(sid, config)
+                    else:
+                        zim_jobs.start(sid, config, resume=bool(retained),
+                                       restart=current is not None and not retained)
+                except BlockingIOError:
+                    return "running" if recovering else "queued", ""
+    if operation == "publish-update":
+        if is_published and not zim_refresh.reconcile_activation(
+                lambda: SOURCE_CATALOG.get()["sources"], source_id=sid, configuration=config):
+            return "failed", "Reader could not serve the update; review the replacement status"
+        return "completed", "Update activated; publication setting preserved"
     while not shutdown.is_set():
         current = inspect(sid)
         if not current:
@@ -845,6 +946,28 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 self._send_json(200, STORAGE_PROBE.status(storage_settings.load_settings()))
             except ValueError:
                 self._send_json(503, {"ready": False, "error": "stored settings are invalid"})
+        elif self.path == "/api/library-overview":
+            try:
+                sources = self._source_profiles(SOURCE_CATALOG.get(initialize=False))["sources"]
+                enabled = publication.load()
+                installed = [source for source in sources if source["installed_verified"]]
+                published = sum(bool(enabled.get(source["source_id"])) for source in sources)
+                archives = {source["artifact"]["filename"]: source["artifact"]["bytes"]
+                            for source in installed if source.get("artifact")}
+                self._send_json(200, {
+                    "total_sources": len(sources), "installed_sources": len(installed),
+                    "enabled_sources": published, "disabled_sources": len(sources) - published,
+                    "installed_bytes": sum(archives.values()), "revision": RELEASE_REVISION,
+                })
+            except (OSError, ValueError, KeyError, TypeError):
+                self._send_json(503, {"error": "Library overview unavailable"})
+        elif self.path == "/api/update-sweep":
+            self._send_json(200, kiwix_update_scheduler.manual_status())
+        elif self.path == "/api/update-schedule":
+            try:
+                self._send_json(200, update_schedule.status())
+            except (ValueError, KeyError, TypeError, OSError):
+                self._send_json(503, {"error": "Update schedule unavailable"})
         elif self.path.rstrip("/") == "/api/storage-settings":
             try:
                 self._send_json(200, storage_settings.load_settings())
@@ -926,6 +1049,50 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             self._send_json(409, {"error": str(exc)})
             return
         self._send_json(202, {"job_ids": accepted})
+
+    def _queue_update_batch(self, data):
+        if not self.headers.get("Origin"):
+            self._send_json(403, {"error": "same-origin request required"})
+            return
+        operation, selection = data.get("operation"), data.get("selection")
+        if (data.keys() != {"operation", "selection", "revision"}
+                or operation not in ("download-update", "publish-update")
+                or not self._valid_revision(data["revision"])
+                or not isinstance(selection, dict) or not 1 <= len(selection) <= catalog_store.MAX_ENTRIES
+                or any(not catalog_store.ID_RE.fullmatch(sid) or not isinstance(digest, str)
+                       or not re.fullmatch(r"[a-f0-9]{64}", digest) for sid, digest in selection.items())):
+            self._send_json(400, {"error": "Invalid update selection"})
+            return
+        rejected = {}
+        try:
+            with publication.LOCK:
+                catalog = SOURCE_CATALOG.get()
+                if catalog["revision"] != data["revision"]:
+                    raise ValueError("Catalog changed; review the updates again")
+                records = {row["source_id"]: row for row in catalog["sources"]}
+                jobs = []
+                pending = {job["source_id"] for job in acquisition_queue.status()
+                           if job["state"] in acquisition_queue.PENDING}
+                for sid, digest in selection.items():
+                    try:
+                        if sid not in records or sid in pending:
+                            raise ValueError("Source is unavailable or already queued")
+                        jobs.append(_publisher_update_job(records[sid], digest, operation))
+                    except (ValueError, OSError) as exc:
+                        rejected[sid] = str(exc)
+                accepted = []
+                if jobs:
+                    settings = storage_settings.load_settings()
+                    available = _batch_available(settings, {"zim"}) if operation == "download-update" else None
+                    accepted = acquisition_queue.enqueue(jobs, available, settings)
+        except (OSError, sqlite3.Error, catalog_store.CatalogError):
+            self._send_json(503, {"error": "Update queue, catalog or storage unavailable"})
+            return
+        except ValueError as exc:
+            self._send_json(409, {"error": str(exc)})
+            return
+        self._send_json(202, {"queued": dict(zip((job["source_id"] for job in jobs), accepted)),
+                              "rejected": rejected})
 
     def _acquisition_preview(self, records, ids, *, exact_selection=False):
         rows = []
@@ -1370,9 +1537,12 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                                 publication=state, mutation_blocked=busy,
                                 publication_filter=publication_filter, download_filter=download_filter))
         published_ids = {source["source_id"] for source in sources if source["publication_filter"] == "published"}
+        stages = [stage for stage in map(_update_stage, sources) if stage]
         return dict(catalog, sources=sources, library_order=self._library_order(catalog, published_ids),
                     acquisition_stale=snapshot["stale"],
-                    update_summary=_source_update_summary(sources))
+                    update_summary=_source_update_summary(sources),
+                    available_updates=len(stages),
+                    update_stages={stage: stages.count(stage) for stage in ("download", "publish")})
 
     def _send_admin_page(self, page: str = "sources") -> None:
         """Render exactly the persisted source profiles."""
@@ -1506,6 +1676,28 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 return
             ADMIN_SESSIONS.clear()  # revoke browser sessions after credential rotation
             self._send_json(200, {"changed": True})
+        elif self.path == "/api/update-sweep":
+            if not self.headers.get("Origin") or self._read_body() != {"confirm": True}:
+                self._send_json(400, {"error": "Confirm the metadata check from Admin"})
+                return
+            if not kiwix_update_scheduler.start_manual():
+                self._send_json(409, {"error": "An update check is already running"})
+                return
+            self._send_json(202, {"state": "running"})
+        elif self.path == "/api/update-schedule":
+            data = self._read_body()
+            try:
+                update_schedule.validate(data)
+            except ValueError as exc:
+                self._send_json(400, {"error": str(exc)})
+                return
+            try:
+                update_schedule.save(data)
+                self._send_json(200, update_schedule.status())
+            except (ValueError, KeyError, TypeError, OSError):
+                self._send_json(503, {"error": "Update schedule could not be saved"})
+        elif self.path == "/api/update-batch":
+            self._queue_update_batch(self._read_body())
         elif self.path == "/api/update-endpoint-test":
             if not self.headers.get("Origin"):
                 self._send_json(403, {"error": "same-origin request required"})
@@ -2437,12 +2629,14 @@ def main() -> None:
     server.axiom_config = config
     server.managed_acquisition_only = True
     queue_shutdown = acquisition_queue.start(_execute_batch_job)
+    schedule_shutdown = kiwix_update_scheduler.start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
         queue_shutdown.set()
+        schedule_shutdown.set()
         server.server_close()
 
 

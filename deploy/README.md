@@ -74,9 +74,22 @@ are **examples only**; deploying or enabling them requires a separately
 authorized, exact-revision deployment and systemd configuration review. The
 service runs `python -m theaxiom.kiwix_update_scheduler` as the existing
 unprivileged application user, using the same private configuration as the
-administration backend. It attempts at most 10 source-scoped metadata checks
-per invocation. A daily 03:00 local-time timer has up to one hour of
-randomized delay and is persistent across downtime.
+administration backend. It checks every eligible installed source with periodic
+checks enabled, with up to eight concurrent checks and a 60-second deadline per
+source. The default daily 03:00 local-time timer has up to one hour of randomized
+delay and is persistent across downtime.
+
+Admin → Settings shows the server time zone and next run. Saving an interval
+and preferred time overrides the default timer without changing systemd
+configuration. The Admin backend runs the custom schedule and attempts the
+latest missed slot after downtime. Scheduled and manual sweeps share a lock.
+
+On Admin → Sources, **Check for all updates** checks every eligible installed
+source, including sources with periodic checks disabled. **Review updates**
+shows the editions and space estimates. Confirm **Download X updates** to
+queue replacements and **Publish X updates** to activate verified candidates.
+The installed archives serve until activation, and publication preferences
+remain in effect. The review shows each source's result.
 
 This path performs only bounded publisher metadata requests and writes
 private check-status JSON under application state. It **never downloads a ZIM

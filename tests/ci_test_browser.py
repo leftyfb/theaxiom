@@ -1062,6 +1062,90 @@ def exercise_mobile_admin_navigation(browser, viewport):
 
 
 
+def exercise_batch_update_journey(browser, viewport):
+    from test_admin_page_template import profile, render
+
+    page = browser.new_page(viewport=viewport)
+    digest = "a" * 64
+    sources = [profile("first", "First archive", format="zim"),
+               profile("second", "Second archive", format="zim")]
+    state = "idle"
+    jobs = []
+    calls = []
+    for source in sources:
+        source.update(installed_verified=True, installed_edition="2026-10",
+                      artifact={"bytes": 1024}, replacement=None, update_check=None)
+
+    def api(route):
+        nonlocal state
+        path = route.request.url.rsplit("/", 1)[-1]
+        if path == "update-sweep":
+            if route.request.method == "POST":
+                state = "completed"
+                for source in sources:
+                    source["update_check"] = {"state": "update_available", "candidate_sha256": digest,
+                                              "candidate_edition": "2026-11", "candidate_bytes": 2048}
+                route.fulfill(status=202, json={"state": "running"})
+            else:
+                route.fulfill(json={"state": state, "checks": []})
+        elif path == "sources":
+            download = sum(bool(row["update_check"] and not row["replacement"]) for row in sources)
+            publish = sum(bool(row["replacement"] and row["replacement"]["state"] == "verified")
+                          for row in sources)
+            route.fulfill(json={"revision": 1, "sources": sources, "available_updates": download + publish,
+                                "update_stages": {"download": download, "publish": publish}})
+        elif path == "update-batch":
+            data = route.request.post_data_json
+            calls.append(data)
+            operation = data["operation"]
+            jobs.insert(0, {"source_id": "first", "operation": operation, "state": "completed"})
+            sources[0]["replacement"] = {"state": "verified" if operation == "download-update" else "activated",
+                                         "sha256": digest}
+            sources[0]["configuration"]["edition"] = "2026-11"
+            sources[1]["update_check"] = None
+            if operation == "publish-update":
+                sources[0]["update_check"] = None
+            route.fulfill(status=202, json={"queued": {"first": "fixture-job"}, "rejected": {}})
+        elif path == "acquisition-batch":
+            route.fulfill(json={"jobs": jobs})
+        else:
+            route.fulfill(json={})
+
+    try:
+        page.route("http://fixture.local/admin/sources", lambda route: route.fulfill(
+            content_type="text/html", body=render(catalog={"sources": sources, "revision": 1})))
+        page.route("http://fixture.local/api/**", api)
+        page.on("dialog", lambda dialog: dialog.accept())
+        page.goto("http://fixture.local/admin/sources")
+        action = page.locator("#check-all-updates")
+        if viewport["width"] <= 640:
+            page.get_by_label("More admin tools").click()
+        expect(action).to_have_text("Check for all updates")
+        action.click()
+        expect(page.get_by_text("Updates are available", exact=True)).to_be_visible()
+        expect(action).to_have_text("Download 2 updates")
+        page.get_by_role("link", name="Review updates").click()
+        review = page.locator("#update-review")
+        expect(review).to_be_visible()
+        expect(page.locator("#regular-sources")).to_be_hidden()
+        expect(review.get_by_text("Installed 2026-10 · Update 2026-11", exact=False)).to_have_count(2)
+        expect(review.get_by_text("Selected download estimate and additional storage required: 4 KiB")).to_be_visible()
+        review.get_by_role("checkbox", name="Second archive").uncheck()
+        expect(action).to_have_text("Download 1 update")
+        action.click()
+        expect(action).to_have_text("Publish 1 update")
+        expect(review.get_by_text("Download completed")).to_be_visible()
+        action.click()
+        expect(review.get_by_text("Publication completed")).to_be_visible()
+        assert calls == [
+            {"operation": "download-update", "revision": 1, "selection": {"first": digest}},
+            {"operation": "publish-update", "revision": 1, "selection": {"first": digest}},
+        ]
+    finally:
+        page.close()
+
+
+
 def main():
     artifacts = Path(os.environ.get("AXIOM_BROWSER_ARTIFACTS", "/tmp/axiom-browser-artifacts"))
     with tempfile.TemporaryDirectory(prefix="axiom-browser-fixtures-") as tmp:
@@ -1101,6 +1185,7 @@ def main():
                                     else:
                                         exercise_compact_sources(browser, viewport)
                                         exercise_mobile_admin_navigation(browser, viewport)
+                                    exercise_batch_update_journey(browser, viewport)
                                     exercise_history_poll(browser, viewport)
                                     exercise_source_order(browser, viewport)
                             finally:
