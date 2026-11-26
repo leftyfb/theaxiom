@@ -228,6 +228,8 @@ def _public_zim_replacement(candidate):
     result = {key: candidate[key] for key in (
         "state", "downloaded_bytes", "expected_bytes", "error"
     ) if key in candidate}
+    if candidate["state"] == "verified":
+        result["sha256"] = candidate["artifact"].get("sha256")
     return result | zim_jobs.current_checksum(candidate)
 
 
@@ -1860,6 +1862,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             data = self._read_body()
             if data.get("action") == "zim-replacement-update":
                 self._download_zim_update(data)
+            elif data.get("action") == "zim-replacement-delete-verified":
+                self._delete_staged_update(data)
             elif data.get("action") in {"zim-download", "zim-resume", "zim-pause", "zim-cancel", "zim-cancel-keep", "zim-restart", "zim-retry", "zim-revalidate", "zim-replacement-prepare", "zim-replacement-discard", "zim-replacement-activate", "zim-replacement-rollback", "zim-replacement-download", "zim-replacement-cancel", "zim-delete-installed"}:
                 self._start_zim(data)
             elif data.get("action") == "delete-downloaded-files":
@@ -2181,6 +2185,34 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 reason = f"{prefix}Deletion incomplete after removing {removed} file(s). {reason}"
             self._send_json(409, {"error": reason})
             return
+        self._send_json(200, result)
+
+    def _delete_staged_update(self, data):
+        if not self.headers.get("Origin"):
+            self._send_json(403, {"error": "same-origin request required"})
+            return
+        sid, digest, revision = data.get("source_id"), data.get("candidate_sha256"), data.get("revision")
+        if (set(data) != {"action", "source_id", "candidate_sha256", "revision", "confirm"}
+                or data["confirm"] is not True or not self._valid_revision(revision)
+                or not isinstance(sid, str) or not catalog_store.ID_RE.fullmatch(sid)
+                or not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest)):
+            self._send_json(400, {"error": "Invalid staged update deletion request"})
+            return
+        with publication.LOCK:
+            try:
+                catalog = SOURCE_CATALOG.get()
+                if revision != catalog["revision"]:
+                    raise ValueError("Catalog changed. Reload and review the staged update.")
+                record = next((row for row in catalog["sources"] if row["source_id"] == sid), None)
+                if not record or not self._zim_record(record):
+                    raise ValueError("No matching ZIM source")
+                result = zim_jobs.delete_verified_candidate(sid, record["configuration"], digest)
+            except (BlockingIOError, ValueError) as exc:
+                self._send_json(409, {"error": str(exc) or "ZIM storage is busy"})
+                return
+            except OSError:
+                self._send_json(503, {"error": "Staged update could not be removed safely"})
+                return
         self._send_json(200, result)
 
     def _download_zim_update(self, data):

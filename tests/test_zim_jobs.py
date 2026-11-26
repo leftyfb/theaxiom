@@ -1647,7 +1647,8 @@ def test_interrupted_promotion_recovers_only_verified_library_and_staging_links(
 from test_source_profiles_http import app as download_app, mutate, source  # noqa: E402,F401
 
 
-def test_download_discovered_update_then_publish(download_app, disk, monkeypatch):
+@pytest.mark.parametrize("finish", ["publish", "delete", "remove"])
+def test_download_discovered_update_and_follow_up(download_app, disk, monkeypatch, finish):
     from theaxiom import publication, update_check_store, zim_refresh
 
     request, _ = download_app
@@ -1692,6 +1693,31 @@ def test_download_discovered_update_then_publish(download_app, disk, monkeypatch
     assert staged["artifact"] == original
     assert staged["update_check"]["state"] == "update_available"
     assert staged["replacement"]["state"] == "verified"
+    if finish == "remove":
+        candidate = zim_jobs.read_candidate(sid)
+        mutate(request, catalog, "remove", sid=sid)
+        assert not publication.load().get(sid)
+        assert all(item["source_id"] != sid for item in request("/api/sources")["sources"])
+        assert zim_jobs.read(sid)["artifact"] == original
+        assert zim_jobs.read_candidate(sid) == candidate
+        for artifact in (original, candidate["artifact"]):
+            assert (disk / "library/zim" / artifact["filename"]).exists()
+        return
+    if finish == "delete":
+        delete = dict(action="zim-replacement-delete-verified", source_id=sid,
+                      revision=catalog["revision"], candidate_sha256=digest, confirm=True)
+        request("/api/action", dict(delete, confirm=False), status=400)
+        request("/api/action", dict(delete, candidate_sha256="0" * 64), status=409)
+        archive = disk / "library/zim" / zim_jobs.read_candidate(sid)["artifact"]["filename"]
+        assert archive.exists()
+        assert request("/api/action", delete)["state"] == "discarded"
+        assert not archive.exists() and zim_jobs.read_candidate(sid) is None
+        assert zim_jobs.read(sid)["artifact"] == original
+        assert (disk / "library/zim" / original["filename"]).read_bytes() == data
+        assert publication.load()[sid] and not refreshes
+        assert source(request("/api/sources"), sid)["replacement"] is None
+        return
+
     request("/api/action", dict(action="zim-replacement-activate", source_id=sid,
                                revision=catalog["revision"], confirm_restart=True), status=202)
     assert zim_jobs.read(sid)["artifact"]["sha256"] == digest

@@ -844,6 +844,9 @@
             <div class="source-actions">
               {% if document or source.zim_download %}
               <button class="button danger-action" type="button" data-delete-downloads{% if not document and not source.installed_verified %} hidden{% endif %}{% if source.mutation_blocked or pub.error or source.replacement %} disabled{% endif %}>Delete downloaded files</button>
+              {% if source.zim_download %}
+              <button class="button danger-action" type="button" data-delete-staged-update hidden>Delete staged update files</button>
+              {% endif %}
               {% endif %}
               <button class="button danger-action" type="button" data-catalog-remove="{{ source.source_id }}"{% if source.mutation_blocked or pub.error %} disabled{% endif %}>Remove source</button>
             </div>
@@ -2121,6 +2124,29 @@
           button.disabled = false;
         }
       }));
+      document.querySelectorAll('[data-delete-staged-update]').forEach(button => button.addEventListener('click', async () => {
+        if (button.disabled || !button.dataset.digest) return;
+        const card = button.closest('.source-card');
+        const edition = button.dataset.edition;
+        if (!window.confirm('Delete the staged update files' + (edition ? ' for ' + edition : '') +
+            '? The installed edition will stay in service.')) return;
+        const feedback = card.querySelector('[data-zim-feedback]');
+        card.dataset.stagedDeletePosting = 'true';
+        button.disabled = true;
+        try {
+          const response = await acquisitionFetch('/api/action', {method:'POST',
+            headers:{...(window.axiomCsrfHeaders?.() || {}), 'Content-Type':'application/json'},
+            body:JSON.stringify({action:'zim-replacement-delete-verified', source_id:card.dataset.sourceId,
+              candidate_sha256:button.dataset.digest, revision, confirm:true})});
+          const result = await response.json().catch(() => ({}));
+          if (!response.ok) throw acquisitionError(response, result, 'Staged update deletion failed');
+          feedback.textContent = 'Staged update files deleted.';
+        } catch (error) {
+          feedback.textContent = error.message;
+        } finally {
+          delete card.dataset.stagedDeletePosting;
+        }
+      }));
       document.querySelectorAll('[data-delete-downloads]').forEach(button => button.addEventListener('click', async () => {
         if (button.disabled) return;
         const card = button.closest('.source-card');
@@ -2664,8 +2690,17 @@
           }
         }
         const deleteButton = card.querySelector('[data-delete-downloads]');
+        const stagedDelete = card.querySelector('[data-delete-staged-update]');
+        const canDeleteStaged = source?.replacement?.state === 'verified' && !!source.replacement.sha256;
+        if (stagedDelete) {
+          stagedDelete.hidden = !canDeleteStaged;
+          stagedDelete.disabled = blocked || card.dataset.stagedDeletePosting === 'true' ||
+            card.dataset.zimReplacementPosting === 'true';
+          stagedDelete.dataset.digest = canDeleteStaged ? source.replacement.sha256 : '';
+          stagedDelete.dataset.edition = source?.profile?.edition || '';
+        }
         if (deleteButton) {
-          deleteButton.hidden = card.dataset.filterFormat === 'zim' && !source?.installed_verified;
+          deleteButton.hidden = canDeleteStaged || (card.dataset.filterFormat === 'zim' && !source?.installed_verified);
           deleteButton.disabled = blocked || !!source?.replacement || card.dataset.deletePosting === 'true';
         }
         const replacement = source?.replacement;
@@ -2705,6 +2740,7 @@
             // preconditions. A changed catalog URL makes the old acquisition
             // appear unmatched; it must not disable a safe replacement action.
             button.disabled = card.dataset.zimReplacementPosting === 'true' ||
+              card.dataset.stagedDeletePosting === 'true' ||
               (op === 'prepare' && !source?.replacement_available) ||
               (op === 'download' && !['prepared','failed','interrupted','cancelled'].includes(replacementState));
           }

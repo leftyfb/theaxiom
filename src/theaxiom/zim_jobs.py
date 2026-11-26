@@ -503,6 +503,39 @@ def discard_candidate(sid, config):
             return {"accepted": True, "source_id": sid, "state": "discarded"}
 
 
+def delete_verified_candidate(sid, config, digest):
+    """Delete only the verified replacement that the operator reviewed."""
+    with LOCK, worker_lock():
+        candidate = read_candidate(sid)
+        if (not candidate or candidate["state"] != "verified"
+                or candidate["configuration"] != identity(config)
+                or candidate["artifact"].get("sha256") != digest):
+            raise ValueError("Verified update changed. Reload and review before deleting.")
+        live = read(sid)
+        if (not live or live.get("artifact") != candidate["base_artifact"]
+                or not installed(live, live["configuration"])):
+            raise ValueError("Serving archive could not be verified.")
+        artifact = candidate["artifact"]
+        if artifact["filename"] == live["artifact"]["filename"]:
+            raise ValueError("Staged update overlaps the serving archive.")
+        target = candidate_path_for(sid)
+        with pdf_source._directory("library", writing=True, format_name="zim") as (directory, mount, _):
+            try:
+                with open_installed_archive(directory, mount, candidate, artifact) as stream:
+                    pdf_source.unlink_managed_file(directory, stream, artifact["filename"])
+            except FileNotFoundError:
+                # A previous attempt may have unlinked the bytes before its ledger write.
+                pass
+            os.fsync(directory)
+        target.unlink()
+        dfd = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(dfd)
+        finally:
+            os.close(dfd)
+        return {"accepted": True, "source_id": sid, "state": "discarded"}
+
+
 
 @contextmanager
 def downloaded_zim(sid):
