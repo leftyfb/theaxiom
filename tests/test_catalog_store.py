@@ -163,7 +163,7 @@ class CatalogStoreTests(unittest.TestCase):
         self.assertEqual(snapshot["revision"], 7)
         self.assertEqual(snapshot["updated_at"], state["updated_at"])
         converted = self.path.read_bytes()
-        self.assertEqual(set(json.loads(converted)), {"schema_version", "revision", "updated_at", "sources", "groups", "starter_groups_initialized"})
+        self.assertEqual(set(json.loads(converted)), {"schema_version", "revision", "updated_at", "sources", "groups", "starter_groups_initialized", "seed_version"})
         sources = {s["source_id"]: s for s in snapshot["sources"]}
         self.assertNotIn("wikivoyage", sources)
         self.assertEqual(sources["wikipedia-en"]["profile"]["title"], "Edited")

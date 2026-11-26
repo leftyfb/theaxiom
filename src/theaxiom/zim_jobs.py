@@ -523,7 +523,7 @@ def delete_verified_candidate(sid, config, digest, *, restore_profile):
         if artifact["filename"] == live["artifact"]["filename"]:
             raise ValueError("Staged update overlaps the serving archive.")
         target = candidate_path_for(sid)
-        with pdf_source._directory("library", writing=True, format_name="zim") as (directory, mount, _):
+        with pdf_source._directory("library", writing=True, format_name=candidate["configuration"]["format"]) as (directory, mount, _):
             try:
                 with open_installed_archive(directory, mount, candidate, artifact) as stream:
                     pdf_source.unlink_managed_file(directory, stream, artifact["filename"])
@@ -556,7 +556,7 @@ def downloaded_zim(sid):
         if not artifact:
             raise ValueError("Installed ZIM is missing or invalid; deletion refused")
         name, size = artifact["filename"], artifact["bytes"]
-        with pdf_source._directory("library", writing=True, format_name="zim") as (directory, mount, _):
+        with pdf_source._directory("library", writing=True, format_name=job["configuration"]["format"]) as (directory, mount, _):
             with open_installed_archive(directory, mount, job, artifact) as stream:
                 yield directory, [(name, stream, size)]
 
@@ -695,12 +695,12 @@ def _promoted_artifact(job):
         checksum = artifact["sha256"]
         length = artifact["bytes"]
         if (not re.fullmatch("[a-f0-9]{64}", checksum)
-                or name != f'{job["source_id"]}.{checksum}.zim'
+                or name != f'{job["source_id"]}.{checksum}.{job["configuration"]["format"]}'
                 or artifact["source_url"] != url or (digest and checksum != digest)
                 or type(length) is not int or not 96 <= length <= zim_source.MAX_BYTES
                 or (size and length != size)):
             return None
-        with pdf_source._directory("library", format_name="zim") as (fd, mount, _):
+        with pdf_source._directory("library", format_name=job["configuration"]["format"]) as (fd, mount, _):
             with pdf_source._file(fd, mount, name, length, allowed_links=(1, 2)) as stream:
                 info = os.fstat(stream.fileno())
                 if zim_source.promotion_identity(info) != intent["identity"]:
@@ -795,10 +795,12 @@ def status(sid):
 
 def identity(config):
     url, size, digest = zim_source.candidate(config)
-    result = {"format": "zim", "source_url": url, "expected_size_bytes": str(size) if size else "",
+    result = {"format": config["format"], "source_url": url, "expected_size_bytes": str(size) if size else "",
               "sha256": digest or ""}
     if publisher_sha1 := zim_source.publisher_sha1(config):
         result["publisher_sha1"] = publisher_sha1
+    if publisher_md5 := zim_source.publisher_md5(config):
+        result["publisher_md5"] = publisher_md5
     return result
 
 
@@ -846,7 +848,7 @@ def open_installed_archive(directory, mount, job, artifact):
     """Open the verified, digest-named file recorded in the managed ledger."""
     digest = artifact["sha256"]
     filename = artifact["filename"]
-    if not re.fullmatch("[a-f0-9]{64}", digest) or filename != f'{job["source_id"]}.{digest}.zim':
+    if not re.fullmatch("[a-f0-9]{64}", digest) or filename != f'{job["source_id"]}.{digest}.{job["configuration"]["format"]}':
         raise ValueError("Invalid installed archive metadata")
     with pdf_source._file(directory, mount, filename, artifact["bytes"]) as stream:
         yield stream
@@ -857,7 +859,7 @@ def installed(job, config):
         return None
     try:
         artifact = job["artifact"]
-        with pdf_source._directory("library", format_name="zim") as (fd, mount, _):
+        with pdf_source._directory("library", format_name=job["configuration"]["format"]) as (fd, mount, _):
             with open_installed_archive(fd, mount, job, artifact):
                 return artifact
     except (OSError, ValueError, KeyError, TypeError):
@@ -945,7 +947,7 @@ def start(sid, config, *, resume=False, restart=False, retry=False):
                     # staged bytes; replacing the record must not reset it.
                     job["attempt_history"] = list(old.get("attempt_history", []))
             with (pdf_source._directory("staging", writing=True, format_name="zim") as (sfd, sm, _),
-                  pdf_source._directory("library", writing=True, format_name="zim") as (_, lm, reserve)):
+                  pdf_source._directory("library", writing=True, format_name=configuration["format"]) as (_, lm, reserve)):
                 cap = os.fstatvfs(sfd)
                 need = max(96, (int(configuration["expected_size_bytes"] or 0) - offset))
                 if sm != lm or cap.f_flag & os.ST_RDONLY or cap.f_bavail * cap.f_frsize < reserve + need:
@@ -986,7 +988,7 @@ def revalidate(sid, config):
             if type(expected) is not int or expected < 96 or actual != expected:
                 raise ValueError("Local revalidation requires a complete retained file of known size")
             with (pdf_source._directory("staging", writing=True, format_name="zim") as (sfd, sm, _),
-                  pdf_source._directory("library", writing=True, format_name="zim") as (_, lm, reserve)):
+                  pdf_source._directory("library", writing=True, format_name=configuration["format"]) as (_, lm, reserve)):
                 cap = os.fstatvfs(sfd)
                 if sm != lm or cap.f_flag & os.ST_RDONLY or cap.f_bavail * cap.f_frsize < reserve:
                     raise ValueError("Insufficient writable ZIM storage capacity")

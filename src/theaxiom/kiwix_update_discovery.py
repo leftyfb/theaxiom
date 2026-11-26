@@ -54,6 +54,8 @@ def check_kiwix_update(installed: dict, *, fetch=None) -> dict:
     never built from the catalog or a user-edited source card. Only the
     transport's pinned TLS, checked DNS and allowlisted endpoints are trusted.
     """
+    if isinstance(installed, dict) and installed.get("publisher") == "protomaps":
+        return archives.check_protomaps_update(installed, fetch=fetch)
     if isinstance(installed, dict) and installed.get("publisher") == "archive":
         return archives.check_archive_update(installed, fetch=fetch)
     stage = "installed identity validation"
@@ -176,13 +178,13 @@ def installed_identity_from_job(job: dict, artifact: dict) -> dict | None:
             or job.get("active") is not False or job.get("artifact") != artifact):
         return None
     config = job.get("configuration")
-    if not isinstance(config, dict) or config.get("format") != "zim":
+    if not isinstance(config, dict) or config.get("format") not in {"zim", "pmtiles"}:
         return None
     digest = artifact.get("sha256")
     source_id = job.get("source_id")
     if (not isinstance(source_id, str) or not re.fullmatch(r"[a-z][a-z0-9-]{0,63}", source_id)
             or not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest)
-            or artifact.get("filename") != f"{source_id}.{digest}.zim"
+            or artifact.get("filename") != f"{source_id}.{digest}.{config['format']}"
             # A checksum is optional at acquisition time. The completed,
             # independently verified artifact contains its measured SHA-256;
             # if the operator supplied an expected digest, it must match.
@@ -190,6 +192,11 @@ def installed_identity_from_job(job: dict, artifact: dict) -> dict | None:
         return None
     url = config.get("source_url")
     if not isinstance(url, str):
+        return None
+    if config["format"] == "pmtiles":
+        map_build = archives.protomaps_identity(url)
+        if map_build and re.fullmatch(r"[a-f0-9]{32}", config.get("publisher_md5", "")):
+            return dict(map_build, verified=True, sha256=digest, source_url=url, publisher="protomaps", publisher_md5=config["publisher_md5"])
         return None
     archive = archives.internet_archive_identity(url)
     if archive and re.fullmatch(r"[a-f0-9]{40}", config.get("publisher_sha1", "")):

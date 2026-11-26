@@ -19,13 +19,16 @@ def candidate(config):
     url = config.get("source_url", "")
     size = config.get("expected_size_bytes", "")
     digest = config.get("sha256", "")
-    if config.get("format") != "zim" or not pdf_source.valid_source_url(url):
+    if config.get("format") not in {"zim", "pmtiles"} or not pdf_source.valid_source_url(url):
         raise ValueError("ZIM download requires a direct plain HTTPS URL")
     if size and (not re.fullmatch(r"[1-9][0-9]{0,19}", size) or int(size) > MAX_BYTES):
         raise ValueError("Expected ZIM size exceeds supported limits")
     if digest and not re.fullmatch(r"[a-fA-F0-9]{64}", digest):
         raise ValueError("Invalid expected ZIM SHA-256")
     publisher_sha1(config)
+    md5 = publisher_md5(config)
+    if config["format"] == "pmtiles" and (not size or not (md5 or digest)):
+        raise ValueError("PMTiles requires expected size and a publisher checksum")
     return url, int(size) if size else None, digest.lower() if digest else None
 
 
@@ -33,6 +36,13 @@ def publisher_sha1(config):
     value = config.get("publisher_sha1", "")
     if not isinstance(value, str) or value and not re.fullmatch(r"[a-fA-F0-9]{40}", value):
         raise ValueError("Invalid publisher SHA-1")
+    return value.lower()
+
+
+def publisher_md5(config):
+    value = config.get("publisher_md5", "")
+    if not isinstance(value, str) or value and not re.fullmatch(r"[a-fA-F0-9]{32}", value):
+        raise ValueError("Invalid publisher MD5")
     return value.lower()
 
 
@@ -59,6 +69,7 @@ def install_stream(source_id, config, stream, *, progress=lambda current, total:
     if not catalog_store.ID_RE.fullmatch(source_id):
         raise ValueError("Invalid source ID")
     url, expected, expected_digest = candidate(config)
+    kind = config["format"]
     reported = getattr(stream, "length", None)
     if reported is not None and (type(reported) is not int or not 0 < reported <= MAX_BYTES):
         raise ValueError("Invalid server ZIM size")
@@ -67,7 +78,7 @@ def install_stream(source_id, config, stream, *, progress=lambda current, total:
     total = expected or reported
     settings = storage_settings.load_settings()
     with (pdf_source._directory("staging", writing=True, format_name="zim") as (staging, smount, _),
-          pdf_source._directory("library", writing=True, format_name="zim") as (library, lmount, reserve)):
+          pdf_source._directory("library", writing=True, format_name=kind) as (library, lmount, reserve)):
         if smount != lmount or storage_settings.load_settings() != settings:
             raise ValueError("ZIM storage changed during preparation")
         root = settings["storage_root"]
@@ -77,7 +88,7 @@ def install_stream(source_id, config, stream, *, progress=lambda current, total:
             if (mount["id"] != smount or mount["read_only"]
                     or (settings["storage_mount"] and
                         (mount["target"] != settings["storage_mount"] or mount["source"] != settings["storage_source"]))
-                    or any(storage._covering(pdf_source.Path(root) / branch / "zim", mounts) != mount
+                    or any(storage._covering(pdf_source.Path(root) / branch / ("zim" if branch == "staging" else kind), mounts) != mount
                            for branch in ("staging", "library"))
                     or storage_settings.load_settings() != settings):
                 raise ValueError("ZIM storage changed during acquisition")
@@ -95,6 +106,8 @@ def install_stream(source_id, config, stream, *, progress=lambda current, total:
             count = 0
             digest = hashlib.sha256()
             expected_sha1 = publisher_sha1(config)
+            expected_md5 = publisher_md5(config)
+            publisher_hash = hashlib.md5(usedforsecurity=False) if expected_md5 else None
             sha1 = hashlib.sha1(usedforsecurity=False) if expected_sha1 else None
             with os.fdopen(fd, "w+b") as target:
                 while block := stream.read(CHUNK):
@@ -108,6 +121,8 @@ def install_stream(source_id, config, stream, *, progress=lambda current, total:
                     digest.update(block)
                     if sha1 is not None:
                         sha1.update(block)
+                    if publisher_hash is not None:
+                        publisher_hash.update(block)
                     count += len(block)
                     progress(count, total)
                 if total is not None and count != total:
@@ -117,25 +132,32 @@ def install_stream(source_id, config, stream, *, progress=lambda current, total:
                     raise ValueError("ZIM publisher SHA-1 differs from expected digest")
                 if expected_digest and identity != expected_digest:
                     raise ValueError("ZIM SHA-256 differs from expected digest")
+                if publisher_hash is not None and publisher_hash.hexdigest() != expected_md5:
+                    raise ValueError("Publisher MD5 differs from expected digest")
                 target.seek(0)
-                check_header(target.read(80), count)
-                # ZIM's trailing MD5 is a format-integrity check, not authentication.
-                target.seek(0)
-                actual = hashlib.md5(usedforsecurity=False)
-                left = count - 16
-                while left:
-                    block = target.read(min(CHUNK, left))
-                    if not block:
-                        raise ValueError("Incomplete staged ZIM")
-                    actual.update(block)
-                    left -= len(block)
-                if actual.digest() != target.read(16):
-                    raise ValueError("ZIM internal checksum mismatch")
+                if kind == "pmtiles":
+                    from . import pmtiles_source
+                    pmtiles_source.check_header(target.read(127), count)
+                else:
+                    check_header(target.read(80), count)
+                if kind == "zim":
+                    # ZIM's trailing MD5 is a format-integrity check, not authentication.
+                    target.seek(0)
+                    actual = hashlib.md5(usedforsecurity=False)
+                    left = count - 16
+                    while left:
+                        block = target.read(min(CHUNK, left))
+                        if not block:
+                            raise ValueError("Incomplete staged ZIM")
+                        actual.update(block)
+                        left -= len(block)
+                    if actual.digest() != target.read(16):
+                        raise ValueError("ZIM internal checksum mismatch")
                 os.fsync(target.fileno())
             check_mount()
             if available() < 0:
                 raise ValueError("ZIM storage reserve would be exceeded")
-            name = source_id + "." + identity + ".zim"
+            name = source_id + "." + identity + "." + kind
             # Never overwrite even an identically named existing archive.
             os.link(temp, name, src_dir_fd=staging, dst_dir_fd=library, follow_symlinks=False)
             os.unlink(temp, dir_fd=staging)
@@ -183,6 +205,7 @@ def download_resumable(source_id, config, *, offset=0, validator=None,
     or paused transfer retains it. No archive is published until full validation.
     """
     url, expected, expected_digest = candidate(config)
+    kind = config["format"]
     if type(offset) is not int or offset < 0 or offset >= MAX_BYTES:
         raise ValueError("Invalid saved ZIM offset")
     if offset and not validator:
@@ -191,7 +214,7 @@ def download_resumable(source_id, config, *, offset=0, validator=None,
     name = partial_name(staging_id if staging_id is not None else source_id)
     settings = storage_settings.load_settings()
     with (pdf_source._directory("staging", writing=True, format_name="zim") as (staging, mount_id, _),
-          pdf_source._directory("library", writing=True, format_name="zim") as (library, library_mount, reserve)):
+          pdf_source._directory("library", writing=True, format_name=kind) as (library, library_mount, reserve)):
         if mount_id != library_mount or storage_settings.load_settings() != settings:
             raise ValueError("ZIM storage changed during preparation")
 
@@ -203,7 +226,7 @@ def download_resumable(source_id, config, *, offset=0, validator=None,
             if (mount["id"] != mount_id or mount["read_only"]
                     or (settings["storage_mount"] and
                         (mount["target"] != settings["storage_mount"] or mount["source"] != settings["storage_source"]))
-                    or any(storage._covering(pdf_source.Path(root) / branch / "zim", mounts) != mount
+                    or any(storage._covering(pdf_source.Path(root) / branch / ("zim" if branch == "staging" else kind), mounts) != mount
                            for branch in ("staging", "library"))
                     or storage_settings.load_settings() != settings):
                 raise ValueError("ZIM storage changed during acquisition")
@@ -291,7 +314,7 @@ def download_resumable(source_id, config, *, offset=0, validator=None,
                     return _verify_and_promote(
                         fd, staging, library, name, source_id, url, count,
                         expected_digest, check_mount, available, stopped,
-                        promote_lock, promoting, progress, expected_sha1=publisher_sha1(config))
+                        promote_lock, promoting, progress, expected_sha1=publisher_sha1(config), kind=kind, expected_md5=publisher_md5(config))
 
         finally:
             os.close(fd)
@@ -299,7 +322,7 @@ def download_resumable(source_id, config, *, offset=0, validator=None,
 
 def _verify_and_promote(fd, staging, library, name, source_id, url, count,
                         expected_digest, check_mount, available, stopped,
-                        promote_lock, promoting, progress, *, expected_sha1=""):
+                        promote_lock, promoting, progress, *, expected_sha1="", kind="zim", expected_md5=""):
     """Verify a staged inode and promote it without copying archive bytes."""
     from contextlib import nullcontext
     check_mount()
@@ -310,7 +333,7 @@ def _verify_and_promote(fd, staging, library, name, source_id, url, count,
         now = time.monotonic()
         if boundary or now - last_report >= 1:
             progress(count, count, {"verifying": True, "checksum_bytes": position,
-                                   "checksum_pass": pass_number, "checksum_passes": 2})
+                                   "checksum_pass": pass_number, "checksum_passes": 2 if kind == "zim" else 1})
             last_report = now
 
     report_checksum(0, 1, boundary=True)
@@ -318,6 +341,7 @@ def _verify_and_promote(fd, staging, library, name, source_id, url, count,
         target.seek(0)
         sha = hashlib.sha256()
         sha1 = hashlib.sha1(usedforsecurity=False) if expected_sha1 else None
+        publisher_hash = hashlib.md5(usedforsecurity=False) if expected_md5 else None
         position = 0
         while block := target.read(CHUNK):
             if stopped():
@@ -325,6 +349,8 @@ def _verify_and_promote(fd, staging, library, name, source_id, url, count,
             sha.update(block)
             if sha1 is not None:
                 sha1.update(block)
+            if publisher_hash is not None:
+                publisher_hash.update(block)
             position += len(block)
             if position < count:
                 report_checksum(position, 1)
@@ -333,26 +359,33 @@ def _verify_and_promote(fd, staging, library, name, source_id, url, count,
         report_checksum(count, 1, boundary=True)
         if sha1 is not None and sha1.hexdigest() != expected_sha1:
             raise ValueError("ZIM publisher SHA-1 differs from expected digest")
+        if publisher_hash is not None and publisher_hash.hexdigest() != expected_md5:
+            raise ValueError("Publisher MD5 differs from expected digest")
         target.seek(0)
-        check_header(target.read(80), count)
-        md5 = hashlib.md5(usedforsecurity=False)
-        target.seek(0)
-        remaining = count - 16
-        report_checksum(0, 2, boundary=True)
-        while remaining:
-            if stopped():
-                raise TransferStopped()
-            block = target.read(min(CHUNK, remaining))
-            if not block:
-                raise ValueError("Incomplete staged ZIM")
-            md5.update(block)
-            remaining -= len(block)
-            report_checksum(count - 16 - remaining, 2)
-        footer = target.read(16)
-        if len(footer) == 16:
-            report_checksum(count, 2, boundary=True)
-        if md5.digest() != footer:
-            raise ValueError("ZIM internal checksum mismatch")
+        if kind == "pmtiles":
+            from . import pmtiles_source
+            pmtiles_source.check_header(target.read(127), count)
+        else:
+            check_header(target.read(80), count)
+        if kind == "zim":
+            md5 = hashlib.md5(usedforsecurity=False)
+            target.seek(0)
+            remaining = count - 16
+            report_checksum(0, 2, boundary=True)
+            while remaining:
+                if stopped():
+                    raise TransferStopped()
+                block = target.read(min(CHUNK, remaining))
+                if not block:
+                    raise ValueError("Incomplete staged ZIM")
+                md5.update(block)
+                remaining -= len(block)
+                report_checksum(count - 16 - remaining, 2)
+            footer = target.read(16)
+            if len(footer) == 16:
+                report_checksum(count, 2, boundary=True)
+            if md5.digest() != footer:
+                raise ValueError("ZIM internal checksum mismatch")
         digest = sha.hexdigest()
         if expected_digest and digest != expected_digest:
             raise ValueError("ZIM SHA-256 differs from expected digest")
@@ -369,7 +402,7 @@ def _verify_and_promote(fd, staging, library, name, source_id, url, count,
         pinned = os.fstat(fd)
         if pinned.st_size != count or pinned.st_nlink != 1:
             raise ValueError("Staged ZIM changed during final verification")
-        filename = source_id + "." + digest + ".zim"
+        filename = source_id + "." + digest + "." + kind
         artifact = {"filename": filename, "source_url": url, "bytes": count, "sha256": digest}
         promoting(artifact, promotion_identity(pinned))
         os.link(name, filename, src_dir_fd=staging, dst_dir_fd=library, follow_symlinks=False)
@@ -397,12 +430,13 @@ def revalidate_retained(source_id, config, *, expected_bytes, progress=lambda cu
     complete archive. Retain all bytes on any verification failure.
     """
     url, configured_size, expected_digest = candidate(config)
+    kind = config["format"]
     if (type(expected_bytes) is not int or not 96 <= expected_bytes <= MAX_BYTES
             or configured_size is not None and expected_bytes != configured_size):
         raise ValueError("A known complete expected ZIM size is required for local revalidation")
     settings = storage_settings.load_settings()
     with (pdf_source._directory("staging", writing=True, format_name="zim") as (staging, mount_id, _),
-          pdf_source._directory("library", writing=True, format_name="zim") as (library, library_mount, reserve)):
+          pdf_source._directory("library", writing=True, format_name=kind) as (library, library_mount, reserve)):
         if mount_id != library_mount or storage_settings.load_settings() != settings:
             raise ValueError("ZIM storage changed during revalidation")
 
@@ -412,7 +446,7 @@ def revalidate_retained(source_id, config, *, expected_bytes, progress=lambda cu
             if (mount["id"] != mount_id or mount["read_only"]
                     or (settings["storage_mount"] and
                         (mount["target"] != settings["storage_mount"] or mount["source"] != settings["storage_source"]))
-                    or any(storage._covering(pdf_source.Path(settings["storage_root"]) / branch / "zim", mounts) != mount
+                    or any(storage._covering(pdf_source.Path(settings["storage_root"]) / branch / ("zim" if branch == "staging" else kind), mounts) != mount
                            for branch in ("staging", "library"))
                     or storage_settings.load_settings() != settings):
                 raise ValueError("ZIM storage changed during revalidation")
@@ -436,6 +470,6 @@ def revalidate_retained(source_id, config, *, expected_bytes, progress=lambda cu
             return _verify_and_promote(
                 fd, staging, library, partial_name(source_id), source_id,
                 url, expected_bytes, expected_digest, check_mount, available,
-                stopped, promote_lock, promoting, progress, expected_sha1=publisher_sha1(config))
+                stopped, promote_lock, promoting, progress, expected_sha1=publisher_sha1(config), kind=kind, expected_md5=publisher_md5(config))
         finally:
             os.close(fd)

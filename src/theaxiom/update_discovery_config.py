@@ -16,11 +16,14 @@ def settings(config):
     endpoint = config.get("update_endpoint", "")
     periodic = config.get("update_periodic", "")
     archive = archives.internet_archive_identity(download) if isinstance(download, str) else None
-    if method not in {"auto", "kiwix", "head", "archive", "manual"} or periodic not in {"", "yes", "no"}:
+    map_build = archives.protomaps_identity(download)
+    if method not in {"auto", "kiwix", "head", "archive", "builds", "manual"} or periodic not in {"", "yes", "no"}:
         raise ValueError("Invalid update discovery settings")
     if method == "auto":
         if kind == "zim" and (not download or urlsplit(download).hostname in kiwix_opds.DOWNLOAD_HOSTS):
             resolved = "kiwix"
+        elif kind == "pmtiles" and map_build:
+            resolved = "builds"
         elif kind == "zim" and archive:
             resolved = "archive"
         elif kind in {"pdf", "epub"} and pdf_source.valid_source_url(endpoint or download):
@@ -36,6 +39,10 @@ def settings(config):
         if endpoint and endpoint != OPDS:
             raise ValueError("Select the approved Kiwix OPDS catalog")
         endpoint = OPDS
+    elif resolved == "builds":
+        if kind != "pmtiles" or not map_build or (endpoint and endpoint != archives.PROTOMAPS_ENDPOINT):
+            raise ValueError("Map build discovery requires a matching dated build URL")
+        endpoint = archives.PROTOMAPS_ENDPOINT
     elif resolved == "archive":
         if kind != "zim" or not archive or (endpoint and endpoint != archive["endpoint"]):
             raise ValueError("Archive discovery requires the matching dated Internet Archive item")
@@ -67,6 +74,9 @@ def probe_endpoint(selected):
             raw = kiwix.fetch_metadata(endpoint, kind="catalog")
             kiwix_opds.parse_acquisition_feed(raw)
             return dict(result, state="reachable", evidence="Approved Kiwix OPDS catalog returned valid metadata")
+        if method == "builds":
+            archives.protomaps_latest(archives.fetch_metadata(endpoint))
+            return dict(result, state="reachable", evidence="Map build catalog returned valid metadata")
         if method == "archive":
             import json
             metadata = json.loads(archives.fetch_metadata(endpoint))

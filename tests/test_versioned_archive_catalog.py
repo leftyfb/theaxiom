@@ -77,3 +77,21 @@ def test_official_streetzim_seed_is_configured_without_extra_map_sources(tmp_pat
     assert config["search_enabled"] == "no"
     assert config["expected_size_bytes"] == "34883793295"
     assert "noncommercial" in config["license"]
+
+
+def test_protomaps_update_uses_actual_publisher_md5_not_a_fake_sha256():
+    import base64
+    from theaxiom import update_discovery_config, admin_api
+    url = "https://build.protomaps.com/20261125.pmtiles"
+    settings = update_discovery_config.settings(dict(format="pmtiles", source_url=url))
+    assert settings == dict(method="builds", endpoint=catalog.PROTOMAPS_ENDPOINT, periodic=True)
+    installed = dict(verified=True, source_url=url, publisher_md5="a" * 32)
+    def check(day, md5):
+        return catalog.check_protomaps_update(installed, fetch=lambda endpoint: encoded([
+            dict(key=day + ".pmtiles", version="4.15.2", size=139816078848,
+                 b3sum="b" * 64, md5sum=base64.b64encode(bytes.fromhex(md5)).decode())]))
+    assert check("20261125", "a" * 32)["state"] == "up_to_date"
+    update = check("20261126", "c" * 32)
+    assert update["state"] == "update_available"
+    assert admin_api._reviewed_update_fields(update, "c" * 32)["publisher_md5"] == "c" * 32
+    assert admin_api._reviewed_update_fields(update, "c" * 32)["sha256"] == ""

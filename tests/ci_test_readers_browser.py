@@ -590,3 +590,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+    from ci_test_maps_browser import main as maps_main
+    maps_main()

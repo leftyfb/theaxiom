@@ -30,3 +30,33 @@ GitHub Actions runs unit/API/browser tests and isolated real Kiwix and Nginx smo
 6. Capture observed deployment SHA and results; treat unsuccessful live checks as failures rather than assuming CI success proves deployment success.
 
 For current operator deployment status see [deployment acceptance register](deployment-acceptance-register.md). Safe replacement and explicit deletion work remains tracked in [#7](https://github.com/leftyfb/theaxiom/issues/7); this page does not declare unfinished remote-update detection complete.
+
+### Offline map sources
+
+The starter catalog includes two independent OpenStreetMap-derived packages:
+StreetZim's contiguous United States ZIM (48 states plus DC, excluding Alaska
+and Hawaii), and Protomaps' complete planet PMTiles vector basemap (native zoom
+0–15; higher display zoom uses existing vector geometry). Both are opt-in
+manual acquisitions, excluded from Axiom global search. StreetZim retains its
+own in-reader address/place search and routing. PMTiles has no routing, address
+search, satellite imagery, or terrain; its MapLibre renderer and style are
+served locally, with system fonts and text labels rather than external sprites.
+The included PMTiles style targets the Protomaps v4 vector schema.
+
+The Internet Archive item metadata and Protomaps dated build index support
+manual and periodic metadata-only update checks. Staged replacement, explicit
+activation and rollback reuse the durable archive job workflow. StreetZim's
+publisher SHA-1 and Protomaps' publisher MD5 are checked during byte
+verification; both retain a measured local SHA-256 identity. These publisher
+checksums are transport integrity evidence, not cryptographic signatures.
+Protomaps also publishes BLAKE3 in its build metadata; the current runtime uses
+MD5 to avoid a new platform dependency. StreetZim's satellite layer has a
+noncommercial license (CC BY-NC-SA 4.0); retain upstream attribution and rights.
+
+PMTiles content is held in `library/pmtiles`; the existing archive staging
+and job directories are shared with ZIM jobs. The reader only exposes bounded
+HTTP ranges for an installed, verified, published archive. No external CDN or
+remote tile server is used at read time. The official packages are intentionally
+not downloaded automatically; existing content and publication intent are
+preserved. The two current releases require approximately 163 GiB installed,
+plus staging space for any replacement and the configured free-space reserve.

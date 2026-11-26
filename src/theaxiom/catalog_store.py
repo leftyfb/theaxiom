@@ -19,7 +19,7 @@ from . import source_catalog
 
 SCHEMA_VERSION = 2
 PROFILE_FIELDS = {"title", "description", "publisher", "edition", "language", "author", "icon_png"}
-CANDIDATE_FIELDS = {"source_url", "expected_size_bytes", "sha256", "publisher_sha1", "provenance", "license"}
+CANDIDATE_FIELDS = {"source_url", "expected_size_bytes", "sha256", "publisher_sha1", "publisher_md5", "provenance", "license"}
 ARTIFACT_CONFIG_FIELDS = CANDIDATE_FIELDS | {"format"}
 DISCOVERY_FIELDS = {"update_method", "update_endpoint", "update_periodic"}
 CONFIG_FIELDS = ARTIFACT_CONFIG_FIELDS | DISCOVERY_FIELDS | {"search_enabled"}
@@ -125,7 +125,8 @@ class CatalogStore:
                 raise CatalogError("catalog cannot be read safely")
             state = {"schema_version": SCHEMA_VERSION, "revision": 0, "updated_at": None,
                      "sources": [self._seed_record(entry) for entry in source_catalog.builtin_sources()],
-                     "groups": self._default_groups(), "starter_groups_initialized": True}
+                     "groups": self._default_groups(), "starter_groups_initialized": True,
+                     "seed_version": source_catalog.SEED_CATALOG_VERSION}
         except OSError as exc:
             raise CatalogError("catalog cannot be read safely") from exc
         else:
@@ -155,7 +156,8 @@ class CatalogStore:
         if not state.get("starter_groups_initialized"):
             self._merge_starter_groups(state)
             state["starter_groups_initialized"] = True
-        changed = self._configure_planned_sources(state)
+        changed = self._add_versioned_seeds(state)
+        changed = self._configure_planned_sources(state) or changed
         defaults = source_catalog.source_defaults()
         for record in state["sources"]:
             default = defaults.get(record["source_id"])
@@ -174,6 +176,22 @@ class CatalogStore:
         if initialize:
             self._atomic_write(payload)
         return state
+
+    def _add_versioned_seeds(self, state):
+        previous = state.get("seed_version", 3)
+        version = source_catalog.SEED_CATALOG_VERSION
+        if previous >= version:
+            return False
+        ids = {record["source_id"] for record in state["sources"]}
+        changed = False
+        for entry in source_catalog.builtin_sources():
+            introduced = entry.get("introduced_in", 0)
+            prerequisite = entry.get("add_when_source_present")
+            if previous < introduced <= version and entry["source_id"] not in ids and prerequisite in ids:
+                state["sources"].append(self._seed_record(entry))
+                changed = True
+        state["seed_version"] = version
+        return changed
 
     def _configure_planned_sources(self, state):
         defaults = {entry["source_id"]: entry for entry in source_catalog.planned_sources() if "setup" in entry}
@@ -283,8 +301,9 @@ class CatalogStore:
     @staticmethod
     def _validate_collection(state):
         required = HEADER_FIELDS | {"sources"}
-        if (not required <= state.keys() or state.keys() - (required | {"groups", "starter_groups_initialized", "library_layout"})
+        if (not required <= state.keys() or state.keys() - (required | {"groups", "starter_groups_initialized", "library_layout", "seed_version"})
                 or not isinstance(state["sources"], list)
+                or ("seed_version" in state and (type(state["seed_version"]) is not int or state["seed_version"] < 0))
                 or ("starter_groups_initialized" in state and state["starter_groups_initialized"] is not True)):
             raise CatalogError("invalid catalog schema")
         if len(state["sources"]) > MAX_ENTRIES:
@@ -375,6 +394,8 @@ class CatalogStore:
             raise CatalogError("invalid source format")
         if key == "expected_size_bytes" and value and not re.fullmatch(r"[1-9][0-9]{0,19}", value):
             raise CatalogError("expected size must be a positive decimal byte count")
+        if key == "publisher_md5" and value and not re.fullmatch(r"[a-fA-F0-9]{32}", value):
+            raise CatalogError("Publisher MD5 must contain exactly 32 hexadecimal characters")
         if key == "publisher_sha1" and value and not re.fullmatch(r"[a-fA-F0-9]{40}", value):
             raise CatalogError("Publisher SHA-1 must contain exactly 40 hexadecimal characters")
         if key == "sha256" and value and not re.fullmatch(r"[a-fA-F0-9]{64}", value):

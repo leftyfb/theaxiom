@@ -29,7 +29,7 @@ def _check_source(record, *, manual=False):
     config = record["configuration"]
     with update_diagnostics.attempt(sid, update_discovery_config.settings(config),
                                     trigger="manual" if manual else "scheduled") as diagnostic:
-        if config["format"] == "zim":
+        if config["format"] in {"zim", "pmtiles"}:
             outcome = kiwix_update_discovery.refresh_checked_source(sid, force=manual, installed_only=True)
         else:
             outcome = document_update_discovery.check_installed_document(record, installed_only=True)
@@ -55,7 +55,7 @@ def check_records(records, *, manual=False):
             continue
         sid, config = record.get("source_id"), record.get("configuration")
         if (isinstance(sid, str) and isinstance(config, dict)
-                and config.get("format") in {"zim", "pdf", "epub"}):
+                and config.get("format") in {"zim", "pdf", "epub", "pmtiles"}):
             discovery = update_discovery_config.settings(config)
             if discovery["periodic"] or (manual and discovery["method"] != "manual"):
                 eligible[sid] = record

@@ -5,6 +5,8 @@ family, extension and metadata endpoint. Published digests retain their actual
 algorithm; they are never represented as SHA-256 unless supplied as such.
 """
 from datetime import date
+import base64
+import binascii
 import json
 import re
 from urllib.parse import urlsplit
@@ -103,7 +105,17 @@ def protomaps_latest(raw, *, version_major=4):
         candidates.append(_candidate(entry.get("key"), entry.get("size"), entry.get("b3sum"),
                                      "blake3", family="", extension="pmtiles",
                                      base="https://build.protomaps.com/", compact=True))
-    return _latest(candidates)
+    latest = _latest(candidates)
+    entry = next(entry for entry in builds if entry.get("key") == latest["filename"] and str(entry.get("version", "")).startswith(str(version_major)+"."))
+    if "md5sum" in entry:
+        try:
+            md5 = base64.b64decode(entry["md5sum"], validate=True)
+        except (ValueError, TypeError, binascii.Error) as exc:
+            raise ValueError("Invalid publisher MD5") from exc
+        if len(md5) != 16:
+            raise ValueError("Invalid publisher MD5")
+        latest["md5"] = md5.hex()
+    return latest
 
 
 def internet_archive_identity(source_url):
@@ -147,5 +159,44 @@ def check_archive_update(installed, *, fetch=None):
                 return dict(common, state="up_to_date", evidence="Publisher edition and SHA-1 match installed archive")
             return dict(unknown, evidence="Publisher changed the digest of the same dated edition")
         return dict(common, state="update_available", evidence="Publisher listed a newer dated archive with SHA-1", candidate_url=latest["source_url"], candidate_bytes=latest["bytes"], candidate_sha1=latest["digest"])
+    except (ValueError, TypeError, KeyError, OSError):
+        return unknown
+
+
+PROTOMAPS_ENDPOINT = "https://build-metadata.protomaps.dev/builds.json"
+
+
+def protomaps_identity(source_url):
+    if not isinstance(source_url, str):
+        return None
+    match = re.fullmatch(r"https://build\.protomaps\.com/(20\d{6})\.pmtiles", source_url)
+    if not match:
+        return None
+    day = match.group(1)
+    edition = f"{day[:4]}-{day[4:6]}-{day[6:]}"
+    try:
+        date.fromisoformat(edition)
+    except ValueError:
+        return None
+    return dict(edition=edition, endpoint=PROTOMAPS_ENDPOINT)
+
+
+def check_protomaps_update(installed, *, fetch=None):
+    unknown = dict(state="unable_to_determine", evidence="Publisher map metadata could not be verified")
+    try:
+        identity = protomaps_identity(installed["source_url"])
+        if not identity or installed.get("verified") is not True or not re.fullmatch(r"[a-f0-9]{32}", installed["publisher_md5"]):
+            return unknown
+        latest = protomaps_latest((fetch or fetch_metadata)(PROTOMAPS_ENDPOINT))
+        common = dict(installed_edition=identity["edition"], candidate_edition=latest["edition"])
+        if latest["edition"] < identity["edition"]:
+            return dict(common, state="older_candidate", evidence="Publisher listed an older map edition")
+        if latest["edition"] == identity["edition"]:
+            if latest.get("md5") == installed["publisher_md5"]:
+                return dict(common, state="up_to_date", evidence="Publisher edition and MD5 match installed archive")
+            return dict(unknown, evidence="Publisher changed the digest of the same dated map")
+        if not latest.get("md5"):
+            return unknown
+        return dict(common, state="update_available", evidence="Publisher listed a newer dated map with MD5", candidate_url=latest["source_url"], candidate_bytes=latest["bytes"], candidate_md5=latest["md5"])
     except (ValueError, TypeError, KeyError, OSError):
         return unknown

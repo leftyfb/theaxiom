@@ -43,6 +43,7 @@ pdf_transport = importlib.import_module(f"{__package__}.pdf_transport" if __pack
 document_origin_evidence = importlib.import_module(f"{__package__}.document_origin_evidence" if __package__ else "theaxiom.document_origin_evidence")
 document_update_discovery = importlib.import_module(f"{__package__}.document_update_discovery" if __package__ else "theaxiom.document_update_discovery")
 zim_jobs = importlib.import_module(f"{__package__}.zim_jobs" if __package__ else "theaxiom.zim_jobs")
+pmtiles_source = importlib.import_module(f"{__package__ or 'theaxiom'}.pmtiles_source")
 zim_source = importlib.import_module(f"{__package__}.zim_source" if __package__ else "theaxiom.zim_source")
 zim_catalog = importlib.import_module(f"{__package__}.zim_catalog" if __package__ else "theaxiom.zim_catalog")
 zim_refresh = importlib.import_module(f"{__package__}.zim_refresh" if __package__ else "theaxiom.zim_refresh")
@@ -69,6 +70,12 @@ PUBLIC_ICON_PATHS = {
 PUBLIC_ICON_DIR = ADMIN_TEMPLATE_DIR
 ADMIN_SESSIONS = admin_sessions.Sessions()
 PDFJS_ROOT = Path("/opt/pdfjs/current")
+MAP_ASSET_PATHS = {"/api/map-assets/" + name: mime for name, mime in {
+    "maplibre-gl.mjs": "text/javascript", "maplibre-gl-worker.mjs": "text/javascript",
+    "maplibre-gl-shared.mjs": "text/javascript", "pmtiles.js": "text/javascript",
+    "maplibre-gl.css": "text/css", "style.json": "application/json",
+    "map-reader.mjs": "text/javascript",
+}.items()}
 PDFJS_PREFIX = "/api/pdfjs/"
 ZIM_READER_ROUTE = re.compile(r'/read/zim/([a-z0-9-]{1,63})\Z')
 PDFJS_ASSET = re.compile(r"/api/pdfjs/(?:build|web|cmaps|standard_fonts|wasm|iccs|image_decoders|locale)/[A-Za-z0-9_./-]+\Z")
@@ -91,7 +98,7 @@ def _release_revision() -> str | None:
     return revision if re.fullmatch(r"[0-9a-f]{40}", revision) else None
 
 
-FORMAT_ADAPTERS = {"zim": "kiwix", "pdf": "pdf", "epub": "epub"}
+FORMAT_ADAPTERS = {"zim": "kiwix", "pmtiles": "pmtiles", "pdf": "pdf", "epub": "epub"}
 
 
 def select_lifecycle(source_id, configuration):
@@ -117,7 +124,7 @@ def select_lifecycle(source_id, configuration):
         return dict(adapter=adapter, configuration_valid=artifact is not None, artifact=artifact,
                     pdf_download=pdf_source.valid_source_url(configuration.get("source_url", "")),
                     acquisition_reason=reason, actions={})
-    if adapter == "kiwix":
+    if adapter in {"kiwix", "pmtiles"}:
         try:
             zim_source.candidate(configuration)
         except ValueError as exc:
@@ -276,7 +283,7 @@ def _source_update_summary(sources):
 
 def _preview_capacity(rows):
     eligible = [row for row in rows if (
-        row["format"] == "zim" and row["state"] != "unsupported"
+        row["format"] in {"zim", "pmtiles"} and row["state"] != "unsupported"
         or row["format"] in {"pdf", "epub"} and row["state"] == "estimated")]
     staging = [row.get("staging_bytes") for row in eligible]
     if not staging:
@@ -405,7 +412,7 @@ def _batch_job(record, published):
         if pin and adapter.ready(pin, verify=False):
             raise ValueError("Document is already installed")
         operation, reservation = kind, int(size) if size else limit
-    elif kind == "zim":
+    elif kind in {"zim", "pmtiles"}:
         identity = zim_jobs.identity(config)
         if not size:
             raise ValueError("A ZIM download needs a known size to reserve space")
@@ -434,19 +441,21 @@ def _batch_available(settings, formats):
 def _reviewed_update_fields(update, reviewed_digest):
     """Resolve a reviewed publisher digest to its actual algorithm."""
     if (update.get("state") != "update_available" or not update.get("candidate_bytes")
-            or (update.get("candidate_sha256") or update.get("candidate_sha1")) != reviewed_digest):
+            or (update.get("candidate_sha256") or update.get("candidate_sha1") or update.get("candidate_md5")) != reviewed_digest):
         raise ValueError("Update evidence changed; check for updates again")
     fields = {"source_url": update["candidate_url"], "sha256": update.get("candidate_sha256", ""),
               "expected_size_bytes": str(update["candidate_bytes"]), "edition": update["candidate_edition"]}
     if update.get("candidate_sha1"):
         fields["publisher_sha1"] = update["candidate_sha1"]
+    if update.get("candidate_md5"):
+        fields["publisher_md5"] = update["candidate_md5"]
     return fields
 
 
 def _publisher_update_job(record, reviewed_digest, operation):
     sid = record["source_id"]
     config = record["configuration"]
-    if config["format"] != "zim":
+    if config["format"] not in {"zim", "pmtiles"}:
         raise ValueError("This source has no verifiable replacement workflow")
     current = zim_jobs.candidate_status(sid)
     reservation = 0
@@ -456,7 +465,7 @@ def _publisher_update_job(record, reviewed_digest, operation):
         payload = config
     else:
         catalog_store.CatalogStore._validate_id(sid + "-candidate")
-        if update_discovery_config.settings(config)["method"] not in {"kiwix", "archive"}:
+        if update_discovery_config.settings(config)["method"] not in {"kiwix", "archive", "builds"}:
             raise ValueError("Source does not use a versioned archive update method")
         update = kiwix_update_discovery.cached_checked_source(sid)
         fields = _reviewed_update_fields(update, reviewed_digest)
@@ -508,7 +517,7 @@ def _execute_batch_job(job, stopping, shutdown):
     sid, operation = job["source_id"], job["operation"]
     recovering = job["state"] == "running"
     config = json.loads(job["configuration"])
-    kind = "zim" if operation == "download-update" else config["format"]
+    kind = config["original"]["format"] if operation == "download-update" else config["format"]
 
     def stop_document():
         return stopping() or shutdown.is_set()
@@ -590,7 +599,7 @@ def _execute_batch_job(job, stopping, shutdown):
                 except BlockingIOError:
                     return "running" if recovering else "queued", ""
     if operation == "publish-update":
-        if is_published and not zim_refresh.reconcile_activation(
+        if kind == "zim" and is_published and not zim_refresh.reconcile_activation(
                 lambda: SOURCE_CATALOG.get()["sources"], source_id=sid, configuration=config):
             return "failed", "Reader could not serve the update; review the replacement status"
         return "completed", "Update activated; publication setting preserved"
@@ -649,6 +658,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         if not post and (self.path in public_paths or self.path == "/admin/login"
                          or self.path.split("?", 1)[0] in {"/", "/index.html", "/search"}
                          or pdf_source.ROUTE.fullmatch(self.path) or epub_source.ROUTE.fullmatch(self.path)
+                         or pmtiles_source.ROUTE.fullmatch(self.path) or self.path in MAP_ASSET_PATHS
                          or ZIM_READER_ROUTE.fullmatch(self.path) or PDFJS_ASSET.fullmatch(self.path)
                          or self.path == "/internal/publication/zim"):
             return True
@@ -818,6 +828,13 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             return
         if PDFJS_ASSET.fullmatch(self.path):
             self._serve_pdfjs_asset()
+            return
+        if self.path in MAP_ASSET_PATHS:
+            self._serve_map_asset()
+            return
+        map_route = pmtiles_source.ROUTE.fullmatch(self.path)
+        if map_route:
+            self._serve_pmtiles(*map_route.groups())
             return
         epub_route = epub_source.ROUTE.fullmatch(self.path)
         if epub_route:
@@ -1018,6 +1035,10 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
     def _zim_record(record):
         return record["configuration"].get("format") == "zim"
 
+    @staticmethod
+    def _archive_record(record):
+        return record["configuration"].get("format") in {"zim", "pmtiles"}
+
     def _manage_acquisition_batch(self, data):
         if not self.headers.get("Origin"):
             self._send_json(403, {"error": "same-origin request required"})
@@ -1070,7 +1091,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 or not self._valid_revision(data["revision"])
                 or not isinstance(selection, dict) or not 1 <= len(selection) <= catalog_store.MAX_ENTRIES
                 or any(not catalog_store.ID_RE.fullmatch(sid) or not isinstance(digest, str)
-                       or not re.fullmatch(r"[a-f0-9]{40}|[a-f0-9]{64}", digest) for sid, digest in selection.items())):
+                       or not re.fullmatch(r"[a-f0-9]{32}|[a-f0-9]{40}|[a-f0-9]{64}", digest) for sid, digest in selection.items())):
             self._send_json(400, {"error": "Invalid update selection"})
             return
         rejected = {}
@@ -1093,7 +1114,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 accepted = []
                 if jobs:
                     settings = storage_settings.load_settings()
-                    available = _batch_available(settings, {"zim"}) if operation == "download-update" else None
+                    available = _batch_available(settings, {records[job["source_id"]]["configuration"]["format"] for job in jobs}) if operation == "download-update" else None
                     accepted = acquisition_queue.enqueue(jobs, available, settings)
         except (OSError, sqlite3.Error, catalog_store.CatalogError):
             self._send_json(503, {"error": "Update queue, catalog or storage unavailable"})
@@ -1111,7 +1132,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             configuration = record["configuration"]
             format_name = configuration["format"]
             estimate = {"state": "unsupported"}
-            if self._zim_record(record):
+            if self._archive_record(record):
                 try:
                     estimate = zim_jobs.preview_acquisition(
                         sid, configuration, exact_selection=exact_selection)
@@ -1230,7 +1251,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             *layout.get("source_order", []),
             *(record["source_id"] for record in catalog["sources"]
               if self._pdf_record(record) or self._epub_record(record)),
-            *(record["source_id"] for record in catalog["sources"] if self._zim_record(record)),
+            *(record["source_id"] for record in catalog["sources"] if self._archive_record(record)),
         ]))
         if published_ids is not None and not layout.get("preserve_source_order"):
             memberships = self._library_memberships(catalog)
@@ -1266,6 +1287,15 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                                         description=profile.get("description", ""),
                                         icon_png=profile.get("icon_png", ""),
                                         language=profile.get("language") or "Unspecified language"))
+            for record in catalog["sources"]:
+                if record["configuration"].get("format") == "pmtiles":
+                    state = pmtiles_source.status(record)
+                    if state["published"]:
+                        profile = record["profile"]
+                        sources.append(dict(source_id=record["source_id"], entry_path=state["entry_path"],
+                                            symbol="M", category="Map", name=profile["title"],
+                                            description=profile.get("description", ""), icon_png=profile.get("icon_png", ""),
+                                            language=profile.get("language") or "Unspecified language", search_enabled=False))
             search_disabled = {record["source_id"] for record in catalog["sources"]
                                if record["configuration"].get("search_enabled") == "no"}
             for source in sources:
@@ -1299,6 +1329,74 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             elif self._epub_record(record):
                 artifact = select_lifecycle(record["source_id"], record["configuration"])["artifact"]
                 yield record, epub_source.status(record, artifact)
+
+    def _serve_map_asset(self):
+        try:
+            body = (ADMIN_TEMPLATE_DIR / "map-assets" / self.path.rsplit("/", 1)[-1]).read_bytes()
+        except OSError:
+            self._send_json(404, {"error": "map asset unavailable"})
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", MAP_ASSET_PATHS[self.path])
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _serve_pmtiles(self, sid, archive):
+        # PMTiles only needs bounded random-access reads; refuse whole-archive GETs.
+        try:
+            with publication.LOCK, ExitStack() as files:
+                record = next((item for item in SOURCE_CATALOG.get()["sources"]
+                               if item["source_id"] == sid and item["configuration"]["format"] == "pmtiles"), None)
+                if not record or not pmtiles_source.status(record)["published"]:
+                    raise ValueError("Map not published")
+                job = zim_jobs.status(sid)
+                artifact = zim_jobs.installed(job, job["configuration"])
+                if not artifact:
+                    raise ValueError("Map unavailable")
+                if not archive:
+                    body = Environment(loader=FileSystemLoader(ADMIN_TEMPLATE_DIR), autoescape=True).get_template(
+                        "map-reader.html.j2").render(record=record, path=self.path + "/map.pmtiles").encode()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.send_header("Content-Security-Policy", "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; frame-ancestors 'none'; base-uri 'none'")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
+                total = artifact["bytes"]
+                etag = '"' + artifact["sha256"] + '"'
+                match = re.fullmatch(r"bytes=([0-9]{1,13})-([0-9]{1,13})", self.headers.get("Range", ""))
+                start, end = map(int, match.groups()) if match else (-1, -1)
+                end = min(end, total - 1)
+                if not 0 <= start <= end < total or end - start + 1 > 16 * 1024 * 1024:
+                    self.send_response(416)
+                    self.send_header("Content-Range", f"bytes */{total}")
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                if self.headers.get("If-Match") not in (None, etag, "*"):
+                    self.send_response(412)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                parent, mount, _ = files.enter_context(pdf_source._directory("library", format_name="pmtiles"))
+                stream = files.enter_context(zim_jobs.open_installed_archive(parent, mount, job, artifact))
+                stream.seek(start)
+                body = stream.read(end - start + 1)
+                if len(body) != end - start + 1:
+                    raise ValueError("Incomplete map range")
+        except (OSError, ValueError, KeyError, TypeError):
+            self._send_json(403, {"error": "map unavailable"})
+            return
+        self.send_response(206)
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Content-Range", f"bytes {start}-{end}/{total}")
+        self.send_header("ETag", etag)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def _serve_pdfjs_asset(self):
         """Serve only trusted installed renderer assets, never arbitrary host files."""
@@ -1511,8 +1609,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                         busy = False
                 except (ValueError, OSError, KeyError, TypeError):
                     busy = True
-            if self._zim_record(record):
-                state = zim_status(record)
+            if self._archive_record(record):
+                state = zim_status(record) if self._zim_record(record) else pmtiles_source.status(record)
                 verified = bool(state["verified"])
             publication_filter = ("unknown" if state and state.get("error") else
                                   "published" if state and state["published"] else "unpublished")
@@ -1770,7 +1868,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 self._send_json(400, {"error": "source does not support update checks"})
                 return
             with update_diagnostics.attempt(sid, discovery, trigger="manual") as diagnostic:
-                if record["configuration"]["format"] == "zim":
+                if record["configuration"]["format"] in {"zim", "pmtiles"}:
                     result = kiwix_update_discovery.refresh_checked_source(sid)
                 else:
                     result = document_update_discovery.check_installed_document(record)
@@ -1938,8 +2036,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                         except (OSError, ValueError) as exc:
                             raise catalog_store.RevisionConflict("could not unpublish source; removal refused") from exc
                     elif isinstance(sid, str) and (is_pdf or
-                            existing and self._zim_record(existing) and isinstance(fields, dict)
-                            and fields.get("format", "zim") != "zim"):
+                            existing and self._archive_record(existing) and isinstance(fields, dict)
+                            and fields.get("format", existing["configuration"]["format"]) != existing["configuration"]["format"]):
                         self._guard_published_mutation(operation, sid, fields, revision)
                     try:
                         result = SOURCE_CATALOG.mutate(operation, sid, fields, revision, busy)
@@ -1984,7 +2082,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 is_epub = record is not None and self._epub_record(record)
                 is_pdf = record is not None and self._pdf_record(record)
                 is_document = is_pdf or is_epub
-                is_zim = record is not None and self._zim_record(record)
+                is_zim = record is not None and self._archive_record(record)
                 if not (is_document or is_zim):
                     self._send_json(400, {"error": "source has no publication adapter"})
                     return
@@ -2040,7 +2138,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 except (OSError, ValueError):
                     self._send_json(503, {"error": "could not save publication state"})
                     return
-            if is_zim:
+            if is_zim and self._zim_record(record):
                 # Never restart a reader from HTTP. Generate the new private
                 # manifest and wait for independently monitored Kiwix OPDS.
                 zim_refresh.schedule(lambda: SOURCE_CATALOG.get()["sources"])
@@ -2358,12 +2456,12 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 if not record:
                     raise ValueError("Source has no managed installation")
                 kind = record["configuration"]["format"]
-                if kind not in {"zim", "pdf", "epub"}:
+                if kind not in {"zim", "pmtiles", "pdf", "epub"}:
                     raise ValueError("Source has no supported downloaded files")
                 if any(job["source_id"] == sid and job["state"] in acquisition_queue.PENDING
                        for job in acquisition_queue.status()):
                     raise ValueError("Finish or cancel this source’s batch download first")
-                files = zim_jobs.downloaded_zim(sid) if kind == "zim" else pdf_source.downloaded_documents(sid, kind)
+                files = zim_jobs.downloaded_zim(sid) if kind in {"zim", "pmtiles"} else pdf_source.downloaded_documents(sid, kind)
                 with files as (directory, opened):
                     enabled = publication.load().get(sid, False)
                     listed = [dict(filename=name, bytes=size) for name, _, size in opened]
@@ -2382,7 +2480,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                             for name, stream, _ in opened:
                                 pdf_source.unlink_managed_file(directory, stream, name)
                                 removed += 1
-                            if kind == "zim":
+                            if kind in {"zim", "pmtiles"}:
                                 zim_jobs.forget_deleted_installation(sid)
                             os.fsync(directory)
                         finally:
@@ -2417,14 +2515,15 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 if revision != catalog["revision"]:
                     raise ValueError("Catalog changed. Reload and review the staged update.")
                 record = next((row for row in catalog["sources"] if row["source_id"] == sid), None)
-                if not record or not self._zim_record(record):
-                    raise ValueError("No matching ZIM source")
+                if not record or not self._archive_record(record):
+                    raise ValueError("No matching archive source")
                 def restore_profile(live):
                     update_check_store.require_recheck(sid)
                     fields = {key: live["configuration"][key] for key in
                               ("source_url", "sha256", "expected_size_bytes")}
-                    if "publisher_sha1" in live["configuration"] or "publisher_sha1" in record["configuration"]:
-                        fields["publisher_sha1"] = live["configuration"].get("publisher_sha1", "")
+                    for digest_field in ("publisher_sha1", "publisher_md5"):
+                        if digest_field in live["configuration"] or digest_field in record["configuration"]:
+                            fields[digest_field] = live["configuration"].get(digest_field, "")
                     installed = kiwix_update_discovery.installed_identity_from_job(live, live["artifact"])
                     if installed:
                         fields["edition"] = installed["edition"]
@@ -2453,7 +2552,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         if (set(data) != {"action", "source_id", "revision", "candidate_sha256"}
                 or not isinstance(sid, str) or not catalog_store.ID_RE.fullmatch(sid)
                 or not self._valid_revision(revision) or not isinstance(digest, str)
-                or not re.fullmatch(r"[a-f0-9]{40}|[a-f0-9]{64}", digest)):
+                or not re.fullmatch(r"[a-f0-9]{32}|[a-f0-9]{40}|[a-f0-9]{64}", digest)):
             self._send_json(400, {"error": "Invalid ZIM update request"})
             return
         with publication.LOCK:
@@ -2462,10 +2561,10 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 if revision != catalog["revision"]:
                     raise ValueError("Catalog changed. Reload and review the update again.")
                 record = next((row for row in catalog["sources"] if row["source_id"] == sid), None)
-                if not record or not self._zim_record(record):
-                    raise ValueError("Source does not support ZIM updates")
+                if not record or not self._archive_record(record):
+                    raise ValueError("Source does not support archive updates")
                 config = record["configuration"]
-                if update_discovery_config.settings(config)["method"] not in {"kiwix", "archive"}:
+                if update_discovery_config.settings(config)["method"] not in {"kiwix", "archive", "builds"}:
                     raise ValueError("Source does not use a versioned archive update method")
                 update = kiwix_update_discovery.cached_checked_source(sid)
                 fields = _reviewed_update_fields(update, digest)
@@ -2556,7 +2655,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             except OSError:
                 self._send_json(503, {"error": "ZIM job or storage unavailable; check Storage settings before retrying"})
                 return
-        if operation in {"zim-replacement-activate", "zim-replacement-rollback"}:
+        if self._zim_record(record) and operation in {"zim-replacement-activate", "zim-replacement-rollback"}:
             # Kiwix reads a separate manifest and only acknowledges the
             # exact loaded book set. A failed activation must restore the
             # retained previous verified serving record, never delete it.
