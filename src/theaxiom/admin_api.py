@@ -1296,6 +1296,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 update_check = update_check_store.load(sid, update_discovery_config.cache_identity(
                     record["configuration"], artifacts[sid]["sha256"]))
             job = jobs.get(sid)
+            installed_edition = None
             replacement_available = False
             if lifecycles[sid].get("zim_download"):
                 try:
@@ -1317,6 +1318,9 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                             lifecycles[sid]["artifact"] = artifact
                             verified = True
                             replacement_available = not matches_profile
+                            identity = kiwix_update_discovery.installed_identity_from_job(local_job, artifact)
+                            if identity:
+                                installed_edition = identity["edition"]
                             update_check = update_check_store.load(sid, artifact["sha256"])
                         elif matches_profile and local_job["state"] == "completed":
                             job = dict(local_job, state="unavailable", verified=False, detail="Installed archive unavailable")
@@ -1362,7 +1366,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             sources.append(dict(record, **lifecycles[sid], acquisition=_public_acquisition(job), replacement=replacement, replacement_available=replacement_available,
                                 update_check=update_check if discovery["method"] != "manual" else None,
                                 discovery=discovery,
-                                installed_verified=verified, publication=state, mutation_blocked=busy,
+                                installed_verified=verified, installed_edition=installed_edition,
+                                publication=state, mutation_blocked=busy,
                                 publication_filter=publication_filter, download_filter=download_filter))
         published_ids = {source["source_id"] for source in sources if source["publication_filter"] == "published"}
         return dict(catalog, sources=sources, library_order=self._library_order(catalog, published_ids),

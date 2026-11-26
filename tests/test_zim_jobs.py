@@ -1691,6 +1691,7 @@ def test_download_discovered_update_and_follow_up(download_app, disk, monkeypatc
     assert staged["profile"]["edition"] == "2026-10"
     assert staged["installed_verified"]
     assert staged["artifact"] == original
+    assert staged["installed_edition"] == "2026-07"
     assert staged["update_check"]["state"] == "update_available"
     assert staged["replacement"]["state"] == "verified"
     if finish == "remove":
@@ -1723,12 +1724,15 @@ def test_download_discovered_update_and_follow_up(download_app, disk, monkeypatc
     assert zim_jobs.read(sid)["artifact"]["sha256"] == digest
     assert publication.load()[sid]
     assert refreshes[0]["activated_source"] == sid
-    assert source(request("/api/sources"), sid)["artifact"]["sha256"] == digest
+    activated = source(request("/api/sources"), sid)
+    assert activated["artifact"]["sha256"] == digest
+    assert activated["installed_edition"] == "2026-10"
     if finish == "rollback-delete":
         request("/api/action", dict(action="zim-replacement-rollback", source_id=sid,
                                   revision=catalog["revision"], confirm_restart=True), status=202)
         restored = source(request("/api/sources"), sid)
         assert restored["artifact"] == original
+        assert restored["installed_edition"] == "2026-07"
         assert restored["replacement"]["state"] == "rolled_back"
         assert restored["replacement"]["sha256"] == digest
         archive = disk / "library/zim" / zim_jobs.read_candidate(sid)["artifact"]["filename"]

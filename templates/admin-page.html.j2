@@ -810,7 +810,6 @@
           {% endif %}
           {% if source.zim_download %}<button class="button" type="button" data-zim-download{% if source.installed_verified %} hidden{% endif %}{% if source.mutation_blocked or source.installed_verified %} disabled{% endif %}>Download</button>{% endif %}
           {% if source.zim_download %}
-          <button class="button" type="button" data-zim-replacement="prepare" hidden>Prepare replacement</button>
           <button class="button" type="button" data-zim-replacement="download" hidden>Download replacement</button>
           <button class="button" type="button" data-zim-replacement="cancel" hidden>Cancel replacement · keep partial</button>
           <button class="button" type="button" data-zim-replacement="activate" hidden>Publish update</button>
@@ -845,6 +844,7 @@
               {% if document or source.zim_download %}
               <button class="button danger-action" type="button" data-delete-downloads{% if not document and not source.installed_verified %} hidden{% endif %}{% if source.mutation_blocked or pub.error or source.replacement %} disabled{% endif %}>Delete downloaded files</button>
               {% if source.zim_download %}
+              <button class="button" type="button" data-zim-replacement="prepare" hidden>Prepare replacement from profile</button>
               <button class="button danger-action" type="button" data-delete-staged-update hidden>Delete staged update files</button>
               {% endif %}
               {% endif %}
@@ -863,7 +863,9 @@
         {% if pub %}<p class="source-note" data-field="publication-status" role="status"{% if pub.published %} hidden{% endif %}>{{ publication_label }}</p>{% endif %}
         <dl class="source-metadata">
           {% for name in ('author', 'publisher', 'edition', 'language') %}
-          <div{% if not source.profile.get(name) %} hidden{% endif %}><dt>{{ name|capitalize }}:</dt><dd data-source-profile="{{ name }}">{{ source.profile.get(name, '') }}</dd></div>
+          {% set installed_edition = source.installed_edition if name == 'edition' else none %}
+          {% set value = installed_edition or source.profile.get(name, '') %}
+          <div{% if not value %} hidden{% endif %}><dt>{{ 'Installed edition' if installed_edition else name|capitalize }}:</dt><dd data-source-profile="{{ name }}">{{ value }}</dd></div>
           {% endfor %}
         </dl>
         <details class="source-technical">
@@ -2729,7 +2731,8 @@
           if (replacementStatus.textContent !== replacementText) replacementStatus.textContent = replacementText;
           for (const button of (card.querySelectorAll?.('[data-zim-replacement]') || [])) {
             const op = button.dataset.zimReplacement;
-            button.hidden = op === 'prepare' ? !source?.replacement_available || !!replacement :
+            button.hidden = op === 'prepare' ? !source?.replacement_available || !!replacement ||
+              source?.update_check?.state === 'update_available' :
               op === 'download' ? !['prepared','failed','interrupted','cancelled'].includes(replacementState) :
               op === 'cancel' ? !['downloading','verifying'].includes(replacementState) :
               op === 'activate' ? replacementState !== 'verified' :
@@ -2839,7 +2842,9 @@
                 unable_to_determine: ['pdf', 'epub'].includes(source?.adapter)
                   ? 'Couldn’t compare with the installed file' : 'Unable to check for updates'
               };
-              if (card.dataset.updateCheckPosting !== 'true') evidence.textContent = update ? (update.stale ? 'Last update check is stale' :
+              const hasCheck = update && (update.checked_at || update.stale ||
+                update.evidence !== 'no current check evidence');
+              if (card.dataset.updateCheckPosting !== 'true') evidence.textContent = hasCheck ? (update.stale ? 'Last update check is stale' :
                 update.state === 'update_available' ? '' : description[update.state] || '') :
                 (source?.installed_verified && source?.discovery?.method && source.discovery.method !== 'manual' ? 'No update check recorded' : '');
             }
@@ -2897,7 +2902,10 @@
                 if (node.dataset.sourceArtifact) label.textContent = value === '' ? '' : artifactLabels[node.dataset.sourceArtifact];
               }
               for (const node of card.querySelectorAll('[data-source-profile]')) {
-                node.textContent = source.profile?.[node.dataset.sourceProfile] || '';
+                const name = node.dataset.sourceProfile;
+                const installedEdition = name === 'edition' && source.installed_edition;
+                node.textContent = installedEdition || source.profile?.[name] || '';
+                if (name === 'edition') node.previousElementSibling.textContent = installedEdition ? 'Installed edition:' : 'Edition:';
                 node.parentElement.hidden = !node.textContent;
               }
             }
