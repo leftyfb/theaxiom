@@ -41,7 +41,8 @@ def test_sweep_attempts_every_enabled_source_with_bounded_parallelism(monkeypatc
     outcomes = scheduler.check_records(records)
     assert calls == {"uninstalled", *(f"source-{i:02}" for i in range(43))}
     assert len(outcomes) == 43
-    assert outcomes[0] == {"source_id": "source-00", "state": "unable_to_determine"}
+    assert outcomes[0] == {"source_id": "source-00", "state": "unable_to_determine",
+                           "evidence": "Publisher metadata check exceeded the per-source deadline."}
     assert all(row["state"] == "up_to_date" for row in outcomes[1:])
 
 

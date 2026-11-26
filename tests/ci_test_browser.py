@@ -1087,7 +1087,11 @@ def exercise_batch_update_journey(browser, viewport):
                                               "candidate_edition": "2026-11", "candidate_bytes": 2048}
                 route.fulfill(status=202, json={"state": "running"})
             else:
-                route.fulfill(json={"state": state, "checks": []})
+                route.fulfill(json={"state": state, "checks": (
+                    [{"source_id": "inconclusive-fixture", "state": "unable_to_determine",
+                      "evidence": "No strong ETag was saved for the installed file and this URL."}]
+                    if state == "completed" else []
+                )})
         elif path == "sources":
             download = sum(bool(row["update_check"] and not row["replacement"]) for row in sources)
             publish = sum(bool(row["replacement"] and row["replacement"]["state"] == "verified")
@@ -1120,12 +1124,21 @@ def exercise_batch_update_journey(browser, viewport):
         action = page.locator("#check-all-updates")
         if viewport["width"] <= 640:
             page.get_by_label("More admin tools").click()
-        expect(action).to_have_text("Check for all updates")
-        action.click()
-        expect(page.get_by_text("Updates are available", exact=True)).to_be_visible()
-        expect(action).to_have_text("Download 2 updates")
+        expect(action).to_be_hidden()
         page.get_by_role("link", name="Review updates").click()
         review = page.locator("#update-review")
+        expect(review).to_be_visible()
+        expect(action).to_have_text("Check for all updates")
+        action.click()
+        expect(action).to_have_text("Download 2 updates")
+        expect(review.get_by_text("Could not determine update status for 1 source.", exact=False)).to_be_visible()
+        review.get_by_text("Inconclusive publisher checks").click()
+        expect(review.get_by_text("No strong ETag was saved", exact=False)).to_be_visible()
+        page.get_by_role("link", name="Show all sources").click()
+        expect(page.get_by_text("Updates are available", exact=True)).to_be_visible()
+        expect(action).to_be_hidden()
+        expect(page.locator("#update-sweep-details")).to_be_hidden()
+        page.get_by_role("link", name="Review updates").click()
         expect(review).to_be_visible()
         expect(page.locator("#regular-sources")).to_be_hidden()
         expect(review.get_by_text("Installed 2026-10 · Update 2026-11", exact=False)).to_have_count(2)

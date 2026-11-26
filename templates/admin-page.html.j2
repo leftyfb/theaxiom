@@ -29,10 +29,11 @@
     .badge.disabled { color: #c0392b; background: #fceaea; }
     .empty { padding: 1.5rem; text-align: center; color: var(--muted); }
     @media print { .site-header { display: none; } }
-    body.reviewing-updates #regular-sources, body.reviewing-updates #review-updates-link { display:none; }
+    body.reviewing-updates #regular-sources, body.reviewing-updates #update-notice { display:none; }
     body.reviewing-updates :is(#mobile-search-toggle, #mobile-filter-control, #mobile-add-control, #mobile-reorder) { display:none; }
-    #update-availability:empty, #update-sweep-feedback:empty,
-    #update-controls:has(> #update-availability:only-child:empty) { display:none; }
+    #update-availability:empty, #update-sweep-feedback:empty, #source-update-summary,
+    #update-notice:has(> #update-availability:only-child:empty) { display:none; }
+    #update-notice { align-items:center; margin-block:.5rem; }
     #update-review:target { scroll-margin-top: 4rem; }
     #update-review-list { padding-inline-start: 1.4rem; }
     #update-review-list li { margin-block: .65rem; }
@@ -555,17 +556,23 @@
     {% else %}
     <h1 class="sources-heading">Manage offline sources</h1>
     {% set available_updates = catalog.available_updates|default(0) %}
-    <div class="source-actions" id="update-controls">
+    <div class="source-actions" id="update-notice">
       <strong id="update-availability" role="status">{{ "An update is available" if available_updates == 1 else "Updates are available" if available_updates else "" }}</strong>
       <a class="button" id="review-updates-link" href="/admin/sources#update-review">Review updates</a>
-      <button class="button" id="check-all-updates" type="button">Check for all updates</button>
-      <button class="button" id="check-updates-again" type="button" hidden>Check for all updates</button>
     </div>
-    <p id="update-sweep-feedback" role="status"></p>
-    <details id="update-sweep-details" hidden><summary>Sources needing attention</summary><ul id="update-sweep-failures"></ul></details>
     <section class="group-panel" id="update-review" aria-labelledby="update-review-title" hidden>
       <h2 id="update-review-title">Review updates</h2>
       <a href="/admin/sources#all-sources">Show all sources</a>
+      <div class="source-actions">
+        <button class="button" id="check-all-updates" type="button">Check for all updates</button>
+        <button class="button" id="check-updates-again" type="button" hidden>Check for all updates</button>
+      </div>
+      <p id="update-sweep-feedback" role="status"></p>
+      <details id="update-sweep-details" hidden>
+        <summary>Inconclusive publisher checks</summary>
+        <p>These checks could not determine whether a newer edition is available. Open a source’s Technical details for the evidence from its last check.</p>
+        <ul id="update-sweep-failures"></ul>
+      </details>
       <p><label><input type="checkbox" id="select-all-updates" disabled> Select all eligible updates</label></p>
       <ul id="update-review-list"></ul>
       <p id="update-selection-size" role="status"></p>
@@ -3075,9 +3082,9 @@
         checkAll.textContent = checking ? 'Checking for updates…' : primaryOperation
           ? actionLabel(primaryOperation, downloadCount || publishCount) : awaitingSelection
             ? 'Select updates' : 'Check for all updates';
-        const menu = mobile.matches && panel.hidden && !primaryOperation ? byId('mobile-admin-tools') :
-          byId('update-controls');
-        if (checkAll.parentElement !== menu) menu.append(reviewLink, checkAll, checkAgain);
+        const menu = mobile.matches && panel.hidden && !counts.download && !counts.publish &&
+          sweepState !== 'running' ? byId('mobile-admin-tools') : byId('update-notice');
+        if (reviewLink.parentElement !== menu) menu.append(reviewLink);
         alternate.hidden = !alternateOperation;
         alternate.disabled = posting || checking;
         if (alternateOperation) alternate.textContent = actionLabel(alternateOperation, publishCount);
@@ -3102,7 +3109,9 @@
           const verified = source.installed_verified && replacement.state === 'verified';
           const available = source.installed_verified && update.state === 'update_available' && update.candidate_bytes &&
             (!replacement.state || replacement.state === 'activated');
-          if (!(verified || available || job || rejected.has(sid) || update.state === 'representation_changed')) return [];
+          const inconclusive = source.installed_verified && update.state === 'unable_to_determine' &&
+            (update.checked_at || update.last_successful_check_at || source.discovery?.periodic);
+          if (!(verified || available || job || rejected.has(sid) || inconclusive || update.state === 'representation_changed')) return [];
           const operation = pending ? null : verified ? 'publish-update' : available ? 'download-update' : null;
           return [{sid, title:source.profile.title, operation, job, replacement, problem:rejected.get(sid),
             digest: verified ? replacement.sha256 : update.candidate_sha256,
@@ -3110,6 +3119,7 @@
             edition: verified ? source.configuration.edition : update.candidate_edition,
             bytes: verified ? 0 : update.candidate_bytes,
             installedBytes: source.artifact?.bytes,
+            inconclusive: inconclusive ? update.evidence || 'No comparison evidence recorded.' : '',
             documentChanged: update.state === 'representation_changed'}];
         });
         const signature = JSON.stringify(rows);
@@ -3140,6 +3150,8 @@
               ' · ' + (row.bytes ? byteSize(row.bytes) + ' download and additional storage'
                 + (Number.isFinite(row.installedBytes) ? ' · ' + byteSize(row.installedBytes + row.bytes) +
                   ' with both editions retained' : '') : 'Verified on disk');
+          } else if (row.inconclusive) {
+            detail.textContent = 'Update status inconclusive. ' + row.inconclusive;
           } else if (row.documentChanged) {
             detail.textContent = 'Publisher metadata changed. Review this document on its source card.';
           }
@@ -3226,18 +3238,27 @@
             sweepFeedback.textContent = {
               running:'Checking publisher metadata…', busy:'An update check is already running.',
               failed:'Could not check for updates.',
-              completed:'Update check finished. ' + (failures.length === 1 ? '1 source needs attention.' :
-                failures.length ? failures.length + ' sources need attention.' : '')
+              completed:'Update check finished. ' + (failures.length === 1 ? 'Could not determine update status for 1 source.' :
+                failures.length ? 'Could not determine update status for ' + failures.length + ' sources.' : '')
             }[sweepState] || '';
             const detail = byId('update-sweep-details');
             detail.hidden = !failures.length;
+            const catalog = failures.length ? await request('/api/sources') : null;
+            const sources = new Map((catalog?.sources || []).map(source => [source.source_id, source]));
             const items = failures.map(row => {
+              const source = sources.get(row.source_id);
               const item = document.createElement('li');
-              item.textContent = row.source_id;
+              const title = document.createElement('strong');
+              title.textContent = source?.profile?.title || row.source_id;
+              const reason = document.createElement('p');
+              reason.textContent = row.evidence || source?.update_check?.evidence ||
+                'No comparison evidence was recorded for this check.';
+              item.append(title, reason);
               return item;
             });
             byId('update-sweep-failures').replaceChildren(...items);
             if (sweepState === 'completed') {
+              selectOnOpen = !panel.hidden;
               if (panel.hidden) {
                 const catalog = await request('/api/sources');
                 window.axiomShowUpdateAvailability(catalog.available_updates, catalog.update_stages);
@@ -3285,6 +3306,7 @@
         }
         selectionChanged();
       }
+      reviewLink.addEventListener('click', () => { byId('mobile-admin-menu').open = false; });
       window.addEventListener('hashchange', showReview);
       mobile.addEventListener('change', selectionChanged);
       showReview();

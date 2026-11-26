@@ -62,15 +62,25 @@ def check_records(records, *, manual=False):
 
     def check(sid):
         state = "unable_to_determine"
+        evidence = None
         try:
             outcome = _check_with_deadline(eligible[sid], manual=manual)
             if outcome is None:
                 return None
             if outcome.get("state") in update_check_store.STATES:
                 state = outcome["state"]
+                if state == "unable_to_determine":
+                    evidence = outcome.get("evidence")
+        except subprocess.TimeoutExpired:
+            evidence = "Publisher metadata check exceeded the per-source deadline."
+            LOGGER.warning("Scheduled metadata check timed out for %r", sid)
         except Exception as exc:
+            evidence = "Metadata check failed; see the server update-check log."
             LOGGER.warning("Scheduled metadata check failed for %r (%s)", sid, type(exc).__name__)
-        return {"source_id": sid, "state": state}
+        result = {"source_id": sid, "state": state}
+        if evidence:
+            result["evidence"] = evidence
+        return result
 
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
         return [item for item in pool.map(check, sorted(eligible)) if item is not None]
