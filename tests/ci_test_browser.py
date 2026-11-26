@@ -30,8 +30,25 @@ def check_kiwix_article_navigation(page, base):
     def serve(route):
         url = route.request.url
         if url == viewer:
-            body = """<a href="/">Back to library</a><iframe id="content_iframe"></iframe>
+            body = """<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1">
+                <style>html {height:100%} html,body,#content_iframe {display:flex;flex-direction:column;flex:1}
+                body {margin:0} #kiwixtoolbar {padding:8px;transition:0.3s;width:100%;box-sizing:border-box}</style>
+                <div id="kiwixtoolbarwrapper"><div id="kiwixtoolbar"><a href="/">Back to library</a></div></div>
+                <iframe id="content_iframe" style="border:0" title="ZIM content"></iframe>
                 <script>
+                  const frame = document.querySelector('iframe');
+                  const toolbar = document.querySelector('#kiwixtoolbar');
+                  let previousScrollTop = Infinity;
+                  // Reproduce the upstream Kiwix mobile auto-hide mechanism.
+                  if (document.body.clientWidth < 520) setInterval(() => {
+                    const doc = frame.contentDocument;
+                    if (!doc?.body) return;
+                    const top = doc.documentElement.scrollTop || doc.body.scrollTop;
+                    if (Math.abs(previousScrollTop - top) <= 5) return;
+                    toolbar.style.position = top > previousScrollTop ? 'fixed' : 'static';
+                    toolbar.style.top = top > previousScrollTop ? '-100%' : '0';
+                    previousScrollTop = top;
+                  }, 250);
                   const load = () => document.querySelector('iframe').contentWindow.location.replace('/zim/content/' + location.hash.slice(1));
                   window.addEventListener('hashchange', load);
                   load();
@@ -39,9 +56,10 @@ def check_kiwix_article_navigation(page, base):
         elif url == content + category:
             body = (f'<a href="/zim/content/{bowline}"><span>Bowline</span></a>'
                     f'<a href="/zim/viewer#{basic}">Basic knots</a>'
+                    '<div style="height:3000px"></div>'
                     '<script>document.addEventListener("click", e => e.preventDefault())</script>')
         elif url == content + bowline:
-            body = '<h1>Bowline</h1>'
+            body = '<h1>Bowline</h1><div style="height:3000px"></div>'
         elif url == content + basic:
             body = '<h1>Basic knots</h1>'
         elif url == base + "/zim/axiom-navigation.js":
@@ -56,16 +74,49 @@ def check_kiwix_article_navigation(page, base):
     try:
         page.goto(viewer + "#" + category)
         frame = page.frame_locator("#content_iframe")
+        toolbar = page.locator("#kiwixtoolbar")
+        def assert_toolbar_visible():
+            bounds = toolbar.bounding_box()
+            assert bounds and bounds["y"] >= 0 and bounds["y"] + bounds["height"] <= page.viewport_size["height"]
+            expect(page.get_by_role("link", name="Back to library")).to_be_visible()
+
+        def scroll_article():
+            # First let the upstream poll observe the initial position.
+            page.wait_for_function("document.querySelector('#kiwixtoolbar').style.position === 'static'")
+            frame.locator("body").evaluate("(body) => body.ownerDocument.defaultView.scrollTo(0, 650)")
+            # Confirm the simulated upstream requested an off-screen toolbar.
+            page.wait_for_function("document.querySelector('#kiwixtoolbar').style.top === '-100%'")
+            assert_toolbar_visible()
+            page.set_viewport_size({"width": page.viewport_size["width"], "height": page.viewport_size["height"] - 80})
+            assert_toolbar_visible()
+            frame.locator("body").evaluate("(body) => body.ownerDocument.defaultView.scrollTo(0, 0)")
+            page.wait_for_function("document.querySelector('#kiwixtoolbar').style.position === 'static'")
+            assert_toolbar_visible()
+            page.set_viewport_size({"width": page.viewport_size["width"], "height": page.viewport_size["height"] + 80})
+
+        expect(frame.get_by_text("Bowline")).to_be_visible()
+        if page.viewport_size["width"] < 520:
+            scroll_article()
         frame.get_by_text("Bowline").click()
         expect(page).to_have_url(viewer + "#" + bowline)
         expect(frame.get_by_role("heading", name="Bowline")).to_be_visible()
-        expect(page.get_by_role("link", name="Back to library")).to_be_visible()
+        assert_toolbar_visible()
+        if page.viewport_size["width"] < 520:
+            scroll_article()
         page.evaluate("history.back()")
         expect(page).to_have_url(viewer + "#" + category)
         frame.get_by_role("link", name="Basic knots").focus()
         page.keyboard.press("Enter")
         expect(page).to_have_url(viewer + "#" + basic)
         expect(frame.get_by_role("heading", name="Basic knots")).to_be_visible()
+        assert_toolbar_visible()
+        # Direct deep links must still open inside the toolbar-bearing shell.
+        page.goto("about:blank")
+        page.goto(viewer + "#" + bowline)
+        expect(frame.get_by_role("heading", name="Bowline")).to_be_visible()
+        assert_toolbar_visible()
+        if page.viewport_size["width"] < 520:
+            scroll_article()
     finally:
         page.unroute("**/zim/**", serve)
 
@@ -1241,6 +1292,11 @@ def main():
                                         exercise(browser, f"http://{host}:{port}", name, viewport, artifacts)
                                         exercise_source_actions(browser, viewport)
                                     else:
+                                        mobile_page = browser.new_page(viewport=viewport, is_mobile=True, has_touch=True)
+                                        try:
+                                            check_kiwix_article_navigation(mobile_page, f"http://{host}:{port}")
+                                        finally:
+                                            mobile_page.close()
                                         exercise_compact_sources(browser, viewport)
                                     exercise_admin_navigation(browser, viewport)
                                     exercise_batch_update_journey(browser, viewport)

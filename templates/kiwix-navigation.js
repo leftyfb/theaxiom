@@ -2,6 +2,24 @@
   const frame = document.getElementById('content_iframe');
   if (!frame) return;
 
+  // Kiwix auto-hides its toolbar on narrow screens by repeatedly setting
+  // position: fixed and top: -100% while the article scrolls down. Keep the
+  // toolbar in the viewer's flex layout, above the independently scrolling
+  // content iframe. CSS takes precedence over those inline scroll updates.
+  const toolbarStyle = document.createElement('style');
+  toolbarStyle.textContent = `
+    @media screen {
+      #kiwixtoolbarwrapper { flex-shrink: 0; }
+      #kiwixtoolbar {
+        position: static !important;
+        top: auto !important;
+        transition: none !important;
+      }
+      #content_iframe { min-height: 0; }
+    }
+  `;
+  document.head.append(toolbarStyle);
+
   const viewer = window.location.pathname;
   const content = viewer.replace(/viewer$/, 'content/');
   const bookPath = /^[a-z0-9-]+\.[a-f0-9]{64}\//;
