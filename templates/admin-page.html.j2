@@ -215,23 +215,23 @@
 
     .mobile-admin-toolbar, .mobile-selection, .mobile-sheet, .desktop-library-link { display:none; }
     @media (min-width: 641px) {
-      body:has(.sources-admin) .site-header, .sources-admin .admin-nav,
-      .sources-admin .source-search-row { display:none; }
+      .site-header, .admin-nav, .sources-admin .source-search-row { display:none; }
       .sources-admin .sources-heading, .sources-admin #update-availability {
         position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
-      .sources-admin { padding-top:0; }
-      .sources-admin .mobile-admin-toolbar { position:sticky; top:0; z-index:10; display:flex;
+      main { padding-top:0; }
+      main:not(.sources-admin) > h1 { margin-top:.75rem; }
+      .mobile-admin-toolbar { position:sticky; top:0; z-index:10; display:flex;
         align-items:center; flex-wrap:wrap; gap:.5rem; padding:.55rem .75rem;
         background:var(--paper); border-bottom:1px solid var(--line); }
-      .sources-admin .desktop-library-link { display:block; margin:0 1rem 0 0; }
-      .sources-admin .mobile-admin-toolbar > details:first-of-type { margin-right:auto; }
-      .sources-admin .mobile-admin-toolbar svg { width:1.2rem; height:1.2rem; }
-      .sources-admin .mobile-admin-toolbar .button { padding:.35rem .65rem; min-height:40px; }
-      .sources-admin .mobile-admin-toolbar details { position:relative; }
-      .sources-admin .mobile-admin-toolbar details > div { position:absolute; top:100%; left:0; display:grid;
+      .desktop-library-link { display:block; margin:0 1rem 0 0; }
+      .mobile-admin-toolbar > details:first-of-type { margin-right:auto; }
+      .mobile-admin-toolbar svg { width:1.2rem; height:1.2rem; }
+      .mobile-admin-toolbar .button { padding:.35rem .65rem; min-height:40px; }
+      .mobile-admin-toolbar details { position:relative; }
+      .mobile-admin-toolbar details > div { position:absolute; top:100%; left:0; display:grid;
         min-width:12rem; padding:.35rem; gap:.25rem; background:var(--paper); border:1px solid var(--line);
         border-radius:.5rem; box-shadow:0 4px 15px #123c3226; }
-      .sources-admin #mobile-admin-menu > div { left:auto; right:0; }
+      #mobile-admin-menu > div { left:auto; right:0; }
       .sources-admin #mobile-source-search { flex-basis:100%; }
       .sources-admin #mobile-source-search input { width:100%; min-height:40px; font:inherit; padding:.5rem;
         border:1px solid #aac5b7; border-radius:.5rem; }
@@ -315,7 +315,7 @@
   <main id="main-content"{% if page == "sources" %} class="sources-admin"{% endif %}>
     <nav class="admin-nav" aria-label="Administration"><a class="button" href="/admin/sources"{% if page == "sources" %} aria-current="page"{% endif %}>Sources</a><a class="button" href="/admin/groupings"{% if page == "groupings" %} aria-current="page"{% endif %}>Groupings</a><a class="button" href="/admin/settings"{% if page == "settings" %} aria-current="page"{% endif %}>Settings</a></nav>
     <nav class="mobile-admin-toolbar" aria-label="Administration tools">
-      {% if page == "sources" %}<a href="/" class="brand desktop-library-link">The Axiom</a>{% endif %}
+      <a href="/" class="brand desktop-library-link">The Axiom</a>
       <details><summary class="button">{{ page|capitalize }} ▾</summary><div>
         <a class="button" href="/">Back to library</a>
         {% for section in ['sources', 'groupings', 'settings'] %}
@@ -1055,14 +1055,10 @@
       const media = matchMedia('(max-width: 640px)');
       const menu = document.getElementById('mobile-admin-menu');
       const logout = document.getElementById('admin-logout');
-      const header = logout.parentElement;
+      document.getElementById('mobile-admin-tools').append(logout);
       function layout() {
         document.body.classList.toggle('compact-admin', media.matches);
-        if (media.matches || document.querySelector('.sources-admin')) document.getElementById('mobile-admin-tools').append(logout);
-        else {
-          header.append(logout);
-          menu.open = false;
-        }
+        menu.open = false;
       }
       menu.querySelector('div').addEventListener('click', () => {
         menu.open = false;

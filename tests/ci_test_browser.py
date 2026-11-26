@@ -1064,10 +1064,11 @@ def exercise_compact_sources(browser, viewport):
 
 
 
-def exercise_mobile_admin_navigation(browser, viewport):
+def exercise_admin_navigation(browser, viewport):
     from test_admin_page_template import render
 
-    page = browser.new_page(viewport=viewport, has_touch=True, is_mobile=True)
+    mobile = viewport["width"] <= 640
+    page = browser.new_page(viewport=viewport, has_touch=mobile, is_mobile=mobile)
     try:
         def admin(route):
             section = route.request.url.rsplit("/", 1)[-1]
@@ -1081,6 +1082,15 @@ def exercise_mobile_admin_navigation(browser, viewport):
                                    ("Groupings", "Sources")):
             expect(toolbar).to_be_visible()
             expect(page.locator(".site-header")).to_be_hidden()
+            expect(page.locator(".admin-nav")).to_be_hidden()
+            brand = toolbar.get_by_role("link", name="The Axiom", exact=True)
+            if mobile:
+                expect(brand).to_be_hidden()
+            else:
+                expect(brand).to_be_visible()
+                expect(brand).to_have_attribute("href", "/")
+            if current != "Sources":
+                expect(toolbar.get_by_role("button", name="Filter sources")).to_have_count(0)
             toolbar.get_by_label("More admin tools").click()
             expect(toolbar.get_by_role("button", name="Sign out")).to_be_visible()
             toolbar.get_by_text(current + " ▾").click()
@@ -1232,7 +1242,7 @@ def main():
                                         exercise_source_actions(browser, viewport)
                                     else:
                                         exercise_compact_sources(browser, viewport)
-                                        exercise_mobile_admin_navigation(browser, viewport)
+                                    exercise_admin_navigation(browser, viewport)
                                     exercise_batch_update_journey(browser, viewport)
                                     exercise_history_poll(browser, viewport)
                                     exercise_source_order(browser, viewport)
