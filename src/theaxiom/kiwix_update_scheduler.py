@@ -47,7 +47,7 @@ def check_records(records, *, max_checks=DEFAULT_MAX_CHECKS, start_index=0, chec
                 if checker is not None:
                     outcome = checker(sid)
                 elif by_id[sid]["configuration"]["format"] == "zim":
-                    outcome = kiwix_update_discovery.refresh_checked_source(sid)
+                    outcome = kiwix_update_discovery.refresh_checked_source(sid, manual=False)
                 else:
                     outcome = document_update_discovery.check_installed_document(by_id[sid])
                 if isinstance(outcome, dict):

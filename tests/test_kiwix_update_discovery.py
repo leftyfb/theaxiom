@@ -523,3 +523,33 @@ def test_unpinned_sha_verified_fema_can_reach_opds_discovery(monkeypatch, tmp_pa
     result = discovery.refresh_checked_source("fema-ready", fetch=fetch)
     assert result["state"] == "no_newer_edition_listed"
     assert len(calls) == 1
+
+
+def test_deleted_update_stays_private_until_a_fresh_manual_check(monkeypatch, tmp_path):
+    from theaxiom import zim_jobs, update_check_store
+
+    sid = "wikipedia"
+    monkeypatch.setattr(update_check_store, "root_path", lambda: tmp_path / "checks")
+    job = installed_job_for_fixture()
+    monkeypatch.setattr(zim_jobs, "status", lambda _: job)
+    monkeypatch.setattr(zim_jobs, "installed", lambda live, config: live["artifact"])
+    calls = []
+    fetch = fetcher(feed(atom("2026-11")), metalink("2026-11"), calls)
+    assert discovery.refresh_checked_source(sid, fetch=fetch)["state"] == "update_available"
+    saved = update_check_store.record_path(sid).read_bytes()
+    update_check_store.require_manual_recheck(sid)
+
+    assert discovery.cached_checked_source(sid) == {
+        "state": "unable_to_determine", "evidence": "no current check evidence"}
+    assert discovery.refresh_checked_source(sid, fetch=fetch, manual=False)["state"] == "unable_to_determine"
+    assert len(calls) == 2
+
+    def offline(*args, **kwargs):
+        raise OSError("offline")
+
+    assert discovery.refresh_checked_source(sid, fetch=offline)["state"] == "unable_to_determine"
+    assert update_check_store.record_path(sid).read_bytes() == saved
+    assert "candidate_edition" not in discovery.cached_checked_source(sid)
+    assert discovery.refresh_checked_source(sid, fetch=fetch)["state"] == "update_available"
+    assert len(calls) == 4
+    assert discovery.cached_checked_source(sid)["candidate_edition"] == "2026-11"

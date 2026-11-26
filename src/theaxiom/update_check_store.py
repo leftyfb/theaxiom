@@ -115,7 +115,30 @@ def _history_path(target):
     return target.with_suffix(".last-success.json")
 
 
-def save(source_id: str, installed_sha256: str, result: dict, *, now=None):
+def manual_recheck_token(source_id):
+    """Identify a pending manual check without exposing cached publisher data."""
+    marker = record_path(source_id).with_suffix(".recheck")
+    try:
+        info = marker.lstat()
+    except FileNotFoundError:
+        return None
+    return info.st_ino, info.st_mtime_ns
+
+
+def require_manual_recheck(source_id):
+    target = record_path(source_id).with_suffix(".recheck")
+    target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    fd = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        _write(target, b"manual check required\n")
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+
+def save(source_id: str, installed_sha256: str, result: dict, *, now=None, recheck_token=None):
     """Save the result and retain the last successful check on failure."""
     stamp = time.time() if now is None else now
     data = _validated(source_id, installed_sha256, stamp, result)
@@ -124,6 +147,9 @@ def save(source_id: str, installed_sha256: str, result: dict, *, now=None):
     directory_fd = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
         fcntl.flock(directory_fd, fcntl.LOCK_EX)
+        pending = manual_recheck_token(source_id)
+        if pending is not None and (pending != recheck_token or result["state"] == "unable_to_determine"):
+            return
         previous = _read(target, source_id, installed_sha256)
         if previous and previous["checked_at"] > stamp:
             return
@@ -137,6 +163,8 @@ def save(source_id: str, installed_sha256: str, result: dict, *, now=None):
                 # Saving the current failure takes precedence over historical display.
                 LOG.warning("Unable to retain last successful update-check evidence")
         _write(target, data)
+        if pending is not None:
+            target.with_suffix(".recheck").unlink()
         os.fsync(directory_fd)
     finally:
         os.close(directory_fd)
@@ -147,7 +175,9 @@ def load(source_id: str, installed_sha256: str, *, now=None) -> dict:
     unknown = {"state": "unable_to_determine", "evidence": "no current check evidence"}
     try:
         target = record_path(source_id)
-    except ValueError:
+        if manual_recheck_token(source_id) is not None:
+            return unknown
+    except (ValueError, OSError):
         return unknown
     if not _digest(installed_sha256):
         return unknown
@@ -167,4 +197,4 @@ def load(source_id: str, installed_sha256: str, *, now=None) -> dict:
         edition = success["result"].get("candidate_edition")
         if edition and current["state"] == "unable_to_determine":
             current["last_known_candidate_edition"] = edition
-    return current
+    return unknown if manual_recheck_token(source_id) is not None else current

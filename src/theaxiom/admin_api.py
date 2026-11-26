@@ -2212,6 +2212,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 if not record or not self._zim_record(record):
                     raise ValueError("No matching ZIM source")
                 def restore_profile(live):
+                    update_check_store.require_manual_recheck(sid)
                     fields = {key: live["configuration"][key] for key in
                               ("source_url", "sha256", "expected_size_bytes")}
                     installed = kiwix_update_discovery.installed_identity_from_job(live, live["artifact"])
