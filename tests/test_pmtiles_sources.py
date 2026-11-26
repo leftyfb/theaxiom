@@ -80,3 +80,37 @@ def test_world_seed_upgrade_adds_once_and_preserves_removed_sources(tmp_path):
     assert all(item["source_id"] != "openstreetmap-world" for item in removed["sources"])
     assert store.get() == removed
     assert initial["revision"] == 0
+
+
+def test_map_staged_update_and_rollback_keep_previous_archive(disk, monkeypatch):
+    from contextlib import contextmanager
+    sid = "map"
+    old = fixture()
+    original = config(old)
+    live_artifact = zim_source.install_stream(sid, original, BytesIO(old))
+    live = dict(source_id=sid, state="completed", active=False, verified=True,
+                configuration=zim_jobs.identity(original), artifact=live_artifact)
+    zim_jobs.save(live)
+    new = old[:128] + b"xyz" + old[131:]
+    changed = dict(config(new), source_url="https://example.org/next.pmtiles")
+    zim_jobs.prepare_candidate(sid, changed)
+    @contextmanager
+    def transport(url, **kwargs):
+        assert url == changed["source_url"]
+        stream = BytesIO(new)
+        stream.total_size, stream.etag, stream.last_modified = len(new), '"new"', None
+        yield stream
+    monkeypatch.setattr(zim_source.pdf_transport, "open_pdf", transport)
+    candidate = zim_jobs.acquire_candidate(sid, changed)
+    assert candidate["state"] == "verified" and zim_jobs.read(sid) == live
+    assert (disk / "library/pmtiles" / live_artifact["filename"]).read_bytes() == old
+    assert zim_jobs.activate_candidate(sid, changed)["artifact"] == candidate["artifact"]
+    assert zim_jobs.rollback_candidate(sid, changed) == live
+    assert (disk / "library/pmtiles" / candidate["artifact"]["filename"]).read_bytes() == new
+
+
+def test_map_worker_asset_version_query_is_bounded():
+    route = "/api/map-assets/maplibre-gl-worker.mjs"
+    assert admin_api._map_asset_path(route + "?v=6.19.0") == route
+    assert admin_api._map_asset_path(route + "?v=unknown") is None
+    assert admin_api._map_asset_path("/api/map-assets/../admin") is None

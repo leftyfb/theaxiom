@@ -76,6 +76,17 @@ MAP_ASSET_PATHS = {"/api/map-assets/" + name: mime for name, mime in {
     "maplibre-gl.css": "text/css", "style.json": "application/json",
     "map-reader.mjs": "text/javascript",
 }.items()}
+def _map_asset_path(path):
+    try:
+        location = urlsplit(path)
+    except ValueError:
+        return None
+    if (location.path in MAP_ASSET_PATHS and location.query in {"", "v=6.19.0"}
+            and not location.fragment and not location.netloc and not location.scheme):
+        return location.path
+    return None
+
+
 PDFJS_PREFIX = "/api/pdfjs/"
 ZIM_READER_ROUTE = re.compile(r'/read/zim/([a-z0-9-]{1,63})\Z')
 PDFJS_ASSET = re.compile(r"/api/pdfjs/(?:build|web|cmaps|standard_fonts|wasm|iccs|image_decoders|locale)/[A-Za-z0-9_./-]+\Z")
@@ -658,7 +669,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         if not post and (self.path in public_paths or self.path == "/admin/login"
                          or self.path.split("?", 1)[0] in {"/", "/index.html", "/search"}
                          or pdf_source.ROUTE.fullmatch(self.path) or epub_source.ROUTE.fullmatch(self.path)
-                         or pmtiles_source.ROUTE.fullmatch(self.path) or self.path in MAP_ASSET_PATHS
+                         or pmtiles_source.ROUTE.fullmatch(self.path) or _map_asset_path(self.path)
                          or ZIM_READER_ROUTE.fullmatch(self.path) or PDFJS_ASSET.fullmatch(self.path)
                          or self.path == "/internal/publication/zim"):
             return True
@@ -829,7 +840,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         if PDFJS_ASSET.fullmatch(self.path):
             self._serve_pdfjs_asset()
             return
-        if self.path in MAP_ASSET_PATHS:
+        if _map_asset_path(self.path):
             self._serve_map_asset()
             return
         map_route = pmtiles_source.ROUTE.fullmatch(self.path)
@@ -1331,13 +1342,14 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 yield record, epub_source.status(record, artifact)
 
     def _serve_map_asset(self):
+        path = _map_asset_path(self.path)
         try:
-            body = (ADMIN_TEMPLATE_DIR / "map-assets" / self.path.rsplit("/", 1)[-1]).read_bytes()
+            body = (ADMIN_TEMPLATE_DIR / "map-assets" / path.rsplit("/", 1)[-1]).read_bytes()
         except OSError:
             self._send_json(404, {"error": "map asset unavailable"})
             return
         self.send_response(200)
-        self.send_header("Content-Type", MAP_ASSET_PATHS[self.path])
+        self.send_header("Content-Type", MAP_ASSET_PATHS[path])
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -1396,7 +1408,11 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         self.send_header("ETag", etag)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            # Panning and zooming routinely cancel outstanding tile requests.
+            pass
 
     def _serve_pdfjs_asset(self):
         """Serve only trusted installed renderer assets, never arbitrary host files."""
