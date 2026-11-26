@@ -795,8 +795,11 @@ def status(sid):
 
 def identity(config):
     url, size, digest = zim_source.candidate(config)
-    return {"format": "zim", "source_url": url, "expected_size_bytes": str(size) if size else "",
-            "sha256": digest or ""}
+    result = {"format": "zim", "source_url": url, "expected_size_bytes": str(size) if size else "",
+              "sha256": digest or ""}
+    if publisher_sha1 := zim_source.publisher_sha1(config):
+        result["publisher_sha1"] = publisher_sha1
+    return result
 
 
 def preview_acquisition(sid, config, *, exact_selection=False):

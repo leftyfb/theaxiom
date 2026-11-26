@@ -19,7 +19,7 @@ from . import source_catalog
 
 SCHEMA_VERSION = 2
 PROFILE_FIELDS = {"title", "description", "publisher", "edition", "language", "author", "icon_png"}
-CANDIDATE_FIELDS = {"source_url", "expected_size_bytes", "sha256", "provenance", "license"}
+CANDIDATE_FIELDS = {"source_url", "expected_size_bytes", "sha256", "publisher_sha1", "provenance", "license"}
 ARTIFACT_CONFIG_FIELDS = CANDIDATE_FIELDS | {"format"}
 DISCOVERY_FIELDS = {"update_method", "update_endpoint", "update_periodic"}
 CONFIG_FIELDS = ARTIFACT_CONFIG_FIELDS | DISCOVERY_FIELDS | {"search_enabled"}
@@ -375,6 +375,8 @@ class CatalogStore:
             raise CatalogError("invalid source format")
         if key == "expected_size_bytes" and value and not re.fullmatch(r"[1-9][0-9]{0,19}", value):
             raise CatalogError("expected size must be a positive decimal byte count")
+        if key == "publisher_sha1" and value and not re.fullmatch(r"[a-fA-F0-9]{40}", value):
+            raise CatalogError("Publisher SHA-1 must contain exactly 40 hexadecimal characters")
         if key == "sha256" and value and not re.fullmatch(r"[a-fA-F0-9]{64}", value):
             raise CatalogError("SHA-256 must contain exactly 64 hexadecimal characters")
         if key == "source_url" and value:

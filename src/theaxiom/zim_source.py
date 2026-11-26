@@ -25,7 +25,15 @@ def candidate(config):
         raise ValueError("Expected ZIM size exceeds supported limits")
     if digest and not re.fullmatch(r"[a-fA-F0-9]{64}", digest):
         raise ValueError("Invalid expected ZIM SHA-256")
+    publisher_sha1(config)
     return url, int(size) if size else None, digest.lower() if digest else None
+
+
+def publisher_sha1(config):
+    value = config.get("publisher_sha1", "")
+    if not isinstance(value, str) or value and not re.fullmatch(r"[a-fA-F0-9]{40}", value):
+        raise ValueError("Invalid publisher SHA-1")
+    return value.lower()
 
 
 def check_header(header, size):
@@ -86,6 +94,8 @@ def install_stream(source_id, config, stream, *, progress=lambda current, total:
         try:
             count = 0
             digest = hashlib.sha256()
+            expected_sha1 = publisher_sha1(config)
+            sha1 = hashlib.sha1(usedforsecurity=False) if expected_sha1 else None
             with os.fdopen(fd, "w+b") as target:
                 while block := stream.read(CHUNK):
                     if count + len(block) > (total or MAX_BYTES):
@@ -96,11 +106,15 @@ def install_stream(source_id, config, stream, *, progress=lambda current, total:
                     target.write(block)
                     target.flush()
                     digest.update(block)
+                    if sha1 is not None:
+                        sha1.update(block)
                     count += len(block)
                     progress(count, total)
                 if total is not None and count != total:
                     raise ValueError("Incomplete ZIM download")
                 identity = digest.hexdigest()
+                if sha1 is not None and sha1.hexdigest() != expected_sha1:
+                    raise ValueError("ZIM publisher SHA-1 differs from expected digest")
                 if expected_digest and identity != expected_digest:
                     raise ValueError("ZIM SHA-256 differs from expected digest")
                 target.seek(0)
@@ -277,7 +291,7 @@ def download_resumable(source_id, config, *, offset=0, validator=None,
                     return _verify_and_promote(
                         fd, staging, library, name, source_id, url, count,
                         expected_digest, check_mount, available, stopped,
-                        promote_lock, promoting, progress)
+                        promote_lock, promoting, progress, expected_sha1=publisher_sha1(config))
 
         finally:
             os.close(fd)
@@ -285,7 +299,7 @@ def download_resumable(source_id, config, *, offset=0, validator=None,
 
 def _verify_and_promote(fd, staging, library, name, source_id, url, count,
                         expected_digest, check_mount, available, stopped,
-                        promote_lock, promoting, progress):
+                        promote_lock, promoting, progress, *, expected_sha1=""):
     """Verify a staged inode and promote it without copying archive bytes."""
     from contextlib import nullcontext
     check_mount()
@@ -303,17 +317,22 @@ def _verify_and_promote(fd, staging, library, name, source_id, url, count,
     with os.fdopen(os.dup(fd), "rb") as target:
         target.seek(0)
         sha = hashlib.sha256()
+        sha1 = hashlib.sha1(usedforsecurity=False) if expected_sha1 else None
         position = 0
         while block := target.read(CHUNK):
             if stopped():
                 raise TransferStopped()
             sha.update(block)
+            if sha1 is not None:
+                sha1.update(block)
             position += len(block)
             if position < count:
                 report_checksum(position, 1)
         if position != count:
             raise ValueError("Staged ZIM changed during checksum verification")
         report_checksum(count, 1, boundary=True)
+        if sha1 is not None and sha1.hexdigest() != expected_sha1:
+            raise ValueError("ZIM publisher SHA-1 differs from expected digest")
         target.seek(0)
         check_header(target.read(80), count)
         md5 = hashlib.md5(usedforsecurity=False)
@@ -417,6 +436,6 @@ def revalidate_retained(source_id, config, *, expected_bytes, progress=lambda cu
             return _verify_and_promote(
                 fd, staging, library, partial_name(source_id), source_id,
                 url, expected_bytes, expected_digest, check_mount, available,
-                stopped, promote_lock, promoting, progress)
+                stopped, promote_lock, promoting, progress, expected_sha1=publisher_sha1(config))
         finally:
             os.close(fd)

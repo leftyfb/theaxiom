@@ -325,3 +325,21 @@ def test_short_network_reads_batch_storage_writes_and_resume(disk, monkeypatch, 
     assert artifact["sha256"] == hashlib.sha256(data).hexdigest()
     assert (disk / "library/zim" / artifact["filename"]).read_bytes() == data
     assert not (disk / "staging/zim/.download-ready.partial").exists()
+
+
+def test_publisher_sha1_is_verified_without_replacing_local_sha256(disk):
+    data = fixture_bytes()
+    expected = hashlib.sha1(data, usedforsecurity=False).hexdigest()
+    config = dict(CONFIG, publisher_sha1=expected)
+    artifact = zim_source.install_stream("approved", config, BytesIO(data))
+    assert artifact["sha256"] == hashlib.sha256(data).hexdigest()
+    with pytest.raises(ValueError, match="publisher SHA-1"):
+        zim_source.install_stream("wrong", dict(config, publisher_sha1="0" * 40), BytesIO(data))
+    stage = disk / "staging/zim" / zim_source.partial_name("retained")
+    stage.write_bytes(data)
+    stage.chmod(0o600)
+    with pytest.raises(ValueError, match="publisher SHA-1"):
+        zim_source.revalidate_retained("retained", dict(config, publisher_sha1="0" * 40), expected_bytes=len(data))
+    assert stage.exists()
+    retained = zim_source.revalidate_retained("retained", config, expected_bytes=len(data))
+    assert retained["sha256"] == artifact["sha256"]
