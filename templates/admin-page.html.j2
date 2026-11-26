@@ -2124,29 +2124,6 @@
           button.disabled = false;
         }
       }));
-      document.querySelectorAll('[data-delete-staged-update]').forEach(button => button.addEventListener('click', async () => {
-        if (button.disabled || !button.dataset.digest) return;
-        const card = button.closest('.source-card');
-        const edition = button.dataset.edition;
-        if (!window.confirm('Delete the staged update files' + (edition ? ' for ' + edition : '') +
-            '? The installed edition will stay in service.')) return;
-        const feedback = card.querySelector('[data-zim-feedback]');
-        card.dataset.stagedDeletePosting = 'true';
-        button.disabled = true;
-        try {
-          const response = await acquisitionFetch('/api/action', {method:'POST',
-            headers:{...(window.axiomCsrfHeaders?.() || {}), 'Content-Type':'application/json'},
-            body:JSON.stringify({action:'zim-replacement-delete-verified', source_id:card.dataset.sourceId,
-              candidate_sha256:button.dataset.digest, revision, confirm:true})});
-          const result = await response.json().catch(() => ({}));
-          if (!response.ok) throw acquisitionError(response, result, 'Staged update deletion failed');
-          feedback.textContent = 'Staged update files deleted.';
-        } catch (error) {
-          feedback.textContent = error.message;
-        } finally {
-          delete card.dataset.stagedDeletePosting;
-        }
-      }));
       document.querySelectorAll('[data-delete-downloads]').forEach(button => button.addEventListener('click', async () => {
         if (button.disabled) return;
         const card = button.closest('.source-card');
@@ -2176,6 +2153,29 @@
         } finally {
           delete card.dataset.deletePosting;
           button.disabled = false;
+        }
+      }));
+      document.querySelectorAll('[data-delete-staged-update]').forEach(button => button.addEventListener('click', async () => {
+        if (button.disabled || !button.dataset.digest) return;
+        const card = button.closest('.source-card');
+        const edition = button.dataset.edition;
+        if (!window.confirm('Delete the staged update files' + (edition ? ' for ' + edition : '') +
+            '? The installed edition will stay in service.')) return;
+        const feedback = card.querySelector('[data-zim-feedback]');
+        card.dataset.stagedDeletePosting = 'true';
+        button.disabled = true;
+        try {
+          const response = await acquisitionFetch('/api/action', {method:'POST',
+            headers:{...(window.axiomCsrfHeaders?.() || {}), 'Content-Type':'application/json'},
+            body:JSON.stringify({action:'zim-replacement-delete-verified', source_id:card.dataset.sourceId,
+              candidate_sha256:button.dataset.digest, revision, confirm:true})});
+          const result = await response.json().catch(() => ({}));
+          if (!response.ok) throw acquisitionError(response, result, 'Staged update deletion failed');
+          feedback.textContent = 'Staged update files deleted.';
+        } catch (error) {
+          feedback.textContent = error.message;
+        } finally {
+          delete card.dataset.stagedDeletePosting;
         }
       }));
       document.querySelectorAll('[data-zim-replacement]').forEach(button => button.addEventListener('click', async () => {
