@@ -1647,7 +1647,7 @@ def test_interrupted_promotion_recovers_only_verified_library_and_staging_links(
 from test_source_profiles_http import app as download_app, mutate, source  # noqa: E402,F401
 
 
-@pytest.mark.parametrize("finish", ["publish", "delete", "remove"])
+@pytest.mark.parametrize("finish", ["publish", "delete", "remove", "rollback-delete"])
 def test_download_discovered_update_and_follow_up(download_app, disk, monkeypatch, finish):
     from theaxiom import publication, update_check_store, zim_refresh
 
@@ -1724,6 +1724,23 @@ def test_download_discovered_update_and_follow_up(download_app, disk, monkeypatc
     assert publication.load()[sid]
     assert refreshes[0]["activated_source"] == sid
     assert source(request("/api/sources"), sid)["artifact"]["sha256"] == digest
+    if finish == "rollback-delete":
+        request("/api/action", dict(action="zim-replacement-rollback", source_id=sid,
+                                  revision=catalog["revision"], confirm_restart=True), status=202)
+        restored = source(request("/api/sources"), sid)
+        assert restored["artifact"] == original
+        assert restored["replacement"]["state"] == "rolled_back"
+        assert restored["replacement"]["sha256"] == digest
+        archive = disk / "library/zim" / zim_jobs.read_candidate(sid)["artifact"]["filename"]
+        assert archive.exists()
+        deleted = request("/api/action", dict(action="zim-replacement-delete-verified", source_id=sid,
+                          revision=catalog["revision"], candidate_sha256=digest, confirm=True))
+        assert deleted["state"] == "discarded"
+        assert not archive.exists() and zim_jobs.read_candidate(sid) is None
+        assert zim_jobs.read(sid)["artifact"] == original
+        assert (disk / "library/zim" / original["filename"]).read_bytes() == data
+        assert publication.load()[sid]
+
 
 
 def test_delete_published_zim_from_source_action(download_app, disk, monkeypatch):

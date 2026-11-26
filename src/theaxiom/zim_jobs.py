@@ -507,12 +507,13 @@ def delete_verified_candidate(sid, config, digest):
     """Delete only the verified replacement that the operator reviewed."""
     with LOCK, worker_lock():
         candidate = read_candidate(sid)
-        if (not candidate or candidate["state"] != "verified"
+        if (not candidate or candidate["state"] not in {"verified", "rolled_back"}
                 or candidate["configuration"] != identity(config)
                 or candidate["artifact"].get("sha256") != digest):
             raise ValueError("Verified update changed. Reload and review before deleting.")
         live = read(sid)
         if (not live or live.get("artifact") != candidate["base_artifact"]
+                or (candidate["state"] == "rolled_back" and live != candidate["previous_job"])
                 or not installed(live, live["configuration"])):
             raise ValueError("Serving archive could not be verified.")
         artifact = candidate["artifact"]

@@ -2691,7 +2691,7 @@
         }
         const deleteButton = card.querySelector('[data-delete-downloads]');
         const stagedDelete = card.querySelector('[data-delete-staged-update]');
-        const canDeleteStaged = source?.replacement?.state === 'verified' && !!source.replacement.sha256;
+        const canDeleteStaged = ['verified','rolled_back'].includes(source?.replacement?.state) && !!source.replacement.sha256;
         if (stagedDelete) {
           stagedDelete.hidden = !canDeleteStaged;
           stagedDelete.disabled = blocked || card.dataset.stagedDeletePosting === 'true' ||
@@ -2719,7 +2719,7 @@
             prepared: 'Update ready to download', downloading: 'Downloading update',
             verifying: 'Verifying update', cancelling: 'Cancelling update download',
             verified: 'Update verified and ready to publish', activated: 'Update activated',
-            rolled_back: 'Previous edition restored', failed: 'Update download failed',
+            rolled_back: 'Previous edition restored. Update files retained.', failed: 'Update download failed',
             cancelled: 'Update download cancelled', interrupted: 'Update download interrupted',
             unavailable: 'Update status unavailable'
           };
@@ -2734,7 +2734,7 @@
               op === 'cancel' ? !['downloading','verifying'].includes(replacementState) :
               op === 'activate' ? replacementState !== 'verified' :
               op === 'rollback' ? replacementState !== 'activated' :
-              !['prepared','rolled_back','failed','cancelled','interrupted'].includes(replacementState) ||
+              !['prepared','failed','cancelled','interrupted'].includes(replacementState) ||
                 (['failed','cancelled','interrupted'].includes(replacementState) && replacement?.can_discard !== true);
             // Replacement controls use their own durable state and backend
             // preconditions. A changed catalog URL makes the old acquisition

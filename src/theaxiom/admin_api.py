@@ -228,7 +228,7 @@ def _public_zim_replacement(candidate):
     result = {key: candidate[key] for key in (
         "state", "downloaded_bytes", "expected_bytes", "error"
     ) if key in candidate}
-    if candidate["state"] == "verified":
+    if candidate["state"] in {"verified", "rolled_back"}:
         result["sha256"] = candidate["artifact"].get("sha256")
     return result | zim_jobs.current_checksum(candidate)
 
