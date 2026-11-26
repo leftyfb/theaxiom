@@ -1716,7 +1716,11 @@ def test_download_discovered_update_and_follow_up(download_app, disk, monkeypatc
         assert zim_jobs.read(sid)["artifact"] == original
         assert (disk / "library/zim" / original["filename"]).read_bytes() == data
         assert publication.load()[sid] and not refreshes
-        assert source(request("/api/sources"), sid)["replacement"] is None
+        cleared = source(request("/api/sources"), sid)
+        assert cleared["replacement"] is None
+        assert cleared["profile"]["edition"] == "2026-07"
+        assert cleared["configuration"]["source_url"] == old["source_url"]
+        assert not cleared["replacement_available"]
         return
 
     request("/api/action", dict(action="zim-replacement-activate", source_id=sid,
@@ -1744,6 +1748,10 @@ def test_download_discovered_update_and_follow_up(download_app, disk, monkeypatc
         assert zim_jobs.read(sid)["artifact"] == original
         assert (disk / "library/zim" / original["filename"]).read_bytes() == data
         assert publication.load()[sid]
+        cleared = source(request("/api/sources"), sid)
+        assert cleared["profile"]["edition"] == "2026-07"
+        assert cleared["configuration"]["source_url"] == old["source_url"]
+        assert not cleared["replacement_available"]
 
 
 

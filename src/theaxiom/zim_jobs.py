@@ -503,12 +503,11 @@ def discard_candidate(sid, config):
             return {"accepted": True, "source_id": sid, "state": "discarded"}
 
 
-def delete_verified_candidate(sid, config, digest):
+def delete_verified_candidate(sid, config, digest, *, restore_profile):
     """Delete only the verified replacement that the operator reviewed."""
     with LOCK, worker_lock():
         candidate = read_candidate(sid)
         if (not candidate or candidate["state"] not in {"verified", "rolled_back"}
-                or candidate["configuration"] != identity(config)
                 or candidate["artifact"].get("sha256") != digest):
             raise ValueError("Verified update changed. Reload and review before deleting.")
         live = read(sid)
@@ -516,6 +515,10 @@ def delete_verified_candidate(sid, config, digest):
                 or (candidate["state"] == "rolled_back" and live != candidate["previous_job"])
                 or not installed(live, live["configuration"])):
             raise ValueError("Serving archive could not be verified.")
+        configured = identity(config)
+        serving = live["configuration"]
+        if configured not in (candidate["configuration"], serving):
+            raise ValueError("Download settings changed. Review them before deleting the update.")
         artifact = candidate["artifact"]
         if artifact["filename"] == live["artifact"]["filename"]:
             raise ValueError("Staged update overlaps the serving archive.")
@@ -528,6 +531,7 @@ def delete_verified_candidate(sid, config, digest):
                 # A previous attempt may have unlinked the bytes before its ledger write.
                 pass
             os.fsync(directory)
+        restore_profile(live)
         target.unlink()
         dfd = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY)
         try:

@@ -2211,7 +2211,19 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 record = next((row for row in catalog["sources"] if row["source_id"] == sid), None)
                 if not record or not self._zim_record(record):
                     raise ValueError("No matching ZIM source")
-                result = zim_jobs.delete_verified_candidate(sid, record["configuration"], digest)
+                def restore_profile(live):
+                    fields = {key: live["configuration"][key] for key in
+                              ("source_url", "sha256", "expected_size_bytes")}
+                    installed = kiwix_update_discovery.installed_identity_from_job(live, live["artifact"])
+                    if installed:
+                        fields["edition"] = installed["edition"]
+                    if any((record["profile"] if key == "edition" else record["configuration"]).get(key, "") != value
+                           for key, value in fields.items()):
+                        SOURCE_CATALOG.mutate("edit", sid, fields, revision)
+
+                result = zim_jobs.delete_verified_candidate(
+                    sid, record["configuration"], digest, restore_profile=restore_profile)
+                result["revision"] = SOURCE_CATALOG.get()["revision"]
             except (BlockingIOError, ValueError) as exc:
                 self._send_json(409, {"error": str(exc) or "ZIM storage is busy"})
                 return

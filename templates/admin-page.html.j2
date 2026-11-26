@@ -2173,6 +2173,7 @@
               candidate_sha256:button.dataset.digest, revision, confirm:true})});
           const result = await response.json().catch(() => ({}));
           if (!response.ok) throw acquisitionError(response, result, 'Staged update deletion failed');
+          if (Number.isInteger(result.revision)) revision = result.revision;
           feedback.textContent = 'Staged update files deleted.';
         } catch (error) {
           feedback.textContent = error.message;
