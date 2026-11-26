@@ -1366,3 +1366,16 @@ def test_batch_updates_keep_old_archives_and_isolate_download_and_activation_fai
     assert publication.load() == {"bad-reader": True, "ready-public": True}
     for old in installed.values():
         assert (disk / "library/zim" / old["artifact"]["filename"]).read_bytes() == old_data
+
+
+def test_global_search_opt_out_preserves_library_entry(app, monkeypatch):
+    request, _ = app
+    catalog = request("/api/sources")
+    catalog = mutate(request, catalog, "edit", {"search_enabled": "no"})
+    assert source(catalog)["configuration"]["search_enabled"] == "no"
+    publish(request, True)
+    assert "Wikipedia" in request("/")
+    assert f'data-source="{SID}"' not in request("/search?q=water&mode=progressive")
+    request(f"/search?q=water&mode=source&source={SID}", status=404)
+    catalog = mutate(request, request("/api/sources"), "edit", {"search_enabled": "yes"})
+    assert f'data-source="{SID}"' in request("/search?q=water&mode=progressive")

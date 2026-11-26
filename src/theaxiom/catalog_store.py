@@ -22,7 +22,7 @@ PROFILE_FIELDS = {"title", "description", "publisher", "edition", "language", "a
 CANDIDATE_FIELDS = {"source_url", "expected_size_bytes", "sha256", "provenance", "license"}
 ARTIFACT_CONFIG_FIELDS = CANDIDATE_FIELDS | {"format"}
 DISCOVERY_FIELDS = {"update_method", "update_endpoint", "update_periodic"}
-CONFIG_FIELDS = ARTIFACT_CONFIG_FIELDS | DISCOVERY_FIELDS
+CONFIG_FIELDS = ARTIFACT_CONFIG_FIELDS | DISCOVERY_FIELDS | {"search_enabled"}
 V1_FIELDS = PROFILE_FIELDS | CANDIDATE_FIELDS
 EDITABLE = PROFILE_FIELDS | CONFIG_FIELDS
 HEADER_FIELDS = {"schema_version", "revision", "updated_at"}
@@ -369,6 +369,8 @@ class CatalogStore:
             raise CatalogError("invalid source field")
         if key == "title" and not value.strip():
             raise CatalogError("title is required")
+        if key == "search_enabled" and value not in {"yes", "no"}:
+            raise CatalogError("search_enabled must be yes or no")
         if key == "format" and not ID_RE.fullmatch(value):
             raise CatalogError("invalid source format")
         if key == "expected_size_bytes" and value and not re.fullmatch(r"[1-9][0-9]{0,19}", value):

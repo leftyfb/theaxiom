@@ -858,6 +858,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     search_number = int(raw_page)
                     start_base = int(raw_base)
                 sources, groups = self._public_library()
+                if search_page:
+                    sources = [source for source in sources if source.get("search_enabled", True)]
                 eligible = {source["source_id"] for source in sources}
                 for kind, gid in selected.items():
                     plural = "categories" if kind == "category" else kind + "s"
@@ -1134,6 +1136,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 yield record, zim_status(record)
 
     def _search_published_content(self, query, sources, *, page=1, start_base=1):
+        sources = [source for source in sources if source.get("search_enabled", True)]
         names = {source["source_id"]: source["name"] for source in sources
                  if source["category"] not in {"PDF", "EPUB"}}
 
@@ -1255,6 +1258,11 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                                         description=profile.get("description", ""),
                                         icon_png=profile.get("icon_png", ""),
                                         language=profile.get("language") or "Unspecified language"))
+            search_disabled = {record["source_id"] for record in catalog["sources"]
+                               if record["configuration"].get("search_enabled") == "no"}
+            for source in sources:
+                if source["source_id"] in search_disabled:
+                    source["search_enabled"] = False
             ids = {source["source_id"] for source in sources}
             groups = [dict(group, source_ids=[sid for sid in group["source_ids"] if sid in ids])
                       for group in catalog.get("groups", [])]
