@@ -2999,7 +2999,7 @@
         field('status').className = 'badge' + (installedSource || verified ?
           ' enabled' : !stale && job?.state === 'failed' ? ' disabled' : '');
         const progress = field('transfer');
-        const transfer = !stale && job?.active === true ? transferStatus(job) : null;
+        const transfer = job?.active === true && !stale ? transferStatus(job) : null;
         const valid = transfer?.transferPercent != null;
         progress.hidden = !valid;
         progress.value = valid ? transfer.transferPercent : 0;
