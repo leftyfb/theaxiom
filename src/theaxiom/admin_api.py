@@ -494,8 +494,11 @@ def _reviewed_update_fields(update, reviewed_digest):
 
 
 def _document_pending(sid):
-    return any(job["source_id"] == sid and job["state"] in acquisition_queue.PENDING
-               for job in acquisition_queue.status())
+    try:
+        return any(job["source_id"] == sid and job["state"] in acquisition_queue.PENDING
+                   for job in acquisition_queue.status())
+    except (OSError, sqlite3.Error) as exc:
+        raise catalog_store.RevisionConflict("Document queue unavailable") from exc
 
 
 def _document_update_job(record, reviewed_digest, operation, *, previous=None):
@@ -955,7 +958,7 @@ def _execute_document_update(job, payload, stopping, shutdown):
     sid, operation = job["source_id"], job["operation"]
     automatic = operation == "automatic-update"
     original = update_discovery_config.migrate_periodic(payload["original"])
-    trigger = ("scheduled" if original.get("update_policy") == "scheduled" else "automatic") if automatic else "batch"
+    trigger = ("scheduled" if original.get("update_policy") == "scheduled" else "automatic") if automatic else payload.get("trigger", "batch")
 
     def stop():
         return stopping() or shutdown.is_set()
@@ -994,6 +997,10 @@ def _execute_document_update(job, payload, stopping, shutdown):
                     return "completed", "Update activated; publication setting preserved"
                 if document_replacement.installed(record) != payload["base"]:
                     raise ValueError("Serving document changed after queuing")
+                pin = payload["base"]
+                tag = document_replacement.validator(record, pin)
+                if tag and document_replacement.token(pin["sha256"], pin["source_url"], tag, pin["bytes"]) == payload["digest"]:
+                    return "completed", "Publisher validator changed; document bytes unchanged"
                 if owned and state and state["state"] == "verified":
                     # Recovery after verified bytes were durably recorded.
                     if automatic:
@@ -1026,7 +1033,7 @@ def _execute_document_update(job, payload, stopping, shutdown):
             # remain available while the bounded document transfer runs.
             try:
                 candidate = document_replacement.download(record, payload["digest"], evidence,
-                                                          job=job["id"], stopped=stop)
+                                                          job=job["id"], stopped=stop, trigger=trigger)
             except acquisition_queue.Cancelled:
                 if shutdown.is_set() and not stopping():
                     return "running", ""
@@ -2776,9 +2783,13 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 is_epub = record is not None and self._epub_record(record)
                 is_pdf = record is not None and self._pdf_record(record)
                 is_document = is_pdf or is_epub
-                if is_document and _document_pending(source_id):
-                    self._send_json(409, {"error": "Finish or cancel the document update first"})
-                    return
+                if is_document:
+                    try:
+                        if _document_pending(source_id):
+                            raise ValueError("Finish or cancel the document update first")
+                    except ValueError as exc:
+                        self._send_json(409, {"error": str(exc)})
+                        return
                 is_zim = record is not None and self._archive_record(record)
                 if not (is_document or is_zim):
                     self._send_json(400, {"error": "source has no publication adapter"})
@@ -3281,6 +3292,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 record = next((row for row in catalog["sources"] if row["source_id"] == sid), None)
                 if record and record["configuration"]["format"] in document_replacement.FORMATS:
                     job = _document_update_job(record, digest, "download-update")
+                    job["configuration"]["trigger"] = "manual"
                     settings = storage_settings.load_settings()
                     available = _batch_available(settings, {record["configuration"]["format"]})
                     ids = acquisition_queue.enqueue([job], available, settings)
