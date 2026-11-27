@@ -956,6 +956,7 @@
         <p class="source-note" data-field="discovery-evidence" role="status" aria-live="polite"></p>
         {% if source.zim_download or (document and url_managed) %}
         <p class="source-note" data-zim-replacement-status role="status" aria-live="polite"></p>
+        <p class="source-note" data-replacement-feedback role="status" aria-live="polite"></p>
         {% endif %}
         <div class="source-actions" aria-label="Source actions">
           {# Legacy pinned-action placeholders cannot execute and must not
@@ -1148,6 +1149,8 @@
       // lane for catalog-revision-sensitive actions. Downloads themselves
       // remain independent; only short revision-sensitive requests serialize.
       let latest = {{ catalog|default({})|tojson }};
+      let rendered = latest;
+      window.axiomMarkSourcesRendered = data => { rendered = data; };
       let mutationTail = Promise.resolve();
       let editorBase = null;
       const sourceAt = (data, sid) => data?.sources?.find(source => source.source_id === sid);
@@ -1174,7 +1177,7 @@
         // A different set of cards, lifecycle adapter, or group controls
         // requires explicit structural reconciliation. Do not advance the
         // displayed revision past a topology the DOM does not represent.
-        if (!same(topology(latest), topology(data)) || !same(groupShape(latest), groupShape(data))) {
+        if (!same(topology(rendered), topology(data)) || !same(groupShape(rendered), groupShape(data))) {
           window.axiomHandleStaleSources?.();
           return false;
         }
@@ -1217,7 +1220,7 @@
       }
       function sourceMutation(url, card, payload, fallback, validateExtra = () => ({})) {
         const sid = card.dataset.sourceId;
-        const reviewed = actionIdentity(sourceAt(latest, sid));
+        const reviewed = actionIdentity(sourceAt(rendered, sid));
         return checkedMutation(url, {source_id:sid, ...payload}, data => {
           const current = sourceAt(data, sid);
           if (!reviewed || !same(reviewed, actionIdentity(current)))
@@ -2140,10 +2143,10 @@
         discoveryOptions();
         editorBase = card ? {
           sid:card.dataset.sourceId,
-          source:sourceAt(latest, card.dataset.sourceId),
+          source:sourceAt(rendered, card.dataset.sourceId),
           fields:Object.fromEntries(fieldsToEdit.map(field => [field.name, field.value])),
           icon:iconValue,
-          groups:groupShape(latest),
+          groups:groupShape(rendered),
           membership:Array.from(form.querySelectorAll('[data-editor-member]'), option => option.checked)
         } : null;
         showIcon(iconValue);
@@ -2156,7 +2159,7 @@
           const card = button.closest('.source-card');
           const candidateBytes = Number(button.dataset.updateBytes);
           if (!Number.isSafeInteger(candidateBytes) || candidateBytes <= 0) return;
-          const feedback = card.querySelector('[data-zim-replacement-status]');
+          const feedback = card.querySelector('[data-replacement-feedback]');
           button.disabled = true;
           try {
             const digest = button.dataset.updateSha256;
@@ -2175,6 +2178,7 @@
           } finally {
             delete card.dataset.reviewPosting;
             button.disabled = false;
+            window.axiomRefreshSources?.();
           }
         });
       });
@@ -2497,6 +2501,7 @@
           feedback.textContent = error.message;
         } finally {
           delete card.dataset.stagedDeletePosting;
+          window.axiomRefreshSources?.();
         }
       }));
 
@@ -2506,17 +2511,18 @@
         const operation = button.dataset.zimReplacement;
         if (['activate','rollback'].includes(operation) &&
             !window.confirm(operation === 'activate' ? 'Switch to the verified update? The source will keep its current publication setting.' : 'Restore the previous verified content?')) return;
-        const feedback = card.querySelector('[data-zim-replacement-status]');
+        const feedback = card.querySelector('[data-replacement-feedback]');
         card.dataset.zimReplacementPosting = 'true';
         card.querySelectorAll('[data-zim-replacement]').forEach(b => b.disabled = true);
         try {
           await sourceMutation('/api/action', card, {action:'zim-replacement-' + operation,
             ...(['activate','rollback'].includes(operation) ? {confirm_restart:true} : {})}, 'Replacement operation failed');
-          feedback.textContent = 'Replacement ' + operation + ' accepted; refreshing status…';
+          feedback.textContent = operation === 'activate' ? 'Update publication accepted.' : operation === 'rollback' ? 'Rollback accepted.' : 'Replacement ' + operation + ' accepted.';
         } catch(error) {
           feedback.textContent = error.message;
         } finally {
           delete card.dataset.zimReplacementPosting;
+          window.axiomRefreshSources?.();
         }
       }));
       document.querySelectorAll('[data-zim-control]').forEach(button => button.addEventListener('click', async () => {
@@ -3098,6 +3104,7 @@
         toggle.dataset.acknowledgeRights = String(!!pub?.requires_rights_acknowledgement);
         toggle.disabled = !pub?.enabled && (blocked || !(pub?.serving || pub?.requires_rights_acknowledgement || pub?.ready_for_publication));
         field('publication-browse').hidden = !pub?.published;
+        if (pub?.entry_path) field('publication-browse').href = pub.entry_path;
         field('publication-summary').textContent = !pub || pub.error ? 'Publication status unavailable' : pub.published ? 'Published' : pub.enabled ? (pub.publication_reason || 'Reader unavailable') : '';
         field('publication-status').hidden = !!pub?.published;
         field('publication-status').textContent =
@@ -3123,7 +3130,6 @@
         const controller = new AbortController();
         const timer = window.setTimeout(() => controller.abort(), 5000);
         try {
-          const revision = window.axiomSourceRevision();
           const response = await fetch('/api/sources', {cache: 'no-store', signal: controller.signal});
           if (response.status === 401) {
             redirectExpiredSession();
@@ -3280,6 +3286,7 @@
             card.dataset.filterPublication = publication;
             card.dataset.filterDownload = download;
           });
+          window.axiomMarkSourcesRendered?.(data);
           window.axiomSourceFilters?.setOrder(data.library_order || []);
           window.axiomSourceFilters?.apply(true);
           if (focusedCard && !focusedCard.hidden && document.activeElement === document.body) {
