@@ -1141,7 +1141,90 @@
       const feedback = document.getElementById('catalog-feedback');
       let revision = {{ (catalog|default({})).revision|default(none)|tojson }};
       window.axiomSourceRevision = () => revision;
-      window.axiomSetSourceRevision = value => { revision = value; };
+      window.axiomSetSourceRevision = value => {
+        if (Number.isInteger(value) && (revision === null || value >= revision)) revision = value;
+      };
+      // One authoritative snapshot for the rendered cards and one mutation
+      // lane for catalog-revision-sensitive actions. Downloads themselves
+      // remain independent; only short revision-sensitive requests serialize.
+      let latest = {{ catalog|default({})|tojson }};
+      let mutationTail = Promise.resolve();
+      let editorBase = null;
+      const sourceAt = (data, sid) => data?.sources?.find(source => source.source_id === sid);
+      const canonical = value => JSON.stringify(value, (_, item) =>
+        item && typeof item === 'object' && !Array.isArray(item)
+          ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item);
+      const same = (a, b) => canonical(a) === canonical(b);
+      const topology = data => (data.sources || []).map(source => [
+        source.source_id, source.configuration?.format || '', source.adapter || '',
+        !!source.zim_download, !!source.pdf_download, !!source.configuration?.source_url,
+        !!source.publication
+      ]).sort((a,b) => a[0].localeCompare(b[0]));
+      const groupShape = data => (data.groups || []).map(group => [group.group_id, group.kind, group.name,
+        [...(group.source_ids || [])].sort()]).sort((a,b) => canonical(a).localeCompare(canonical(b)));
+      const actionIdentity = source => source && {
+        configuration: source.configuration, artifact: source.artifact?.sha256 || '',
+        verified: !!source.installed_verified, enabled: !!source.publication?.enabled,
+        rights: !!source.publication?.requires_rights_acknowledgement,
+        replacement: source.replacement ? [source.replacement.state, source.replacement.sha256 || ''] : null
+      };
+      function acceptSnapshot(data) {
+        if (!Number.isInteger(data?.revision) || !Array.isArray(data.sources) ||
+            (Number.isInteger(revision) && data.revision < revision)) return false;
+        // A different set of cards, lifecycle adapter, or group controls
+        // requires explicit structural reconciliation. Do not advance the
+        // displayed revision past a topology the DOM does not represent.
+        if (!same(topology(latest), topology(data)) || !same(groupShape(latest), groupShape(data))) {
+          window.axiomHandleStaleSources?.();
+          return false;
+        }
+        latest = data;
+        window.axiomSetSourceRevision(data.revision);
+        return true;
+      }
+      window.axiomAcceptSourceSnapshot = acceptSnapshot;
+      function serializeMutation(run) {
+        const result = mutationTail.then(run);
+        mutationTail = result.catch(() => {});
+        return result;
+      }
+      async function freshSnapshot() {
+        const response = await fetch('/api/sources', {cache:'no-store'});
+        if (!response.ok) throw new Error('Current source profiles unavailable. No changes submitted.');
+        const data = await response.json();
+        if (!acceptSnapshot(data)) throw new Error('Source list or groupings changed. Reload sources and review before retrying.');
+        return data;
+      }
+      const revisionConflict = (response, result) => response.status === 409 && /revision changed|catalog changed/i.test(result.error || '');
+      async function checkedMutation(url, payload, validate, fallback) {
+        return serializeMutation(async () => {
+          for (let attempt = 0; attempt < 3; attempt++) {
+            const data = await freshSnapshot();
+            const extra = validate(data);
+            const response = await acquisitionFetch(url, {method:'POST',
+              headers:{...(window.axiomCsrfHeaders?.() || {}),'Content-Type':'application/json'},
+              body:JSON.stringify({...payload, ...extra, revision:data.revision})});
+            const result = await response.json().catch(() => ({}));
+            if (revisionConflict(response, result) && attempt < 2) continue;
+            if (!response.ok) throw acquisitionError(response, result, fallback);
+            window.axiomSetSourceRevision(result.revision);
+            // A mutation succeeded even if the next status poll fails.
+            // Never retry an accepted request merely because rendering failed.
+            window.axiomRefreshSources?.();
+            return result;
+          }
+        });
+      }
+      function sourceMutation(url, card, payload, fallback, validateExtra = () => ({})) {
+        const sid = card.dataset.sourceId;
+        const reviewed = actionIdentity(sourceAt(latest, sid));
+        return checkedMutation(url, {source_id:sid, ...payload}, data => {
+          const current = sourceAt(data, sid);
+          if (!reviewed || !same(reviewed, actionIdentity(current)))
+            throw new Error('This source changed. Review its current status before retrying.');
+          return validateExtra(current);
+        }, fallback);
+      }
       const stateKey = 'theaxiom-source-view';
       try {
         const saved = JSON.parse(sessionStorage.getItem(stateKey) || 'null');
@@ -1435,10 +1518,6 @@
       let batchJobIds = [];
       let completedBatch = false;
       window.axiomHandleStaleSources = () => {
-        if (completedBatch && !bulkBusy && !formPosting && !document.querySelector('dialog[open]')) {
-          reloadSources();
-          return;
-        }
         if (feedback.querySelector('[data-reload-sources]')) return;
         const reload = document.createElement('button');
         reload.type = 'button';
@@ -2059,6 +2138,14 @@
         if (!card) input('update_policy').value = 'disabled';
         else if (!input('update_policy').value) input('update_policy').value = input('update_method').value ? 'disabled' : 'notify';
         discoveryOptions();
+        editorBase = card ? {
+          sid:card.dataset.sourceId,
+          source:sourceAt(latest, card.dataset.sourceId),
+          fields:Object.fromEntries(fieldsToEdit.map(field => [field.name, field.value])),
+          icon:iconValue,
+          groups:groupShape(latest),
+          membership:Array.from(form.querySelectorAll('[data-editor-member]'), option => option.checked)
+        } : null;
         showIcon(iconValue);
         dialog.showModal();
         input('title').focus();
@@ -2072,15 +2159,21 @@
           const feedback = card.querySelector('[data-zim-replacement-status]');
           button.disabled = true;
           try {
-            const response = await acquisitionFetch('/api/action', {method:'POST',
-              headers:{...(window.axiomCsrfHeaders?.() || {}), 'Content-Type':'application/json'},
-              body:JSON.stringify({source_id:card.dataset.sourceId, action:'zim-replacement-update', revision,
-                candidate_sha256:button.dataset.updateSha256})});
-            const result = await response.json().catch(() => ({}));
-            if (!response.ok) throw acquisitionError(response, result, 'Update download failed');
-            reloadSources();
+            const digest = button.dataset.updateSha256;
+            card.dataset.reviewPosting = 'true';
+            await sourceMutation('/api/action', card, {action:'zim-replacement-update', candidate_sha256:digest},
+              'Update download failed', current => {
+                const update = current.update_check || {};
+                if (digest !== (update.candidate_sha256 || update.candidate_sha1 || update.candidate_md5 || update.candidate_token))
+                  throw new Error('Publisher update changed; review the new candidate.');
+                return {};
+              });
+            feedback.textContent = 'Update download accepted.';
+            window.axiomRefreshSources?.();
           } catch (error) {
             feedback.textContent = error.message;
+          } finally {
+            delete card.dataset.reviewPosting;
             button.disabled = false;
           }
         });
@@ -2114,6 +2207,47 @@
       }
       async function change(operation, source_id, fields, editGroups = false) {
         if (revision === null) throw new Error('Catalog revision unavailable');
+        if (operation === 'edit' && editorBase?.sid === source_id) {
+          const base = editorBase;
+          const changed = Object.fromEntries(Object.entries(fields).filter(([key, value]) =>
+            value !== (key === 'icon_png' ? base.icon : base.fields[key])));
+          const groupsChanged = !!document.getElementById('editor-new-tag').value.trim() ||
+            !same(base.membership, Array.from(form.querySelectorAll('[data-editor-member]'), option => option.checked));
+          const structural = ['format','source_url','update_method','update_endpoint','icon_png'].some(key => key in changed);
+          await serializeMutation(async () => {
+            let result;
+            for (let attempt = 0; attempt < 3; attempt++) {
+              const data = await freshSnapshot();
+              const current = sourceAt(data, source_id);
+              if (!current || !base.source) throw new Error('Source removed or unavailable; unsaved changes retained.');
+              const value = (source, key) => source.profile?.[key] ?? source.configuration?.[key] ?? '';
+              const conflicts = Object.keys(changed).filter(key =>
+                !same(value(base.source,key), value(current,key)) && !same(changed[key], value(current,key)));
+              if (conflicts.length) throw new Error('Source changed in: ' + conflicts.join(', ') + '. Review before saving; your edits are retained.');
+              if (groupsChanged && !same(base.groups,groupShape(data)))
+                throw new Error('Group memberships changed; review before saving.');
+              if (!Object.keys(changed).length) { result = data; break; }
+              const response = await acquisitionFetch('/api/sources', {method:'POST',
+                headers:{...(window.axiomCsrfHeaders?.() || {}),'Content-Type':'application/json'},
+                body:JSON.stringify({operation, source_id, fields:changed, revision:data.revision})});
+              result = await response.json().catch(() => ({}));
+              if (revisionConflict(response,result) && attempt < 2) continue;
+              if (!response.ok) throw acquisitionError(response,result,'Catalog update failed');
+              window.axiomSetSourceRevision(result.revision);
+              break;
+            }
+            if (groupsChanged) {
+              try { await updateEditorGroups(source_id, result.revision); }
+              catch (error) {
+                window.alert('Source profile saved, but grouping changes may be incomplete. Reload and review memberships: ' + error.message);
+              }
+            }
+            if (groupsChanged || structural) { reloadSources(); return; }
+            dialog.close();
+            window.axiomRefreshSources?.();
+          });
+          return;
+        }
         const response = await fetch('/api/sources', {method:'POST', headers:{...((typeof window !== 'undefined' && window.axiomCsrfHeaders?.()) || {}),'Content-Type':'application/json'},
           body:JSON.stringify({operation, source_id, fields, revision})});
         const result = await response.json();
@@ -2352,17 +2486,12 @@
         const edition = button.dataset.edition;
         if (!window.confirm('Delete the staged update files' + (edition ? ' for ' + edition : '') +
             '? The installed edition will stay in service.')) return;
-        const feedback = card.querySelector('[data-zim-feedback]');
+        const feedback = card.querySelector('[data-delete-feedback]');
         card.dataset.stagedDeletePosting = 'true';
         button.disabled = true;
         try {
-          const response = await acquisitionFetch('/api/action', {method:'POST',
-            headers:{...(window.axiomCsrfHeaders?.() || {}), 'Content-Type':'application/json'},
-            body:JSON.stringify({action:'zim-replacement-delete-verified', source_id:card.dataset.sourceId,
-              candidate_sha256:button.dataset.digest, revision, confirm:true})});
-          const result = await response.json().catch(() => ({}));
-          if (!response.ok) throw acquisitionError(response, result, 'Staged update deletion failed');
-          if (Number.isInteger(result.revision)) revision = result.revision;
+          await sourceMutation('/api/action', card, {action:'zim-replacement-delete-verified',
+            candidate_sha256:button.dataset.digest, confirm:true}, 'Staged update deletion failed');
           feedback.textContent = 'Staged update files deleted.';
         } catch (error) {
           feedback.textContent = error.message;
@@ -2381,12 +2510,8 @@
         card.dataset.zimReplacementPosting = 'true';
         card.querySelectorAll('[data-zim-replacement]').forEach(b => b.disabled = true);
         try {
-          const response = await acquisitionFetch('/api/action', {method:'POST',
-            headers:{...((typeof window !== 'undefined' && window.axiomCsrfHeaders?.()) || {}),'Content-Type':'application/json'},
-            body:JSON.stringify({source_id:card.dataset.sourceId, action:'zim-replacement-' + operation, revision,
-              ...(['activate','rollback'].includes(operation) ? {confirm_restart:true} : {})})});
-          const result = await response.json().catch(() => ({}));
-          if (!response.ok) throw acquisitionError(response, result, 'Replacement operation failed');
+          await sourceMutation('/api/action', card, {action:'zim-replacement-' + operation,
+            ...(['activate','rollback'].includes(operation) ? {confirm_restart:true} : {})}, 'Replacement operation failed');
           feedback.textContent = 'Replacement ' + operation + ' accepted; refreshing status…';
         } catch(error) {
           feedback.textContent = error.message;
@@ -2438,12 +2563,9 @@
         status.textContent = enabled ? 'Publishing…' : 'Unpublishing…';
         const action = sourceAction(card, () => status.textContent);
         try {
-          const payload = {source_id:card.dataset.sourceId, enabled, revision};
+          const payload = {enabled};
           if (acknowledge) payload.acknowledge_rights = true;
-          const response = await fetch('/api/publication', {method:'POST', headers:{...window.axiomCsrfHeaders(),'Content-Type':'application/json'},
-            body:JSON.stringify(payload)});
-          if (!response.ok) throw new Error((await response.json()).error || 'Publication failed');
-          revision = (await response.json()).revision;
+          await sourceMutation('/api/publication', card, payload, 'Publication failed');
           button.dataset.enabled = String(enabled);
           button.textContent = enabled ? 'Unpublish' : 'Publish';
           status.textContent = enabled ? 'Publication enabled.' : 'Source unpublished.';
@@ -2870,8 +2992,9 @@
         }
         const updateCheckButton = card.querySelector('[data-zim-update-check], [data-document-update-check]');
         if (updateCheckButton) {
-          updateCheckButton.hidden = !source?.installed_verified;
-          updateCheckButton.disabled = !source?.installed_verified || card.dataset.updateCheckPosting === 'true';
+          const canCheck = !!source?.installed_verified && source?.discovery?.method !== 'manual';
+          updateCheckButton.hidden = !canCheck;
+          updateCheckButton.disabled = !canCheck || card.dataset.updateCheckPosting === 'true';
         }
         const zim = card.querySelector('[data-zim-download]');
         if (zim && ['zim', 'pmtiles'].includes(card.dataset.filterFormat)) {
@@ -2991,8 +3114,12 @@
         // sole place where credentials are collected.
         window.location.assign('/admin/login');
       }
+      let polling = false, pollAgain = false, pollTimer = null;
       async function refresh() {
         if (sessionExpired) return;
+        if (polling) { pollAgain = true; return; }
+        if (pollTimer !== null) window.clearTimeout(pollTimer);
+        polling = true;
         const controller = new AbortController();
         const timer = window.setTimeout(() => controller.abort(), 5000);
         try {
@@ -3004,14 +3131,8 @@
           }
           if (!response.ok) throw new Error('Status unavailable');
           const data = await response.json();
-          if (revision !== window.axiomSourceRevision()) return;
-          if (data.revision !== revision) {
-            // A document install can commit before its POST response arrives.
-            if (data.revision === revision + 1 && cards.some(card => card.dataset.acquiring === 'true')) return;
-            window.axiomHandleStaleSources?.();
-            refreshFeedback.hidden = true;
-            return;
-          }
+          if (Number.isInteger(window.axiomSourceRevision()) && data.revision < window.axiomSourceRevision()) return;
+          if (window.axiomAcceptSourceSnapshot && !window.axiomAcceptSourceSnapshot(data)) return;
           showUpdateSummary(data.update_summary || '');
           window.axiomShowUpdateAvailability?.(data.available_updates, data.update_stages);
           const sources = new Map(data.sources.map(source => [source.source_id, source]));
@@ -3114,6 +3235,7 @@
             if (review) {
               review.hidden = !hasUpdate || !Number.isSafeInteger(update?.candidate_bytes) || !!source?.mutation_blocked ||
                 (!!source?.replacement && source.replacement.state !== 'activated');
+              review.disabled = card.dataset.reviewPosting === 'true';
               if (!review.hidden) {
                 review.dataset.updateSha256 = update.candidate_sha256 || update.candidate_sha1 || update.candidate_md5 || update.candidate_token || '';
                 review.dataset.updateBytes = String(update.candidate_bytes);
@@ -3121,6 +3243,18 @@
             }
             controls(card, source);
             if (source) {
+              const title = card.querySelector('.source-header h3');
+              const subtitle = card.querySelector('.source-subtitle');
+              if (source.profile?.title !== undefined) {
+                card.dataset.filterTitle = source.profile.title;
+                if (title) title.textContent = source.profile.title;
+              }
+              if (subtitle && source.configuration?.format) subtitle.textContent =
+                source.configuration.format.toUpperCase() + (source.profile?.description ? ' · ' + source.profile.description : '');
+              const policy = card.querySelector('[data-field="discovery-status"]');
+              const selected = source.automatic_update?.policy;
+              if (policy && selected) policy.textContent = 'Update policy: ' +
+                (selected === 'notify' ? 'Notify only' : selected[0].toUpperCase() + selected.slice(1));
               for (const field of editableFields) {
                 const attribute = 'data-catalog-' + field.replaceAll('_', '-');
                 card.setAttribute(attribute, source.profile?.[field] ?? source.configuration?.[field] ?? '');
@@ -3161,9 +3295,15 @@
           refreshFeedback.hidden = false;
         } finally {
           window.clearTimeout(timer);
-          if (!sessionExpired) window.setTimeout(refresh, 2000);
+          polling = false;
+          if (!sessionExpired) {
+            const delay = pollAgain ? 0 : 2000;
+            pollAgain = false;
+            pollTimer = window.setTimeout(refresh, delay);
+          }
         }
       }
+      window.axiomRefreshSources = refresh;
       refresh();
     })();
   </script>
