@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
+from functools import lru_cache
 from io import BytesIO
 from itertools import groupby
 import importlib
@@ -579,6 +581,24 @@ def _automatic_digest(update):
     return update.get("candidate_sha256") or update.get("candidate_sha1") or update.get("candidate_md5")
 
 
+def _verified_redownload_base(live, config, evidence):
+    if not live or live.get("verified") is not True or live.get("active") is not False:
+        return False
+    artifact = zim_jobs.installed(live, config)
+    if not artifact:
+        return False
+    installed = kiwix_update_discovery.installed_identity_from_job(live, artifact)
+    return (installed and evidence.get("installed_edition") == installed["edition"]
+            and evidence.get("candidate_edition", "") > installed["edition"]
+            and _automatic_digest(evidence) not in {artifact["sha256"], config.get("publisher_sha1"),
+                                                   config.get("publisher_md5")})
+
+
+@lru_cache(maxsize=512)
+def _log_automatic_skip(sid, reason, interval):
+    logging.getLogger(__name__).warning("unattended_update source=%s skipped=%s", sid, reason)
+
+
 def _rollback_digest(candidate):
     target = candidate["configuration"]
     return target.get("sha256") or target.get("publisher_sha1") or target.get("publisher_md5")
@@ -640,38 +660,60 @@ def _poll_automatic_updates():
             sid, config = record["source_id"], record["configuration"]
             if sid in pending:
                 continue
+            actionable = False
+
+            def skip(reason):
+                _log_automatic_skip(sid, reason, int(time.monotonic() // 900))
+
             try:
                 live = zim_jobs.read(sid)
                 if not live or live.get("state") != "completed":
                     continue
                 evidence = kiwix_update_discovery.cached_checked_source(sid)
                 digest = _automatic_digest(evidence)
-                if (evidence.get("state") != "update_available" or not digest
-                        or not update_discovery_config.current_unattended_evidence(config, now, evidence)):
+                if evidence.get("state") != "update_available" or not digest:
+                    continue
+                actionable = True
+                if not update_discovery_config.current_unattended_evidence(config, now, evidence):
+                    skip("publisher_evidence_not_current")
                     continue
                 previous = attempted.get((sid, digest))
                 candidate = zim_jobs.read_candidate(sid)
                 rollback_retry = None
+                redownload_after = None
                 if previous:
-                    rollback_retry = _matching_rollback(record, candidate, digest)
-                    if (previous["state"] != "completed" or not rollback_retry
-                            or previous["job_id"] != rollback_retry[0]):
+                    if previous["state"] != "completed":
+                        skip("previous_attempt_not_completed")
+                        continue
+                    if candidate is not None:
+                        rollback_retry = _matching_rollback(record, candidate, digest)
+                        if not rollback_retry or previous["job_id"] != rollback_retry[0]:
+                            skip("retained_candidate_not_eligible")
+                            continue
+                    elif _verified_redownload_base(live, config, evidence):
+                        redownload_after = previous["job_id"]
+                    else:
+                        skip("verified_older_installation_required")
                         continue
                 elif not zim_jobs.matches(live, config) and not _restored_rollback(record, candidate, live):
+                    skip("installed_archive_does_not_match_profile")
                     continue
                 job = _publisher_update_job(record, digest, "automatic-update", rollback_retry=rollback_retry)
                 job["configuration"]["digest"] = digest
+                if redownload_after:
+                    job["configuration"]["redownload_after"] = redownload_after
                 settings = storage_settings.load_settings()
                 available = _batch_available(settings, {config["format"]}) if not rollback_retry else None
                 current_now = datetime.now(update_schedule.timezone())
                 if (update_schedule.automatic_paused() or not update_discovery_config.window_open(config, current_now)
                         or not update_discovery_config.current_unattended_evidence(config, current_now, evidence)):
+                    skip("policy_window_pause_or_evidence_changed")
                     continue
                 acquisition_queue.enqueue([job], available, settings)
                 return
-            except (ValueError, OSError):
-                # Another candidate, insufficient space, or a busy archive worker.
-                continue
+            except (ValueError, OSError, sqlite3.Error):
+                if actionable:
+                    skip("candidate_storage_or_queue_rejected")
 
 
 def _execute_automatic_update(job, payload, stopping, shutdown):
@@ -731,7 +773,7 @@ def _execute_automatic_update(job, payload, stopping, shutdown):
                                        or candidate["base_artifact"] != payload["base"]):
                     raise ValueError("The rollback changed; review manually")
                 evidence = kiwix_update_discovery.cached_checked_source(sid)
-                if (rollback_retry or evidence.get("state") == "update_available") and not (
+                if (rollback_retry or payload.get("redownload_after") or evidence.get("state") == "update_available") and not (
                         update_discovery_config.current_unattended_evidence(
                             current_config, datetime.now(update_schedule.timezone()), evidence)):
                     return "deferred", "Waiting for current publisher evidence"
@@ -739,6 +781,11 @@ def _execute_automatic_update(job, payload, stopping, shutdown):
                         key: value for key, value in payload["fields"].items() if key != "update_endpoint"}:
                     raise ValueError("Update evidence changed; review manually")
 
+                if payload.get("redownload_after") and not owned:
+                    live = zim_jobs.read(sid)
+                    if (candidate is not None or not _verified_redownload_base(live, current_config, evidence)
+                            or live["artifact"] != payload["base"]):
+                        return "interrupted", "Re-download requires the same verified older archive and no replacement"
                 if not rollback_retry and _batch_available(settings, {kind}) < job["bytes"]:
                     return "deferred", "Waiting for free storage"
                 try:

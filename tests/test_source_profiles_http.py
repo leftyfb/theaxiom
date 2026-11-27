@@ -1,13 +1,17 @@
 """Source profile regression tests through the real HTTP handler and template."""
+from contextlib import closing, contextmanager
+import hashlib
 import http.client
+import http.server
 import json
 import re
 import threading
+import time
 from unittest.mock import Mock
 
 import pytest
 
-from theaxiom import admin_api, catalog_store, publication, source_catalog, storage_settings
+from theaxiom import admin_api, catalog_store, pdf_transport, publication, source_catalog, storage_settings
 from test_admin_page_template import Parser
 from test_zim_source import fixture_bytes
 from test_zim_source import disk as disk
@@ -1776,3 +1780,187 @@ def test_global_search_opt_out_preserves_library_entry(app, monkeypatch):
     request(f"/search?q=water&mode=source&source={SID}", status=404)
     catalog = mutate(request, request("/api/sources"), "edit", {"search_enabled": "yes"})
     assert f'data-source="{SID}"' in request("/search?q=water&mode=progressive")
+
+
+@pytest.mark.parametrize("first_outcome", ["completed", "reader_failed"])
+def test_kiwix_http_redownload_after_rollback_and_cleanup(app, disk, monkeypatch, caplog, first_outcome):
+    from datetime import datetime, timezone
+    from io import BytesIO
+    from types import SimpleNamespace
+    from theaxiom import acquisition_queue as queue, kiwix_update_scheduler as scheduler
+    from theaxiom import update_schedule, update_check_store, zim_jobs as jobs, zim_source
+    from test_kiwix_update_discovery import atom, feed, metalink, FAMILY, ROOT
+
+    request, _ = app
+    old = fixture_bytes()
+    body = old[:103] + b"x"
+    payload = body + hashlib.md5(body, usedforsecurity=False).digest()
+    digest = hashlib.sha256(payload).hexdigest()
+    archive_path = f"/{FAMILY}_2026-10.zim"
+    responses = {archive_path: payload, "/catalog": feed(atom("2026-10"), atom("2026-07")),
+                 "/metalink": metalink("2026-10", digest).replace(b"123456", str(len(payload)).encode())}
+    hits = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            data = responses[self.path]
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("ETag", '"kiwix-fixture"')
+            self.end_headers()
+            hits.append((self.path, self.wfile.write(data)))
+
+        def log_message(self, *_args):
+            pass
+
+    with http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler) as fixture_server:
+        fixture_thread = threading.Thread(target=fixture_server.serve_forever, daemon=True)
+        fixture_thread.start()
+        port = fixture_server.server_address[1]
+        host = "127.0.0.1"
+
+        class Body:
+            length = len(payload)
+            total_size = len(payload)
+            etag = '"kiwix-fixture"'
+            last_modified = None
+
+            def __init__(self, response):
+                self.response = response
+
+            def read(self, size=-1):
+                return self.response.read(size)
+
+        @contextmanager
+        def local_http(_url, **_kwargs):
+            connection = http.client.HTTPConnection(host, port, timeout=5)
+            assert _url == ROOT + archive_path[1:]
+            connection.request("GET", archive_path)
+            response = connection.getresponse()
+            assert response.status == 200
+            try:
+                yield Body(response)
+            finally:
+                response.close()
+                connection.close()
+
+        def metadata(_url, *, kind):
+            with closing(http.client.HTTPConnection(host, port, timeout=5)) as connection:
+                connection.request("GET", "/" + kind)
+                response = connection.getresponse()
+                assert response.status == 200
+                return response.read()
+
+        # Redirect only the transport; parsing, transfer, verification and activation stay real.
+        monkeypatch.setattr(pdf_transport, "open_pdf", local_http)
+        discovery = scheduler.kiwix_update_discovery
+        monkeypatch.setattr(discovery.kiwix_metadata_transport, "fetch_metadata", metadata)
+        monkeypatch.setattr(scheduler, "_check_with_deadline", scheduler._check_source)
+        monkeypatch.setattr(admin_api.zim_refresh, "schedule", lambda *a, **kw: None)
+        reconciled = []
+        def reconcile(*args, **kwargs):
+            reconciled.append(kwargs)
+            if first_outcome == "reader_failed":
+                jobs.rollback_candidate(kwargs["source_id"], kwargs["configuration"], reason="Fixture reader unavailable")
+                return False
+            return True
+
+        monkeypatch.setattr(admin_api.zim_refresh, "reconcile_activation", reconcile)
+        monkeypatch.setattr(admin_api, "_batch_available", lambda *_: 10_000)
+        instant = datetime(2026, 11, 26, 22, 25, tzinfo=timezone.utc)
+
+        class Clock(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return instant.astimezone(tz) if tz else instant.replace(tzinfo=None)
+
+        monkeypatch.setattr(admin_api, "datetime", Clock)
+        monkeypatch.setattr(scheduler, "datetime", Clock)
+        monkeypatch.setattr(update_schedule, "timezone", lambda: timezone.utc)
+        monkeypatch.setattr(update_check_store, "time", SimpleNamespace(time=lambda: instant.timestamp()))
+        catalog = request("/api/sources")
+        sid = "kiwix-http-sha256"
+        catalog = mutate(request, catalog, "add", {
+            "title": "Kiwix HTTP SHA-256 fixture",
+            "format": "zim",
+            "source_url": ROOT + FAMILY + "_2026-07.zim", "edition": "2026-07",
+            "expected_size_bytes": str(len(old)), "sha256": hashlib.sha256(old).hexdigest(),
+            "update_method": "kiwix", "update_policy": "automatic", "update_periodic": "yes",
+        }, sid=sid)
+        config = source(catalog, sid)["configuration"]
+        artifact = zim_source.install_stream(sid, config, BytesIO(old))
+        previous = dict(source_id=sid, state="completed", verified=True, active=False,
+                        configuration=jobs.identity(config), artifact=artifact)
+        jobs.save(previous)
+        publication.save(sid, True)
+        result = discovery.refresh_checked_source(sid)
+        assert result and result.get("candidate_sha256") == digest, result
+        admin_api._poll_automatic_updates()
+        assert queue.run_next(admin_api._execute_batch_job, threading.Event()), queue.status()
+        first, = queue.status()
+        assert first["state"] == ("completed" if first_outcome == "completed" else "failed"), first
+        promoted = disk / "library/zim" / f"{sid}.{digest}.zim"
+        assert promoted.read_bytes() == payload
+        catalog = request("/api/sources")
+        if first_outcome == "completed":
+            request("/api/action", dict(action="zim-replacement-rollback", source_id=sid,
+                                        revision=catalog["revision"], confirm_restart=True), status=202)
+        assert jobs.read(sid) == previous
+        request("/api/action", dict(action="zim-replacement-delete-verified", source_id=sid,
+                                    revision=request("/api/sources")["revision"],
+                                    candidate_sha256=digest, confirm=True))
+        assert not promoted.exists() and jobs.read_candidate(sid) is None
+        admin_api._poll_automatic_updates()
+        assert queue.status() == [first]  # Cleanup invalidates the previous evidence.
+
+        instant = instant.replace(day=27)
+        update_schedule.save({"interval_days": 2, "start_time": "03:00"}, now=instant)
+        schedule = update_schedule.current()
+        catalog = mutate(request, request("/api/sources"), "edit", {
+            "update_policy": "scheduled", "update_window_start": "22:30", "update_window_end": "23:00",
+        }, sid=sid)
+        path = admin_api.SOURCE_CATALOG.path
+        scheduler.poll_unattended(path)
+        admin_api._poll_automatic_updates()
+        assert queue.status() == [first]
+        instant = instant.replace(minute=34)
+        update_schedule.set_automatic_pause(True)
+        scheduler.poll_unattended(path)
+        admin_api._poll_automatic_updates()
+        assert queue.status() == [first]
+        update_schedule.set_automatic_pause(False)
+        scheduler.poll_unattended(path)
+        assert schedule and update_schedule.current() == schedule
+        due, upcoming = update_schedule.slot(schedule, instant)
+        assert due is None and upcoming and upcoming > instant
+        assert discovery.cached_checked_source(sid)["candidate_sha256"] == digest
+        for policy in ("disabled", "notify", "scheduled"):
+            catalog = mutate(request, request("/api/sources"), "edit", {"update_policy": policy}, sid=sid)
+            if policy != "scheduled":
+                admin_api._poll_automatic_updates()
+                assert queue.status() == [first]
+        # New polling/worker invocations reopen the durable queue each time.
+        for _ in range(3):
+            admin_api._poll_automatic_updates()
+        if first_outcome == "reader_failed":
+            assert queue.status() == [first]
+            assert "previous_attempt_not_completed" in caplog.text
+            assert [n for p, n in hits if p == archive_path] == [len(payload)]
+            fixture_server.shutdown()
+            fixture_thread.join(timeout=5)
+            return
+        retry, original = queue.status()
+        assert original == first and retry["state"] == "queued" and retry["bytes"] == len(payload)
+        assert queue.automatic_attempts() == [dict(source_id=sid, digest=digest, state="queued", job_id=retry["id"])]
+        assert queue.run_next(admin_api._execute_batch_job, threading.Event()), queue.status()
+        assert queue.status()[0]["state"] == "completed", queue.status()
+        serving = jobs.read(sid)
+        assert serving and serving["artifact"]["sha256"] == digest
+        assert promoted.read_bytes() == payload and publication.load()[sid] and len(reconciled) == 2
+        assert [n for p, n in hits if p == archive_path] == [len(payload)] * 2
+        assert [p for p, _ in hits if p != archive_path] == ["/catalog", "/metalink"] * 2
+        admin_api._poll_automatic_updates()
+        assert len(queue.status()) == 2
+
+        fixture_server.shutdown()
+        fixture_thread.join(timeout=5)

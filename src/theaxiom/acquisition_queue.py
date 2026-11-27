@@ -65,11 +65,17 @@ def enqueue(jobs, available, settings):
             if job["operation"] == "automatic-update":
                 payload = job["configuration"]
                 key = (job["source_id"], payload["digest"])
-                if retry := payload.get("rollback_retry"):
+                retry = payload.get("rollback_retry")
+                previous = payload.get("redownload_after")
+                if previous and (retry or available is None or job["bytes"] <= 0):
+                    raise ValueError("Automatic re-download requires a full storage reservation")
+                if retry:
                     previous, token = retry
                     consumed = db.execute("INSERT OR IGNORE INTO automatic_rollback_retries VALUES (?)", (token,))
                     if not consumed.rowcount:
                         raise ValueError("This rollback already has an automatic retry")
+                if previous:
+                    # Legacy completed rows use this same ledger, even after their job history is pruned.
                     result = db.execute("""UPDATE automatic_attempts SET job_id = ?, state = 'queued', ready_at = 0
                         WHERE source_id = ? AND digest = ? AND job_id = ? AND state = 'completed'""",
                         (job_id, *key, previous))

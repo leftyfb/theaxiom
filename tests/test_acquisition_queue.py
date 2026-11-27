@@ -118,3 +118,33 @@ def test_rollback_retry_consumes_only_the_matching_completed_attempt():
     assert after.pop("success")["job_id"] == retry_id
     before.pop("success")
     assert before == after
+
+
+def test_redownload_reserves_space_and_replaces_exact_legacy_completed_row():
+    queue = acquisition_queue
+    digest = "a" * 64
+    initial = dict(job("archive", 20), operation="automatic-update", configuration={"digest": digest})
+    previous, = queue.enqueue([initial], 20, {})
+    assert queue.run_next(lambda *_: ("completed", ""), threading.Event())
+    # Batch history can be pruned independently of the durable digest ledger.
+    with queue.database() as db:
+        db.execute("DELETE FROM jobs WHERE id = ?", (previous,))
+    payload = {"digest": digest, "redownload_after": previous}
+    retry = initial | {"configuration": payload}
+    before = queue.automatic_attempts()
+    for wrong in (retry | {"source_id": "other"},
+                  retry | {"configuration": payload | {"redownload_after": "not-current"}},
+                  retry | {"configuration": payload | {"digest": "b" * 64}}):
+        with pytest.raises(ValueError, match="already has an automatic attempt"):
+            queue.enqueue([wrong], 20, {})
+    with pytest.raises(ValueError, match="Insufficient space"):
+        queue.enqueue([retry], 19, {})
+    assert queue.automatic_attempts() == before and queue.status() == []
+    current, = queue.enqueue([retry], 20, {})
+    assert not queue.run_next(lambda *_: ("running", ""), threading.Event())
+    with pytest.raises(ValueError, match="pending batch download"):
+        queue.enqueue([retry], 50, {})
+    assert queue.run_next(lambda row, *_: ("completed", row["id"]), threading.Event())
+    assert queue.automatic_attempts() == [dict(source_id="archive", digest=digest, state="completed", job_id=current)]
+    with pytest.raises(ValueError, match="already has an automatic attempt"):
+        queue.enqueue([retry], 20, {})
