@@ -285,3 +285,22 @@ def test_restart_preserves_remaining_retry_budget():
     with pytest.raises(pdf_transport.RetryableDownloadError):
         pdf_transport.run_with_download_retries(attempt, retries_used=2, wait=lambda _: False)
     assert len(calls) == max(0, len(pdf_transport.RETRY_DELAYS) - 2) + 1
+
+@pytest.mark.parametrize("status,headers", [
+    (200, [("Content-Length", "3"), ("ETag", '"wrong"')]),
+    (200, [("Content-Length", "3")]),
+    (302, [("Location", "https://publisher.org/other.pdf")]),
+    (412, []),
+])
+def test_reviewed_document_refuses_changed_validator_or_redirect(monkeypatch, status, headers):
+    mock_response(monkeypatch, status, headers)
+    with pytest.raises(ValueError):
+        with pdf_transport.open_pdf("https://publisher.org/guide.pdf", required_etag='"reviewed"'):
+            pytest.fail("Unreviewed representation opened a transfer")
+
+
+def test_reviewed_document_requires_exact_get_validator(monkeypatch):
+    mock_response(monkeypatch, 200, [("Content-Length", "3"), ("ETag", '"reviewed"')])
+    with pdf_transport.open_pdf("https://publisher.org/guide.pdf", required_etag='"reviewed"') as body:
+        assert body.etag == '"reviewed"'
+        assert body.read(10) == b"abc"
