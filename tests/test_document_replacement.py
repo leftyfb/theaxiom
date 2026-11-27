@@ -133,6 +133,23 @@ def test_manual_stage_publish_and_rollback(fixture, published):
     assert replacement.installed(f["record"](), verify=True)["sha256"] == sha256(f["old"]).hexdigest()
     if published:
         assert http(f["route"], raw=True)[0] == f["old"]
+    # Individual and batch publication must reuse the retained document.
+    rolled = replacement.status(f["record"]())
+    assert admin_api._update_stage(source(http("/api/sources"), SID)) == "publish"
+    action(f, "zim-replacement-activate", confirm_restart=True, expected_replacement=rolled["review_token"])
+    assert replacement.status(f["record"]())["state"] == "activated"
+    assert replacement.installed(f["record"](), verify=True)["sha256"] == sha256(f["new"]).hexdigest()
+    action(f, "zim-replacement-rollback", confirm_restart=True)
+    http("/api/update-batch", dict(operation="publish-update", selection={SID:rolled["sha256"]},
+                                  revision=http("/api/sources")["revision"]), status=202)
+    assert run_queue()
+    assert replacement.status(f["record"]())["state"] == "activated"
+    assert publication.load().get(SID, False) == published
+    assert replacement.installed(f["record"](), verify=True)["sha256"] == sha256(f["new"]).hexdigest()
+    if published:
+        assert http(f["route"], raw=True)[0] == f["new"]
+    assert f["calls"] == [f["url"]]
+    action(f, "zim-replacement-rollback", confirm_restart=True)
     action(f, "zim-replacement-delete-verified", candidate_sha256=sha256(f["new"]).hexdigest(), confirm=True)
     assert replacement.status(f["record"]()) is None
     assert check(f) == token
