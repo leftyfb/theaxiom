@@ -101,8 +101,11 @@ Nginx API proxy, requiring no change to the local TLS configuration.
 
 Experimental microphone decoding requires a secure context (trusted local HTTPS
 or supported localhost), user permission and a browser supporting Web Audio.
-Set the sender's speed (5–30 WPM), pitch (400–1200 Hz) and detection threshold.
-The decoder is fixed-speed, tuned for a single clean tone; noise, variable
+Automatic mode estimates the pitch (350–1500 Hz) and sending speed (5–30 WPM)
+from the first several tones, then locks the speed for the session. The meter
+and tone diagnostics show microphone level, detected pitch, estimated speed
+and mark count. Manual speed/pitch and adjustable detection threshold remain
+available. Restart listening when changing sending speed. Noise, variable
 spacing, browser timing and microphone processing can cause errors. No audio or
 transcript is sent to the server or saved; leaving or hiding the page stops the
 microphone. Use the text decoder if access is unavailable or decoding is
