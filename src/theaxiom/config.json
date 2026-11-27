@@ -1,5 +1,5 @@
 {
-  "version": 4,
+  "version": 5,
   "sources": [
     {
       "source_id": "wikipedia-en",
@@ -466,6 +466,28 @@
       "issue": 43,
       "availability": "planned",
       "icon_png": "iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAD3klEQVR42rWWv09USxTHPzNzf+xeYnBFshiigQsxgQJCoLEylv4RNPSU1r5K/RtsrOz8E+iAigqyJPJDCMkGEkJ0o2aXnbt3jgWZ8S4Pi/de3mlm5szM+fk9Z0bleS5USCmF1hqlFGVZMhgMsNZyfX1NvV4HoNfrkSQJaZoSRRFRFAHgnENEEPktMqoKd84FgUVRUK/XuX//PouLiywsLLC0tISI0Gq1ODg44PPnz3z9+pVOpwNArVYjiiKMMSilbgz2HiiliOOYsbEx5ubmgtD5+XkePnzIXfTz509OTk7Y29tjf3+fVqvF2dkZvV4P59yNgpmZGbHWMj09zfr6OtPT02RZFsJRFAVFUTAYDIaEG2OIoog4jjHGYK2l2+3S6XR4+/YtrVaLer1OJCJEUcTFxQWHh4d0u90hC7y71bh6j0WEsiwREbTW1Ot1jo+POT4+Jk1TnHM3OVBKYa3lxYsXPHv2jP9CGxsbfPjwgVqthoj8ViAifPz4kYODAw4PD7HWIiI0m01GR0f58uVL8MIYw8zMDFdXV1xdXaGUIssy8jxna2sLY8xvjXmey9OnT+XBgwfy6tUrabfb8vLlSxkZGZGRkRF5//69nJ6eSp7n0mg05N69e7K8vCztdlvevHkjaZpKlmWyuroq7XZb1tbWZHx8XGZnZyXPc4mqEJ2YmGBycpKpqSl2d3dJ05Q8z5mamuLx48cAlGXJkydPmJycJM9zxsfHh3iPHj2iLEu01jjn0NWk+VDFcUxRFABorRERkiShKAqstcRxjAeHR1oUReFuFRAaQEQwxlCr1VBKBQRorQOvVquFS1WeMQbnHEmSoJQiSZKhpAcFWmviOAYgTdPA8xeSJAltwJ9LkgStdfC0Og4pqIbpT+s/zW/zbu9p/mfS1Trw1eucQymFcy7wyrIMFvp5WZZDd6od9W8eOOfo9/sAYXTOYa0NPI80v18URRB227g7FXho9vv9AE+vwI9esD/nMX/XufAe+BD59mCtDfDr9Xqho3ql19fXQ+eNMUO8Oz2ouueF9/t9nHOheHzMu91uqBfP8yH0cA5tvdFo/OUXSZJQliWbm5t0Oh2MMSRJwuXlJdvb2xRFEeoiTVN2dnY4OjoiTVO01hhj2N7e5vz8PFS2yvNcfOJev37N8vLyUOX2ej0GgwFZloUuWZYl3W6XKIpCVfsQbW5u8u7dO7Isu2knSikGgwHNZhNrLe12eyhR1Q/A7Y9BFdreK+cczWaTb9++3XwIjDF8//6d58+fs7CwwI8fP8Jj8U/IG7GyssLR0RGfPn1idHR0+NG/3aj+DYnIUH38AqZyX/Av/vAiAAAAAElFTkSuQmCC"
+    },
+    {
+      "source_id": "hearham",
+      "title": "HearHam Repeater Directory",
+      "description": "Amateur radio repeater directory; frequencies and offsets in Hz, nominal band labels, modes and locations.",
+      "kind": "planned",
+      "issue": 60,
+      "availability": "planned",
+      "introduced_in": 5,
+      "icon_png": "iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAAiElEQVR4nNWTSw6AIAxEuYbX8ibef6FxYWKw05l+FtikCZShr1AY236cyB/Lrt8+KpsVnQlQkyv6D2AWsytiEBOQ7QEFRKpXC4IAS8xiJcBs7YD2E1g9QAC5B2yDMi/9g8gaBHjiaBwCPKiXbF0AshbAOxkarwuYk7B5CsCeYxoQtfIzzfr/ARfgalcYJ9mzyQAAAABJRU5ErkJggg==",
+      "setup": {
+        "format": "json",
+        "source_url": "https://hearham.com/api/repeaters/v1",
+        "publisher": "HearHam / Great Maps LLC",
+        "edition": "Live JSON API v1",
+        "provenance": "Publisher directory https://hearham.com/repeaters; live export inspected 2026-11-27: 10308065 bytes, 24813 records, SHA-256 135828c4deb505cecb311272e325b51c4c140a6d24d088b812f711b3c4025d5c. Snapshot is not pinned because the export changes.",
+        "license": "Publisher permits offline/online application use: https://hearham.com/repeaters; subject to https://hearham.com/terms. Attribute HearHam / Great Maps LLC; not for life-and-death operations. No blanket redistribution license asserted.",
+        "data_columns": "callsign,city,frequency,offset,mode,encode,decode,latitude,longitude,group,internet_node,power,operational,restriction,description",
+        "data_title_field": "callsign",
+        "data_range_labels": "[\"frequency\",\"band\",[[28000000,29700001,\"10m\"],[50000000,54000001,\"6m\"],[144000000,148000001,\"2m\"],[219000000,225000001,\"1.25m\"],[420000000,450000001,\"70cm\"],[902000000,928000001,\"33cm\"],[1240000000,1300000001,\"23cm\"]]]",
+        "update_policy": "disabled"
+      }
     }
   ]
 }

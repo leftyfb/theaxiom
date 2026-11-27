@@ -428,3 +428,21 @@ def test_periodic_opt_out_migrates_to_disabled_and_policy_controls_checks(tmp_pa
             updated |= {"update_window_start": "01:00", "update_window_end": "02:00"}
         assert discovery.settings(updated)["periodic"]
     assert not discovery.settings(row["configuration"])["periodic"]
+
+
+def test_hearham_seed_upgrade_preserves_existing_catalog(tmp_path):
+    store = catalog_store.CatalogStore(tmp_path / "sources.json")
+    store.get()
+    saved = json.loads(store.path.read_bytes())
+    saved["seed_version"] = 4
+    saved["sources"] = [r for r in saved["sources"] if r["source_id"] != "hearham"]
+    saved["sources"][0]["profile"]["title"] = "Operator title"
+    store.path.write_text(json.dumps(saved))
+    upgraded = store.get()
+    assert upgraded["revision"] == saved["revision"] + 1
+    assert upgraded["sources"][:-1] == saved["sources"]
+    assert upgraded["groups"] == saved["groups"]
+    assert upgraded["sources"][-1]["source_id"] == "hearham"
+    removed = store.mutate("remove", "hearham", {}, upgraded["revision"])
+    assert store.get() == removed
+    assert json.loads(store.path.read_bytes())["seed_version"] == 5

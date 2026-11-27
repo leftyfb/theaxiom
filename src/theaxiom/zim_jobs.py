@@ -1065,6 +1065,8 @@ def identity(config):
         result["publisher_md5"] = publisher_md5
     if config["format"] in zim_source.structured_source.FORMATS:
         result.update({field: config.get(field, "") for field in zim_source.structured_source.CONFIG_FIELDS})
+        if config.get("data_range_labels"):
+            result["data_range_labels"] = config["data_range_labels"]
     return result
 
 

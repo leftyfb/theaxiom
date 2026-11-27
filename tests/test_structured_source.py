@@ -169,3 +169,40 @@ def test_reader_pagination_and_record_links():
     assert context["total"] == 25 and len(context["entries"]) == 5
     assert context["entries"][0]["index"] == 21
     assert context["previous"] and not context["following"]
+
+
+def test_numeric_range_labels_are_generic_and_searchable():
+    raw = b'[{"name":"First","value":5},{"name":"Edge","value":10},{"name":"Other","value":99}]'
+    fields = config(raw, data_columns="name,value", data_title_field="name",
+                    data_range_labels='["value","category",[[0,10,"Low"],[10,20,"Medium"]]]')
+    dataset = data.parse(io.BytesIO(raw), fields)
+    assert dataset.columns == ("name", "value", "category")
+    assert [row[-1] for row in dataset.rows] == ["Low", "Medium", ""]
+    assert [i for i, _ in dataset.matching("medium")] == [2]
+    assert zim_jobs.identity(fields)["data_range_labels"] == fields["data_range_labels"]
+    assert "data_range_labels" not in zim_jobs.identity(config(raw))
+    for invalid in ('["value","name",[[0,10,"Low"]]]',
+                    '["missing","category",[[0,10,"Low"]]]',
+                    '["value","category",[[0,10,"Low"],[9,20,"High"]]]'):
+        with pytest.raises(ValueError):
+            data.options(dict(fields, data_range_labels=invalid))
+
+
+def test_hearham_default_schema_and_opt_in(app):
+    request, _ = app
+    row = next(r for r in request("/api/sources")["sources"] if r["source_id"] == "hearham")
+    assert row["adapter"] == "structured" and row["zim_download"]
+    assert not row["publication"]["enabled"]
+    assert row["profile"]["icon_png"]
+    fields = row["configuration"]
+    assert fields["source_url"] == "https://hearham.com/api/repeaters/v1"
+    assert fields["update_policy"] == "disabled"
+    assert not fields.get("sha256") and not fields.get("expected_size_bytes")
+    raw = json.dumps([dict(callsign="TEST1", city="Example City", frequency=145270000,
+                           offset=-600000, mode="FM", encode="100", decode="100",
+                           latitude=42.0, longitude=-71.0, group="Test", internet_node="0",
+                           power="unknown", operational=1, restriction="", description="Fixture")]).encode()
+    dataset = data.parse(io.BytesIO(raw), fields)
+    assert dataset.title(1, dataset.rows[0]) == "TEST1"
+    for query in ("TEST1", "Example City", "145270000", "FM", "2m"):
+        assert [n for n, _ in dataset.matching(query)] == [1]

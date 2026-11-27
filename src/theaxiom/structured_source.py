@@ -24,6 +24,32 @@ ROUTE = re.compile(r"/api/library/data/([a-z0-9-]{1,63})(?:/record/([a-f0-9]{64}
 _READERS = threading.BoundedSemaphore(2)
 
 
+def range_labels(config, columns):
+    """Optional bounded numeric interval labels; no executable transforms."""
+    raw = config.get("data_range_labels", "")
+    if not isinstance(raw, str) or len(raw) > 512:
+        raise ValueError("Invalid data range labels")
+    if not raw:
+        return None
+    try:
+        field, label, ranges = json.loads(raw, parse_constant=_invalid_constant)
+        if (not isinstance(field, str) or field not in columns
+                or not isinstance(label, str) or not re.fullmatch(r"[A-Za-z0-9_ -]{1,64}", label)
+                or label in columns or not isinstance(ranges, list) or not 1 <= len(ranges) <= 24):
+            raise ValueError
+        previous = None
+        for low, high, name in ranges:
+            if (type(low) not in (int, float) or type(high) not in (int, float)
+                    or not math.isfinite(low) or not math.isfinite(high) or low >= high
+                    or (previous is not None and low < previous)
+                    or not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_. -]{1,64}", name)):
+                raise ValueError
+            previous = high
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("Use ordered nonoverlapping numeric ranges for a displayed field") from exc
+    return field, label, ranges
+
+
 def options(config):
     values = [config.get(key, "") for key in CONFIG_FIELDS]
     if not all(isinstance(v, str) and len(v) <= 512 and not any(ord(c) < 32 for c in v)
@@ -43,6 +69,7 @@ def options(config):
                 raise ValueError("Invalid dot-separated data field path")
     if title and columns and title not in columns:
         raise ValueError("Record title must be a displayed column")
+    range_labels(config, columns)
     return path, columns, title
 
 
@@ -167,6 +194,20 @@ def parse(stream, config):
         raise ValueError("Dataset contains no readable records")
     if title and title not in columns:
         raise ValueError("Record title field is not a displayed column")
+    labels = range_labels(config, columns)
+    if labels:
+        if len(columns) >= MAX_COLUMNS or (len(columns) + 1) * len(rows) > MAX_CELLS:
+            raise ValueError("Data exceeds displayed cell limit")
+        field, label, ranges = labels
+        index = columns.index(field)
+        def classify(row):
+            try:
+                value = float(row[index])
+            except ValueError:
+                return ""
+            return next((name for low, high, name in ranges if low <= value < high), "")
+        rows = tuple(row + (classify(row),) for row in rows)
+        columns = columns + (label,)
     return Dataset(columns, rows, columns.index(title) if title else 0)
 
 

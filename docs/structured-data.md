@@ -37,6 +37,18 @@ update policy is offered for these formats until trusted update discovery is
 implemented. A source with an unchanged URL and no changed pin is not
 automatically treated as a new edition.
 
-No HearHam, Open Repeater, or other real dataset is enabled by this adapter
-alone. Check the current distribution permission, exact schema, size and
-integrity before configuring an upstream source.
+Optional numeric range labels use a JSON array `["field","label",[[0,10,"Low"],[10,20,"Medium"]]]`.
+Intervals are ordered, nonoverlapping, lower-inclusive and upper-exclusive.
+The source field must be an explicitly displayed column. Unmatched values
+produce an empty label; the derived column is searchable and rendered as text.
+
+HearHam is a preconfigured opt-in source using the publisher's live JSON API.
+On 2026-11-27 the export contained 24,813 records (10,308,065 bytes; SHA-256
+`135828c4deb505cecb311272e325b51c4c140a6d24d088b812f711b3c4025d5c`).
+The default deliberately does not pin that mutable snapshot. The source
+includes nominal band labels based on frequency in Hz; these do not establish
+local transmission authorization. The endpoint did not advertise an ETag or
+Last-Modified validator, so discovery is manual. See the publisher's
+[application-use permission](https://hearham.com/repeaters) and
+[terms](https://hearham.com/terms). No dataset is bundled or downloaded
+automatically.

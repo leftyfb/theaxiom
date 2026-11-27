@@ -20,7 +20,7 @@ from . import source_catalog, source_activity
 SCHEMA_VERSION = 2
 PROFILE_FIELDS = {"title", "description", "publisher", "edition", "language", "author", "icon_png"}
 CANDIDATE_FIELDS = {"source_url", "expected_size_bytes", "sha256", "publisher_sha1", "publisher_md5", "provenance", "license"}
-DATA_FIELDS = {"data_record_path", "data_columns", "data_title_field"}
+DATA_FIELDS = {"data_record_path", "data_columns", "data_title_field", "data_range_labels"}
 ARTIFACT_CONFIG_FIELDS = CANDIDATE_FIELDS | DATA_FIELDS | {"format"}
 DISCOVERY_FIELDS = {"update_method", "update_endpoint", "update_periodic"}
 UPDATE_POLICY_FIELDS = {"update_policy", "update_window_start", "update_window_end"}
@@ -194,11 +194,13 @@ class CatalogStore:
         for entry in source_catalog.builtin_sources():
             introduced = entry.get("introduced_in", 0)
             prerequisite = entry.get("add_when_source_present")
-            if previous < introduced <= version and entry["source_id"] not in ids and prerequisite in ids:
+            if (previous < introduced <= version and entry["source_id"] not in ids
+                    and (prerequisite in ids or (prerequisite is None and ids and "seed_version" in state))
+                    and len(state["sources"]) < MAX_ENTRIES):
                 state["sources"].append(self._seed_record(entry))
                 changed = True
         state["seed_version"] = version
-        return changed
+        return changed or "seed_version" in state and previous >= 4
 
     def _configure_planned_sources(self, state):
         defaults = {entry["source_id"]: entry for entry in source_catalog.planned_sources() if "setup" in entry}
