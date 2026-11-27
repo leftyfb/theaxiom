@@ -43,7 +43,7 @@ class ZimReplacementPublicResponseTests(unittest.TestCase):
             "expected_bytes": 456,
             "error": "review needed",
             "previous_job": {"artifact": {"path": "/private/archive.zim"}},
-            "artifact": {"path": "/private/replacement.zim"},
+            "artifact": {"path": "/private/replacement.zim", "sha256": "a" * 64},
             "configuration": {"source_url": "https://private.example/archive.zim"},
             "base_artifact": {"sha256": "secret"},
             "etag": '"internal"',
@@ -54,6 +54,8 @@ class ZimReplacementPublicResponseTests(unittest.TestCase):
             "downloaded_bytes": 123,
             "expected_bytes": 456,
             "error": "review needed",
+            "sha256": "a" * 64,
+            "review_token": admin_api.zim_jobs.candidate_review_token(internal),
         })
         self.assertIn("previous_job", internal)
 
