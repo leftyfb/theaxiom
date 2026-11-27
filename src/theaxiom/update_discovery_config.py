@@ -1,5 +1,5 @@
 """Source-scoped metadata discovery settings and endpoint diagnostics."""
-from datetime import datetime, time, timezone
+from datetime import datetime, time, timedelta, timezone
 from hashlib import sha256
 import re
 from urllib.parse import urlsplit
@@ -36,6 +36,27 @@ def window_open(config, local_now):
     start, end = time.fromisoformat(start), time.fromisoformat(end)
     current = local_now.time()
     return start <= current < end if start < end else current >= start or current < end
+
+
+def window_start(config, now):
+    """Opening of the current window, or the next one if it is closed."""
+    _, start, end = policy(config)
+    start, end = time.fromisoformat(start), time.fromisoformat(end)
+    day = now.date()
+    if window_open(config, now):
+        if start > end and now.time() < end:
+            day -= timedelta(days=1)
+    elif now.time() >= start:
+        day += timedelta(days=1)
+    opening = datetime.combine(day, start, now.tzinfo)
+    return datetime.fromtimestamp(opening.timestamp(), now.tzinfo)
+
+
+def current_unattended_evidence(config, now, evidence):
+    if evidence.get("state") in (None, "unable_to_determine") or evidence.get("stale"):
+        return False
+    return (policy(config)[0] != "scheduled" or not settings(config)["periodic"]
+            or evidence.get("checked_at", 0) >= window_start(config, now).timestamp())
 
 
 def settings(config):

@@ -26,6 +26,10 @@ def timezone():
         return ZoneInfo.from_file(stream)
 
 
+def zone_label(now):
+    return os.path.realpath("/etc/localtime").partition("/zoneinfo/")[2] or now.strftime("%Z (%z)")
+
+
 def validate(value):
     if (not isinstance(value, dict) or value.keys() != DEFAULT.keys()
             or type(value["interval_days"]) is not int or not 1 <= value["interval_days"] <= 365
@@ -137,6 +141,5 @@ def status():
     else:
         next_run = _legacy_next(zone)
         settings = DEFAULT
-    zone_name = os.path.realpath("/etc/localtime").partition("/zoneinfo/")[2]
-    return dict(settings, time_zone=zone_name or now.strftime("%Z (%z)"),
+    return dict(settings, time_zone=zone_label(now),
                 next_run=datetime.fromtimestamp(next_run.timestamp(), zone).isoformat() if next_run else None)

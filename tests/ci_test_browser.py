@@ -786,6 +786,13 @@ def exercise_automatic_eligibility(browser, viewport):
             expect(card.locator("[data-automatic-rearm]")).to_have_count(0)
             expect(card.get_by_text("Allow automatic update again")).to_have_count(0)
             expect(card).not_to_contain_text("Automatic update suppressed")
+        fixture["automatic_update"] = {"policy": "scheduled", "next": "Maintenance window open",
+                                       "check": "Source check failed; retry pending",
+                                       "server_time": "2026-11-27 23:00:01 EST", "time_zone": "America/New_York"}
+        expect(details).to_contain_text("Maintenance window open", timeout=8000)
+        expect(details).to_contain_text("Source check failed; retry pending")
+        expect(details).to_contain_text("Server local: 2026-11-27 23:00:01 EST (America/New_York)")
+        expect(details).not_to_contain_text("Next window:")
     finally:
         page.close()
 

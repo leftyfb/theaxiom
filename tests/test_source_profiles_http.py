@@ -1454,7 +1454,7 @@ def test_automatic_replacement(app, disk, monkeypatch, outcome):
                      configuration=jobs.identity(config), artifact=artifact)
     evidence = dict(state="update_available", installed_edition="2026-10", candidate_edition="2026-11",
                     candidate_url=url.replace("2026-10", "2026-11"), candidate_sha256=digest,
-                    candidate_bytes=len(new))
+                    candidate_bytes=len(new), checked_at=datetime(2026, 11, 26, 23, 45, tzinfo=timezone.utc).timestamp())
     monkeypatch.setattr(admin_api.kiwix_update_discovery, "cached_checked_source", lambda _: evidence)
     hour = 23
 
@@ -1529,13 +1529,16 @@ def test_automatic_replacement(app, disk, monkeypatch, outcome):
     assert len(queue.status()) == 1
 
 
-@pytest.mark.parametrize("policy,legacy", [("automatic", False), ("scheduled", True)])
-def test_retry_rolled_back_automatic_update(app, disk, monkeypatch, policy, legacy):
+@pytest.mark.parametrize("policy,legacy,discover", [("automatic", False, False), ("scheduled", True, False),
+                                                   ("scheduled", False, True)])
+def test_retry_rolled_back_automatic_update(app, disk, monkeypatch, policy, legacy, discover):
     from contextlib import contextmanager
     from datetime import datetime, timezone
     import hashlib
     from io import BytesIO
+    from types import SimpleNamespace
     from theaxiom import acquisition_queue as queue, update_check_store, zim_jobs as jobs, zim_source as archives
+    from theaxiom import kiwix_update_scheduler as scheduler, update_schedule
 
     request, _ = app
     sid = "devdocs"
@@ -1547,6 +1550,7 @@ def test_retry_rolled_back_automatic_update(app, disk, monkeypatch, policy, lega
     catalog = mutate(request, request("/api/sources"), "add", {
         "title": "DevDocs", "format": "zim", "source_url": base, "update_method": "archive",
         "publisher_sha1": hashlib.sha1(old, usedforsecurity=False).hexdigest(), "update_policy": policy,
+        **({"update_periodic": "yes"} if discover else {}),
         **({"update_window_start": "23:00", "update_window_end": "02:00"} if policy == "scheduled" else {}),
     }, sid=sid)
     config = source(catalog, sid)["configuration"]
@@ -1557,17 +1561,19 @@ def test_retry_rolled_back_automatic_update(app, disk, monkeypatch, policy, lega
     evidence = dict(state="update_available", evidence="fixture", installed_edition="2026-10-01",
                     candidate_edition="2026-11-01", candidate_url=base.replace("2026-10", "2026-11"),
                     candidate_sha1=digest, candidate_bytes=len(new))
-    update_check_store.save(sid, artifact["sha256"], evidence)
     hour = 23
+    day = 26
 
     class Clock(datetime):
         @classmethod
         def now(cls, tz=None):
-            return cls(2026, 11, 26, hour, 30, tzinfo=tz)
+            return cls(2026, 11, day, hour, 30, tzinfo=tz)
 
     monkeypatch.setattr(admin_api, "datetime", Clock)
     monkeypatch.setattr(admin_api.update_schedule, "timezone", lambda: timezone.utc)
     monkeypatch.setattr(admin_api, "_batch_available", lambda *_: 10_000)
+    monkeypatch.setattr(update_check_store, "time", SimpleNamespace(time=lambda: Clock.now(timezone.utc).timestamp()))
+    update_check_store.save(sid, artifact["sha256"], evidence)
     monkeypatch.setattr(admin_api.zim_refresh, "reconcile_activation", lambda *a, **kw: True)
     monkeypatch.setattr(admin_api.zim_refresh, "schedule", lambda *a, **kw: None)
     transfers = []
@@ -1588,6 +1594,9 @@ def test_retry_rolled_back_automatic_update(app, disk, monkeypatch, policy, lega
     assert queue.run_next(admin_api._execute_batch_job, threading.Event()), queue.status()
     first, = queue.status()
     assert first["state"] == "completed", first
+    latest = jobs.read(sid)
+    assert latest
+    latest_digest = latest["artifact"]["sha256"]
     catalog = request("/api/sources")
     publication.save(sid, True)
     request("/api/action", dict(action="zim-replacement-rollback", source_id=sid,
@@ -1601,6 +1610,41 @@ def test_retry_rolled_back_automatic_update(app, disk, monkeypatch, policy, lega
         with queue.database() as db:
             db.execute("CREATE TABLE automatic_rearms (job_id TEXT PRIMARY KEY, rollback_token TEXT NOT NULL)")
             db.execute("INSERT INTO automatic_rearms VALUES (?, ?)", (first["id"], "obsolete grant"))
+    if discover:
+        hour, day = 22, 27
+        update_schedule.save({"interval_days": 2, "start_time": "03:00"}, now=Clock.now(timezone.utc))
+        schedule = update_schedule.current()
+        update_check_store.save(sid, latest_digest, {"state": "up_to_date", "evidence": "Latest was installed"})
+        monkeypatch.setattr(scheduler, "datetime", Clock)
+        monkeypatch.setattr(scheduler, "_check_with_deadline", scheduler._check_source)
+        checks = []
+
+        def metadata(installed, *, fetch):
+            checks.append(installed["sha256"])
+            assert installed["sha256"] == artifact["sha256"]
+            assert not publication.LOCK._is_owned() and not jobs.LOCK._is_owned()
+            return evidence
+
+        monkeypatch.setattr(scheduler.kiwix_update_discovery, "check_kiwix_update", metadata)
+        path = admin_api.SOURCE_CATALOG.path
+        scheduler.poll_unattended(path)
+        assert not checks and queue.status() == [first]
+        hour = 23
+        assert update_schedule.slot(schedule, Clock.now(timezone.utc))[0] is None
+        admin_api._poll_automatic_updates()
+        assert queue.status() == [first]
+        assert scheduler._run(path, custom=True) is None
+        scheduler.poll_unattended(path)
+        scheduler.poll_unattended(path)
+        assert checks == [artifact["sha256"]]
+        assert update_schedule.current() == schedule
+        admin_api._poll_automatic_updates()
+        assert queue.run_next(admin_api._execute_batch_job, threading.Event()), queue.status()
+        assert queue.status()[0]["state"] == "completed"
+        live = jobs.read(sid)
+        assert live and live["artifact"]["sha256"] == latest_digest
+        assert len(transfers) == 1
+        return
     catalog = mutate(request, request("/api/sources"), "edit", {"update_policy": "notify"}, sid=sid)
     admin_api._poll_automatic_updates()
     assert queue.status() == [first]
@@ -1633,7 +1677,7 @@ def test_retry_rolled_back_automatic_update(app, disk, monkeypatch, policy, lega
         hour = 2
         admin_api._poll_automatic_updates()
         assert len(queue.status()) == 2
-        hour = 0
+        hour, day = 0, 27
     admin_api._poll_automatic_updates()
     admin_api._poll_automatic_updates()
     assert len(queue.status()) == 3
@@ -1663,6 +1707,7 @@ def test_retry_rolled_back_automatic_update(app, disk, monkeypatch, policy, lega
         assert not queue.run_next(admin_api._execute_batch_job, threading.Event())
         assert jobs.read(sid) == old_job
         hour = 1
+        update_check_store.save(sid, artifact["sha256"], evidence)
     with monkeypatch.context() as stale:
         stale.setattr(update_check_store, "MAX_AGE", -1)
         with queue.database() as db:

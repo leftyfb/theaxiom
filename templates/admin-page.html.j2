@@ -1001,11 +1001,9 @@
           <summary>Technical details</summary>
           {% if discovery %}
           <p class="source-note">Update discovery: {{ {'head': 'HTTPS / ETag', 'kiwix': 'Kiwix OPDS / Metalink', 'archive': 'Internet Archive editions', 'builds': 'Protomaps map builds', 'manual': 'Manual update discovery'}.get(discovery.method, 'Unknown') }} · Periodic checks {{ 'enabled' if discovery.periodic else 'disabled' }}</p>
-          {% if source.automatic_update %}
+          {% endif %}
           {% set auto = source.automatic_update %}
-          <p class="source-note">Update policy: {{ 'Notify only' if auto.policy == 'notify' else auto.policy|capitalize }}{% if auto.next %} · {{ auto.next }}{% endif %}{% if auto.attempt %} · Last automatic attempt: {{ auto.attempt }}{% endif %}</p>
-          {% endif %}
-          {% endif %}
+          <p class="source-note" data-field="automatic-update"{% if not auto %} hidden{% endif %}>{% if auto %}Update policy: {{ 'Notify only' if auto.policy == 'notify' else auto.policy|capitalize }}{% if auto.next %} · {{ auto.next }}{% endif %}{% if auto.check %} · {{ auto.check }}{% endif %}{% if auto.attempt %} · Last automatic attempt: {{ auto.attempt }}{% endif %}{% if auto.server_time %} · Server local: {{ auto.server_time }} ({{ auto.time_zone }}){% endif %}{% endif %}</p>
 
           <p class="source-note" data-field="update-evidence">
             {% if source.update_check %}{{ source.update_check.evidence }}{% endif %}
@@ -3018,6 +3016,16 @@
               if (card.dataset.updateCheckPosting !== 'true') evidence.textContent = hasCheck ? (update.stale ? 'Last update check is stale' :
                 update.state === 'update_available' ? '' : description[update.state] || '') :
                 (source?.installed_verified && source?.discovery?.method && source.discovery.method !== 'manual' ? 'No update check recorded' : '');
+            }
+            const automatic = card.querySelector('[data-field="automatic-update"]');
+            if (automatic) {
+              const auto = source?.automatic_update;
+              automatic.hidden = !auto?.policy;
+              automatic.textContent = auto?.policy ? [
+                'Update policy: ' + (auto.policy === 'notify' ? 'Notify only' : auto.policy[0].toUpperCase() + auto.policy.slice(1)),
+                auto.next, auto.check, auto.attempt ? 'Last automatic attempt: ' + auto.attempt : '',
+                auto.server_time ? `Server local: ${auto.server_time} (${auto.time_zone})` : ''
+              ].filter(Boolean).join(' · ') : '';
             }
             const technical = card.querySelector('[data-field="update-evidence"]');
             if (technical && card.dataset.updateCheckPosting !== 'true') {

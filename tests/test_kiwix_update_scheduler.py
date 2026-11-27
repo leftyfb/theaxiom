@@ -1,5 +1,5 @@
 """Offline regression tests for metadata-only publisher sweeps."""
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import fcntl
 from pathlib import Path
 import subprocess
@@ -13,6 +13,80 @@ from theaxiom import kiwix_update_scheduler as scheduler, storage_settings, upda
 
 def record(sid, **config):
     return {"source_id": sid, "configuration": {"format": "zim", **config}}
+
+
+@pytest.mark.parametrize("policy", ["automatic", "scheduled"])
+def test_unattended_discovery_budget(tmp_path, monkeypatch, policy):
+    from types import SimpleNamespace
+    from theaxiom import update_check_store as store
+
+    now = datetime(2026, 11, 26, 23, 58, tzinfo=timezone.utc)
+
+    class Clock:
+        @staticmethod
+        def now(tz):
+            return now.astimezone(tz)
+
+    monkeypatch.setattr(scheduler, "datetime", Clock)
+    monkeypatch.setattr(update_schedule, "timezone", lambda: timezone.utc)
+    monkeypatch.setattr(storage_settings, "SETTINGS_PATH", tmp_path / "storage.json")
+    monkeypatch.setattr(store, "time", SimpleNamespace(time=lambda: now.timestamp()))
+    config = dict(source_url="https://download.kiwix.org/zim/zimit/devdocs_en_all_2026-10.zim",
+                  update_policy=policy, update_window_start="23:00", update_window_end="02:00")
+    rows = [record("devdocs", **config), record("uninstalled", **config),
+            record("notify", **(config | {"update_policy": "notify"})),
+            record("disabled", **(config | {"update_policy": "disabled"})),
+            record("opt-out", **(config | {"update_periodic": "no"})),
+            record("closed", **(config | {"update_policy": "scheduled", "update_window_start": "10:00",
+                                          "update_window_end": "11:00"}))]
+    monkeypatch.setattr(scheduler.catalog_store, "CatalogStore", lambda _: SimpleNamespace(
+        get=lambda **kwargs: {"sources": rows}))
+    digest = "a" * 64
+
+    def job(sid):
+        if sid != "uninstalled":
+            return dict(source_id=sid, state="completed", active=False, verified=True,
+                        configuration=rows[0]["configuration"] | {"sha256": ""},
+                        artifact=dict(sha256=digest, filename=f"{sid}.{digest}.zim"))
+
+    monkeypatch.setattr(scheduler.zim_jobs, "read", job)
+    monkeypatch.setattr(scheduler.zim_jobs, "installed", lambda row, _: row["artifact"])
+    calls = []
+
+    def check(row, *, manual, unattended):
+        assert not manual and unattended["installed"]["sha256"] == digest
+        calls.append(row["source_id"])
+        # A second scheduler/sweep cannot check while the first holds the lock.
+        scheduler.poll_unattended(tmp_path / "sources.json")
+        if len(calls) == 1:
+            raise subprocess.TimeoutExpired("fixture", 1)
+        evidence = {"state": "unable_to_determine", "evidence": "fixture"}
+        store.save(row["source_id"], digest, evidence)
+        return evidence
+
+    monkeypatch.setattr(scheduler, "_check_with_deadline", check)
+    path = tmp_path / "sources.json"
+    update_schedule.set_automatic_pause(True)
+    scheduler.poll_unattended(path)
+    assert not calls
+    update_schedule.set_automatic_pause(False)
+    scheduler.poll_unattended(path)  # No prior cache.
+    assert calls == ["devdocs"]
+    assert "retry pending" in scheduler.unattended_status("devdocs", rows[0]["configuration"], job("devdocs"), now)
+    # Each poll reopens durable state, including across midnight (same window).
+    for count in (2, 3):
+        scheduler.poll_unattended(path)
+        assert len(calls) == count - 1
+        now += timedelta(seconds=scheduler.SOURCE_BACKOFF)
+        scheduler.poll_unattended(path)
+        assert len(calls) == count
+    now += timedelta(seconds=scheduler.SOURCE_BACKOFF)
+    scheduler.poll_unattended(path)
+    assert calls == ["devdocs"] * 3
+    assert "limit reached" in scheduler.unattended_status("devdocs", rows[0]["configuration"], job("devdocs"), now)
+    now += timedelta(days=1)
+    scheduler.poll_unattended(path)
+    assert len(calls) == (4 if policy == "scheduled" else 3)
 
 
 def test_policy_defaults_and_local_window():

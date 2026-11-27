@@ -90,7 +90,7 @@ def _write(target, data):
         Path(temporary).unlink(missing_ok=True)
 
 
-def _read(target, source_id, installed_sha256):
+def read_bytes(target):
     try:
         fd = os.open(target, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
         try:
@@ -102,6 +102,16 @@ def _read(target, source_id, installed_sha256):
                 payload = stream.read(MAX_RECORD + 1)
         finally:
             os.close(fd)
+        return payload if len(payload) <= MAX_RECORD else None
+    except OSError:
+        return None
+
+
+def _read(target, source_id, installed_sha256):
+    try:
+        payload = read_bytes(target)
+        if payload is None:
+            return None
         record = json.loads(payload)
         if (not isinstance(record, dict) or set(record) != {
                 "source_id", "installed_sha256", "checked_at", "result"}

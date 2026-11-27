@@ -16,7 +16,7 @@ import threading
 import time
 from contextlib import ExitStack
 from dataclasses import asdict
-from datetime import datetime, time as wall_time, timedelta
+from datetime import datetime
 from urllib.parse import parse_qs, urlsplit, unquote
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -602,20 +602,26 @@ def _matching_rollback(record, candidate, digest):
     return None
 
 
-def _automatic_status(config, paused, now, attempt):
-    policy, start, _ = update_discovery_config.policy(config)
+def _automatic_status(sid, config, paused, now, attempt, job, evidence):
+    policy, _, _ = update_discovery_config.policy(config)
     if policy not in update_discovery_config.UNATTENDED:
         return {"policy": policy, "next": "", "attempt": ""}
+    zone = update_schedule.zone_label(now)
+    check = ""
     if paused:
-        upcoming = "Paused for new downloads"
+        upcoming = "Paused for unattended checks and new downloads"
     elif update_discovery_config.window_open(config, now):
-        upcoming = "Next queue poll if eligible"
+        upcoming = "Maintenance window open" if policy == "scheduled" else "Next queue poll if eligible"
+        if update_discovery_config.settings(config)["periodic"] and job:
+            if update_discovery_config.current_unattended_evidence(config, now, evidence or {}):
+                check = "Current publisher evidence available"
+            else:
+                check = kiwix_update_scheduler.unattended_status(sid, config, job, now) or "Waiting for current publisher evidence"
     else:
-        opening = datetime.combine(now.date(), wall_time.fromisoformat(start), now.tzinfo)
-        if opening <= now:
-            opening += timedelta(days=1)
-        upcoming = f"Next window: {opening:%Y-%m-%d %H:%M} (server local)"
-    return {"policy": policy, "next": upcoming, "attempt": attempt}
+        opening = update_discovery_config.window_start(config, now)
+        upcoming = f"Next window: {opening:%Y-%m-%d %H:%M %Z} (server local)"
+    return dict(policy=policy, next=upcoming, attempt=attempt, check=check,
+                server_time=f"{now:%Y-%m-%d %H:%M:%S %Z}", time_zone=zone)
 
 
 def _poll_automatic_updates():
@@ -640,7 +646,8 @@ def _poll_automatic_updates():
                     continue
                 evidence = kiwix_update_discovery.cached_checked_source(sid)
                 digest = _automatic_digest(evidence)
-                if evidence.get("state") != "update_available" or not digest:
+                if (evidence.get("state") != "update_available" or not digest
+                        or not update_discovery_config.current_unattended_evidence(config, now, evidence)):
                     continue
                 previous = attempted.get((sid, digest))
                 candidate = zim_jobs.read_candidate(sid)
@@ -656,6 +663,10 @@ def _poll_automatic_updates():
                 job["configuration"]["digest"] = digest
                 settings = storage_settings.load_settings()
                 available = _batch_available(settings, {config["format"]}) if not rollback_retry else None
+                current_now = datetime.now(update_schedule.timezone())
+                if (update_schedule.automatic_paused() or not update_discovery_config.window_open(config, current_now)
+                        or not update_discovery_config.current_unattended_evidence(config, current_now, evidence)):
+                    continue
                 acquisition_queue.enqueue([job], available, settings)
                 return
             except (ValueError, OSError):
@@ -720,7 +731,9 @@ def _execute_automatic_update(job, payload, stopping, shutdown):
                                        or candidate["base_artifact"] != payload["base"]):
                     raise ValueError("The rollback changed; review manually")
                 evidence = kiwix_update_discovery.cached_checked_source(sid)
-                if rollback_retry and (evidence.get("stale") or evidence.get("state") == "unable_to_determine"):
+                if (rollback_retry or evidence.get("state") == "update_available") and not (
+                        update_discovery_config.current_unattended_evidence(
+                            current_config, datetime.now(update_schedule.timezone()), evidence)):
                     return "deferred", "Waiting for current publisher evidence"
                 if _reviewed_update_fields(evidence, payload["digest"]) != {
                         key: value for key, value in payload["fields"].items() if key != "update_endpoint"}:
@@ -1851,6 +1864,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     record["configuration"], artifacts[sid]["sha256"]))
             job = jobs.get(sid)
             installed_edition = None
+            local_job = None
             replacement_available = False
             if lifecycles[sid].get("zim_download"):
                 try:
@@ -1918,8 +1932,9 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 except (ValueError, OSError):
                     replacement = {"state": "unavailable", "error": "Replacement status unavailable"}
             source_attempts = attempts.get(sid, [])
-            automatic = _automatic_status(record["configuration"], paused, local_now,
-                                          source_attempts[0]["state"] if source_attempts else "")
+            automatic = _automatic_status(sid, record["configuration"], paused, local_now,
+                                          source_attempts[0]["state"] if source_attempts else "",
+                                          local_job if verified else None, update_check)
 
             sources.append(dict(record, **lifecycles[sid], acquisition=_public_acquisition(job), replacement=replacement, replacement_available=replacement_available,
                                 update_check=update_check if discovery["method"] != "manual" else None,
@@ -2152,15 +2167,23 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             sid = data["source_id"]
             record = next((item for item in catalog["sources"] if item["source_id"] == sid), None)
             discovery = update_discovery_config.settings(record["configuration"]) if record else None
-            if not discovery or discovery["method"] == "manual":
+            if not record or not discovery or discovery["method"] == "manual":
                 self._send_json(400, {"error": "source does not support update checks"})
                 return
-            with update_diagnostics.attempt(sid, discovery, trigger="manual") as diagnostic:
-                if record["configuration"]["format"] in {"zim", "pmtiles"}:
-                    result = kiwix_update_discovery.refresh_checked_source(sid)
-                else:
-                    result = document_update_discovery.check_installed_document(record)
-                diagnostic.update(result)
+            try:
+                with kiwix_update_scheduler.check_lock() as locked:
+                    if not locked:
+                        self._send_json(409, {"error": "Another metadata check is running"})
+                        return
+                    with update_diagnostics.attempt(sid, discovery, trigger="manual") as diagnostic:
+                        if record["configuration"]["format"] in {"zim", "pmtiles"}:
+                            result = kiwix_update_discovery.refresh_checked_source(sid)
+                        else:
+                            result = document_update_discovery.check_installed_document(record)
+                        diagnostic.update(result)
+            except OSError:
+                self._send_json(503, {"error": "Metadata check unavailable"})
+                return
             self._send_json(200, dict(source_id=sid, **result))
         elif self.path == "/api/upstream-kiwix-catalog":
             if not self.headers.get("Origin"):
