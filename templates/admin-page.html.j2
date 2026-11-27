@@ -319,7 +319,7 @@
     <button id="admin-logout" class="button" type="button"{% if not session_csrf_token %} hidden{% endif %}>Sign out</button>
   </header>
   <main id="main-content"{% if page == "sources" %} class="sources-admin"{% endif %}>
-    {% set available_updates = catalog.available_updates|default(0) %}
+    {% set available_updates = (catalog|default({})).available_updates|default(0) %}
     <nav class="admin-nav" aria-label="Administration"><a class="button" href="/admin/sources"{% if page == "sources" %} aria-current="page"{% endif %}>Sources</a><a class="button" href="/admin/updates"{% if page == "updates" %} aria-current="page"{% endif %}>Updates{% if page == "sources" %}<span class="update-nav-count" data-update-nav-count aria-hidden="true"{% if not available_updates %} hidden{% endif %}>{{ available_updates }}</span>{% endif %}</a><a class="button" href="/admin/groupings"{% if page == "groupings" %} aria-current="page"{% endif %}>Groupings</a><a class="button" href="/admin/settings"{% if page == "settings" %} aria-current="page"{% endif %}>Settings</a></nav>
     <nav class="mobile-admin-toolbar" aria-label="Administration tools">
       <a href="/" class="brand desktop-library-link">The Axiom</a>
