@@ -190,13 +190,15 @@ class _BoundedBody:
 
 
 @contextmanager
-def open_pdf(url, *, format_name="pdf", limit=None, total_seconds=None, offset=0, validator=None):
+def open_pdf(url, *, format_name="pdf", limit=None, total_seconds=None, offset=0, validator=None, required_etag=None):
     if format_name not in {"pdf", "epub", "zim"} or (format_name == "zim" and (limit is None or total_seconds is None)):
         raise ValueError("Unsupported document format")
     if offset and (format_name != "zim" or type(offset) is not int or not 0 < offset < limit
                    or not isinstance(validator, str) or not validator
                    or not re.fullmatch(r"[\x20-\x7e]{1,202}", validator)):
         raise ValueError("Safe ZIM resume requires a validated offset and upstream validator")
+    if required_etag is not None and (format_name not in {"pdf", "epub"} or offset or not isinstance(required_etag, str) or not STRONG_ETAG.fullmatch(required_etag)):
+        raise ValueError("Document replacement requires a strong ETag")
     limit = pdf_source.MAX_BYTES if limit is None else limit
     deadline = time.monotonic() + (TOTAL_SECONDS if total_seconds is None else total_seconds)
     visited = set()
@@ -220,6 +222,8 @@ def open_pdf(url, *, format_name="pdf", limit=None, total_seconds=None, offset=0
                 "Accept-Encoding": "identity", "Connection": "close",
                 "User-Agent": "The-Axiom PDF acquisition",
             }
+            if required_etag is not None:
+                headers["If-Match"] = required_etag
             if offset:
                 headers["Range"] = f"bytes={offset}-"
                 headers["If-Range"] = validator
@@ -230,6 +234,8 @@ def open_pdf(url, *, format_name="pdf", limit=None, total_seconds=None, offset=0
                 with _network_errors():
                     _remaining(deadline)
                 if response.status in (301, 302, 303, 307, 308):
+                    if required_etag is not None:
+                        raise ValueError("Reviewed document URL redirected; check again")
                     locations = response.headers.get_all("Location", [])
                     if hop == MAX_REDIRECTS:
                         raise ValueError("PDF redirect limit exceeded")
@@ -268,6 +274,8 @@ def open_pdf(url, *, format_name="pdf", limit=None, total_seconds=None, offset=0
                 if len(etags) > 1 or len(modified) > 1:
                     raise ValueError("Ambiguous publisher validator")
                 etag = etags[0] if etags and STRONG_ETAG.fullmatch(etags[0]) else None
+                if required_etag is not None and etag != required_etag:
+                    raise ValueError("Publisher document changed since update check")
                 last_modified = modified[0] if modified and re.fullmatch(r"[\x20-\x7e]{1,200}", modified[0]) else None
                 if format_name == "zim" and last_modified and _http_date(last_modified) is None:
                     last_modified = None
