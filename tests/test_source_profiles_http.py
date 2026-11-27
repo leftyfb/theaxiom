@@ -1377,7 +1377,8 @@ def test_batch_updates_keep_old_archives_and_isolate_download_and_activation_fai
         admin_api.update_check_store.save(sid, installed[sid]["artifact"]["sha256"], updates[sid])
     page = request("/admin/sources")
     assert 'role="status">Updates are available</strong>' in page
-    assert 'href="/admin/updates" aria-label="Review updates"' in page
+    assert 'id="review-updates-link"' not in page
+    assert page.count('data-update-nav-count aria-hidden="true">4</span>') == 3
     assert 'id="update-review"' in request("/admin/updates")
     for sid in ("bad-reader", "ready-public"):
         publication.save(sid, True)

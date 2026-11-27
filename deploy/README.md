@@ -85,8 +85,8 @@ configuration. The Admin backend runs the custom schedule and attempts the
 latest missed slot after downtime. Scheduled and manual sweeps share a lock.
 
 On Admin → Updates, **Check for all updates** checks every eligible installed
-source, including sources with periodic checks disabled. The Sources banner's
-**Review updates** link opens the same page. Use status filters and search to
+source, including sources with periodic checks disabled. The Sources navigation displays an available-update count; select **Updates**
+from the administration menu to review them. Use status filters and search to
 review installed and candidate editions, update policy, check timestamps,
 maintenance windows, and space estimates. Select visible eligible updates,
 then confirm **Download X updates** to queue replacements and **Publish X
