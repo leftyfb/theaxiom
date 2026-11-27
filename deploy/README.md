@@ -84,12 +84,17 @@ and preferred time overrides the default timer without changing systemd
 configuration. The Admin backend runs the custom schedule and attempts the
 latest missed slot after downtime. Scheduled and manual sweeps share a lock.
 
-On Admin → Sources, **Check for all updates** checks every eligible installed
-source, including sources with periodic checks disabled. **Review updates**
-shows the editions and space estimates. Confirm **Download X updates** to
-queue replacements and **Publish X updates** to activate verified candidates.
-The installed archives serve until activation, and publication preferences
-remain in effect. The review shows each source's result.
+On Admin → Updates, **Check for all updates** checks every eligible installed
+source, including sources with periodic checks disabled. The Sources banner's
+**Review updates** link opens the same page. Use status filters and search to
+review installed and candidate editions, update policy, check timestamps,
+maintenance windows, and space estimates. Select visible eligible updates,
+then confirm **Download X updates** to queue replacements and **Publish X
+updates** to activate verified candidates. The installed archives serve until
+activation, and publication preferences remain in effect. Individual checks
+and the global automatic-update pause use the existing settings and source
+APIs; opening the page only reads status. Use **Source details** for individual
+source actions and Settings for the schedule.
 
 This path performs only bounded publisher metadata requests and writes
 private check-status JSON under application state. It **never downloads a ZIM

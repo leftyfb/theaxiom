@@ -266,7 +266,7 @@ def exercise(browser, base, name, viewport, artifacts):
         isolated = browser.new_context(viewport=viewport)
         try:
             outsider = isolated.new_page()
-            for protected in ("/admin", "/admin/sources", "/admin/groupings", "/admin/settings"):
+            for protected in ("/admin", "/admin/sources", "/admin/groupings", "/admin/settings", "/admin/updates"):
                 outsider.goto(base + protected)
                 expect(outsider).to_have_url(base + "/admin/login")
             outsider.goto(base + "/")
@@ -687,7 +687,7 @@ def exercise(browser, base, name, viewport, artifacts):
         expect(page.locator("h1")).to_be_visible()
         page.goto(base + "/admin/settings")
         expect(page.locator("h1")).to_be_visible()
-        for path in ("/admin", "/admin/sources", "/admin/groupings", "/admin/settings"):
+        for path in ("/admin", "/admin/sources", "/admin/groupings", "/admin/settings", "/admin/updates"):
             page.goto(base + path)
             overflow = page.evaluate("""() => ({
                 scroll: document.documentElement.scrollWidth,
@@ -1169,8 +1169,8 @@ def exercise_admin_navigation(browser, viewport):
         page.route("http://fixture.local/api/**", lambda route: route.fulfill(json={}))
         page.goto("http://fixture.local/admin/sources")
         toolbar = page.get_by_role("navigation", name="Administration tools")
-        for current, next_page in (("Sources", "Settings"), ("Settings", "Groupings"),
-                                   ("Groupings", "Sources")):
+        for current, next_page in (("Sources", "Updates"), ("Updates", "Settings"),
+                                   ("Settings", "Groupings"), ("Groupings", "Sources")):
             expect(toolbar).to_be_visible()
             expect(page.locator(".site-header")).to_be_hidden()
             expect(page.locator(".admin-nav")).to_be_hidden()
@@ -1206,19 +1206,31 @@ def exercise_batch_update_journey(browser, viewport):
     state = "idle"
     jobs = []
     calls = []
+    checks = []
+    pause_calls = []
+    paused = False
     for source in sources:
         source.update(installed_verified=True, installed_edition="2026-10",
-                      artifact={"bytes": 1024}, replacement=None, update_check=None)
+                      artifact={"bytes": 1024}, replacement=None,
+                      update_check={"state": "up_to_date", "checked_at": 1795000000},
+                      discovery={"method": "kiwix", "periodic": True},
+                      automatic_update={"policy": "scheduled", "next": "Next window: tomorrow"})
+
+    def candidate():
+        return {"state": "update_available", "candidate_sha256": digest,
+                "candidate_edition": "2026-11", "candidate_bytes": 2048,
+                "checked_at": 1795000000}
 
     def api(route):
-        nonlocal state
+        nonlocal state, paused
         path = route.request.url.rsplit("/", 1)[-1]
         if path == "update-sweep":
             if route.request.method == "POST":
+                assert route.request.post_data_json == {"confirm": True}
+                checks.append("all")
                 state = "completed"
                 for source in sources:
-                    source["update_check"] = {"state": "update_available", "candidate_sha256": digest,
-                                              "candidate_edition": "2026-11", "candidate_bytes": 2048}
+                    source["update_check"] = candidate()
                 route.fulfill(status=202, json={"state": "running"})
             else:
                 route.fulfill(json={"state": state, "checks": (
@@ -1227,72 +1239,131 @@ def exercise_batch_update_journey(browser, viewport):
                     if state == "completed" else []
                 )})
         elif path == "sources":
-            download = sum(bool(row["update_check"] and not row["replacement"]) for row in sources)
-            publish = sum(bool(row["replacement"] and row["replacement"]["state"] == "verified")
-                          for row in sources)
-            route.fulfill(json={"revision": 1, "sources": sources, "available_updates": download + publish,
-                                "update_stages": {"download": download, "publish": publish}})
+            count = sum(row["update_check"].get("state") == "update_available"
+                        and not row["replacement"] for row in sources)
+            staged = sum(bool(row["replacement"] and row["replacement"]["state"] == "verified")
+                         for row in sources)
+            route.fulfill(json={"revision": 1, "sources": sources, "available_updates": count + staged,
+                                "update_stages": {"download": count, "publish": staged}})
         elif path == "update-batch":
             data = route.request.post_data_json
             calls.append(data)
             operation = data["operation"]
             jobs.insert(0, {"source_id": "first", "operation": operation, "state": "completed"})
             sources[0]["replacement"] = {"state": "verified" if operation == "download-update" else "activated",
-                                         "sha256": digest}
+                                         "sha256": digest, "expected_bytes": 2048}
             sources[0]["configuration"]["edition"] = "2026-11"
-            sources[1]["update_check"] = None
+            sources[1]["update_check"] = {"state": "up_to_date"}
             if operation == "publish-update":
-                sources[0]["update_check"] = None
+                sources[0]["update_check"] = {"state": "up_to_date"}
+                sources[0]["installed_edition"] = "2026-11"
             route.fulfill(status=202, json={"queued": {"first": "fixture-job"}, "rejected": {}})
+        elif path == "update-check":
+            data = route.request.post_data_json
+            checks.append(data)
+            sources[1]["update_check"] = candidate()
+            route.fulfill(json=sources[1]["update_check"])
         elif path == "acquisition-batch":
             route.fulfill(json={"jobs": jobs})
+        elif path == "update-schedule":
+            route.fulfill(json={"next_run": "2026-11-28T03:00:00-05:00", "time_zone": "America/New_York"})
+        elif path == "automatic-update-pause":
+            if route.request.method == "POST":
+                paused = route.request.post_data_json["paused"]
+                pause_calls.append(paused)
+            route.fulfill(json={"paused": paused})
         else:
             route.fulfill(json={})
 
+    def admin(route):
+        section = route.request.url.rsplit("/", 1)[-1]
+        route.fulfill(content_type="text/html", body=render(
+            admin_page=section, catalog={"sources": sources, "revision": 1}, session_csrf_token="fixture"))
+
     try:
-        page.route("http://fixture.local/admin/sources", lambda route: route.fulfill(
-            content_type="text/html", body=render(catalog={"sources": sources, "revision": 1})))
+        page.route("http://fixture.local/admin/*", admin)
         page.route("http://fixture.local/api/**", api)
         page.on("dialog", lambda dialog: dialog.accept())
         page.goto("http://fixture.local/admin/sources")
-        action = page.locator("#check-all-updates")
         page.get_by_label("More admin tools").click()
-        expect(action).to_be_hidden()
         page.get_by_role("link", name="Review updates").click()
+        expect(page).to_have_url("http://fixture.local/admin/updates")
         review = page.locator("#update-review")
+        check_all = page.locator("#check-all-updates")
+        download = page.locator("#download-updates")
+        publish = page.locator("#publish-updates")
+        filters = page.locator("#update-filter-state")
         expect(review).to_be_visible()
-        expect(action).to_have_text("Check for all updates")
-        action.click()
-        expect(action).to_have_text("Download 2 updates")
+        expect(page.locator("#source-cards")).to_have_count(0)
+        expect(review.get_by_text("No updates need attention.", exact=False)).to_be_visible()
+        expect(download).to_be_disabled()
+        expect(publish).to_be_disabled()
+        assert not calls and not checks and not pause_calls
+        expect(page.locator("#updates-schedule")).to_contain_text("2026-11-28")
+        expect(review.get_by_role("link", name="Update schedule settings")).to_have_attribute("href", "/admin/settings#update-schedule-title")
+        assert page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth + 2")
+        filters.select_option("all")
+        expect(review.get_by_text("Up to date", exact=True)).to_have_count(2)
+        expect(review.get_by_text("Update policy: Scheduled", exact=False)).to_have_count(2)
+        expect(review.get_by_text("Next window: tomorrow", exact=False)).to_have_count(2)
+        filters.select_option("attention")
+        check_all.click()
+        expect(download).to_have_text("Download 2 updates")
         expect(review.get_by_text("Could not determine update status for 1 source.", exact=False)).to_be_visible()
         review.get_by_text("Inconclusive publisher checks").click()
         expect(review.get_by_text("No strong ETag was saved", exact=False)).to_be_visible()
-        page.get_by_role("link", name="Show all sources").click()
-        if viewport["width"] <= 640:
-            expect(page.get_by_text("Updates are available", exact=True)).to_be_visible()
-        else:
-            expect(page.get_by_role("link", name="Review updates")).to_have_text("2 updates available")
-        expect(action).to_be_hidden()
-        expect(page.locator("#update-sweep-details")).to_be_hidden()
-        page.get_by_role("link", name="Review updates").click()
-        expect(review).to_be_visible()
-        expect(page.locator("#regular-sources")).to_be_hidden()
         expect(review.get_by_text("Installed 2026-10 · Update 2026-11", exact=False)).to_have_count(2)
-        expect(review.get_by_text("Selected download estimate and additional storage required: 4 KiB")).to_be_visible()
+        expect(page.locator("#update-selection-size")).to_contain_text("4 KiB")
+        # Filter selection is limited to visible rows and restored on clearing.
+        page.locator("#update-filter-search").fill("First")
+        expect(download).to_have_text("Download 1 update")
+        page.locator("#update-filter-search").fill("")
+        expect(download).to_have_text("Download 2 updates")
+        filters.select_option("staged")
+        expect(review.get_by_text("No sources match the selected update filters.")).to_be_visible()
+        expect(download).to_be_disabled()
+        filters.select_option("attention")
+        expect(download).to_have_text("Download 2 updates")
         review.get_by_role("checkbox", name="Second archive").uncheck()
-        expect(action).to_have_text("Download 1 update")
-        action.click()
-        expect(action).to_have_text("Publish 1 update")
+        expect(download).to_have_text("Download 1 update")
+        download.click()
+        expect(publish).to_have_text("Publish 1 update")
+        expect(review.get_by_text("Verified / staged", exact=True)).to_be_visible()
         expect(review.get_by_text("Download completed")).to_be_visible()
-        action.click()
+        publish.click()
+        filters.select_option("applied")
+        expect(review.get_by_text("Applied", exact=True)).to_be_visible()
         expect(review.get_by_text("Publication completed")).to_be_visible()
+        # Live refresh: automatic job appears without navigating or submitting.
+        filters.select_option("attention")
+        jobs.insert(0, {"source_id": "second", "operation": "automatic-update", "state": "queued"})
+        expect(review.get_by_text("Queued", exact=True)).to_be_visible(timeout=12000)
+        jobs[0]["state"] = "failed"
+        jobs[0]["detail"] = "fixture failure"
+        expect(review.get_by_text("Automatic update failed · fixture failure")).to_be_visible(timeout=12000)
+        filters.select_option("failed")
+        expect(review.get_by_text("Failed / needs attention")).to_be_visible()
+        # Global pause shares the settings API; individual checks share source API.
+        page.locator("#updates-pause").click()
+        expect(page.locator("#updates-pause")).to_have_text("Resume automatic updates")
+        review.get_by_role("button", name="Check for updates for Second archive").click()
+        filters.select_option("available")
+        expect(review.get_by_text("Update available", exact=True)).to_be_visible()
+        assert checks == ["all", {"source_id": "second", "revision": 1}]
+        assert pause_calls == [True]
         assert calls == [
             {"operation": "download-update", "revision": 1, "selection": {"first": digest}},
             {"operation": "publish-update", "revision": 1, "selection": {"first": digest}},
         ]
+        review.get_by_role("link", name="Source details for Second archive").click()
+        expect(page).to_have_url("http://fixture.local/admin/sources#source-second")
+        expect(page.locator("#source-second")).to_have_attribute("open", "")
+        expect(page.get_by_role("link", name="Review updates")).to_have_attribute("href", "/admin/updates")
+        page.get_by_role("link", name="Review updates").click()
+        expect(page).to_have_url("http://fixture.local/admin/updates")
+        assert len(calls) == 2
     finally:
         page.close()
-
 
 
 def main():

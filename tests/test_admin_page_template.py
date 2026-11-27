@@ -67,6 +67,17 @@ def test_page_specific_scripts_and_navigation():
     assert "storage-settings-script" not in groupings
     assert "admin-password-script" not in groupings
     assert "source-catalog-script" not in groupings
+    updates = render(admin_page="updates", password_change_enabled=True)
+    assert 'href="/admin/updates" aria-current="page"' in updates
+    assert 'href="/admin/updates" aria-label="Review updates"' in sources
+    for page in (sources, settings, groupings):
+        assert 'href="/admin/updates"' in page
+        assert 'id="update-review-script"' not in page
+    for marker in ("update-review-script", "download-updates", "publish-updates",
+                   "update-filter-state", "updates-pause"):
+        assert marker in updates
+    for marker in ("source-cards", "acquisition-monitor-script", "storage-form", "source-catalog-script"):
+        assert marker not in updates
 
 
 def test_candidate_card_has_no_acquisition_buttons():

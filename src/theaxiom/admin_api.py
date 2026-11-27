@@ -988,7 +988,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         # credentials that cannot be cleared by the application's Sign out.
         # Preserve Basic for explicit nonbrowser clients and deploy probes.
         browser_admin_navigation = (not post and self.path.rstrip("/") in {
-            "/admin", "/admin/sources", "/admin/settings", "/admin/groupings"
+            "/admin", "/admin/sources", "/admin/settings", "/admin/groupings", "/admin/updates"
         } and "text/html" in self.headers.get("Accept", "").lower())
         # Browser background fetches may omit Sec-Fetch-Mode (notably older
         # clients and some proxied requests). Other browser-only headers must
@@ -1015,7 +1015,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 self._session_csrf, self._session_token = csrf, token
         if not login and not basic and self._session_csrf is None:
             if not post and self.path.rstrip("/") in {
-                    "/admin", "/admin/sources", "/admin/settings", "/admin/groupings"}:
+                    "/admin", "/admin/sources", "/admin/settings", "/admin/groupings", "/admin/updates"}:
                 # Real browser navigation advertises HTML; render the branded
                 # login. Legacy curl/API probes still receive their expected
                 # 401 Basic challenge, preserving fixed deploy preflight checks.
@@ -1279,8 +1279,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                             | {item["source_id"]: state for item, state in self._zim_publications()})
         elif self.path.rstrip("/") == "/health":
             self._send_json(200, health_response())
-        elif self.path.rstrip("/") in {"/admin", "/admin/sources", "/admin/settings", "/admin/groupings"}:
-            page = {"/admin/settings": "settings", "/admin/groupings": "groupings"}.get(self.path.rstrip("/"), "sources")
+        elif self.path.rstrip("/") in {"/admin", "/admin/sources", "/admin/settings", "/admin/groupings", "/admin/updates"}:
+            page = {"/admin/settings": "settings", "/admin/groupings": "groupings", "/admin/updates": "updates"}.get(self.path.rstrip("/"), "sources")
             self._send_admin_page(page)
         elif self.path.rstrip("/") == "/api/acquisitions":
             self._send_json(200, self._snapshot())
@@ -2005,13 +2005,13 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         )
         template = environment.get_template("admin-page.html.j2")
         try:
-            catalog_snapshot = SOURCE_CATALOG.get() if page in {"sources", "groupings"} else {"revision": None, "sources": []}
+            catalog_snapshot = SOURCE_CATALOG.get() if page in {"sources", "groupings", "updates"} else {"revision": None, "sources": []}
         except (catalog_store.CatalogError, OSError):
             self._send_json(503, {"error": "source catalog unavailable; stored data was not replaced"})
             return
         body = template.render(
             admin_page=page,
-            catalog=self._source_profiles(catalog_snapshot) if page == "sources" else catalog_snapshot if page == "groupings" else None,
+            catalog=self._source_profiles(catalog_snapshot) if page in {"sources", "updates"} else catalog_snapshot if page == "groupings" else None,
             selection_presets={key: value[0] for key, value in library_selection.PRESETS.items()},
             editable_fields=sorted(catalog_store.EDITABLE),
             action_labels=ACTION_LABELS,

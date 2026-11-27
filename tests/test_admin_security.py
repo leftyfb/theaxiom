@@ -160,7 +160,8 @@ class HTTPAuthTests(unittest.TestCase):
         self.assertIn(b'aria-label="Search library"', body)
         self.assertNotIn(b"Your offline reference library", body)
         for path in ("/admin", "/admin/", "/admin/sources", "/admin/settings",
-                     "/admin/sources/", "/admin/settings/", "/admin/groupings", "/admin/groupings/"):
+                     "/admin/sources/", "/admin/settings/", "/admin/groupings", "/admin/groupings/",
+                     "/admin/updates", "/admin/updates/"):
             with self.subTest(path=path):
                 status, headers, _ = self.request(path, headers={"Accept": "text/html"})
                 self.assertEqual(status, 303)
@@ -331,7 +332,7 @@ class HTTPAuthTests(unittest.TestCase):
         self.assertEqual(self.request("/admin", auth=new_auth)[0], 200)
 
     def test_deployment_probe_keeps_legacy_basic_challenge(self):
-        for path in ("/admin", "/admin/groupings", "/admin/groupings/"):
+        for path in ("/admin", "/admin/groupings", "/admin/groupings/", "/admin/updates", "/admin/updates/"):
             status, headers, _ = self.request(path)
             self.assertEqual(status, 401)
             self.assertEqual(headers["WWW-Authenticate"], 'Basic realm="The Axiom", charset="UTF-8"')
@@ -422,6 +423,18 @@ class HTTPAuthTests(unittest.TestCase):
             self.assertNotIn(b'id="acquisition-monitor-script"', body)
             self.assertNotIn(b'id="source-cards"', body)
 
+    def test_updates_page_is_authenticated_and_separate(self):
+        for path in ("/admin/updates", "/admin/updates/"):
+            code, headers, body = self.request(path, auth=self.auth)
+            self.assertEqual(code, 200)
+            self.assertEqual(headers["Cache-Control"], "no-store")
+            self.assertIn(b'id="update-review"', body)
+            self.assertIn(b'id="update-review-script"', body)
+            self.assertIn(b'href="/admin/updates" aria-current="page"', body)
+            self.assertNotIn(b'id="source-cards"', body)
+            self.assertNotIn(b'id="storage-form"', body)
+            self.assertNotIn(b'id="acquisition-monitor-script"', body)
+
     def test_cross_origin_and_simple_posts_rejected(self):
         for headers, expected in [
             ({"Origin":"http://attacker.invalid", "Content-Type":"application/json"}, 403),
@@ -489,7 +502,7 @@ class PasswordLengthTests(unittest.TestCase):
 class AdminProxyRouteTests(unittest.TestCase):
     def test_all_admin_navigation_routes_reach_authenticated_backend(self):
         config = (Path(__file__).parents[1] / "deploy/nginx/theaxiom.conf").read_text()
-        for route in ("/admin/sources", "/admin/groupings", "/admin/settings"):
+        for route in ("/admin/sources", "/admin/groupings", "/admin/settings", "/admin/updates"):
             for path in (route, route + "/"):
                 with self.subTest(path=path):
                     self.assertIn("location = " + path + " { include /opt/theaxiom/app/templates/theaxiom-backend.conf; }", config)
