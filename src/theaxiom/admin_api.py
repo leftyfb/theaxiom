@@ -264,7 +264,8 @@ def _update_stage(source):
         return None
     check = source["update_check"] or {}
     replacement = source["replacement"] or {}
-    if replacement.get("state") == "verified":
+    if replacement.get("state") == "verified" or (source.get("adapter") in document_replacement.FORMATS
+            and replacement.get("state") == "rolled_back" and replacement.get("sha256")):
         return "publish"
     if ((check.get("state") == "update_available" or check.get("candidate_token")) and check.get("candidate_bytes")
             and replacement.get("state") in (None, "activated")):
@@ -512,7 +513,7 @@ def _document_update_job(record, reviewed_digest, operation, *, previous=None):
     payload = {"document": True, "original": config, "base": pin, "digest": reviewed_digest}
     reservation = 0
     if operation == "publish-update":
-        if not state or state["state"] != "verified" or state["sha256"] != reviewed_digest:
+        if not state or state["state"] not in {"verified", "rolled_back"} or state["sha256"] != reviewed_digest:
             raise ValueError("The verified document changed; review again")
     else:
         evidence = document_replacement.checked(record)
@@ -992,7 +993,7 @@ def _execute_document_update(job, payload, stopping, shutdown):
                         return "running", ""
                     raise acquisition_queue.Cancelled()
                 if operation == "publish-update":
-                    if not state or state["state"] != "verified" or state["sha256"] != payload["digest"]:
+                    if not state or state["state"] not in {"verified", "rolled_back"} or state["sha256"] != payload["digest"]:
                         raise ValueError("Verified document replacement changed")
                     document_replacement.switch(SOURCE_CATALOG, record, catalog["revision"], trigger=trigger)
                     return "completed", "Update activated; publication setting preserved"
