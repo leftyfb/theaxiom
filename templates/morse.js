@@ -10,12 +10,13 @@ const MORSE = Object.freeze({
  "&":".-...",":":"---...",";":"-.-.-.","=":"-...-","+":".-.-.","-":"-....-",
  "_":"..--.-",'"':".-..-.","$":"...-..-","@":".--.-."
 });
-const REVERSE = Object.fromEntries(Object.entries(MORSE).map(([letter, code]) => [code, letter]));
+const REVERSE = Object.assign(Object.fromEntries(Object.entries(MORSE).map(([letter, code]) => [code, letter])), {"...---...": "SOS"});
 function encode(text) {
  const unknown = new Set();
- const output = text.trim().toUpperCase().split(/\s+/).filter(Boolean).map(word =>
+ const output = text.trim().split(/\s+/).filter(Boolean).map(word =>
   Array.from(word, letter => {
-   if (Object.hasOwn(MORSE, letter)) return MORSE[letter];
+   const upper = letter.toUpperCase();
+   if (Object.hasOwn(MORSE, upper)) return MORSE[upper];
    unknown.add(letter); return "[?]";
   }).join(" ")).join(" / ");
  return {output, unknown: [...unknown]};
