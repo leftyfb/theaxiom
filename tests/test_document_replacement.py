@@ -112,13 +112,23 @@ def test_manual_stage_publish_and_rollback(fixture, published):
     assert view["publication"]["enabled"] == published
     if published:
         assert http(f["route"], raw=True)[0] == f["old"]
-    action(f, "zim-replacement-activate", confirm_restart=True)
+    reviewed = view["replacement"]["review_token"]
+    http("/api/action", dict(action="zim-replacement-activate", source_id=SID,
+         revision=http("/api/sources")["revision"], confirm_restart=True,
+         expected_replacement="0" * 64), status=409)
+    assert replacement.status(f["record"]())["state"] == "verified"
+    action(f, "zim-replacement-activate", confirm_restart=True, expected_replacement=reviewed)
     assert replacement.status(f["record"]())["state"] == "activated"
     assert replacement.installed(f["record"](), verify=True)["sha256"] == sha256(f["new"]).hexdigest()
     assert publication.load().get(SID, False) == published
     if published:
         assert http(f["route"], raw=True)[0] == f["new"]
-    action(f, "zim-replacement-rollback", confirm_restart=True)
+    http("/api/action", dict(action="zim-replacement-rollback", source_id=SID,
+         revision=http("/api/sources")["revision"], confirm_restart=True,
+         expected_replacement=reviewed), status=409)
+    assert replacement.status(f["record"]())["state"] == "activated"
+    action(f, "zim-replacement-rollback", confirm_restart=True,
+           expected_replacement=replacement.status(f["record"]())["review_token"])
     assert replacement.status(f["record"]())["state"] == "rolled_back"
     assert replacement.installed(f["record"](), verify=True)["sha256"] == sha256(f["old"]).hexdigest()
     if published:
