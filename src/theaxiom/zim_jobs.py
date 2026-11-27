@@ -465,7 +465,15 @@ def rollback_token(candidate):
     return hashlib.sha256(json.dumps(candidate, sort_keys=True).encode()).hexdigest()
 
 
-def activate_candidate(sid, config, *, rollback_retry=None, activity_trigger=None):
+def candidate_review_token(candidate):
+    """Bind an operator confirmation to both immutable archive identities."""
+    if not candidate or candidate.get("state") not in {"verified", "activated", "rolled_back"}:
+        return None
+    return hashlib.sha256(json.dumps([candidate["state"], candidate["base_artifact"],
+                                     candidate["artifact"]], sort_keys=True).encode()).hexdigest()
+
+
+def activate_candidate(sid, config, *, rollback_retry=None, activity_trigger=None, expected_replacement=None):
     """Switch the serving record only after the replacement artifact is installed.
 
     The old content-addressed archive remains on disk. Candidate metadata is
@@ -478,6 +486,8 @@ def activate_candidate(sid, config, *, rollback_retry=None, activity_trigger=Non
             candidate = read_candidate(sid)
             if not candidate or candidate["configuration"] != configuration:
                 raise ValueError("No matching replacement candidate")
+            if expected_replacement is not None and candidate_review_token(candidate) != expected_replacement:
+                raise ValueError("Reviewed replacement changed; review again")
             if rollback_retry is not None:
                 previous_job, token, _ = rollback_retry
                 if (candidate["state"] != "rolled_back" or candidate.get("automatic_job") != previous_job
@@ -515,7 +525,7 @@ def activate_candidate(sid, config, *, rollback_retry=None, activity_trigger=Non
             return replacement
 
 
-def rollback_candidate(sid, config, *, reason=None):
+def rollback_candidate(sid, config, *, reason=None, expected_replacement=None):
     """Restore the previous verified serving record without removing either archive."""
     if reason is not None and (not isinstance(reason, str) or not reason
                                or len(reason) > 240 or any(ord(ch) < 32 for ch in reason)):
@@ -526,6 +536,8 @@ def rollback_candidate(sid, config, *, reason=None):
             candidate = read_candidate(sid)
             if not candidate or candidate["configuration"] != configuration:
                 raise ValueError("No matching replacement candidate")
+            if expected_replacement is not None and candidate_review_token(candidate) != expected_replacement:
+                raise ValueError("Reviewed replacement changed; review again")
             if candidate["state"] != "activated":
                 raise ValueError("Replacement has not been activated")
             current = read(sid)
