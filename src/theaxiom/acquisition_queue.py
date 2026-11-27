@@ -38,8 +38,8 @@ def database():
             ready_at REAL NOT NULL DEFAULT 0, state TEXT NOT NULL DEFAULT 'queued',
             PRIMARY KEY (source_id, digest)
         )""")
-        db.execute("""CREATE TABLE IF NOT EXISTS automatic_rearms (
-            job_id TEXT PRIMARY KEY, rollback_token TEXT NOT NULL
+        db.execute("""CREATE TABLE IF NOT EXISTS automatic_rollback_retries (
+            rollback_token TEXT PRIMARY KEY
         )""")
         yield db
 
@@ -65,12 +65,11 @@ def enqueue(jobs, available, settings):
             if job["operation"] == "automatic-update":
                 payload = job["configuration"]
                 key = (job["source_id"], payload["digest"])
-                if rearm := payload.get("rearm"):
-                    previous, token = rearm
-                    grant = db.execute("DELETE FROM automatic_rearms WHERE job_id = ? AND rollback_token = ?",
-                                       (previous, token))
-                    if not grant.rowcount:
-                        raise ValueError("Rollback authorization changed")
+                if retry := payload.get("rollback_retry"):
+                    previous, token = retry
+                    consumed = db.execute("INSERT OR IGNORE INTO automatic_rollback_retries VALUES (?)", (token,))
+                    if not consumed.rowcount:
+                        raise ValueError("This rollback already has an automatic retry")
                     result = db.execute("""UPDATE automatic_attempts SET job_id = ?, state = 'queued', ready_at = 0
                         WHERE source_id = ? AND digest = ? AND job_id = ? AND state = 'completed'""",
                         (job_id, *key, previous))
@@ -98,23 +97,7 @@ def status():
 def automatic_attempts():
     with database() as db:
         return [dict(row) for row in db.execute(
-            """SELECT source_id, digest, state, automatic_attempts.job_id, rollback_token
-               FROM automatic_attempts LEFT JOIN automatic_rearms USING (job_id)
-               ORDER BY automatic_attempts.rowid DESC""")]
-
-
-def allow_automatic_rearm(sid, digest, previous_job, token):
-    """Grant one retry without releasing or deleting the completed attempt."""
-    with database() as db:
-        db.execute("BEGIN IMMEDIATE")
-        if db.execute("SELECT 1 FROM jobs WHERE source_id = ? AND state IN (?, ?)", (sid, *PENDING)).fetchone():
-            raise ValueError("This source has a pending download")
-        result = db.execute("""INSERT OR IGNORE INTO automatic_rearms (job_id, rollback_token)
-            SELECT job_id, ? FROM automatic_attempts
-            WHERE source_id = ? AND digest = ? AND job_id = ? AND state = 'completed'""",
-            (token, sid, digest, previous_job))
-        if not result.rowcount:
-            raise ValueError("No matching completed automatic attempt awaiting authorization")
+            "SELECT source_id, digest, state, job_id FROM automatic_attempts ORDER BY rowid DESC")]
 
 
 def cancel(job_id):

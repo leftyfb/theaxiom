@@ -1530,7 +1530,7 @@ def test_automatic_replacement(app, disk, monkeypatch, outcome):
 
 
 @pytest.mark.parametrize("policy,legacy", [("automatic", False), ("scheduled", True)])
-def test_rearm_rolled_back_automatic_update(app, disk, monkeypatch, policy, legacy):
+def test_retry_rolled_back_automatic_update(app, disk, monkeypatch, policy, legacy):
     from contextlib import contextmanager
     from datetime import datetime, timezone
     import hashlib
@@ -1598,36 +1598,33 @@ def test_rearm_rolled_back_automatic_update(app, disk, monkeypatch, policy, lega
         assert candidate
         candidate.pop("rollback_id")
         jobs._save_candidate(candidate)  # Baseline on-disk format.
-    catalog = request("/api/sources")
-    status = source(catalog, sid)["automatic_update"]
-    assert "rolled back" in status["reason"]
-    assert status["digest"] == digest
-    assert not source(catalog)["automatic_update"].get("token")
+        with queue.database() as db:
+            db.execute("CREATE TABLE automatic_rearms (job_id TEXT PRIMARY KEY, rollback_token TEXT NOT NULL)")
+            db.execute("INSERT INTO automatic_rearms VALUES (?, ?)", (first["id"], "obsolete grant"))
+    catalog = mutate(request, request("/api/sources"), "edit", {"update_policy": "notify"}, sid=sid)
     admin_api._poll_automatic_updates()
     assert queue.status() == [first]
-    action = dict(action="allow-automatic-update", source_id=sid, revision=catalog["revision"],
-                  digest=digest, token=status["token"])
-    request("/api/action", action, status=403, origin="https://other.invalid")
-    request("/api/action", action | {"revision": catalog["revision"] + 1}, status=409)
-    request("/api/action", action | {"digest": "0" * 40}, status=409)
-    request("/api/action", action | {"token": "0" * 64}, status=409)
+    catalog = mutate(request, catalog, "edit", {"update_policy": policy,
+                     **({"update_window_start": "23:00", "update_window_end": "02:00"}
+                        if policy == "scheduled" else {})}, sid=sid)
+    status = source(catalog, sid)["automatic_update"]
+    assert status["policy"] == policy
+    assert not {"reason", "digest", "token"} & status.keys()
     with monkeypatch.context() as stale:
         stale.setattr(update_check_store, "MAX_AGE", -1)
-        request("/api/action", action, status=409)
+        admin_api._poll_automatic_updates()
+        assert queue.status() == [first]
     queue.enqueue([dict(source_id=sid, title=sid, operation="publish-update", configuration=config, bytes=0)],
                   settings=storage_settings.load_settings(), available=None)
     pending = queue.status()[0]
-    request("/api/action", action, status=409)
+    admin_api._poll_automatic_updates()
     assert queue.status()[0] == pending
     queue.cancel(pending["id"])
-    update_check_store.save(sid, artifact["sha256"], evidence | {"candidate_sha1": "0" * 40})
-    request("/api/action", action, status=409)
+    update_check_store.save(sid, artifact["sha256"], evidence | {"candidate_bytes": len(new) + 1})
+    admin_api._poll_automatic_updates()
+    assert len(queue.status()) == 2
     update_check_store.save(sid, artifact["sha256"], evidence)
     request("/api/automatic-update-pause", {"paused": True})
-    assert request("/api/action", action) == {"allowed": True}
-    request("/api/action", action, status=409)
-    assert queue.automatic_attempts()[0]["rollback_token"] == status["token"]
-    assert "waiting for eligibility" in source(request("/api/sources"), sid)["automatic_update"]["reason"]
     admin_api._poll_automatic_updates()
     assert jobs.read(sid) == old_job
     assert len(queue.status()) == 2
@@ -1640,6 +1637,40 @@ def test_rearm_rolled_back_automatic_update(app, disk, monkeypatch, policy, lega
     admin_api._poll_automatic_updates()
     admin_api._poll_automatic_updates()
     assert len(queue.status()) == 3
+    assert queue.automatic_attempts()[0]["job_id"] == queue.status()[0]["id"]
+    # Reopen the persisted catalog and resume a job left running on shutdown.
+    job_id = queue.status()[0]["id"]
+    shutdown = threading.Event()
+
+    def stop_worker(job, stopping, event):
+        event.set()
+        return admin_api._execute_batch_job(job, stopping, event)
+
+    assert not queue.run_next(stop_worker, shutdown)
+    assert queue.status()[0]["state"] == "running"
+    monkeypatch.setattr(admin_api, "SOURCE_CATALOG", catalog_store.CatalogStore(admin_api.SOURCE_CATALOG.path))
+    request("/api/automatic-update-pause", {"paused": True})
+    assert not queue.run_next(admin_api._execute_batch_job, threading.Event())
+    assert queue.status()[0]["state"] == "queued"
+    assert jobs.read(sid) == old_job
+    request("/api/automatic-update-pause", {"paused": False})
+    if policy == "scheduled":
+        # Change the persisted schedule while the retry is queued.
+        mutate(request, request("/api/sources"), "edit", {
+            "update_window_start": "01:00", "update_window_end": "02:00"}, sid=sid)
+        with queue.database() as db:
+            db.execute("UPDATE automatic_attempts SET ready_at = 0 WHERE job_id = ?", (job_id,))
+        assert not queue.run_next(admin_api._execute_batch_job, threading.Event())
+        assert jobs.read(sid) == old_job
+        hour = 1
+    with monkeypatch.context() as stale:
+        stale.setattr(update_check_store, "MAX_AGE", -1)
+        with queue.database() as db:
+            db.execute("UPDATE automatic_attempts SET ready_at = 0 WHERE job_id = ?", (job_id,))
+        assert not queue.run_next(admin_api._execute_batch_job, threading.Event())
+        assert jobs.read(sid) == old_job
+    with queue.database() as db:
+        db.execute("UPDATE automatic_attempts SET ready_at = 0 WHERE job_id = ?", (job_id,))
     assert queue.run_next(admin_api._execute_batch_job, threading.Event())
     second = queue.status()[0]
     assert second["state"] == "completed", second
@@ -1651,9 +1682,41 @@ def test_rearm_rolled_back_automatic_update(app, disk, monkeypatch, policy, lega
     catalog = request("/api/sources")
     request("/api/action", dict(action="zim-replacement-rollback", source_id=sid,
                                 revision=catalog["revision"], confirm_restart=True), status=202)
-    request("/api/action", action | {"revision": request("/api/sources")["revision"]}, status=409)
     admin_api._poll_automatic_updates()
-    assert len(queue.status()) == 3
+    admin_api._poll_automatic_updates()
+    assert len(queue.status()) == 4
+    assert jobs.read(sid) == old_job
+
+    def reader_failure(*args, source_id, configuration, **kwargs):
+        jobs.rollback_candidate(source_id, configuration, reason="Fixture reader unavailable")
+        return False
+
+    monkeypatch.setattr(admin_api.zim_refresh, "reconcile_activation", reader_failure)
+    assert queue.run_next(admin_api._execute_batch_job, threading.Event())
+    assert queue.status()[0]["state"] == "failed"
+    admin_api._poll_automatic_updates()
+    assert len(queue.status()) == 4
+    assert jobs.read(sid) == old_job
+    assert len(transfers) == 1
+
+    candidate = jobs.read_candidate(sid)
+    assert candidate
+    retained = candidate["artifact"]["filename"]
+    body = old[:103] + b"y"
+    newer = body + hashlib.md5(body, usedforsecurity=False).digest()
+    newer_digest = hashlib.sha1(newer, usedforsecurity=False).hexdigest()
+    newer_url = base.replace("2026-10", "2026-12")
+    update_check_store.save(sid, artifact["sha256"], evidence | {
+        "candidate_edition": "2026-12-01", "candidate_url": newer_url,
+        "candidate_sha1": newer_digest, "candidate_bytes": len(newer)})
+    admin_api._poll_automatic_updates()
+    assert len(queue.status()) == 5
+    with monkeypatch.context() as fixture:
+        fixture.setattr(jobs, "start_candidate_acquisition", lambda *a, **kw: (_ for _ in ()).throw(BlockingIOError()))
+        assert not queue.run_next(admin_api._execute_batch_job, threading.Event())
+    candidate = jobs.read_candidate(sid)
+    assert candidate and candidate["configuration"]["source_url"] == newer_url
+    assert (disk / "library/zim" / retained).read_bytes() == new
     assert jobs.read(sid) == old_job
 
 

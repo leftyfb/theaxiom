@@ -758,43 +758,34 @@ def exercise(browser, base, name, viewport, artifacts):
         context.close()
 
 
-def exercise_automatic_rearm(browser, viewport):
+def exercise_automatic_eligibility(browser, viewport):
+    """The rolled-back source shows its policy without any extra grant control."""
     from test_admin_page_template import profile, render
 
-    first = profile("devdocs", format="zim", source_url="https://publisher.example/devdocs.zim")
-    second = profile("other", format="zim", source_url="https://publisher.example/other.zim")
-    proof = {"reason": "Automatic update suppressed because this edition was rolled back.",
-             "digest": "a" * 40, "token": "b" * 64}
-    posts = []
-
-    def catalog():
-        return {"revision": 7, "sources": [dict(first, automatic_update=(proof if not posts else {
-            "reason": "Automatic update allowed again; waiting for eligibility."})), second]}
-
-    def api(route):
-        if route.request.url.endswith("/api/action"):
-            posts.append(route.request.post_data_json)
-            route.fulfill(json={"allowed": True})
-        else:
-            route.fulfill(json=catalog())
-
+    fixture = profile("devdocs", format="zim", source_url="https://publisher.example/devdocs.zim")
+    fixture.update(installed_verified=True, discovery={"method": "archive", "periodic": True},
+                   replacement={"state": "rolled_back", "sha256": "a" * 64},
+                   update_check={"state": "update_available", "evidence": "Fresh fixture evidence"})
     page = browser.new_page(viewport=viewport)
     try:
         page.route("http://fixture.local/admin/sources", lambda route: route.fulfill(
-            content_type="text/html", body=render(catalog=catalog())))
-        page.route("http://fixture.local/api/**", api)
-        page.goto("http://fixture.local/admin/sources")
-        card = page.locator('.source-card[data-source-id="devdocs"]')
-        card.locator(":scope > summary").click()
-        card.locator("details.source-technical > summary").click()
-        expect(card.locator("[data-automatic-rearm-reason]")).to_contain_text("was rolled back")
-        expect(page.locator('.source-card[data-source-id="other"] [data-automatic-rearm]')).to_be_hidden()
-        button = card.get_by_role("button", name="Allow automatic update again")
-        button.click()
-        expect(card.locator("[data-automatic-rearm-feedback]")).to_contain_text("waiting for eligibility")
-        expect(button).to_be_hidden()
-        assert posts == [{"action": "allow-automatic-update", "source_id": "devdocs", "revision": 7,
-                          "digest": proof["digest"], "token": proof["token"]}]
+            content_type="text/html", body=render([fixture])))
+        page.route("http://fixture.local/api/sources", lambda route: route.fulfill(
+            json={"revision": 0, "sources": [fixture]}))
+        for policy, upcoming in (("automatic", "Next queue poll if eligible"),
+                                 ("automatic", "Paused for new downloads"),
+                                 ("scheduled", "Next window: 2026-11-27 23:00 (server local)")):
+            fixture["automatic_update"] = {"policy": policy, "next": upcoming, "attempt": "completed"}
+            page.goto("http://fixture.local/admin/sources")
+            card = page.locator('.source-card[data-source-id="devdocs"]')
+            card.locator(":scope > summary").click()
+            details = card.locator("details.source-technical")
+            details.locator("summary").click()
+            expect(details.get_by_text(f"Update policy: {policy.capitalize()} · {upcoming}", exact=False)).to_be_visible()
+            expect(details).to_contain_text("Fresh fixture evidence")
+            expect(card.locator("[data-automatic-rearm]")).to_have_count(0)
+            expect(card.get_by_text("Allow automatic update again")).to_have_count(0)
+            expect(card).not_to_contain_text("Automatic update suppressed")
     finally:
         page.close()
 
@@ -1342,7 +1333,7 @@ def main():
                                     exercise_admin_navigation(browser, viewport)
                                     exercise_batch_update_journey(browser, viewport)
                                     exercise_history_poll(browser, viewport)
-                                    exercise_automatic_rearm(browser, viewport)
+                                    exercise_automatic_eligibility(browser, viewport)
                                     exercise_source_order(browser, viewport)
                             finally:
                                 browser.close()

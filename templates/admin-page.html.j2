@@ -1006,10 +1006,7 @@
           <p class="source-note">Update policy: {{ 'Notify only' if auto.policy == 'notify' else auto.policy|capitalize }}{% if auto.next %} · {{ auto.next }}{% endif %}{% if auto.attempt %} · Last automatic attempt: {{ auto.attempt }}{% endif %}</p>
           {% endif %}
           {% endif %}
-          {% set rearm = source.automatic_update or {} %}
-          <p class="source-note" data-automatic-rearm-reason{% if not rearm.reason %} hidden{% endif %}>{{ rearm.reason or '' }}</p>
-          <button class="button" type="button" data-automatic-rearm data-digest="{{ rearm.digest or '' }}" data-token="{{ rearm.token or '' }}"{% if not rearm.token %} hidden{% endif %}>Allow automatic update again</button>
-          <p class="source-note" role="status" data-automatic-rearm-feedback></p>
+
           <p class="source-note" data-field="update-evidence">
             {% if source.update_check %}{{ source.update_check.evidence }}{% endif %}
           </p>
@@ -2333,26 +2330,7 @@
           delete card.dataset.stagedDeletePosting;
         }
       }));
-      document.querySelectorAll('[data-automatic-rearm]').forEach(button => button.addEventListener('click', async () => {
-        if (button.disabled || button.hidden) return;
-        const card = button.closest('.source-card');
-        const feedback = card.querySelector('[data-automatic-rearm-feedback]');
-        button.disabled = true;
-        try {
-          const response = await acquisitionFetch('/api/action', {method:'POST',
-            headers:{...((typeof window !== 'undefined' && window.axiomCsrfHeaders?.()) || {}),'Content-Type':'application/json'},
-            body:JSON.stringify({source_id:card.dataset.sourceId, action:'allow-automatic-update', revision,
-              digest:button.dataset.digest, token:button.dataset.token})});
-          const result = await response.json().catch(() => ({}));
-          if (!response.ok) throw acquisitionError(response, result, 'Could not allow automatic update again');
-          button.hidden = true;
-          feedback.textContent = 'Automatic update allowed again; waiting for eligibility.';
-        } catch(error) {
-          feedback.textContent = error.message;
-        } finally {
-          button.disabled = false;
-        }
-      }));
+
       document.querySelectorAll('[data-zim-replacement]').forEach(button => button.addEventListener('click', async () => {
         if (button.disabled) return;
         const card = button.closest('.source-card');
@@ -2994,16 +2972,7 @@
           const anchorTop = anchor?.getBoundingClientRect().top;
           cards.forEach(card => {
             const source = sources.get(card.dataset.sourceId);
-            const rearm = source?.automatic_update;
-            const rearmReason = card.querySelector('[data-automatic-rearm-reason]');
-            const rearmButton = card.querySelector('[data-automatic-rearm]');
-            if (rearmReason && rearmButton && !rearmButton.disabled) {
-              rearmReason.textContent = rearm?.reason || '';
-              rearmReason.hidden = !rearm?.reason;
-              rearmButton.dataset.digest = rearm?.digest || '';
-              rearmButton.dataset.token = rearm?.token || '';
-              rearmButton.hidden = !rearm?.token;
-            }
+
             if (source && !source.adapter) {
               card.querySelector('[data-field="status"]').textContent = 'Not yet supported';
             } else if (['pdf','epub'].includes(source?.adapter)) {

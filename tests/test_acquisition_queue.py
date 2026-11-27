@@ -91,7 +91,7 @@ def test_automatic_attempt_defers_without_blocking_manual_work(monkeypatch):
     acquisition_queue.enqueue([automatic | {"configuration": {"digest": "b" * 64}}], 50, {})
 
 
-def test_rearm_consumes_only_the_matching_completed_attempt():
+def test_rollback_retry_consumes_only_the_matching_completed_attempt():
     queue = acquisition_queue
     digest = "a" * 64
     automatic = [dict(job(sid, 20), operation="automatic-update", configuration={"digest": digest})
@@ -100,21 +100,20 @@ def test_rearm_consumes_only_the_matching_completed_attempt():
     queue.cancel(cancelled)
     for outcome in ("completed", "failed", "completed"):
         assert queue.run_next(lambda *_: (outcome, ""), threading.Event())
-    for sid, jid in (("failure", failure), ("cancelled", cancelled), ("other", success), ("success", other)):
-        with pytest.raises(ValueError, match="No matching completed"):
-            queue.allow_automatic_rearm(sid, digest, jid, "rollback")
-    queue.allow_automatic_rearm("success", digest, success, "rollback")
+    def retry(sid, jid, digest=digest):
+        return dict(job(sid, 0), operation="automatic-update",
+                    configuration={"digest": digest, "rollback_retry": [jid, "rollback"]})
+
     before = {row["source_id"]: row for row in queue.automatic_attempts()}
-    retry = automatic[0] | {"configuration": {"digest": digest, "rearm": [success, "rollback"]}, "bytes": 0}
-    wrong = retry | {"configuration": {"digest": "b" * 64, "rearm": [success, "rollback"]}}
-    with pytest.raises(ValueError, match="already has an automatic attempt"):
-        queue.enqueue([wrong], None, {})
+    for wrong in (retry("failure", failure), retry("cancelled", cancelled), retry("other", success),
+                  retry("success", other), retry("success", success, "b" * 64)):
+        with pytest.raises(ValueError, match="already has an automatic attempt"):
+            queue.enqueue([wrong], None, {})
     assert {row["source_id"]: row for row in queue.automatic_attempts()} == before
-    # Connections are reopened for each operation, including after granting authorization.
-    retry_id, = queue.enqueue([retry], None, {})
+    retry_id, = queue.enqueue([retry("success", success)], None, {})
     assert queue.run_next(lambda *_: ("completed", ""), threading.Event())
-    with pytest.raises(ValueError, match="authorization changed"):
-        queue.enqueue([retry], None, {})
+    with pytest.raises(ValueError, match="already has an automatic retry"):
+        queue.enqueue([retry("success", retry_id)], None, {})
     after = {row["source_id"]: row for row in queue.automatic_attempts()}
     assert after.pop("success")["job_id"] == retry_id
     before.pop("success")

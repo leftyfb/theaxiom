@@ -117,7 +117,7 @@ def candidate_status(sid):
     return candidate
 
 
-def prepare_candidate(sid, config, *, replace_activated=False, automatic_job=None):
+def prepare_candidate(sid, config, *, replace_activated=False, automatic_job=None, supersede_rollback=None):
     """Persist replacement intent only; do not download or activate it."""
     configuration = identity(config)
     with LOCK:
@@ -134,6 +134,12 @@ def prepare_candidate(sid, config, *, replace_activated=False, automatic_job=Non
             can_replace = (previous and previous["state"] == "activated"
                            and live["artifact"] == previous["artifact"]
                            and live["configuration"] == previous["configuration"])
+            if supersede_rollback is not None:
+                if (not previous or previous["state"] != "rolled_back" or live != previous["previous_job"]
+                        or live["artifact"] != previous["base_artifact"]
+                        or configuration == previous["configuration"] or rollback_token(previous) != supersede_rollback):
+                    raise ValueError("The rollback changed; review the replacement again")
+                can_replace = True  # Keep both archives; replace only the candidate record.
             if target.is_symlink() or (target.exists() and not can_replace):
                 raise ValueError("Replacement candidate already exists")
             candidate = {"source_id": sid, "state": "prepared",
@@ -417,7 +423,7 @@ def rollback_token(candidate):
     return hashlib.sha256(json.dumps(candidate, sort_keys=True).encode()).hexdigest()
 
 
-def activate_candidate(sid, config, *, automatic_rearm=None):
+def activate_candidate(sid, config, *, rollback_retry=None):
     """Switch the serving record only after the replacement artifact is installed.
 
     The old content-addressed archive remains on disk. Candidate metadata is
@@ -429,11 +435,12 @@ def activate_candidate(sid, config, *, automatic_rearm=None):
             candidate = read_candidate(sid)
             if not candidate or candidate["configuration"] != configuration:
                 raise ValueError("No matching replacement candidate")
-            if automatic_rearm is not None:
-                previous_job, token, _ = automatic_rearm
+            if rollback_retry is not None:
+                previous_job, token, _ = rollback_retry
                 if (candidate["state"] != "rolled_back" or candidate.get("automatic_job") != previous_job
-                        or rollback_token(candidate) != token or read(sid) != candidate["previous_job"]):
-                    raise ValueError("The authorized rollback changed; activation refused")
+                        or candidate.get("error") or rollback_token(candidate) != token
+                        or read(sid) != candidate["previous_job"]):
+                    raise ValueError("The rollback changed; activation refused")
             elif candidate["state"] != "verified":
                 raise ValueError("Replacement must be verified before activation")
             live = read(sid)
@@ -449,9 +456,8 @@ def activate_candidate(sid, config, *, automatic_rearm=None):
             # Preserve the complete original serving record for rollback.
             candidate["previous_job"] = live
             candidate["state"] = "activated"
-            if automatic_rearm is not None:
-                candidate["automatic_job"] = automatic_rearm[2]
-                candidate.pop("error", None)
+            if rollback_retry is not None:
+                candidate["automatic_job"] = rollback_retry[2]
             _save_candidate(candidate)
             save(replacement)
             return replacement

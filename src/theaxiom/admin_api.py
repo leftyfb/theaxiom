@@ -488,12 +488,12 @@ def _reviewed_update_fields(update, reviewed_digest):
     return fields
 
 
-def _publisher_update_job(record, reviewed_digest, operation, *, rearm=None) -> dict[str, Any]:
+def _publisher_update_job(record, reviewed_digest, operation, *, rollback_retry=None) -> dict[str, Any]:
     sid = record["source_id"]
     config = record["configuration"]
     if config["format"] not in {"zim", "pmtiles"}:
         raise ValueError("This source has no verifiable replacement workflow")
-    current = zim_jobs.read_candidate(sid) if rearm else zim_jobs.candidate_status(sid)
+    current = zim_jobs.candidate_status(sid)
     reservation = 0
     if operation == "publish-update":
         if not current or current["state"] != "verified" or current["artifact"]["sha256"] != reviewed_digest:
@@ -508,19 +508,23 @@ def _publisher_update_job(record, reviewed_digest, operation, *, rearm=None) -> 
         if config.get("update_method") == "archive" and config.get("update_endpoint"):
             fields["update_endpoint"] = update_discovery_config.settings(
                 config | fields | {"update_endpoint": ""})["endpoint"]
-        if current and current["state"] != "activated" and not rearm:
-            raise ValueError("Resolve the existing replacement on its source card")
         live = zim_jobs.read(sid)
         if not live or live.get("state") != "completed" or not live.get("artifact"):
             raise ValueError("No installed archive to replace")
         payload = {"original": config, "fields": fields, "base": live["artifact"]}
         reservation = update["candidate_bytes"]
-        if rearm:
-            if (not current or _matching_rollback(record, current, reviewed_digest) != rearm
+        if rollback_retry:
+            if (_matching_rollback(record, current, reviewed_digest) != rollback_retry
                     or zim_jobs.identity(_queued_update_configuration(payload)) != current["configuration"]):
                 raise ValueError("Cached publisher evidence no longer matches the rolled-back edition")
-            payload["rearm"] = rearm
+            payload["rollback_retry"] = rollback_retry
             reservation = 0  # Reuse the retained, verified artifact; no acquisition.
+        elif current and current["state"] != "activated":
+            if not (operation == "automatic-update" and _restored_rollback(record, current, live)
+                    and reviewed_digest not in {_rollback_digest(current), current["artifact"]["sha256"]}
+                    and fields["source_url"] != current["configuration"]["source_url"]):
+                raise ValueError("Resolve the existing replacement on its source card")
+            payload["supersede_rollback"] = zim_jobs.rollback_token(current)
     return dict(source_id=sid, title=record["profile"]["title"], operation=operation,
                 configuration=payload, bytes=reservation)
 
@@ -546,13 +550,15 @@ def _prepare_queued_update(sid, record, revision, payload, *, automatic_job=None
     live = zim_jobs.read(sid)
     if not live or live.get("artifact") != payload["base"]:
         raise ValueError("Installed archive changed after queuing")
-    if current and current["state"] != "activated":
+    supersede = payload.get("supersede_rollback")
+    if current and current["state"] != "activated" and not supersede:
         raise ValueError("Another replacement already exists")
     if current and current["configuration"] == zim_jobs.identity(config):
         raise ValueError("The reviewed edition is already installed")
     with zim_jobs.LOCK:
         # Serialize the base check and candidate preparation with manual ZIM actions.
-        candidate = zim_jobs.prepare_candidate(sid, config, replace_activated=True, automatic_job=automatic_job)
+        candidate = zim_jobs.prepare_candidate(sid, config, replace_activated=True, automatic_job=automatic_job,
+                                               supersede_rollback=supersede)
         SOURCE_CATALOG.mutate("edit", sid, fields, revision)
     return config, candidate
 
@@ -573,41 +579,27 @@ def _automatic_digest(update):
     return update.get("candidate_sha256") or update.get("candidate_sha1") or update.get("candidate_md5")
 
 
-def _matching_rollback(record, candidate, digest):
-    if not candidate or candidate["state"] != "rolled_back" or not candidate.get("automatic_job"):
-        return None
+def _rollback_digest(candidate):
     target = candidate["configuration"]
-    previous = candidate["previous_job"]
-    live = zim_jobs.read(record["source_id"])
+    return target.get("sha256") or target.get("publisher_sha1") or target.get("publisher_md5")
+
+
+def _restored_rollback(record, candidate, live):
     # Baseline rollback restored the serving job but left catalog intent on
     # the replacement. Accept either known identity, never an unrelated edit.
-    if (digest != (target.get("sha256") or target.get("publisher_sha1") or target.get("publisher_md5"))
-            or not live or live != previous or live.get("artifact") != candidate["base_artifact"]
-            or live.get("state") != "completed" or live.get("verified") is not True
-            or zim_jobs.identity(record["configuration"]) not in (target, live["configuration"])):
-        return None
-    return candidate["automatic_job"], zim_jobs.rollback_token(candidate)
+    return (candidate and candidate["state"] == "rolled_back" and live
+            and live == candidate["previous_job"] and live.get("artifact") == candidate["base_artifact"]
+            and live.get("state") == "completed" and live.get("verified") is True
+            and zim_jobs.identity(record["configuration"]) in (candidate["configuration"], live["configuration"]))
 
 
-def _automatic_rollback_status(record, candidate, attempts, pending):
-    for attempt in attempts:
-        if attempt["state"] != "completed":
-            continue
-        digest = attempt["digest"]
-        match = _matching_rollback(record, candidate, digest)
-        if not match or match[0] != attempt["job_id"]:
-            continue
-        if attempt["rollback_token"] == match[1]:
-            return {"reason": "Automatic update allowed again; waiting for eligibility."}
-        reason = "Automatic update suppressed because this edition was rolled back."
-        if pending:
-            return {"reason": reason + " Wait for the pending job to finish."}
-        try:
-            _publisher_update_job(record, digest, "automatic-update", rearm=match)
-        except (ValueError, OSError):
-            return {"reason": reason + " Check for matching publisher metadata again."}
-        return {"reason": reason, "digest": digest, "token": match[1]}
-    return {}
+def _matching_rollback(record, candidate, digest):
+    live = zim_jobs.read(record["source_id"])
+    if (_restored_rollback(record, candidate, live) and candidate.get("automatic_job")
+            and not candidate.get("error")  # Reader-recovery rollback records carry a reason.
+            and digest == _rollback_digest(candidate)):
+        return candidate["automatic_job"], zim_jobs.rollback_token(candidate)
+    return None
 
 
 def _automatic_status(config, paused, now, attempt):
@@ -628,7 +620,7 @@ def _automatic_status(config, paused, now, attempt):
 
 def _poll_automatic_updates():
     """Use cached metadata only; offer at most one job per bounded poll."""
-    with publication.LOCK:
+    with publication.LOCK, zim_jobs.LOCK:
         if update_schedule.automatic_paused():
             return
         now = datetime.now(update_schedule.timezone())
@@ -651,17 +643,19 @@ def _poll_automatic_updates():
                 if evidence.get("state") != "update_available" or not digest:
                     continue
                 previous = attempted.get((sid, digest))
-                rearm = None
+                candidate = zim_jobs.read_candidate(sid)
+                rollback_retry = None
                 if previous:
-                    if previous["state"] != "completed" or not previous["rollback_token"]:
+                    rollback_retry = _matching_rollback(record, candidate, digest)
+                    if (previous["state"] != "completed" or not rollback_retry
+                            or previous["job_id"] != rollback_retry[0]):
                         continue
-                    rearm = previous["job_id"], previous["rollback_token"]
-                elif not zim_jobs.matches(live, config):
+                elif not zim_jobs.matches(live, config) and not _restored_rollback(record, candidate, live):
                     continue
-                job = _publisher_update_job(record, digest, "automatic-update", rearm=rearm)
+                job = _publisher_update_job(record, digest, "automatic-update", rollback_retry=rollback_retry)
                 job["configuration"]["digest"] = digest
                 settings = storage_settings.load_settings()
-                available = _batch_available(settings, {config["format"]}) if not rearm else None
+                available = _batch_available(settings, {config["format"]}) if not rollback_retry else None
                 acquisition_queue.enqueue([job], available, settings)
                 return
             except (ValueError, OSError):
@@ -674,6 +668,16 @@ def _execute_automatic_update(job, payload, stopping, shutdown):
     original = payload["original"]
     config = _queued_update_configuration(payload)
     kind = config["format"]
+    # Legacy queued jobs still have to pass current policy and rollback checks.
+    rollback_retry = payload.get("rollback_retry") or payload.get("rearm")
+
+    def same_configuration(left, right):
+        if not rollback_retry:
+            return left == right
+        policy_fields = catalog_store.UPDATE_POLICY_FIELDS
+        return ({key: value for key, value in left.items() if key not in policy_fields}
+                == {key: value for key, value in right.items() if key not in policy_fields})
+
     while not shutdown.is_set():
         with publication.LOCK:
             catalog = SOURCE_CATALOG.get()
@@ -691,10 +695,12 @@ def _execute_automatic_update(job, payload, stopping, shutdown):
             else:
                 if stopping():
                     raise acquisition_queue.Cancelled()
-                if not record or record["configuration"] not in (original, config):
+                if not record or not any(same_configuration(record["configuration"], expected)
+                                         for expected in (original, config)):
                     return "interrupted", "Source configuration or update policy changed; review manually"
+                current_config = record["configuration"]
                 if owned and candidate["state"] in {"verified", "activated"}:
-                    if record["configuration"] != config:
+                    if not same_configuration(current_config, config):
                         return "interrupted", "Source configuration changed; review manually"
                     try:
                         published = _publish_queued_update(sid, config, job["state"] == "running")
@@ -705,33 +711,36 @@ def _execute_automatic_update(job, payload, stopping, shutdown):
                     state = candidate["state"]
                     return state if state in {"failed", "cancelled"} else "interrupted", "Review replacement on the source card"
                 if (update_schedule.automatic_paused() or not update_discovery_config.window_open(
-                        original, datetime.now(update_schedule.timezone()))):
+                        current_config, datetime.now(update_schedule.timezone()))):
                     return "deferred", "Waiting for the maintenance window or automatic updates to resume"
                 settings = storage_settings.load_settings()
                 if json.loads(job["storage"]) != settings:
                     return "interrupted", "Storage settings changed; review manually"
+                if rollback_retry and (_matching_rollback(record, candidate, payload["digest"]) != tuple(rollback_retry)
+                                       or candidate["base_artifact"] != payload["base"]):
+                    raise ValueError("The rollback changed; review manually")
                 evidence = kiwix_update_discovery.cached_checked_source(sid)
+                if rollback_retry and (evidence.get("stale") or evidence.get("state") == "unable_to_determine"):
+                    return "deferred", "Waiting for current publisher evidence"
                 if _reviewed_update_fields(evidence, payload["digest"]) != {
                         key: value for key, value in payload["fields"].items() if key != "update_endpoint"}:
                     raise ValueError("Update evidence changed; review manually")
-                rearm = payload.get("rearm")
-                if not rearm and _batch_available(settings, {kind}) < job["bytes"]:
+
+                if not rollback_retry and _batch_available(settings, {kind}) < job["bytes"]:
                     return "deferred", "Waiting for free storage"
                 try:
-                    if rearm:
-                        if _matching_rollback(record, candidate, payload["digest"]) != tuple(rearm):
-                            raise ValueError("The authorized rollback changed; review manually")
-                        if record["configuration"] != config:
+                    if rollback_retry:
+                        if not same_configuration(current_config, config):
                             SOURCE_CATALOG.mutate("edit", sid, payload["fields"], catalog["revision"])
                         if stopping():
                             raise acquisition_queue.Cancelled()
                         if shutdown.is_set():
                             return "running", ""
                         if (update_schedule.automatic_paused() or not update_discovery_config.window_open(
-                                original, datetime.now(update_schedule.timezone()))):
+                                current_config, datetime.now(update_schedule.timezone()))):
                             return "deferred", "Waiting for the maintenance window or automatic updates to resume"
                         published = publication.load().get(sid, False)
-                        zim_jobs.activate_candidate(sid, config, automatic_rearm=(*rearm, job_id))
+                        zim_jobs.activate_candidate(sid, config, rollback_retry=(*rollback_retry, job_id))
                         break
                     _prepare_queued_update(sid, record, catalog["revision"], payload, automatic_job=job_id)
                     if (update_schedule.automatic_paused() or not update_discovery_config.window_open(
@@ -1817,12 +1826,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             try:
                 for attempt in acquisition_queue.automatic_attempts():
                     attempts.setdefault(attempt["source_id"], []).append(attempt)
-                pending = {job["source_id"] for job in acquisition_queue.status()
-                           if job["state"] in acquisition_queue.PENDING}
             except (OSError, sqlite3.Error):
-                pending = set(attempts)  # Do not advertise an action when queue status is unknown.
-        else:
-            pending = set()
+                pass  # Source profiles remain available when queue status is unknown.
         sources = []
         for record in catalog["sources"]:
             sid = record["source_id"]
@@ -1915,11 +1920,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             source_attempts = attempts.get(sid, [])
             automatic = _automatic_status(record["configuration"], paused, local_now,
                                           source_attempts[0]["state"] if source_attempts else "")
-            if automatic and candidate and candidate["state"] == "rolled_back":
-                try:
-                    automatic.update(_automatic_rollback_status(record, candidate, source_attempts, sid in pending))
-                except (ValueError, OSError):
-                    automatic["reason"] = "Automatic update rollback status unavailable."
+
             sources.append(dict(record, **lifecycles[sid], acquisition=_public_acquisition(job), replacement=replacement, replacement_available=replacement_available,
                                 update_check=update_check if discovery["method"] != "manual" else None,
                                 discovery=discovery, automatic_update=automatic,
@@ -2460,8 +2461,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             data = self._read_body()
             if data.get("action") == "zim-replacement-update":
                 self._download_zim_update(data)
-            elif data.get("action") == "allow-automatic-update":
-                self._allow_automatic_update(data)
+
             elif data.get("action") == "zim-replacement-delete-verified":
                 self._delete_staged_update(data)
             elif data.get("action") in {"zim-download", "zim-resume", "zim-pause", "zim-cancel", "zim-cancel-keep", "zim-restart", "zim-retry", "zim-revalidate", "zim-replacement-prepare", "zim-replacement-discard", "zim-replacement-activate", "zim-replacement-rollback", "zim-replacement-download", "zim-replacement-cancel", "zim-delete-installed"}:
@@ -2477,38 +2477,6 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         else:
             self._send_json(404, {"error": "not found"})
 
-    def _allow_automatic_update(self, data):
-        sid, digest, token = (data.get(key) for key in ("source_id", "digest", "token"))
-        if (set(data) != {"action", "source_id", "digest", "token", "revision"}
-                or not isinstance(sid, str) or not catalog_store.ID_RE.fullmatch(sid)
-                or not isinstance(digest, str) or not re.fullmatch(r"(?:[a-f0-9]{32}|[a-f0-9]{40}|[a-f0-9]{64})", digest)
-                or not isinstance(token, str) or not re.fullmatch(r"[a-f0-9]{64}", token)
-                or not self._valid_revision(data["revision"])):
-            self._send_json(400, {"error": "Re-arm requires a source ID, current revision, digest and rollback token"})
-            return
-        if not self.headers.get("Origin"):
-            self._send_json(403, {"error": "same-origin request required"})
-            return
-        with publication.LOCK, zim_jobs.LOCK:
-            try:
-                catalog = SOURCE_CATALOG.get()
-                if data["revision"] != catalog["revision"]:
-                    raise ValueError("Catalog changed. Reload and review the rollback again.")
-                record = next((row for row in catalog["sources"] if row["source_id"] == sid), None)
-                if not record or update_discovery_config.policy(record["configuration"])[0] not in update_discovery_config.UNATTENDED:
-                    raise ValueError("Source does not allow unattended updates")
-                match = _matching_rollback(record, zim_jobs.read_candidate(sid), digest)
-                if not match or match[1] != token:
-                    raise ValueError("Rollback evidence changed. Reload and review it again.")
-                _publisher_update_job(record, digest, "automatic-update", rearm=match)
-                acquisition_queue.allow_automatic_rearm(sid, digest, *match)
-            except ValueError as exc:
-                self._send_json(409, {"error": str(exc)})
-                return
-            except (OSError, sqlite3.Error):
-                self._send_json(503, {"error": "Could not save the automatic update authorization"})
-                return
-        self._send_json(200, {"allowed": True})
 
     def _check_storage_change(self):
         """Check local acquisition records without probing the managed mount."""

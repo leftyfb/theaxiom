@@ -41,6 +41,7 @@ material, or mutate operator publication state.
 - Groupings and Settings navigation
 - Horizontal overflow checks on public home/search and admin pages at all three administrator viewport widths
 - Login failure isolation, cross-browser session isolation, multi-tab logout revocation, and session invalidation
+- A rolled-back source shows the Automatic or Scheduled policy, next eligibility or pause status, and current update evidence without an extra authorization button or hold message.
 - Uncaught browser JavaScript errors
 
 These are **behavioral regression checks**, not screenshot-golden tests.
