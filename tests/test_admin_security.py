@@ -198,6 +198,14 @@ class HTTPAuthTests(unittest.TestCase):
         for route in ("/api/tools/morse/unknown", "/api/tools/morse.js?bad=1"):
             self.assertEqual(self.request(route)[0], 401)
         self.assertEqual(self.request("/api/tools/morse", method="POST")[0], 401)
+        for mode in ("", "&mode=progressive"):
+            status, _, body = self.request("/search?q=Morse" + mode)
+            self.assertEqual(status, 200)
+            self.assertIn(b'href="/api/tools/morse"', body)
+        status, _, body = self.request("/search?q=water")
+        self.assertEqual(status, 200)
+        self.assertNotIn(b'href="/api/tools/morse"', body)
+
 
     def test_brand_icons_load_without_admin_credentials(self):
         """Browser favicon requests must not trigger an admin password prompt."""
