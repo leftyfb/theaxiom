@@ -48,7 +48,7 @@ def check_installed_document(record, *, probe=None, persist=True, installed_only
                 result["evidence"] = (diagnostic["evidence"] if diagnostic["state"] == "failed"
                                       else "Endpoint reachable; no capture-time ETag for this exact URL")
             if persist:
-                update_check_store.save(sid, cache_id, result, recheck_token=recheck_token)
+                update_check_store.save(sid, cache_id, result, **({"recheck_token": recheck_token} if recheck_token is not None else {}))
             return result
         probe = pdf_transport.probe_document_metadata if probe is None else probe
         try:
@@ -71,7 +71,7 @@ def check_installed_document(record, *, probe=None, persist=True, installed_only
         except (OSError, ValueError):
             result = dict(UNKNOWN, evidence="Publisher metadata request failed HTTPS, public address, response, or timeout checks")
         if persist:
-            update_check_store.save(sid, cache_id, result, recheck_token=recheck_token)
+            update_check_store.save(sid, cache_id, result, **({"recheck_token": recheck_token} if recheck_token is not None else {}))
         return result
     except (OSError, ValueError, TypeError, KeyError):
         return dict(UNKNOWN)
