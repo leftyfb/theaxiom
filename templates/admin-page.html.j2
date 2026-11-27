@@ -3100,7 +3100,7 @@
               const installed = source?.installed_verified === true ? source.artifact?.bytes : null;
               const estimate = Number.isSafeInteger(incoming) && incoming > 0 ?
                 ' · Estimated transfer and staging: ' + size(incoming) +
-                ' · Installed and candidate files together: ' +
+                (update.candidate_token ? ' · Installed and candidate files together: ' : ' · Installed and candidate archives together: ') +
                 (Number.isSafeInteger(installed) && installed > 0 && Number.isSafeInteger(installed + incoming) ?
                   size(installed + incoming) : 'unknown') : '';
               updateDetails.textContent = hasUpdate
