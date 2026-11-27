@@ -758,6 +758,47 @@ def exercise(browser, base, name, viewport, artifacts):
         context.close()
 
 
+def exercise_automatic_rearm(browser, viewport):
+    from test_admin_page_template import profile, render
+
+    first = profile("devdocs", format="zim", source_url="https://publisher.example/devdocs.zim")
+    second = profile("other", format="zim", source_url="https://publisher.example/other.zim")
+    proof = {"reason": "Automatic update suppressed because this edition was rolled back.",
+             "digest": "a" * 40, "token": "b" * 64}
+    posts = []
+
+    def catalog():
+        return {"revision": 7, "sources": [dict(first, automatic_update=(proof if not posts else {
+            "reason": "Automatic update allowed again; waiting for eligibility."})), second]}
+
+    def api(route):
+        if route.request.url.endswith("/api/action"):
+            posts.append(route.request.post_data_json)
+            route.fulfill(json={"allowed": True})
+        else:
+            route.fulfill(json=catalog())
+
+    page = browser.new_page(viewport=viewport)
+    try:
+        page.route("http://fixture.local/admin/sources", lambda route: route.fulfill(
+            content_type="text/html", body=render(catalog=catalog())))
+        page.route("http://fixture.local/api/**", api)
+        page.goto("http://fixture.local/admin/sources")
+        card = page.locator('.source-card[data-source-id="devdocs"]')
+        card.locator(":scope > summary").click()
+        card.locator("details.source-technical > summary").click()
+        expect(card.locator("[data-automatic-rearm-reason]")).to_contain_text("was rolled back")
+        expect(page.locator('.source-card[data-source-id="other"] [data-automatic-rearm]')).to_be_hidden()
+        button = card.get_by_role("button", name="Allow automatic update again")
+        button.click()
+        expect(card.locator("[data-automatic-rearm-feedback]")).to_contain_text("waiting for eligibility")
+        expect(button).to_be_hidden()
+        assert posts == [{"action": "allow-automatic-update", "source_id": "devdocs", "revision": 7,
+                          "digest": proof["digest"], "token": proof["token"]}]
+    finally:
+        page.close()
+
+
 def exercise_history_poll(browser, viewport):
     """Use the real source-card DOM and poller with two independent timelines."""
     from test_admin_page_template import profile, render
@@ -1301,6 +1342,7 @@ def main():
                                     exercise_admin_navigation(browser, viewport)
                                     exercise_batch_update_journey(browser, viewport)
                                     exercise_history_poll(browser, viewport)
+                                    exercise_automatic_rearm(browser, viewport)
                                     exercise_source_order(browser, viewport)
                             finally:
                                 browser.close()

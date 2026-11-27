@@ -1529,6 +1529,134 @@ def test_automatic_replacement(app, disk, monkeypatch, outcome):
     assert len(queue.status()) == 1
 
 
+@pytest.mark.parametrize("policy,legacy", [("automatic", False), ("scheduled", True)])
+def test_rearm_rolled_back_automatic_update(app, disk, monkeypatch, policy, legacy):
+    from contextlib import contextmanager
+    from datetime import datetime, timezone
+    import hashlib
+    from io import BytesIO
+    from theaxiom import acquisition_queue as queue, update_check_store, zim_jobs as jobs, zim_source as archives
+
+    request, _ = app
+    sid = "devdocs"
+    base = "https://archive.org/download/devdocs/devdocs_2026-10-01.zim"
+    old = fixture_bytes()
+    body = old[:103] + b"x"
+    new = body + hashlib.md5(body, usedforsecurity=False).digest()
+    digest = hashlib.sha1(new, usedforsecurity=False).hexdigest()
+    catalog = mutate(request, request("/api/sources"), "add", {
+        "title": "DevDocs", "format": "zim", "source_url": base, "update_method": "archive",
+        "publisher_sha1": hashlib.sha1(old, usedforsecurity=False).hexdigest(), "update_policy": policy,
+        **({"update_window_start": "23:00", "update_window_end": "02:00"} if policy == "scheduled" else {}),
+    }, sid=sid)
+    config = source(catalog, sid)["configuration"]
+    artifact = archives.install_stream(sid, config, BytesIO(old))
+    old_job = dict(source_id=sid, state="completed", active=False, verified=True,
+                   configuration=jobs.identity(config), artifact=artifact)
+    jobs.save(old_job)
+    evidence = dict(state="update_available", evidence="fixture", installed_edition="2026-10-01",
+                    candidate_edition="2026-11-01", candidate_url=base.replace("2026-10", "2026-11"),
+                    candidate_sha1=digest, candidate_bytes=len(new))
+    update_check_store.save(sid, artifact["sha256"], evidence)
+    hour = 23
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 11, 26, hour, 30, tzinfo=tz)
+
+    monkeypatch.setattr(admin_api, "datetime", Clock)
+    monkeypatch.setattr(admin_api.update_schedule, "timezone", lambda: timezone.utc)
+    monkeypatch.setattr(admin_api, "_batch_available", lambda *_: 10_000)
+    monkeypatch.setattr(admin_api.zim_refresh, "reconcile_activation", lambda *a, **kw: True)
+    monkeypatch.setattr(admin_api.zim_refresh, "schedule", lambda *a, **kw: None)
+    transfers = []
+
+    class Stream(BytesIO):
+        total_size = len(new)
+        etag = '"fixture"'
+        last_modified = None
+
+    @contextmanager
+    def download(*args, **kwargs):
+        transfers.append(args)
+        assert len(transfers) == 1
+        yield Stream(new)
+
+    monkeypatch.setattr(archives.pdf_transport, "open_pdf", download)
+    admin_api._poll_automatic_updates()
+    assert queue.run_next(admin_api._execute_batch_job, threading.Event()), queue.status()
+    first, = queue.status()
+    assert first["state"] == "completed", first
+    catalog = request("/api/sources")
+    publication.save(sid, True)
+    request("/api/action", dict(action="zim-replacement-rollback", source_id=sid,
+                                revision=catalog["revision"], confirm_restart=True), status=202)
+    assert jobs.read(sid) == old_job
+    if legacy:
+        candidate = jobs.read_candidate(sid)
+        assert candidate
+        candidate.pop("rollback_id")
+        jobs._save_candidate(candidate)  # Baseline on-disk format.
+    catalog = request("/api/sources")
+    status = source(catalog, sid)["automatic_update"]
+    assert "rolled back" in status["reason"]
+    assert status["digest"] == digest
+    assert not source(catalog)["automatic_update"].get("token")
+    admin_api._poll_automatic_updates()
+    assert queue.status() == [first]
+    action = dict(action="allow-automatic-update", source_id=sid, revision=catalog["revision"],
+                  digest=digest, token=status["token"])
+    request("/api/action", action, status=403, origin="https://other.invalid")
+    request("/api/action", action | {"revision": catalog["revision"] + 1}, status=409)
+    request("/api/action", action | {"digest": "0" * 40}, status=409)
+    request("/api/action", action | {"token": "0" * 64}, status=409)
+    with monkeypatch.context() as stale:
+        stale.setattr(update_check_store, "MAX_AGE", -1)
+        request("/api/action", action, status=409)
+    queue.enqueue([dict(source_id=sid, title=sid, operation="publish-update", configuration=config, bytes=0)],
+                  settings=storage_settings.load_settings(), available=None)
+    pending = queue.status()[0]
+    request("/api/action", action, status=409)
+    assert queue.status()[0] == pending
+    queue.cancel(pending["id"])
+    update_check_store.save(sid, artifact["sha256"], evidence | {"candidate_sha1": "0" * 40})
+    request("/api/action", action, status=409)
+    update_check_store.save(sid, artifact["sha256"], evidence)
+    request("/api/automatic-update-pause", {"paused": True})
+    assert request("/api/action", action) == {"allowed": True}
+    request("/api/action", action, status=409)
+    assert queue.automatic_attempts()[0]["rollback_token"] == status["token"]
+    assert "waiting for eligibility" in source(request("/api/sources"), sid)["automatic_update"]["reason"]
+    admin_api._poll_automatic_updates()
+    assert jobs.read(sid) == old_job
+    assert len(queue.status()) == 2
+    request("/api/automatic-update-pause", {"paused": False})
+    if policy == "scheduled":
+        hour = 2
+        admin_api._poll_automatic_updates()
+        assert len(queue.status()) == 2
+        hour = 0
+    admin_api._poll_automatic_updates()
+    admin_api._poll_automatic_updates()
+    assert len(queue.status()) == 3
+    assert queue.run_next(admin_api._execute_batch_job, threading.Event())
+    second = queue.status()[0]
+    assert second["state"] == "completed", second
+    live = jobs.read(sid)
+    assert live and live["artifact"]["sha256"] == hashlib.sha256(new).hexdigest()
+    assert len(transfers) == 1
+    assert publication.load()[sid] is True
+    assert (disk / "library/zim" / artifact["filename"]).read_bytes() == old
+    catalog = request("/api/sources")
+    request("/api/action", dict(action="zim-replacement-rollback", source_id=sid,
+                                revision=catalog["revision"], confirm_restart=True), status=202)
+    request("/api/action", action | {"revision": request("/api/sources")["revision"]}, status=409)
+    admin_api._poll_automatic_updates()
+    assert len(queue.status()) == 3
+    assert jobs.read(sid) == old_job
+
+
 def test_global_search_opt_out_preserves_library_entry(app, monkeypatch):
     request, _ = app
     catalog = request("/api/sources")

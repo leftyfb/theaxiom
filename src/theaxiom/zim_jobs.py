@@ -1,6 +1,7 @@
 """Durable ZIM jobs with concurrent source acquisition, explicit controls, and restart recovery."""
 from contextlib import contextmanager
 import fcntl
+import hashlib
 import json
 import os
 import re
@@ -8,6 +9,7 @@ from pathlib import Path
 import tempfile
 import threading
 import time
+from uuid import uuid4
 
 from . import acquisition_queue, catalog_store, storage_settings, zim_source, pdf_source, pdf_transport
 
@@ -411,7 +413,11 @@ def cancel_candidate_acquisition(sid, config):
         return {"accepted": True, "source_id": sid, "state": "cancelling"}
 
 
-def activate_candidate(sid, config):
+def rollback_token(candidate):
+    return hashlib.sha256(json.dumps(candidate, sort_keys=True).encode()).hexdigest()
+
+
+def activate_candidate(sid, config, *, automatic_rearm=None):
     """Switch the serving record only after the replacement artifact is installed.
 
     The old content-addressed archive remains on disk. Candidate metadata is
@@ -423,7 +429,12 @@ def activate_candidate(sid, config):
             candidate = read_candidate(sid)
             if not candidate or candidate["configuration"] != configuration:
                 raise ValueError("No matching replacement candidate")
-            if candidate["state"] != "verified":
+            if automatic_rearm is not None:
+                previous_job, token, _ = automatic_rearm
+                if (candidate["state"] != "rolled_back" or candidate.get("automatic_job") != previous_job
+                        or rollback_token(candidate) != token or read(sid) != candidate["previous_job"]):
+                    raise ValueError("The authorized rollback changed; activation refused")
+            elif candidate["state"] != "verified":
                 raise ValueError("Replacement must be verified before activation")
             live = read(sid)
             if (not live or live.get("state") != "completed"
@@ -438,6 +449,9 @@ def activate_candidate(sid, config):
             # Preserve the complete original serving record for rollback.
             candidate["previous_job"] = live
             candidate["state"] = "activated"
+            if automatic_rearm is not None:
+                candidate["automatic_job"] = automatic_rearm[2]
+                candidate.pop("error", None)
             _save_candidate(candidate)
             save(replacement)
             return replacement
@@ -469,6 +483,7 @@ def rollback_candidate(sid, config, *, reason=None):
             # Persist rollback intent before changing the serving record.
             # A crash between writes must never reactivate the replacement.
             candidate["state"] = "rolled_back"
+            candidate["rollback_id"] = uuid4().hex
             if reason is not None:
                 candidate["error"] = reason
             _save_candidate(candidate)

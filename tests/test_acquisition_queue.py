@@ -89,3 +89,33 @@ def test_automatic_attempt_defers_without_blocking_manual_work(monkeypatch):
         acquisition_queue.enqueue([automatic], 50, {})
     assert acquisition_queue.automatic_attempts()[0]["state"] == "failed"
     acquisition_queue.enqueue([automatic | {"configuration": {"digest": "b" * 64}}], 50, {})
+
+
+def test_rearm_consumes_only_the_matching_completed_attempt():
+    queue = acquisition_queue
+    digest = "a" * 64
+    automatic = [dict(job(sid, 20), operation="automatic-update", configuration={"digest": digest})
+                 for sid in ("success", "failure", "cancelled", "other")]
+    success, failure, cancelled, other = queue.enqueue(automatic, 100, {})
+    queue.cancel(cancelled)
+    for outcome in ("completed", "failed", "completed"):
+        assert queue.run_next(lambda *_: (outcome, ""), threading.Event())
+    for sid, jid in (("failure", failure), ("cancelled", cancelled), ("other", success), ("success", other)):
+        with pytest.raises(ValueError, match="No matching completed"):
+            queue.allow_automatic_rearm(sid, digest, jid, "rollback")
+    queue.allow_automatic_rearm("success", digest, success, "rollback")
+    before = {row["source_id"]: row for row in queue.automatic_attempts()}
+    retry = automatic[0] | {"configuration": {"digest": digest, "rearm": [success, "rollback"]}, "bytes": 0}
+    wrong = retry | {"configuration": {"digest": "b" * 64, "rearm": [success, "rollback"]}}
+    with pytest.raises(ValueError, match="already has an automatic attempt"):
+        queue.enqueue([wrong], None, {})
+    assert {row["source_id"]: row for row in queue.automatic_attempts()} == before
+    # Connections are reopened for each operation, including after granting authorization.
+    retry_id, = queue.enqueue([retry], None, {})
+    assert queue.run_next(lambda *_: ("completed", ""), threading.Event())
+    with pytest.raises(ValueError, match="authorization changed"):
+        queue.enqueue([retry], None, {})
+    after = {row["source_id"]: row for row in queue.automatic_attempts()}
+    assert after.pop("success")["job_id"] == retry_id
+    before.pop("success")
+    assert before == after
