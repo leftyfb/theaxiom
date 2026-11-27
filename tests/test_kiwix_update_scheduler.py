@@ -107,8 +107,13 @@ def test_policy_defaults_and_local_window():
     assert discovery.window_open(scheduled, midnight)
     assert discovery.window_open(scheduled, midnight.replace(hour=23))
     assert not discovery.window_open(scheduled, midnight.replace(hour=2))
-    with pytest.raises(ValueError, match="ZIM or PMTiles"):
+    with pytest.raises(ValueError, match="exact configured HTTPS URL"):
         discovery.policy({"format": "epub", "update_policy": "automatic"})
+    assert discovery.settings({"format": "epub", "source_url": "https://publisher.org/book.epub",
+                               "update_policy": "automatic"})["periodic"]
+    with pytest.raises(ValueError, match="exact configured HTTPS URL"):
+        discovery.settings({"format": "pdf", "source_url": "https://publisher.org/book.pdf",
+                            "update_endpoint": "https://publisher.org/other.pdf", "update_policy": "automatic"})
 
 
 def test_sweep_attempts_every_enabled_source_with_bounded_parallelism(monkeypatch):
