@@ -17,4 +17,4 @@
 <nav aria-label="Chapter navigation">{% if chapter > 0 %}<a href="{{ base }}/chapter/{{ chapter-1 }}?size={{ size }}" data-chapter-nav="previous">← Previous</a>{% endif %}<span>Chapter {{ chapter+1 }} of {{ labels|length }}</span>{% if chapter+1 < labels|length %}<a href="{{ base }}/chapter/{{ chapter+1 }}?size={{ size }}" data-chapter-nav="next">Next →</a>{% endif %}</nav>
 <article id="chapter-content" tabindex="-1" class="book {{ size }}">{{ content|safe }}</article>
 <nav aria-label="Continue reading">{% if chapter > 0 %}<a href="{{ base }}/chapter/{{ chapter-1 }}?size={{ size }}" data-chapter-nav="previous">← Previous</a>{% endif %}{% if chapter+1 < labels|length %}<a href="{{ base }}/chapter/{{ chapter+1 }}?size={{ size }}" data-chapter-nav="next">Next →</a>{% endif %}<a href="/">Return to library</a></nav>
-</main></body></html>
+</main><script src="/api/update-notifications.js"></script></body></html>

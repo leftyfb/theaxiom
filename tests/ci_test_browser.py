@@ -1197,6 +1197,56 @@ def exercise_admin_navigation(browser, viewport):
 
 
 
+def exercise_update_notifications(browser, viewport):
+    import time
+    script = (Path(__file__).parents[1] / "templates/update-notifications.js").read_text()
+    page = browser.new_page(viewport=viewport)
+    pending = []
+    claimed = []
+    acknowledged = []
+    def api(route):
+        payload = route.request.post_data_json
+        if payload["action"] == "claim":
+            item = next((item for item in pending if item not in claimed), None)
+            if item:
+                claimed.append(item)
+            route.fulfill(json={"notification": item})
+        else:
+            acknowledged.append(payload["event_id"])
+            route.fulfill(json={"acknowledged": True})
+    try:
+        page.route("http://fixture.local/", lambda route: route.fulfill(
+            content_type="text/html", body='<button id="target">Still interactive</button><script src="/api/update-notifications.js"></script>'))
+        page.route("http://fixture.local/api/update-notifications.js", lambda route: route.fulfill(
+            content_type="text/javascript", body=script))
+        page.route("http://fixture.local/api/update-notifications", api)
+        page.goto("http://fixture.local/")
+        toast = page.locator("#axiom-update-toast")
+        expect(toast).to_be_hidden()
+        pending.extend([dict(event_id="first", claim="lease-1", name="First source", edition="2026-11"),
+                        dict(event_id="second", claim="lease-2", name="Second source", edition=None)])
+        expect(toast).to_contain_text("First source updated to 2026-11.", timeout=12000)
+        t = time.monotonic()
+        page.locator("#target").click()
+        page.wait_for_timeout(4000)
+        expect(toast).to_contain_text("First source updated")
+        assert not acknowledged
+        expect(toast).to_contain_text("Second source updated.", timeout=12000)
+        assert time.monotonic() - t >= 4.5
+        assert acknowledged == ["first"]
+        page.get_by_role("button", name="Dismiss update notification").click()
+        expect(toast).to_be_hidden()
+        deadline = time.monotonic() + 5
+        while len(acknowledged) < 2 and time.monotonic() < deadline:
+            page.wait_for_timeout(50)
+        assert acknowledged == ["first", "second"]
+        page.reload()
+        expect(toast).to_be_hidden()
+        assert len(claimed) == 2
+    finally:
+        page.close()
+
+
 def exercise_source_activity(browser, viewport):
     from test_admin_page_template import render
 
@@ -1453,6 +1503,7 @@ def main():
                                         timed_case("desktop-journey", name, exercise, browser,
                                                    f"http://{host}:{port}", name, viewport, artifacts)
                                         timed_case("source-actions", name, exercise_source_actions, browser, viewport)
+                                        timed_case("update-notifications", name, exercise_update_notifications, browser, viewport)
                                     else:
                                         mobile_page = browser.new_page(viewport=viewport, is_mobile=True, has_touch=True)
                                         try:

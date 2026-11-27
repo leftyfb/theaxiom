@@ -171,3 +171,18 @@ periodic checks. Existing maintenance windows and archive bytes are retained.
 Activity records update discovery and queue transitions independently from
 completed activations. Repeated deferrals with the same reason are deduplicated
 per job; only fixed, sanitized reason categories are retained.
+
+### Completed-update notifications
+
+The library and admin surfaces poll for successful activation events from
+the private Activity journal. A notification is claimed for 30 seconds and
+acknowledged only after a full five-second visible toast or explicit dismissal.
+Delivery is once per Axiom instance (one visitor/tab, not once per account);
+unacknowledged claims replay after the lease expires, including after a restart
+or closing a tab before display finishes. Acknowledged events are not replayed;
+historical successful activation events already in Activity are initially eligible.
+Public visitors can receive only currently published, reader-ready source
+notifications, using public display names. Admin-only events remain pending
+for an authenticated admin. No URLs, errors, policy or other private activity
+details are returned by the notification endpoint. Unacknowledged update
+events are excluded from journal retention pruning.

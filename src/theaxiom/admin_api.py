@@ -16,7 +16,7 @@ import sqlite3
 import subprocess
 import threading
 import time
-from contextlib import ExitStack
+from contextlib import ExitStack, nullcontext
 from dataclasses import asdict
 from datetime import datetime
 from urllib.parse import parse_qs, urlsplit, unquote
@@ -1047,13 +1047,29 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             self._send_json(403, {"error": "cross-origin request rejected"})
             return False
         public_paths = set(PUBLIC_ICON_PATHS) | {
-            "/", "/index.html", "/health", "/health/", "/api/pdf-reader.mjs"}
+            "/", "/index.html", "/health", "/health/", "/api/pdf-reader.mjs", "/api/update-notifications.js"}
         if not post and (self.path in public_paths or self.path == "/admin/login"
                          or self.path.split("?", 1)[0] in {"/", "/index.html", "/search"}
                          or pdf_source.ROUTE.fullmatch(self.path) or epub_source.ROUTE.fullmatch(self.path)
                          or pmtiles_source.ROUTE.fullmatch(self.path) or _map_asset_path(self.path)
                          or ZIM_READER_ROUTE.fullmatch(self.path) or PDFJS_ASSET.fullmatch(self.path)
                          or self.path == "/internal/publication/zim"):
+            return True
+
+        if post and self.path == "/api/update-notifications":
+            scheme = self.headers.get("X-Forwarded-Proto", "") if config.proxied else "http"
+            if (scheme not in {"http", "https"} or
+                    self.headers.get_all("Origin", []) != [scheme + "://" + hosts[0].lower()]):
+                self._send_json(403, {"error": "same-origin request required"})
+                return False
+            if self.headers.get_content_type() != "application/json":
+                self._send_json(415, {"error": "application/json required"})
+                return False
+            lengths = self.headers.get_all("Content-Length", [])
+            if (len(lengths) != 1 or not re.fullmatch(r"[0-9]{1,4}", lengths[0])
+                    or int(lengths[0]) > 1024 or self.headers.get("Transfer-Encoding")):
+                self._send_json(400, {"error": "invalid request length"})
+                return False
             return True
 
         # The login submission is public, but still passes all content-type,
@@ -1230,8 +1246,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(payload)
             return
-        if self.path == "/api/pdf-reader.mjs":
-            body = (ADMIN_TEMPLATE_DIR / "pdf-reader.mjs").read_bytes()
+        if self.path in {"/api/pdf-reader.mjs", "/api/update-notifications.js"}:
+            body = (ADMIN_TEMPLATE_DIR / self.path.rsplit("/", 1)[-1]).read_bytes()
             self.send_response(200)
             self.send_header("Content-Type", "text/javascript")
             self.send_header("Content-Length", str(len(body)))
@@ -2177,9 +2193,41 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
+    def _update_notifications(self, *, public):
+        data = self._read_body()
+        action = data.get("action")
+        if not (action == "claim" and set(data) == {"action"} or
+                action == "ack" and set(data) == {"action", "event_id", "claim"} and
+                all(isinstance(data[key], str) and re.fullmatch(r"[a-f0-9]{32,64}", data[key])
+                    for key in ("event_id", "claim"))):
+            self._send_json(400, {"error": "Invalid notification request"})
+            return
+        try:
+            with publication.LOCK if public else nullcontext():
+                allowed = None
+                if public:
+                    ids = {sid for sid, enabled in publication.load().items() if enabled}
+                    if action == "claim" and not source_activity.has_update_notification(ids):
+                        self._send_json(200, {"notification": None})
+                        return
+                    # Only sources actually visible in the public library, not
+                    # unpublished, invalid, or reader-unready source profiles.
+                    allowed = {row["source_id"]: row["name"] for row in self._public_library()[0]}
+                if action == "claim":
+                    payload = {"notification": source_activity.claim_update_notification(allowed)}
+                else:
+                    payload = {"acknowledged": source_activity.acknowledge_update_notification(
+                        data["event_id"], data["claim"], allowed)}
+            self._send_json(200, payload)
+        except (OSError, sqlite3.Error, ValueError):
+            self._send_json(503, {"error": "Update notifications unavailable"})
+
     def do_POST(self) -> None:  # noqa: N802 - http.server convention
         global ENDPOINT_TEST_NEXT
         if not self._guard(post=True):
+            return
+        if self.path in {"/api/update-notifications", "/api/admin/update-notifications"}:
+            self._update_notifications(public=self.path == "/api/update-notifications")
             return
         if self.path in {"/admin/login", "/api/admin/login"}:
             self._sign_in_admin(form_login=self.path == "/admin/login")

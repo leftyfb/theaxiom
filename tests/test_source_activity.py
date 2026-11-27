@@ -99,3 +99,46 @@ def test_update_queue_history_deferral_deduplicates_and_excludes_error_text(tmp_
     assert "private-secret-fixture" not in str(source_activity.query())
     assert not source_activity.query(action="updated")["events"]
     assert jid
+
+def test_update_notifications_replay_lease_ack_and_history(tmp_path, monkeypatch):
+    monkeypatch.setattr(storage_settings, "SETTINGS_PATH", tmp_path / "storage.json")
+    now = [100.0]
+    monkeypatch.setattr(source_activity.time, "time", lambda: now[0])
+    for action in ("update_discovered", "staged", "rolled_back", "update_failed"):
+        source_activity.record("public", action, name="Public")
+    for sid, trigger in (("private", "automatic"), ("public", "scheduled"), ("other", "batch"), ("manual", "manual")):
+        source_activity.record(sid, "updated", name=sid, new_edition="2", trigger=trigger)
+    source_activity.record("public", "updated", name="Public", outcome="failed")
+    assert source_activity.has_update_notification({"public"})
+    allowed = {"public": "Public"}
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        notifications = list(pool.map(lambda _: source_activity.claim_update_notification(allowed), range(4)))
+    claimed, = [item for item in notifications if item]
+    assert claimed["name"] == "Public" and claimed["edition"] == "2"
+    assert source_activity.claim_update_notification(allowed) is None
+    # A restarted process or closed browser never acknowledges its lease.
+    now[0] += source_activity.NOTIFICATION_LEASE + 1
+    replay = source_activity.claim_update_notification(allowed)
+    assert replay["event_id"] == claimed["event_id"] and replay["claim"] != claimed["claim"]
+    assert not source_activity.acknowledge_update_notification(claimed["event_id"], claimed["claim"])
+    assert not source_activity.acknowledge_update_notification(replay["event_id"], replay["claim"], {})
+    assert source_activity.acknowledge_update_notification(replay["event_id"], replay["claim"], allowed)
+    assert source_activity.acknowledge_update_notification(replay["event_id"], replay["claim"], allowed)
+    assert not source_activity.has_update_notification(allowed)
+    for name in ("private", "other", "manual"):
+        item = source_activity.claim_update_notification()
+        assert item["name"] == name
+        assert source_activity.acknowledge_update_notification(item["event_id"], item["claim"])
+    assert source_activity.claim_update_notification() is None
+    assert len(source_activity.query(action="updated")["events"]) == 5
+
+
+def test_unseen_notifications_survive_activity_retention(tmp_path, monkeypatch):
+    monkeypatch.setattr(storage_settings, "SETTINGS_PATH", tmp_path / "storage.json")
+    source_activity.record("fixture", "updated", name="Fixture")
+    for _ in range(4):
+        source_activity.record("fixture", "edited", name="Fixture")
+    source_activity.acknowledge("other-consumer", 999, retain=1)
+    item = source_activity.claim_update_notification()
+    assert item and item["name"] == "Fixture"
+    assert source_activity.acknowledge_update_notification(item["event_id"], item["claim"])

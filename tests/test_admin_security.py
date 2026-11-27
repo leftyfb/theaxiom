@@ -435,6 +435,31 @@ class HTTPAuthTests(unittest.TestCase):
             self.assertNotIn(b'id="storage-form"', body)
             self.assertNotIn(b'id="acquisition-monitor-script"', body)
 
+    def test_notification_scope_and_same_origin(self):
+        from theaxiom import source_activity, storage_settings
+        with tempfile.TemporaryDirectory() as root, patch.object(storage_settings, "SETTINGS_PATH", Path(root) / "storage.json"):
+            source_activity.record("private", "updated", name="Private secret", new_edition="1")
+            source_activity.record("public", "updated", name="Public historical name", new_edition="2")
+            headers = {"Content-Type": "application/json", "Origin": "http://" + self.host}
+            claim = json.dumps({"action": "claim"})
+            self.assertEqual(self.request("/api/admin/update-notifications", "POST", headers=headers, body=claim)[0], 401)
+            self.assertEqual(self.request("/api/update-notifications", "POST", headers={"Content-Type":"application/json"}, body=claim)[0], 403)
+            self.assertEqual(self.request("/api/update-notifications", "POST", headers=headers | {"Origin":"http://other.invalid"}, body=claim)[0], 403)
+            with (patch.object(admin_api.publication, "load", return_value={"public": True}),
+                  patch.object(admin_api.AdminAPIHandler, "_public_library", return_value=([{"source_id":"public", "name":"Public"}], []))):
+                code, _, body = self.request("/api/update-notifications", "POST", headers=headers, body=claim)
+                self.assertEqual(code, 200)
+                item = json.loads(body)["notification"]
+                self.assertEqual(item["name"], "Public")
+                self.assertNotIn(b"private", body.lower())
+                self.assertNotIn(b"source_id", body)
+                ack = json.dumps({"action":"ack", "event_id":item["event_id"], "claim":item["claim"]})
+                self.assertTrue(json.loads(self.request("/api/update-notifications", "POST", headers=headers, body=ack)[2])["acknowledged"])
+                self.assertIsNone(json.loads(self.request("/api/update-notifications", "POST", headers=headers, body=claim)[2])["notification"])
+            code, _, body = self.request("/api/admin/update-notifications", "POST", auth=self.auth, headers=headers, body=claim)
+            self.assertEqual(code, 200)
+            self.assertEqual(json.loads(body)["notification"]["name"], "Private secret")
+
     def test_activity_view_and_api_require_authentication(self):
         for route in ("/admin/activity", "/admin/activity/", "/api/source-activity"):
             self.assertEqual(self.request(route)[0], 401)

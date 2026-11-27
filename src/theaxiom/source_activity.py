@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import sqlite3
+import time
 from pathlib import Path
 from uuid import uuid4
 
@@ -46,6 +47,9 @@ def connect(target=None):
     db.execute("CREATE TABLE IF NOT EXISTS pending (event_id TEXT PRIMARY KEY, target TEXT NOT NULL, "
                "digest TEXT NOT NULL, payload TEXT NOT NULL)")
     db.execute("CREATE TABLE IF NOT EXISTS seen (event_id TEXT PRIMARY KEY)")
+    db.execute("CREATE TABLE IF NOT EXISTS update_notifications (event_id TEXT PRIMARY KEY, "
+               "claim TEXT NOT NULL, expires REAL NOT NULL, acknowledged INTEGER NOT NULL DEFAULT 0)")
+    db.execute("CREATE INDEX IF NOT EXISTS events_action ON events(action, outcome, sequence)")
     return db
 
 
@@ -178,6 +182,63 @@ def query(source=None, action=None, before=None, limit=50):
             "sources": sources, "actions": list(ACTIONS)}
 
 
+NOTIFICATION_LEASE = 30
+
+
+def _notification_where(allowed):
+    where = ("e.action='updated' AND e.outcome='completed' AND "
+             "(n.event_id IS NULL OR (n.acknowledged=0 AND n.expires <= ?))")
+    args = [time.time()]
+    if allowed is not None:
+        if not allowed:
+            return "0", []
+        where += " AND e.source_id IN (" + ",".join("?" for _ in allowed) + ")"
+        args.extend(allowed)
+    return where, args
+
+
+def has_update_notification(allowed):
+    """Cheap prefilter before constructing the public library visibility view."""
+    where, args = _notification_where(allowed)
+    with closing(connect()) as db:
+        return db.execute("SELECT 1 FROM events e LEFT JOIN update_notifications n "
+                          "ON e.event_id=n.event_id WHERE " + where + " LIMIT 1", args).fetchone() is not None
+
+
+def claim_update_notification(allowed=None):
+    """Atomically lease the oldest unseen successful activation across tabs.
+
+    allowed is None for admin or a mapping of public source IDs to public names.
+    No acknowledgement occurs until the UI finishes displaying or dismisses.
+    """
+    with closing(connect()) as db, db:
+        db.execute("BEGIN IMMEDIATE")
+        where, args = _notification_where(allowed)
+        row = db.execute("SELECT e.* FROM events e LEFT JOIN update_notifications n "
+                         "ON e.event_id=n.event_id WHERE " + where + " ORDER BY e.sequence LIMIT 1", args).fetchone()
+        if row is None:
+            return None
+        token = uuid4().hex
+        db.execute("INSERT INTO update_notifications VALUES (?,?,?,0) ON CONFLICT(event_id) "
+                   "DO UPDATE SET claim=excluded.claim,expires=excluded.expires",
+                   (row["event_id"], token, time.time() + NOTIFICATION_LEASE))
+        return dict(event_id=row["event_id"], claim=token,
+                    name=row["name"] if allowed is None else allowed[row["source_id"]],
+                    edition=row["new_edition"], lease_seconds=NOTIFICATION_LEASE)
+
+
+def acknowledge_update_notification(event, token, allowed=None):
+    """Acknowledge only the exact claim; retries are idempotent."""
+    with closing(connect()) as db, db:
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute("SELECT e.source_id,n.claim,n.acknowledged FROM update_notifications n "
+                         "JOIN events e ON e.event_id=n.event_id WHERE n.event_id=?", (event,)).fetchone()
+        if not row or row["claim"] != token or (allowed is not None and row["source_id"] not in allowed):
+            return False
+        db.execute("UPDATE update_notifications SET acknowledged=1 WHERE event_id=?", (event,))
+        return True
+
+
 def acknowledge(consumer, sequence, *, retain=10000):
     """Registered consumers explicitly advance their durable high-water mark.
 
@@ -191,6 +252,8 @@ def acknowledge(consumer, sequence, *, retain=10000):
         sequence = min(sequence, maximum)
         db.execute("INSERT INTO consumers VALUES (?,?) ON CONFLICT(name) DO UPDATE SET "
                    "acknowledged=MAX(acknowledged,excluded.acknowledged)", (consumer, sequence))
-        db.execute("DELETE FROM events WHERE sequence <= (SELECT MIN(acknowledged) FROM consumers) "
+        db.execute("DELETE FROM events WHERE (action!='updated' OR outcome!='completed' OR "
+                   "event_id IN (SELECT event_id FROM update_notifications WHERE acknowledged=1)) "
+                   "AND sequence <= (SELECT MIN(acknowledged) FROM consumers) "
                    "AND sequence <= COALESCE((SELECT sequence FROM events ORDER BY sequence DESC "
                    "LIMIT 1 OFFSET ?),0)", (retain,))
