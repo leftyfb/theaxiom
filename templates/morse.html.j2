@@ -17,14 +17,18 @@
 <div class="actions"><button id="morse-encode" type="button">Encode text</button><button id="morse-decode" type="button">Decode Morse</button></div>
 <label for="morse-output">Result</label><textarea id="morse-output" readonly></textarea><button id="morse-use-output" type="button">Use result as input</button><p id="morse-notice" role="status"></p></section>
 <section aria-labelledby="mic-title"><h2 id="mic-title">Microphone decoder (experimental)</h2>
-<p>Use a clean, steady Morse tone. Match its pitch and sending speed; background noise, uneven spacing, weak signals and browser timing can cause errors. This is not a dependable emergency communications decoder.</p>
+<p>Play a clean Morse tone through speakers or use a microphone connected to your radio. Automatic detection estimates pitch and speed from the first several tones; background noise, uneven spacing, weak signals and browser timing can cause errors. This is not a dependable emergency communications decoder.</p>
 <p>Microphone access requires a trusted HTTPS connection (or browser-supported localhost) and permission. Audio is processed only in memory on this device; it is not recorded, saved or transmitted. Listening stops when you leave or hide this page.</p>
+<label><input id="mic-auto" type="checkbox" checked> Automatically detect pitch and speed</label>
 <div class="settings"><label for="mic-speed">Speed (WPM)<input id="mic-speed" type="number" min="5" max="30" value="15" required></label>
 <label for="mic-frequency">Pitch (Hz)<input id="mic-frequency" type="number" min="400" max="1200" step="10" value="700" required></label>
-<label for="mic-threshold">Threshold (dB)<input id="mic-threshold" type="number" min="-90" max="-20" value="-55" required></label></div>
-<p class="muted">Lower the threshold for weaker signals; raise it for noisy rooms.</p>
+<label for="mic-threshold">Threshold (dB)<input id="mic-threshold" type="number" min="-90" max="-20" value="-75" required></label></div>
+<p class="muted">Automatic mode is recommended. If the meter moves but no tones are detected, lower the threshold; if background noise causes false marks, raise it. Keep this page visible while listening.</p>
 <div class="actions"><button id="mic-start" type="button">Start microphone</button><button id="mic-stop" type="button" disabled>Stop microphone</button></div>
-<p id="mic-status" role="status">Microphone is off.</p><label for="mic-output">Decoded audio</label><textarea id="mic-output" readonly></textarea></section>
+<p id="mic-status" role="status">Microphone is off.</p>
+<label for="mic-level">Microphone input level</label><meter id="mic-level" min="0" max="100" value="0" style="width:100%;height:22px"></meter>
+<p id="mic-metrics" class="muted">Start listening to see the input level, detected pitch, speed and tone activity.</p><p>Current Morse symbols: <code id="mic-symbols">—</code></p>
+<label for="mic-output">Decoded audio</label><textarea id="mic-output" readonly></textarea></section>
 <section aria-labelledby="reference-title"><h2 id="reference-title">International Morse reference</h2>
 <p>A dash is three dot units. Gaps are one unit within a character, three between characters, and seven between words. SOS is conventionally sent as a continuous prosign <code>...---...</code>; ordinary S O S text encodes as <code>... --- ...</code>.</p>
 <div id="morse-reference" class="reference"></div>
