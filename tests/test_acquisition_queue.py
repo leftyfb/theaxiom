@@ -62,3 +62,30 @@ def test_running_job_can_see_a_durable_cancel_request():
 
     assert acquisition_queue.run_next(run, threading.Event())
     assert acquisition_queue.status()[0]["state"] == "cancelled"
+
+
+def test_automatic_attempt_defers_without_blocking_manual_work(monkeypatch):
+    now = 1000
+    monkeypatch.setattr(acquisition_queue.time, "time", lambda: now)
+    automatic = dict(job("archive", 20), operation="automatic-update", configuration={"digest": "a" * 64})
+    auto_id, manual_id = acquisition_queue.enqueue([automatic, job("book", 20)], 50, {})
+    shutdown = threading.Event()
+    assert not acquisition_queue.run_next(lambda *_: ("deferred", "Window closed"), shutdown)
+
+    def finish_manual(row, *_):
+        assert row["id"] == manual_id
+        return "completed", ""
+
+    assert acquisition_queue.run_next(finish_manual, shutdown)
+    assert not acquisition_queue.run_next(finish_manual, shutdown)
+    now += 61
+
+    def fail_automatic(row, *_):
+        assert row["id"] == auto_id
+        return "failed", "Digest mismatch"
+
+    assert acquisition_queue.run_next(fail_automatic, shutdown)
+    with pytest.raises(ValueError, match="already has an automatic attempt"):
+        acquisition_queue.enqueue([automatic], 50, {})
+    assert acquisition_queue.automatic_attempts()[0]["state"] == "failed"
+    acquisition_queue.enqueue([automatic | {"configuration": {"digest": "b" * 64}}], 50, {})

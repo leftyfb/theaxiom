@@ -1429,6 +1429,106 @@ def test_batch_updates_keep_old_archives_and_isolate_download_and_activation_fai
         assert (disk / "library/zim" / old["artifact"]["filename"]).read_bytes() == old_data
 
 
+@pytest.mark.parametrize("outcome", ["success", "failure", "cancel", "stale", "storage", "staged", "window"])
+def test_automatic_replacement(app, disk, monkeypatch, outcome):
+    from contextlib import contextmanager
+    from datetime import datetime, timezone
+    import hashlib
+    from io import BytesIO
+    from theaxiom import acquisition_queue as queue, zim_jobs as jobs, zim_source as archives
+
+    request, _ = app
+    sid = "automatic-fixture"
+    url = f"https://download.kiwix.org/zim/zimit/{sid}_2026-10.zim"
+    catalog = mutate(request, request("/api/sources"), "add", {
+        "title": sid, "format": "zim", "source_url": url, "update_policy": "scheduled",
+        "update_window_start": "23:00", "update_window_end": "02:00",
+    }, sid=sid)
+    config = source(catalog, sid)["configuration"]
+    old = fixture_bytes()
+    new_body = old[:103] + b"x"
+    new = new_body + hashlib.md5(new_body, usedforsecurity=False).digest()
+    digest = hashlib.sha256(new).hexdigest()
+    artifact = archives.install_stream(sid, config, BytesIO(old))
+    installed = dict(source_id=sid, state="completed", active=False, verified=True,
+                     configuration=jobs.identity(config), artifact=artifact)
+    evidence = dict(state="update_available", installed_edition="2026-10", candidate_edition="2026-11",
+                    candidate_url=url.replace("2026-10", "2026-11"), candidate_sha256=digest,
+                    candidate_bytes=len(new))
+    monkeypatch.setattr(admin_api.kiwix_update_discovery, "cached_checked_source", lambda _: evidence)
+    hour = 23
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 11, 26 if hour == 23 else 27, hour, 30, tzinfo=tz)
+
+    monkeypatch.setattr(admin_api, "datetime", Clock)
+    monkeypatch.setattr(admin_api.update_schedule, "timezone", lambda: timezone.utc)
+    available = 10_000
+    monkeypatch.setattr(admin_api, "_batch_available", lambda *_: available)
+    admin_api._poll_automatic_updates()
+    assert not queue.status()  # file alone is not a verified install
+    jobs.save(installed)
+    publication.save(sid, True)
+    assert request("/api/automatic-update-pause", {"paused": True}) == {"paused": True}
+    admin_api._poll_automatic_updates()
+    assert not queue.status()
+    assert request("/api/automatic-update-pause", {"paused": False}) == {"paused": False}
+    hour = 2
+    admin_api._poll_automatic_updates()
+    assert not queue.status()
+    hour = 0
+    admin_api._poll_automatic_updates()
+    admin_api._poll_automatic_updates()
+    job, = queue.status()
+    assert job["operation"] == "automatic-update"
+
+    class PublisherStream(BytesIO):
+        total_size = len(new)
+        etag = '"fixture-automatic"'
+        last_modified = None
+
+    @contextmanager
+    def download(*args, **kwargs):
+        nonlocal hour
+        assert jobs.read(sid) == installed
+        assert outcome in {"success", "failure"}
+        hour = 2  # Transfer was started inside the window; verification finishes outside it.
+        yield PublisherStream(new if outcome == "success" else old)
+
+    monkeypatch.setattr(archives.pdf_transport, "open_pdf", download)
+    monkeypatch.setattr(admin_api.zim_refresh, "reconcile_activation", lambda *a, **kw: True)
+    if outcome == "cancel":
+        queue.cancel(job["id"])
+    elif outcome == "storage":
+        available = 0
+    elif outcome == "stale":
+        evidence = {"state": "unable_to_determine", "stale": True}
+    elif outcome == "staged":
+        jobs.prepare_candidate(sid, config | admin_api._reviewed_update_fields(evidence, digest))
+    elif outcome == "window":
+        hour = 2
+
+    queue.run_next(admin_api._execute_batch_job, threading.Event())
+    expected = {"success": "completed", "cancel": "cancelled", "storage": "queued", "window": "queued"}.get(outcome, "failed")
+    assert queue.status()[0]["state"] == expected
+    assert queue.automatic_attempts()[0]["state"] == expected
+    if outcome == "success":
+        current = jobs.read(sid)
+        assert current and current["artifact"]["sha256"] == digest
+    else:
+        assert jobs.read(sid) == installed
+    if outcome == "staged":
+        candidate = jobs.read_candidate(sid)
+        assert candidate and "automatic_job" not in candidate
+    assert publication.load()[sid] is True
+    assert (disk / "library/zim" / artifact["filename"]).read_bytes() == old
+    hour = 23
+    admin_api._poll_automatic_updates()
+    assert len(queue.status()) == 1
+
+
 def test_global_search_opt_out_preserves_library_entry(app, monkeypatch):
     request, _ = app
     catalog = request("/api/sources")

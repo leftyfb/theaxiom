@@ -115,7 +115,7 @@ def candidate_status(sid):
     return candidate
 
 
-def prepare_candidate(sid, config, *, replace_activated=False):
+def prepare_candidate(sid, config, *, replace_activated=False, automatic_job=None):
     """Persist replacement intent only; do not download or activate it."""
     configuration = identity(config)
     with LOCK:
@@ -137,6 +137,8 @@ def prepare_candidate(sid, config, *, replace_activated=False):
             candidate = {"source_id": sid, "state": "prepared",
                          "configuration": configuration, "base_artifact": live["artifact"],
                          "created_at": time.time()}
+            if automatic_job is not None:
+                candidate["automatic_job"] = automatic_job
             if can_replace:
                 _save_candidate(candidate)
                 return candidate
@@ -207,7 +209,7 @@ def acquire_candidate(sid, config):
         return candidate
 
 
-def start_candidate_acquisition(sid, config):
+def start_candidate_acquisition(sid, config, *, automatic_job=None):
     """Queue a replacement download without blocking the HTTP request."""
     configuration = identity(config)
     with LOCK:
@@ -220,6 +222,10 @@ def start_candidate_acquisition(sid, config):
                 raise ValueError("No matching replacement candidate")
             if candidate["state"] not in {"prepared", "failed", "interrupted", "cancelled"}:
                 raise ValueError("Replacement candidate is not ready for acquisition")
+            if automatic_job is None:
+                candidate.pop("automatic_job", None)
+            elif candidate.get("automatic_job") != automatic_job:
+                raise ValueError("Replacement is not owned by this automatic attempt")
             if (not live or live.get("state") != "completed"
                     or live.get("artifact") != candidate["base_artifact"]
                     or not installed(live, live["configuration"])):

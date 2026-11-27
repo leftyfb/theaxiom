@@ -16,6 +16,7 @@ import threading
 import time
 from contextlib import ExitStack
 from dataclasses import asdict
+from datetime import datetime, time as wall_time, timedelta
 from urllib.parse import parse_qs, urlsplit, unquote
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -487,7 +488,7 @@ def _reviewed_update_fields(update, reviewed_digest):
     return fields
 
 
-def _publisher_update_job(record, reviewed_digest, operation):
+def _publisher_update_job(record, reviewed_digest, operation) -> dict[str, Any]:
     sid = record["source_id"]
     config = record["configuration"]
     if config["format"] not in {"zim", "pmtiles"}:
@@ -504,6 +505,9 @@ def _publisher_update_job(record, reviewed_digest, operation):
             raise ValueError("Source does not use a versioned archive update method")
         update = kiwix_update_discovery.cached_checked_source(sid)
         fields = _reviewed_update_fields(update, reviewed_digest)
+        if config.get("update_method") == "archive" and config.get("update_endpoint"):
+            fields["update_endpoint"] = update_discovery_config.settings(
+                config | fields | {"update_endpoint": ""})["endpoint"]
         if current and current["state"] != "activated":
             raise ValueError("Resolve the existing replacement on its source card")
         live = zim_jobs.read(sid)
@@ -513,14 +517,21 @@ def _publisher_update_job(record, reviewed_digest, operation):
                 configuration=payload, bytes=reservation)
 
 
-def _prepare_queued_update(sid, record, revision, payload):
+def _queued_update_configuration(payload):
+    return payload["original"] | {key: value for key, value in payload["fields"].items()
+                                  if key in catalog_store.CONFIG_FIELDS}
+
+
+def _prepare_queued_update(sid, record, revision, payload, *, automatic_job=None):
     original, fields = payload["original"], payload["fields"]
-    config = original | fields
+    config = _queued_update_configuration(payload)
     if record["configuration"] not in (original, config):
         raise ValueError("Source configuration changed after queuing")
     current = zim_jobs.candidate_status(sid)
     if (current and current["configuration"] == zim_jobs.identity(config)
             and current["base_artifact"] == payload["base"]):
+        if automatic_job is not None and current.get("automatic_job") != automatic_job:
+            raise ValueError("Replacement is not owned by this automatic attempt")
         if record["configuration"] == original:
             SOURCE_CATALOG.mutate("edit", sid, fields, revision)
         return config, current
@@ -533,7 +544,7 @@ def _prepare_queued_update(sid, record, revision, payload):
         raise ValueError("The reviewed edition is already installed")
     with zim_jobs.LOCK:
         # Serialize the base check and candidate preparation with manual ZIM actions.
-        candidate = zim_jobs.prepare_candidate(sid, config, replace_activated=True)
+        candidate = zim_jobs.prepare_candidate(sid, config, replace_activated=True, automatic_job=automatic_job)
         SOURCE_CATALOG.mutate("edit", sid, fields, revision)
     return config, candidate
 
@@ -545,13 +556,140 @@ def _publish_queued_update(sid, config, recovering):
     enabled = publication.load().get(sid, False)
     if candidate["state"] != "activated" or not recovering:
         zim_jobs.activate_candidate(sid, config)
+    else:
+        zim_jobs.recover_candidate_transition(sid)
     return enabled
+
+
+def _automatic_digest(update):
+    return update.get("candidate_sha256") or update.get("candidate_sha1") or update.get("candidate_md5")
+
+
+def _automatic_status(config, paused, now, attempt):
+    policy, start, _ = update_discovery_config.policy(config)
+    if policy not in update_discovery_config.UNATTENDED:
+        return {"policy": policy, "next": "", "attempt": ""}
+    if paused:
+        upcoming = "Paused for new downloads"
+    elif update_discovery_config.window_open(config, now):
+        upcoming = "Next queue poll if eligible"
+    else:
+        opening = datetime.combine(now.date(), wall_time.fromisoformat(start), now.tzinfo)
+        if opening <= now:
+            opening += timedelta(days=1)
+        upcoming = f"Next window: {opening:%Y-%m-%d %H:%M} (server local)"
+    return {"policy": policy, "next": upcoming, "attempt": attempt}
+
+
+def _poll_automatic_updates():
+    """Use cached metadata only; offer at most one job per bounded poll."""
+    with publication.LOCK:
+        if update_schedule.automatic_paused():
+            return
+        now = datetime.now(update_schedule.timezone())
+        eligible = [record for record in SOURCE_CATALOG.get()["sources"]
+                    if update_discovery_config.window_open(record["configuration"], now)]
+        if not eligible:
+            return
+        pending = {job["source_id"] for job in acquisition_queue.status() if job["state"] in acquisition_queue.PENDING}
+        attempted = {(row["source_id"], row["digest"]) for row in acquisition_queue.automatic_attempts()}
+        for record in eligible:
+            sid, config = record["source_id"], record["configuration"]
+            if sid in pending:
+                continue
+            try:
+                live = zim_jobs.read(sid)
+                if not live or live.get("state") != "completed" or not zim_jobs.matches(live, config):
+                    continue
+                evidence = kiwix_update_discovery.cached_checked_source(sid)
+                digest = _automatic_digest(evidence)
+                if evidence.get("state") != "update_available" or not digest or (sid, digest) in attempted:
+                    continue
+                job = _publisher_update_job(record, digest, "automatic-update")
+                job["configuration"]["digest"] = digest
+                settings = storage_settings.load_settings()
+                available = _batch_available(settings, {config["format"]})
+                acquisition_queue.enqueue([job], available, settings)
+                return
+            except (ValueError, OSError):
+                # Another candidate, insufficient space, or a busy archive worker.
+                continue
+
+
+def _execute_automatic_update(job, payload, stopping, shutdown):
+    sid, job_id = job["source_id"], job["id"]
+    original = payload["original"]
+    config = _queued_update_configuration(payload)
+    kind = config["format"]
+    while not shutdown.is_set():
+        with publication.LOCK:
+            catalog = SOURCE_CATALOG.get()
+            record = next((record for record in catalog["sources"] if record["source_id"] == sid), None)
+            candidate = zim_jobs.candidate_status(sid)
+            owned = (candidate and candidate.get("automatic_job") == job_id
+                     and candidate["configuration"] == zim_jobs.identity(config)
+                     and candidate["base_artifact"] == payload["base"])
+            if owned and candidate["state"] in zim_jobs.ACTIVE:
+                if stopping() and candidate["state"] not in {"cancelling", "publishing", "pausing"}:
+                    try:
+                        zim_jobs.cancel_candidate_acquisition(sid, config)
+                    except ValueError:
+                        pass  # Transfer crossed into a terminal state.
+            else:
+                if stopping():
+                    raise acquisition_queue.Cancelled()
+                if not record or record["configuration"] not in (original, config):
+                    return "interrupted", "Source configuration or update policy changed; review manually"
+                if owned and candidate["state"] in {"verified", "activated"}:
+                    if record["configuration"] != config:
+                        return "interrupted", "Source configuration changed; review manually"
+                    try:
+                        published = _publish_queued_update(sid, config, job["state"] == "running")
+                    except BlockingIOError:
+                        return "running", ""
+                    break
+                if owned and candidate["state"] != "prepared":
+                    state = candidate["state"]
+                    return state if state in {"failed", "cancelled"} else "interrupted", "Review replacement on the source card"
+                if (update_schedule.automatic_paused() or not update_discovery_config.window_open(
+                        original, datetime.now(update_schedule.timezone()))):
+                    return "deferred", "Waiting for the maintenance window or automatic updates to resume"
+                settings = storage_settings.load_settings()
+                if json.loads(job["storage"]) != settings:
+                    return "interrupted", "Storage settings changed; review manually"
+                evidence = kiwix_update_discovery.cached_checked_source(sid)
+                if _reviewed_update_fields(evidence, payload["digest"]) != {
+                        key: value for key, value in payload["fields"].items() if key != "update_endpoint"}:
+                    raise ValueError("Update evidence changed; review manually")
+                if _batch_available(settings, {kind}) < job["bytes"]:
+                    return "deferred", "Waiting for free storage"
+                try:
+                    _prepare_queued_update(sid, record, catalog["revision"], payload, automatic_job=job_id)
+                    if (update_schedule.automatic_paused() or not update_discovery_config.window_open(
+                            original, datetime.now(update_schedule.timezone()))):
+                        return "deferred", "Waiting for the maintenance window or automatic updates to resume"
+                    if stopping():
+                        raise acquisition_queue.Cancelled()
+                    if shutdown.is_set():
+                        return "running", ""
+                    zim_jobs.start_candidate_acquisition(sid, config, automatic_job=job_id)
+                except BlockingIOError:
+                    return "deferred", "Waiting for the archive worker"
+        shutdown.wait(1)
+    else:
+        return "running", ""
+    if kind == "zim" and published and not zim_refresh.reconcile_activation(
+            lambda: SOURCE_CATALOG.get()["sources"], source_id=sid, configuration=config):
+        return "failed", "Reader could not serve the update; review the replacement status"
+    return "completed", "Update activated; publication setting preserved"
 
 
 def _execute_batch_job(job, stopping, shutdown):
     sid, operation = job["source_id"], job["operation"]
     recovering = job["state"] == "running"
     config = json.loads(job["configuration"])
+    if operation == "automatic-update":
+        return _execute_automatic_update(job, config, stopping, shutdown)
     kind = config["original"]["format"] if operation == "download-update" else config["format"]
 
     def stop_document():
@@ -1030,6 +1168,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 self._send_json(503, {"error": "Library overview unavailable"})
         elif self.path == "/api/update-sweep":
             self._send_json(200, kiwix_update_scheduler.manual_status())
+        elif self.path == "/api/automatic-update-pause":
+            self._send_json(200, {"paused": update_schedule.automatic_paused()})
         elif self.path == "/api/update-schedule":
             try:
                 self._send_json(200, update_schedule.status())
@@ -1600,6 +1740,16 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         matched = self._matched_snapshot(snapshot, artifacts)
         jobs = {job["source_id"]: job for job in matched["acquisitions"]}
         zim_status = zim_catalog.status_for_catalog(catalog["sources"])
+        paused = update_schedule.automatic_paused()
+        local_now = datetime.now(update_schedule.timezone())
+        attempts = {}
+        if any(row["configuration"].get("update_policy") in update_discovery_config.UNATTENDED
+               for row in catalog["sources"]):
+            try:
+                for attempt in acquisition_queue.automatic_attempts():
+                    attempts.setdefault(attempt["source_id"], attempt["state"])
+            except (OSError, sqlite3.Error):
+                pass
         sources = []
         for record in catalog["sources"]:
             sid = record["source_id"]
@@ -1691,7 +1841,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     replacement = {"state": "unavailable", "error": "Replacement status unavailable"}
             sources.append(dict(record, **lifecycles[sid], acquisition=_public_acquisition(job), replacement=replacement, replacement_available=replacement_available,
                                 update_check=update_check if discovery["method"] != "manual" else None,
-                                discovery=discovery,
+                                discovery=discovery, automatic_update=_automatic_status(
+                                    record["configuration"], paused, local_now, attempts.get(sid, "")),
                                 installed_verified=verified, installed_edition=installed_edition,
                                 publication=state, mutation_blocked=busy,
                                 publication_filter=publication_filter, download_filter=download_filter))
@@ -1843,6 +1994,17 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 self._send_json(409, {"error": "An update check is already running"})
                 return
             self._send_json(202, {"state": "running"})
+        elif self.path == "/api/automatic-update-pause":
+            data = self._read_body()
+            if not isinstance(data, dict) or data.keys() != {"paused"} or type(data["paused"]) is not bool:
+                self._send_json(400, {"error": "Specify whether automatic updates are paused"})
+                return
+            try:
+                with publication.LOCK:
+                    update_schedule.set_automatic_pause(data["paused"])
+                self._send_json(200, data)
+            except OSError:
+                self._send_json(503, {"error": "Automatic update pause could not be saved"})
         elif self.path == "/api/update-schedule":
             data = self._read_body()
             try:
@@ -2335,7 +2497,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 if len(metadata[0]) > 8192:
                     raise ValueError
                 fields = json.loads(unquote(metadata[0], errors="strict"))
-                SOURCE_CATALOG._validate_fields(fields, catalog_store.PROFILE_FIELDS | {"source_url", "license"} | update_discovery_config.FIELDS,
+                SOURCE_CATALOG._validate_fields(fields, catalog_store.PROFILE_FIELDS | {"source_url", "license", "update_policy"} | update_discovery_config.FIELDS,
                                                 required={"title"})
                 fields["format"] = requested_format
                 update_discovery_config.settings(fields)
@@ -2429,7 +2591,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 if type(data["auto_title"]) is not bool:
                     raise ValueError("invalid automatic title flag")
                 fields = dict(data["fields"]) if isinstance(data["fields"], dict) else None
-                SOURCE_CATALOG._validate_fields(fields, catalog_store.PROFILE_FIELDS | {"source_url", "license"} | update_discovery_config.FIELDS,
+                SOURCE_CATALOG._validate_fields(fields, catalog_store.PROFILE_FIELDS | {"source_url", "license", "update_policy"} | update_discovery_config.FIELDS,
                                                 required={"title", "source_url"})
                 if not pdf_source.valid_source_url(fields["source_url"]):
                     raise ValueError("A direct HTTPS EPUB URL is required")
@@ -2782,7 +2944,7 @@ def main() -> None:
     server = ThreadingHTTPServer((config.host, config.port), AdminAPIHandler)
     server.axiom_config = config
     server.managed_acquisition_only = True
-    queue_shutdown = acquisition_queue.start(_execute_batch_job)
+    queue_shutdown = acquisition_queue.start(_execute_batch_job, poll=_poll_automatic_updates)
     schedule_shutdown = kiwix_update_scheduler.start()
     try:
         server.serve_forever()

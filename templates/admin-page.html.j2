@@ -365,6 +365,10 @@
         </fieldset>
       </form>
       <p id="update-schedule-feedback" role="status"></p>
+      <h3>Unattended archive updates</h3>
+      <p>Pause new unattended downloads without changing metadata checks or manual actions. Transfers already started can finish and activate, even after the maintenance window closes.</p>
+      <button type="button" class="button" id="automatic-update-pause" disabled>Loading pause status…</button>
+      <p id="automatic-update-feedback" role="status"></p>
     </section>
     <section class="settings-panel" id="storage-settings" aria-labelledby="storage-title">
       <h2 id="storage-title">Storage preferences</h2>
@@ -711,6 +715,18 @@
             <input id="catalog-update-endpoint" name="update_endpoint" type="url" maxlength="512" aria-describedby="update-endpoint-hint">
             <small id="update-endpoint-hint">Leave blank to use the provider default.</small>
           </div>
+          <div><label for="catalog-update-policy">Update policy</label>
+            <select id="catalog-update-policy" name="update_policy">
+              <option value="">Notify only (default)</option><option value="notify" hidden>Notify only</option>
+              <option value="automatic">Automatic</option><option value="scheduled">Scheduled</option>
+              <option value="disabled">Disabled (no periodic checks)</option>
+            </select>
+          </div>
+          <div><label for="catalog-update-window-start">Maintenance window start (server local)</label>
+            <input id="catalog-update-window-start" name="update_window_start" type="time"></div>
+          <div><label for="catalog-update-window-end">Maintenance window end (server local)</label>
+            <input id="catalog-update-window-end" name="update_window_end" type="time"></div>
+          <p class="source-note editor-wide">Unattended replacement requires an installed, verified ZIM or PMTiles archive and current publisher evidence. PDF and EPUB updates are notify-only. Windows may cross midnight; work that has already started can run past the end.</p>
           <div class="editor-wide"><button class="button" type="button" id="test-update-endpoint">Test endpoint</button>
             <p class="source-note" id="update-endpoint-feedback" role="status"></p>
           </div>
@@ -985,6 +1001,10 @@
           <summary>Technical details</summary>
           {% if discovery %}
           <p class="source-note">Update discovery: {{ {'head': 'HTTPS / ETag', 'kiwix': 'Kiwix OPDS / Metalink', 'archive': 'Internet Archive editions', 'builds': 'Protomaps map builds', 'manual': 'Manual update discovery'}.get(discovery.method, 'Unknown') }} · Periodic checks {{ 'enabled' if discovery.periodic else 'disabled' }}</p>
+          {% if source.automatic_update %}
+          {% set auto = source.automatic_update %}
+          <p class="source-note">Update policy: {{ 'Notify only' if auto.policy == 'notify' else auto.policy|capitalize }}{% if auto.next %} · {{ auto.next }}{% endif %}{% if auto.attempt %} · Last automatic attempt: {{ auto.attempt }}{% endif %}</p>
+          {% endif %}
           {% endif %}
           <p class="source-note" data-field="update-evidence">
             {% if source.update_check %}{{ source.update_check.evidence }}{% endif %}
@@ -1849,6 +1869,15 @@
         }
         if (method.selectedOptions[0]?.disabled) method.value = '';
         const manual = method.value === 'manual';
+        const policy = input('update_policy');
+        const supportsUnattended = !manual && ['zim', 'pmtiles'].includes(format.value);
+        for (const option of policy.options) {
+          if (['automatic', 'scheduled'].includes(option.value)) option.disabled = !supportsUnattended;
+        }
+        if (policy.selectedOptions[0]?.disabled) policy.value = '';
+        for (const name of ['update_window_start', 'update_window_end']) {
+          input(name).required = policy.value === 'scheduled';
+        }
         endpoint.disabled = manual;
         input('update_periodic').options[1].disabled = manual;
         if (manual) {
@@ -1862,7 +1891,7 @@
         endpointFeedback.textContent = '';
         editorGeneration++;
       }
-      for (const field of [format, uploadFile, input('source_url'), input('update_method'), input('update_endpoint')]) {
+      for (const field of [format, uploadFile, input('source_url'), input('update_method'), input('update_endpoint'), input('update_policy')]) {
         field.addEventListener('input', discoveryOptions);
         field.addEventListener('change', discoveryOptions);
       }
@@ -2085,7 +2114,7 @@
         try {
           if (form.dataset.operation === 'add' && file) {
             if (!file.size || file.size > 16 * 1024 * 1024) throw new Error('Choose a PDF or EPUB up to 16 MiB');
-            const metadata = Object.fromEntries(Object.entries(fields).filter(([k]) => ['title','description','author','publisher','edition','language','source_url','license','update_method','update_endpoint','update_periodic','icon_png'].includes(k)));
+            const metadata = Object.fromEntries(Object.entries(fields).filter(([k]) => ['title','description','author','publisher','edition','language','source_url','license','update_method','update_endpoint','update_periodic','update_policy','icon_png'].includes(k)));
             const headers = {...window.axiomCsrfHeaders(), 'Content-Type':format.value === 'epub' ? 'application/epub+zip' : 'application/pdf', 'X-Document-Format':format.value, 'X-Source-ID':source_id,
               'X-Catalog-Revision':String(revision), 'X-PDF-Add':'1',
               'X-PDF-Metadata':encodeURIComponent(JSON.stringify(metadata))};
@@ -2095,7 +2124,7 @@
             if (!response.ok || !result.installed_verified) throw acquisitionError(response, result, 'Document upload was not confirmed');
             reloadSources();
           } else if (form.dataset.operation === 'add' && format.value === 'epub' && fields.source_url) {
-            const metadata = Object.fromEntries(Object.entries(fields).filter(([k]) => ['title','description','author','publisher','edition','language','source_url','license','update_method','update_endpoint','update_periodic','icon_png'].includes(k)));
+            const metadata = Object.fromEntries(Object.entries(fields).filter(([k]) => ['title','description','author','publisher','edition','language','source_url','license','update_method','update_endpoint','update_periodic','update_policy','icon_png'].includes(k)));
             const response = await acquisitionFetch('/api/action', {method:'POST', headers:{...((typeof window !== 'undefined' && window.axiomCsrfHeaders?.()) || {}),'Content-Type':'application/json'},
               body:JSON.stringify({source_id, action:'epub-add-download', revision, fields:metadata, auto_title:automaticTitle})});
             const result = await response.json().catch(() => ({}));
@@ -3427,6 +3456,29 @@
           fields.disabled = false;
         }
       });
+      const pause = byId('automatic-update-pause');
+      const pauseFeedback = byId('automatic-update-feedback');
+      let paused;
+      async function refreshPause(value) {
+        pause.disabled = true;
+        try {
+          const response = await fetch('/api/automatic-update-pause', value === undefined ? {cache:'no-store'} : {
+            method:'POST', headers:{...(window.axiomCsrfHeaders?.() || {}), 'Content-Type':'application/json'},
+            body:JSON.stringify({paused:value})
+          });
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.error || 'Automatic update pause unavailable');
+          paused = result.paused;
+          pause.textContent = paused ? 'Resume automatic updates' : 'Pause automatic updates';
+          pauseFeedback.textContent = paused ? 'New unattended downloads are paused.' : 'Eligible sources are evaluated by the acquisition queue.';
+        } catch (error) {
+          pauseFeedback.textContent = error.message;
+        } finally {
+          pause.disabled = paused === undefined;
+        }
+      }
+      pause.addEventListener('click', () => refreshPause(!paused));
+      refreshPause();
       schedule().catch(error => { feedback.textContent = error.message; });
     })();
   </script>

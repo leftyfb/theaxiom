@@ -22,7 +22,8 @@ PROFILE_FIELDS = {"title", "description", "publisher", "edition", "language", "a
 CANDIDATE_FIELDS = {"source_url", "expected_size_bytes", "sha256", "publisher_sha1", "publisher_md5", "provenance", "license"}
 ARTIFACT_CONFIG_FIELDS = CANDIDATE_FIELDS | {"format"}
 DISCOVERY_FIELDS = {"update_method", "update_endpoint", "update_periodic"}
-CONFIG_FIELDS = ARTIFACT_CONFIG_FIELDS | DISCOVERY_FIELDS | {"search_enabled"}
+UPDATE_POLICY_FIELDS = {"update_policy", "update_window_start", "update_window_end"}
+CONFIG_FIELDS = ARTIFACT_CONFIG_FIELDS | DISCOVERY_FIELDS | UPDATE_POLICY_FIELDS | {"search_enabled"}
 V1_FIELDS = PROFILE_FIELDS | CANDIDATE_FIELDS
 EDITABLE = PROFILE_FIELDS | CONFIG_FIELDS
 HEADER_FIELDS = {"schema_version", "revision", "updated_at"}
@@ -322,7 +323,7 @@ class CatalogStore:
             ids.add(sid)
             self._validate_fields(record["profile"], PROFILE_FIELDS, required={"title"})
             self._validate_fields(record["configuration"], CONFIG_FIELDS, required={"format"})
-            if DISCOVERY_FIELDS & record["configuration"].keys():
+            if (DISCOVERY_FIELDS | UPDATE_POLICY_FIELDS) & record["configuration"].keys():
                 from . import update_discovery_config
                 try:
                     update_discovery_config.settings(record["configuration"])

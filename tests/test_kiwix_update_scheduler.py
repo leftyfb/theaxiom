@@ -15,6 +15,27 @@ def record(sid, **config):
     return {"source_id": sid, "configuration": {"format": "zim", **config}}
 
 
+def test_policy_defaults_and_local_window():
+    from theaxiom import update_discovery_config as discovery
+
+    legacy = {"format": "zim", "source_url": "https://download.kiwix.org/zim/zimit/example_2026-10.zim",
+              "update_periodic": "no"}
+    assert discovery.policy(legacy)[0] == "notify"
+    assert not discovery.settings(legacy)["periodic"]
+    midnight = datetime(2026, 11, 27, 0, 0)
+    assert not discovery.window_open(legacy, midnight)
+    assert discovery.window_open(legacy | {"update_policy": "automatic"}, midnight)
+    disabled = legacy | {"update_policy": "disabled", "update_periodic": "yes"}
+    assert not discovery.settings(disabled)["periodic"]
+    assert discovery.settings(disabled)["method"] == "kiwix"
+    scheduled = legacy | {"update_policy": "scheduled", "update_window_start": "23:00", "update_window_end": "02:00"}
+    assert discovery.window_open(scheduled, midnight)
+    assert discovery.window_open(scheduled, midnight.replace(hour=23))
+    assert not discovery.window_open(scheduled, midnight.replace(hour=2))
+    with pytest.raises(ValueError, match="ZIM or PMTiles"):
+        discovery.policy({"format": "epub", "update_policy": "automatic"})
+
+
 def test_sweep_attempts_every_enabled_source_with_bounded_parallelism(monkeypatch):
     records = [record(f"source-{i:02}") for i in range(43)]
     records += [

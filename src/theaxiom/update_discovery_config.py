@@ -1,12 +1,41 @@
 """Source-scoped metadata discovery settings and endpoint diagnostics."""
-from datetime import datetime, timezone
+from datetime import datetime, time, timezone
 from hashlib import sha256
+import re
 from urllib.parse import urlsplit
 
 from . import kiwix_metadata_transport as kiwix, kiwix_opds, pdf_source, pdf_transport, versioned_archive_catalog as archives
 
 from .catalog_store import DISCOVERY_FIELDS as FIELDS
 OPDS = f"https://{kiwix.CATALOG_HOST}{kiwix.CATALOG_PATH}"
+UNATTENDED = {"automatic", "scheduled"}
+POLICIES = UNATTENDED | {"notify", "disabled"}
+
+
+def policy(config, method=None):
+    """Legacy records never imply permission to acquire content."""
+    selected = config.get("update_policy") or "notify"
+    if selected not in POLICIES:
+        raise ValueError("Invalid update policy")
+    if selected in UNATTENDED and (config.get("format") not in {"zim", "pmtiles"}
+                                  or method not in {None, "kiwix", "archive", "builds"}):
+        raise ValueError("Unattended updates require versioned ZIM or PMTiles discovery")
+    start, end = (config.get(key, "") for key in ("update_window_start", "update_window_end"))
+    if selected == "scheduled" or start or end:
+        if not all(isinstance(value, str) and re.fullmatch(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]", value)
+                   for value in (start, end)) or start == end:
+            raise ValueError("Use two different local maintenance window times (HH:MM)")
+    return selected, start, end
+
+
+def window_open(config, local_now):
+    """Check an inclusive start and exclusive end in server-local wall time."""
+    selected, start, end = policy(config)
+    if selected != "scheduled":
+        return selected == "automatic"
+    start, end = time.fromisoformat(start), time.fromisoformat(end)
+    current = local_now.time()
+    return start <= current < end if start < end else current >= start or current < end
 
 
 def settings(config):
@@ -55,6 +84,9 @@ def settings(config):
         raise ValueError("Manual discovery has no endpoint or periodic checks")
     # Explicit methods opt in. Existing sources retain their previous schedule.
     enabled = resolved != "manual" and (periodic == "yes" or not periodic and method == "auto")
+    selected, _, _ = policy(config, resolved)
+    if selected == "disabled":
+        enabled = False
     return dict(method=resolved, endpoint=endpoint, periodic=enabled)
 
 

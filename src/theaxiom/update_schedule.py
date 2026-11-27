@@ -46,8 +46,8 @@ def _read():
     return state
 
 
-def _write(state):
-    path = state_path()
+def _write(state, path=None):
+    path = path or state_path()
     fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=".update-schedule-")
     try:
         with os.fdopen(fd, "w") as stream:
@@ -57,6 +57,23 @@ def _write(state):
         os.replace(temporary, path)
     finally:
         Path(temporary).unlink(missing_ok=True)
+
+
+def automatic_paused():
+    path = state_path().with_name("automatic-update-pause.json")
+    try:
+        value = json.loads(path.read_text())
+        return value is not False
+    except FileNotFoundError:
+        return False
+    except (OSError, ValueError):
+        return True
+
+
+def set_automatic_pause(paused):
+    path = state_path().with_name("automatic-update-pause.json")
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    _write(paused, path)
 
 
 def save(value, now=None):

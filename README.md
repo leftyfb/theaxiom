@@ -101,6 +101,8 @@ Unpublish before removing a published source or changing its artifact identity. 
 
 PDF HTTPS acquisition and safe ZIM transport have separate workers and validation rules. The shared Kiwix reader and `/zim/viewer` are deployed on Vancouver; source publication still requires verified installed content and explicit operator action. No production metadata is registered from the historical demo fixture.
 
+In Admin → Sources, **Notify only** is the default update policy and preserves the source's existing periodic-check preference. **Disabled** skips periodic checks but leaves manual actions available. **Automatic** and **Scheduled** opt into downloading, verifying, and activating replacements for an already installed, verified ZIM or PMTiles archive, using current publisher metadata. PDF and EPUB do not support unattended replacement. Scheduled windows use server-local time, may cross midnight, and restrict when a transfer starts, not when it finishes. Settings can pause new unattended starts without changing the metadata-check schedule. Activation preserves publication intent and the previous archive. A failed or cancelled digest is not automatically attempted again; review and retry it manually from Sources.
+
 ### Storage configuration (development)
 
 Open `/admin` and select Storage settings. Enter an existing storage root, select local or required mounted storage, and enter the expected mount target/source when applicable. Save and validate displays the saved configuration and its detected filesystem, free space, advisory write readiness and managed paths. Reload saved settings discards unsaved form edits. Saving unavailable storage is allowed for later recovery; readiness remains false and no data is relocated.
