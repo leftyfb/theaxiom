@@ -9,6 +9,9 @@
 .filter-label{display:flex;flex-direction:column;gap:4px;flex:1;min-width:130px}.filter-label select{font:inherit;padding:10px;border:1px solid #aac5b7;border-radius:8px;background:white}
 </style></head><body><main><a href="/">← Back to library</a><h1>Search library</h1>
 <form action="/search" method="get" role="search"><label for="q">Search library content</label><input id="q" name="q" type="search" maxlength="160" value="{{ query }}" required><button>Search</button>{% for kind, plural, label in [("category","categories","Category"),("collection","collections","Collection"),("tag","tags","Tag")] %}{% set options = filter_groups|default([])|selectattr("kind","equalto",plural)|list %}{% if options or (selected|default({})).get(kind) %}<label class="filter-label">{{ label }}<select name="{{ kind }}"><option value="">All</option>{% for group in options %}<option value="{{ group.group_id }}"{% if (selected|default({})).get(kind) == group.group_id %} selected{% endif %}>{{ group.name }}</option>{% endfor %}{% if (selected|default({})).get(kind) and (selected|default({})).get(kind) not in options|map(attribute="group_id")|list %}<option selected value="{{ selected[kind] }}">Unavailable group</option>{% endif %}</select></label>{% endif %}{% endfor %}<p class="search-wait" role="status" hidden><span aria-hidden="true"></span>Searching library…</p></form>
+{% if not error and not search_source and not selected and query and ('morse' in query|lower or 'telegraph' in query|lower) %}
+<section aria-label="Matching utilities"><h2>Utilities</h2><p><a href="/api/tools/morse">Morse code reference and translator</a> — offline utility.</p></section>
+{% endif %}
 {% macro result_items(results) %}
 {% for result in results %}
 <li><a href="{{ result.href }}">{{ result.title }}</a>{% if result.snippet %}<p>{{ result.snippet }}</p>{% endif %}</li>
