@@ -253,8 +253,9 @@ def _public_zim_replacement(candidate):
     result = {key: candidate[key] for key in (
         "state", "downloaded_bytes", "expected_bytes", "error", "automatic_retry_count", "retry_delay_seconds"
     ) if key in candidate}
-    if candidate["state"] in {"verified", "rolled_back"}:
+    if candidate["state"] in {"verified", "activated", "rolled_back"}:
         result["sha256"] = candidate["artifact"].get("sha256")
+        result["review_token"] = zim_jobs.candidate_review_token(candidate)
     return result | zim_jobs.current_checksum(candidate)
 
 
@@ -3330,6 +3331,14 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         expected_keys = ({"source_id", "action", "revision", "confirm_restart"}
                          if data.get("action") in {"zim-restart", "zim-replacement-activate", "zim-replacement-rollback", "zim-delete-installed"}
                          else {"source_id", "action", "revision"})
+        reviewed = data.get("expected_replacement")
+        if "expected_replacement" in data:
+            if (data.get("action") not in {"zim-replacement-activate", "zim-replacement-rollback"}
+                    or not isinstance(reviewed, str) or not re.fullmatch(r"[a-f0-9]{64}", reviewed)):
+                self._send_json(400, {"error": "Invalid replacement review token"})
+                return
+            expected_keys.add("expected_replacement")
+        review_kwargs = {"expected_replacement": reviewed} if reviewed is not None else {}
         if (set(data) != expected_keys
                 or (data.get("action") in {"zim-restart", "zim-replacement-activate", "zim-replacement-rollback", "zim-delete-installed"} and data.get("confirm_restart") is not True)
                 or not isinstance(sid, str)
@@ -3354,7 +3363,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                         raise ValueError("Finish or cancel the document update first")
                     with zim_jobs.worker_lock(source_id=sid):
                         updated = document_replacement.switch(SOURCE_CATALOG, record, catalog["revision"],
-                                                              rollback=action == "zim-replacement-rollback")
+                                                              rollback=action == "zim-replacement-rollback", **review_kwargs)
                     self._send_json(200, {"accepted": True, "revision": updated["revision"]})
                     return
                 if not record or not select_lifecycle(sid, record["configuration"]).get("zim_download"):
@@ -3369,9 +3378,9 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 elif operation == "zim-replacement-download":
                     result = zim_jobs.start_candidate_acquisition(sid, record["configuration"])
                 elif operation == "zim-replacement-activate":
-                    result = zim_jobs.activate_candidate(sid, record["configuration"])
+                    result = zim_jobs.activate_candidate(sid, record["configuration"], **review_kwargs)
                 elif operation == "zim-replacement-rollback":
-                    result = zim_jobs.rollback_candidate(sid, record["configuration"])
+                    result = zim_jobs.rollback_candidate(sid, record["configuration"], **review_kwargs)
                 elif operation == "zim-replacement-prepare":
                     result = zim_jobs.prepare_candidate(sid, record["configuration"])
                 elif operation == "zim-replacement-discard":
