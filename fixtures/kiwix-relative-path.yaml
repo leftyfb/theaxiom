@@ -1,4 +1,0 @@
-# Local-only fixture documenting the approved Kiwix metadata path rule.
-# No network access is required or permitted to use this fixture.
-metadata_path: /data/zim/example/example.zim
-normalized_url: https://download.kiwix.org/zim/example/example.zim

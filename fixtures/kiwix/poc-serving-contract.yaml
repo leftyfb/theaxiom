@@ -1,8 +1,0 @@
----
-# The tiny fixture is served as a static file by the managed nginx catalog root.
-# It is not a Kiwix archive and must never be listed in library.xml.
-service: nginx-static
-fixture_source: fixtures/kiwix/tiny.txt
-fixture_route: /content/offline-library-fixture
-content_type: text/plain
-kiwix_artifact: false

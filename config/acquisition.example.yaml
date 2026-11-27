@@ -1,4 +1,0 @@
-# Copy to $XDG_CONFIG_HOME/theaxiom/acquisition.yaml to enable acquisitions.
-# Downloads remain disabled until an operator adds and reviews manifest items.
-bulk_acquisition_approved: false
-items: []
