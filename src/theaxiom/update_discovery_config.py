@@ -30,9 +30,15 @@ def policy(config, method=None):
             selected = "notify"
     if selected not in POLICIES:
         raise ValueError("Invalid update policy")
-    if selected in UNATTENDED and (config.get("format") not in {"zim", "pmtiles"}
-                                  or method not in {None, "kiwix", "archive", "builds"}):
-        raise ValueError("Unattended updates require versioned ZIM or PMTiles discovery")
+    if selected in UNATTENDED:
+        kind = config.get("format")
+        if kind in {"pdf", "epub"}:
+            url = config.get("source_url", "")
+            if (method not in {None, "head"} or not pdf_source.valid_source_url(url)
+                    or config.get("update_endpoint", "") not in ("", url)):
+                raise ValueError("Unattended document updates require discovery at the exact configured HTTPS URL")
+        elif kind not in {"zim", "pmtiles"} or method not in {None, "kiwix", "archive", "builds"}:
+            raise ValueError("Unattended updates require supported publisher discovery")
     start, end = (config.get(key, "") for key in ("update_window_start", "update_window_end"))
     if selected == "scheduled" or start or end:
         if not all(isinstance(value, str) and re.fullmatch(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]", value)
