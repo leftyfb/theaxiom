@@ -3095,7 +3095,7 @@
               source?.update_check?.state === 'update_available' :
               op === 'download' ? !['prepared','failed','interrupted','cancelled'].includes(replacementState) :
               op === 'cancel' ? !['downloading','retrying','verifying'].includes(replacementState) :
-              op === 'activate' ? replacementState !== 'verified' :
+              op === 'activate' ? !(replacementState === 'verified' || (['pdf','epub'].includes(source?.adapter) && replacementState === 'rolled_back' && !!replacement?.sha256)) :
               op === 'rollback' ? replacementState !== 'activated' :
               !['prepared','failed','cancelled','interrupted'].includes(replacementState) ||
                 (['failed','cancelled','interrupted'].includes(replacementState) && replacement?.can_discard !== true);
@@ -3484,7 +3484,7 @@
           const job = latest.get(sid), auto = source.automatic_update || {}, discovery = source.discovery || {};
           if (!source.installed_verified && !job && !replacement.state) return [];
           const pending = job && activeStates.includes(job.state) || activeStates.includes(replacement.state);
-          const verified = source.installed_verified && replacement.state === 'verified';
+          const verified = source.installed_verified && (replacement.state === 'verified' || (['pdf','epub'].includes(source.adapter) && replacement.state === 'rolled_back' && !!replacement.sha256));
           const available = source.installed_verified && !update.stale && (update.state === 'update_available' || !!update.candidate_token) &&
             Number.isFinite(update.candidate_bytes) && update.candidate_bytes > 0 &&
             (!replacement.state || replacement.state === 'activated');
@@ -3496,7 +3496,7 @@
             label = activeStates.includes(replacement.state) ? replacement.state : job.state;
             label = label[0].toUpperCase() + label.slice(1);
             if (job?.operation === 'publish-update') label = 'Publication ' + label.toLowerCase();
-          } else if (verified) state = 'staged';
+          } else if (verified) { state = 'staged'; if (replacement.state === 'rolled_back') label = 'Rolled back · verified update retained'; }
           else if (failedStates.includes(replacement.state)) {
             state = 'failed';
             if (replacement.state === 'rolled_back') label = 'Rolled back';
