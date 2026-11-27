@@ -783,7 +783,7 @@
           <div class="editor-wide"><label for="catalog-title">Source name</label><input id="catalog-title" name="title" required maxlength="512"></div>
           <div class="editor-wide"><label for="catalog-url">Download URL</label><input id="catalog-url" name="source_url" type="url" maxlength="512">
             <small>Direct HTTP(S) download URL, if available.</small></div>
-          <div><label for="catalog-format">Content format</label><select id="catalog-format" name="format"><option value="unspecified">Auto / not yet specified</option><option value="zim">Kiwix / ZIM</option><option value="pmtiles">PMTiles map</option><option value="pdf">PDF</option><option value="epub">EPUB</option></select></div>
+          <div><label for="catalog-format">Content format</label><select id="catalog-format" name="format"><option value="unspecified">Auto / not yet specified</option><option value="zim">Kiwix / ZIM</option><option value="pmtiles">PMTiles map</option><option value="pdf">PDF</option><option value="epub">EPUB</option><option value="json">JSON data</option><option value="csv">CSV data</option></select></div>
           <div class="editor-wide"><label for="catalog-description">Description (optional)</label><textarea id="catalog-description" name="description" maxlength="512"></textarea></div>
         </div>
         <fieldset class="editor-grid">
@@ -850,6 +850,9 @@
             <div><label for="catalog-search-enabled">Include in global search</label><select id="catalog-search-enabled" name="search_enabled"><option value="">Default (enabled)</option><option value="yes">Enabled</option><option value="no">Disabled</option></select></div>
             <div class="editor-wide"><label for="catalog-publisher-md5">Publisher MD5 (optional map checksum)</label><input id="catalog-publisher-md5" name="publisher_md5" pattern="[a-fA-F0-9]{32}" maxlength="32"></div>
             <div class="editor-wide"><label for="catalog-publisher-sha1">Publisher SHA-1 (optional ZIM checksum)</label><input id="catalog-publisher-sha1" name="publisher_sha1" pattern="[a-fA-F0-9]{40}" maxlength="40"></div>
+            <div class="editor-wide" data-structured-field hidden><label for="catalog-data-record-path">JSON record path (optional)</label><input id="catalog-data-record-path" name="data_record_path" maxlength="512" placeholder="e.g. results.items"><p class="source-note">Leave empty for a top-level array. Use dot-separated object keys.</p></div>
+            <div class="editor-wide" data-structured-field hidden><label for="catalog-data-columns">Displayed columns (optional)</label><input id="catalog-data-columns" name="data_columns" maxlength="512" placeholder="name,city,frequency"><p class="source-note">Comma-separated field names in display order; leave empty to discover columns. JSON nested scalar fields may use dot-separated paths.</p></div>
+            <div class="editor-wide" data-structured-field hidden><label for="catalog-data-title-field">Record title field (optional)</label><input id="catalog-data-title-field" name="data_title_field" maxlength="512" placeholder="name"><p class="source-note">Use a displayed column for record headings.</p></div>
             <div class="editor-wide"><label for="catalog-sha256">Expected SHA-256 (candidate metadata)</label><input id="catalog-sha256" name="sha256" pattern="[a-fA-F0-9]{64}" maxlength="64"></div>
             <div class="editor-wide"><label for="catalog-provenance">Provenance / source of metadata</label><textarea id="catalog-provenance" name="provenance" maxlength="512"></textarea></div>
             <div class="editor-wide"><label for="catalog-license">License / rights note</label><input id="catalog-license" name="license" maxlength="512"></div>
@@ -1537,7 +1540,7 @@
         }).join(' · ');
       }
       function formatEstimates(sources) {
-        const zim = sources.filter(source => ['zim', 'pmtiles'].includes(source.format) && source.state !== 'unsupported');
+        const zim = sources.filter(source => ['zim', 'pmtiles', 'json', 'csv'].includes(source.format) && source.state !== 'unsupported');
         const documents = sources.filter(source => ['pdf', 'epub'].includes(source.format) && source.state !== 'unsupported');
         const estimates = [];
         if (zim.length) estimates.push('Map and ZIM archives · ' + estimateSummary(zim));
@@ -2029,7 +2032,7 @@
         try {
           const path = new URL(input('source_url').value).pathname;
           const lower = path.toLowerCase();
-          format.value = lower.endsWith('.zim') ? 'zim' : lower.endsWith('.pmtiles') ? 'pmtiles' : lower.endsWith('.pdf') ? 'pdf' : lower.endsWith('.epub') ? 'epub' : 'unspecified';
+          format.value = lower.endsWith('.zim') ? 'zim' : lower.endsWith('.pmtiles') ? 'pmtiles' : lower.endsWith('.pdf') ? 'pdf' : lower.endsWith('.epub') ? 'epub' : lower.endsWith('.json') ? 'json' : lower.endsWith('.csv') ? 'csv' : 'unspecified';
           if (format.value === 'epub' && form.dataset.operation === 'add' && (!input('title').value.trim() || automaticTitle)) {
             input('title').value = path.split('/').pop().replace(/\.epub$/i, '').replace(/[_-]+/g, ' ').trim().slice(0,512) || 'Untitled EPUB';
             automaticTitle = true;
@@ -2042,6 +2045,11 @@
       const endpointFeedback = document.getElementById('update-endpoint-feedback');
       let editorGeneration = 0;
       function discoveryOptions() {
+        const structured = ['json','csv'].includes(format.value);
+        if (format.value === 'csv') input('data_record_path').value = '';
+        for (const node of form.querySelectorAll('[data-structured-field]')) {
+          node.hidden = !structured || (format.value === 'csv' && !!node.querySelector('[name="data_record_path"]'));
+        }
         const method = input('update_method');
         const endpoint = input('update_endpoint');
         for (const option of method.options) {
@@ -2049,6 +2057,7 @@
             (option.value === 'head' && !['pdf', 'epub'].includes(format.value)) || (option.value === 'builds' && format.value !== 'pmtiles');
         }
         if (method.selectedOptions[0]?.disabled) method.value = '';
+        if (structured) method.value = 'manual';
         const manual = method.value === 'manual';
         const policy = input('update_policy');
         const downloadUrl = input('source_url').value.trim();
@@ -2339,7 +2348,7 @@
         if (formPosting) return;
         if (iconDecode) { formFeedback.textContent = 'Wait for the icon preview before saving.'; return; }
         const source_id = form.dataset.operation === 'add' ? generateId() : input('source_id').value;
-        const fields = Object.fromEntries(fieldsToEdit.map(field => [field.name, field.value]));
+        const fields = Object.fromEntries(fieldsToEdit.filter(field => !field.closest('[data-structured-field]') || ['json','csv'].includes(format.value)).map(field => [field.name, field.value]));
         if (iconValue || form.dataset.operation === 'edit') fields.icon_png = iconValue;
         const save = form.querySelector('[type="submit"]');
         formPosting = true;
@@ -3047,7 +3056,7 @@
           updateCheckButton.disabled = !canCheck || card.dataset.updateCheckPosting === 'true';
         }
         const zim = card.querySelector('[data-zim-download]');
-        if (zim && ['zim', 'pmtiles'].includes(card.dataset.filterFormat)) {
+        if (zim && ['zim', 'pmtiles', 'json', 'csv'].includes(card.dataset.filterFormat)) {
           zim.hidden = !!source?.installed_verified;
           card.dataset.zimBlocked = String(blocked || !!source?.installed_verified || !source?.zim_download);
           if (source?.acquisition && card.dataset.zimAccepted === 'true') {
@@ -3060,7 +3069,7 @@
           const running = ['queued','downloading','retrying','verifying','pausing','cancelling','publishing'].includes(state);
           const recoverable = ['paused','interrupted','failed'].includes(state) && hasPartial;
           const expected = Number(source?.acquisition?.expected_bytes);
-          const complete = Number.isSafeInteger(expected) && expected >= 96 &&
+          const complete = Number.isSafeInteger(expected) && expected >= (['json','csv'].includes(card.dataset.filterFormat) ? 1 : 96) &&
             Number(source?.acquisition?.downloaded_bytes) === expected;
           const canRevalidate = recoverable && complete && source?.acquisition?.retained === true;
           const canResume = recoverable && !complete;
@@ -3094,7 +3103,7 @@
           stagedDelete.dataset.edition = source?.profile?.edition || '';
         }
         if (deleteButton) {
-          deleteButton.hidden = canDeleteStaged || (['zim', 'pmtiles'].includes(card.dataset.filterFormat) && !source?.installed_verified);
+          deleteButton.hidden = canDeleteStaged || (['zim', 'pmtiles', 'json', 'csv'].includes(card.dataset.filterFormat) && !source?.installed_verified);
           deleteButton.disabled = blocked || (!!source?.replacement && !['pdf','epub'].includes(source?.adapter)) || card.dataset.deletePosting === 'true';
         }
         const replacement = source?.replacement;

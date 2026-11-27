@@ -6,7 +6,7 @@ from . import catalog_store, source_catalog
 VERSION = 1
 MAX_BYTES = 15000  # Leave room for the admin API request envelope.
 FIELDS = {"source_id", "format", "language", "edition"}
-FORMATS = {"zim", "pmtiles", "pdf", "epub", "unspecified"}
+FORMATS = {"zim", "pmtiles", "pdf", "epub", "json", "csv", "unspecified"}
 LIGHTWEIGHT_LIMIT = 64 * 1024 * 1024
 PRESETS = {
     "emergency": ("Emergency", ("fema-ready", "epa-water", "noaa", "amateur-radio")),

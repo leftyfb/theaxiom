@@ -49,6 +49,7 @@ document_update_discovery = importlib.import_module(f"{__package__}.document_upd
 document_replacement = importlib.import_module(f"{__package__}.document_replacement" if __package__ else "theaxiom.document_replacement")
 zim_jobs = importlib.import_module(f"{__package__}.zim_jobs" if __package__ else "theaxiom.zim_jobs")
 pmtiles_source = importlib.import_module(f"{__package__ or 'theaxiom'}.pmtiles_source")
+structured_source = importlib.import_module(f"{__package__ or 'theaxiom'}.structured_source")
 zim_source = importlib.import_module(f"{__package__}.zim_source" if __package__ else "theaxiom.zim_source")
 zim_catalog = importlib.import_module(f"{__package__}.zim_catalog" if __package__ else "theaxiom.zim_catalog")
 zim_refresh = importlib.import_module(f"{__package__}.zim_refresh" if __package__ else "theaxiom.zim_refresh")
@@ -114,7 +115,7 @@ def _release_revision() -> str | None:
     return revision if re.fullmatch(r"[0-9a-f]{40}", revision) else None
 
 
-FORMAT_ADAPTERS = {"zim": "kiwix", "pmtiles": "pmtiles", "pdf": "pdf", "epub": "epub"}
+FORMAT_ADAPTERS = {"zim": "kiwix", "pmtiles": "pmtiles", "pdf": "pdf", "epub": "epub", "json": "structured", "csv": "structured"}
 
 
 def select_lifecycle(source_id, configuration):
@@ -140,7 +141,7 @@ def select_lifecycle(source_id, configuration):
         return dict(adapter=adapter, configuration_valid=artifact is not None, artifact=artifact,
                     pdf_download=pdf_source.valid_source_url(configuration.get("source_url", "")),
                     acquisition_reason=reason, actions={})
-    if adapter in {"kiwix", "pmtiles"}:
+    if adapter in {"kiwix", "pmtiles", "structured"}:
         try:
             zim_source.candidate(configuration)
         except ValueError as exc:
@@ -305,7 +306,7 @@ def _source_update_summary(sources):
 
 def _preview_capacity(rows):
     eligible = [row for row in rows if (
-        row["format"] in {"zim", "pmtiles"} and row["state"] != "unsupported"
+        row["format"] in zim_source.ARCHIVE_FORMATS and row["state"] != "unsupported"
         or row["format"] in {"pdf", "epub"} and row["state"] == "estimated")]
     staging = [row.get("staging_bytes") for row in eligible]
     if not staging:
@@ -459,7 +460,7 @@ def _batch_job(record, published):
         if pin and adapter.ready(pin, verify=False):
             raise ValueError("Document is already installed")
         operation, reservation = kind, int(size) if size else limit
-    elif kind in {"zim", "pmtiles"}:
+    elif kind in zim_source.ARCHIVE_FORMATS:
         identity = zim_jobs.identity(config)
         if not size:
             raise ValueError("A ZIM download needs a known size to reserve space")
@@ -707,7 +708,7 @@ def _recover_archive_downloads():
         enabled = publication.load()
         for record in SOURCE_CATALOG.get()["sources"]:
             sid, config = record["source_id"], record["configuration"]
-            if sid in pending or config.get("format") not in {"zim", "pmtiles"}:
+            if sid in pending or config.get("format") not in zim_source.ARCHIVE_FORMATS:
                 continue
             try:
                 with zim_jobs.LOCK:
@@ -1227,6 +1228,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                          or self.path.split("?", 1)[0] in {"/", "/index.html", "/search"}
                          or pdf_source.ROUTE.fullmatch(self.path) or epub_source.ROUTE.fullmatch(self.path)
                          or pmtiles_source.ROUTE.fullmatch(self.path) or _map_asset_path(self.path)
+                         or structured_source.ROUTE.fullmatch(self.path.split("?", 1)[0])
                          or ZIM_READER_ROUTE.fullmatch(self.path) or PDFJS_ASSET.fullmatch(self.path)
                          or self.path == "/internal/publication/zim"):
             return True
@@ -1449,6 +1451,10 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         if _map_asset_path(self.path):
             self._serve_map_asset()
             return
+        data_route = structured_source.ROUTE.fullmatch(self.path.split("?", 1)[0])
+        if data_route:
+            self._serve_structured(*data_route.groups())
+            return
         map_route = pmtiles_source.ROUTE.fullmatch(self.path)
         if map_route:
             self._serve_pmtiles(*map_route.groups())
@@ -1656,7 +1662,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
 
     @staticmethod
     def _archive_record(record):
-        return record["configuration"].get("format") in {"zim", "pmtiles"}
+        return record["configuration"].get("format") in zim_source.ARCHIVE_FORMATS
 
     def _manage_acquisition_batch(self, data):
         if not self.headers.get("Origin"):
@@ -1786,7 +1792,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
     def _search_published_content(self, query, sources, *, page=1, start_base=1):
         sources = [source for source in sources if source.get("search_enabled", True)]
         names = {source["source_id"]: source["name"] for source in sources
-                 if source["category"] not in {"PDF", "EPUB"}}
+                 if source["category"] not in {"PDF", "EPUB", "Data"}}
 
         def acknowledged():
             try:
@@ -1827,7 +1833,18 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             targets[sid] = (dict(name=source["name"], kind=kind, artifact=artifact,
                                  path=source["entry_path"]), library_search.DOCUMENT_ADAPTER)
 
+        for source in sources:
+            if source["category"] != "Data":
+                continue
+            sid = source["source_id"]
+            snapshot = structured_source.current(SOURCE_CATALOG, sid)
+            if snapshot:
+                targets[sid] = (dict(name=source["name"], kind="structured", snapshot=snapshot,
+                                     path=source["entry_path"]), library_search.STRUCTURED_ADAPTER)
+
         def allowed(sid, route):
+            if route.get("kind") == "structured":
+                return structured_source.current(SOURCE_CATALOG, sid) == route["snapshot"]
             if "artifact" in route:
                 config = current_documents().get(sid)
                 adapter = pdf_source if route["kind"] == "pdf" else epub_source
@@ -1915,6 +1932,15 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                                             symbol="M", category="Map", name=profile["title"],
                                             description=profile.get("description", ""), icon_png=profile.get("icon_png", ""),
                                             language=profile.get("language") or "Unspecified language", search_enabled=False))
+            for record in catalog["sources"]:
+                if record["configuration"].get("format") in structured_source.FORMATS:
+                    state = structured_source.status(record)
+                    if state["published"]:
+                        profile = record["profile"]
+                        sources.append(dict(source_id=record["source_id"], entry_path=state["entry_path"],
+                                            symbol="D", category="Data", name=profile["title"],
+                                            description=profile.get("description", ""), icon_png=profile.get("icon_png", ""),
+                                            language=profile.get("language") or "Unspecified language"))
             search_disabled = {record["source_id"] for record in catalog["sources"]
                                if record["configuration"].get("search_enabled") == "no"}
             for source in sources:
@@ -1958,6 +1984,35 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             return
         self.send_response(200)
         self.send_header("Content-Type", MAP_ASSET_PATHS[path])
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _serve_structured(self, sid, digest, number):
+        snapshot = structured_source.current(SOURCE_CATALOG, sid)
+        if not snapshot:
+            self._send_json(403, {"error": "Data source is not published or unavailable"})
+            return
+        try:
+            params = structured_source.reader_params(self.path, digest, number)
+            with structured_source.open_dataset(snapshot) as dataset:
+                context = structured_source.reader_context(dataset, snapshot, params)
+                body = Environment(loader=FileSystemLoader(ADMIN_TEMPLATE_DIR), autoescape=True).get_template(
+                    "structured-reader.html.j2").render(**context).encode()
+            # A replacement or unpublish while rendering invalidates the response.
+            if structured_source.current(SOURCE_CATALOG, sid) != snapshot:
+                raise ValueError("Data source changed")
+        except (ValueError, UnicodeError):
+            self._send_json(400, {"error": "Invalid record, filter, or dataset"})
+            return
+        except (OSError, RuntimeError, TimeoutError):
+            self._send_json(503, {"error": "Data source temporarily unavailable"})
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -2252,7 +2307,9 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 except (ValueError, OSError, KeyError, TypeError):
                     busy = True
             if self._archive_record(record):
-                state = zim_status(record) if self._zim_record(record) else pmtiles_source.status(record)
+                state = (zim_status(record) if self._zim_record(record) else
+                         structured_source.status(record) if record["configuration"]["format"] in structured_source.FORMATS
+                         else pmtiles_source.status(record))
                 verified = bool(state["verified"])
             publication_filter = ("unknown" if state and state.get("error") else
                                   "published" if state and state["published"] else "unpublished")
@@ -3179,12 +3236,12 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 if not record:
                     raise ValueError("Source has no managed installation")
                 kind = record["configuration"]["format"]
-                if kind not in {"zim", "pmtiles", "pdf", "epub"}:
+                if kind not in zim_source.ARCHIVE_FORMATS | {"pdf", "epub"}:
                     raise ValueError("Source has no supported downloaded files")
                 if any(job["source_id"] == sid and job["state"] in acquisition_queue.PENDING
                        for job in acquisition_queue.status()):
                     raise ValueError("Finish or cancel this source’s batch download first")
-                files = zim_jobs.downloaded_zim(sid) if kind in {"zim", "pmtiles"} else pdf_source.downloaded_documents(sid, kind)
+                files = zim_jobs.downloaded_zim(sid) if kind in zim_source.ARCHIVE_FORMATS else pdf_source.downloaded_documents(sid, kind)
                 with files as (directory, opened):
                     enabled = publication.load().get(sid, False)
                     listed = [dict(filename=name, bytes=size) for name, _, size in opened]
@@ -3205,7 +3262,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                             for name, stream, _ in opened:
                                 pdf_source.unlink_managed_file(directory, stream, name)
                                 removed += 1
-                            if kind in {"zim", "pmtiles"}:
+                            if kind in zim_source.ARCHIVE_FORMATS:
                                 zim_jobs.forget_deleted_installation(sid)
                             else:
                                 document_replacement.forget(sid)

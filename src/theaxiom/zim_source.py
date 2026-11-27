@@ -9,6 +9,16 @@ from uuid import uuid4
 
 from . import catalog_store, pdf_source, pdf_transport, storage, storage_settings
 
+from . import structured_source
+
+ARCHIVE_FORMATS = {"zim", "pmtiles"} | structured_source.FORMATS
+
+def byte_limit(kind):
+    return structured_source.MAX_BYTES if kind in structured_source.FORMATS else MAX_BYTES
+
+def minimum_bytes(kind):
+    return 1 if kind in structured_source.FORMATS else 96
+
 MAX_BYTES = 2**40  # explicit 1 TiB ceiling; available storage may be lower
 CHUNK = 1024 * 1024
 TOTAL_SECONDS = 48 * 3600
@@ -19,9 +29,9 @@ def candidate(config):
     url = config.get("source_url", "")
     size = config.get("expected_size_bytes", "")
     digest = config.get("sha256", "")
-    if config.get("format") not in {"zim", "pmtiles"} or not pdf_source.valid_source_url(url):
+    if config.get("format") not in ARCHIVE_FORMATS or not pdf_source.valid_source_url(url):
         raise ValueError("ZIM download requires a direct plain HTTPS URL")
-    if size and (not re.fullmatch(r"[1-9][0-9]{0,19}", size) or int(size) > MAX_BYTES):
+    if size and (not re.fullmatch(r"[1-9][0-9]{0,19}", size) or int(size) > byte_limit(config["format"])):
         raise ValueError("Expected ZIM size exceeds supported limits")
     if digest and not re.fullmatch(r"[a-fA-F0-9]{64}", digest):
         raise ValueError("Invalid expected ZIM SHA-256")
@@ -29,6 +39,8 @@ def candidate(config):
     md5 = publisher_md5(config)
     if config["format"] == "pmtiles" and (not size or not (md5 or digest)):
         raise ValueError("PMTiles requires expected size and a publisher checksum")
+    if config["format"] in structured_source.FORMATS:
+        structured_source.options(config)
     return url, int(size) if size else None, digest.lower() if digest else None
 
 
@@ -71,7 +83,7 @@ def install_stream(source_id, config, stream, *, progress=lambda current, total:
     url, expected, expected_digest = candidate(config)
     kind = config["format"]
     reported = getattr(stream, "length", None)
-    if reported is not None and (type(reported) is not int or not 0 < reported <= MAX_BYTES):
+    if reported is not None and (type(reported) is not int or not 0 < reported <= byte_limit(kind)):
         raise ValueError("Invalid server ZIM size")
     if expected is not None and reported is not None and expected != reported:
         raise ValueError("ZIM server size differs from expected size")
@@ -98,7 +110,7 @@ def install_stream(source_id, config, stream, *, progress=lambda current, total:
                 raise ValueError("ZIM storage is read-only")
             return capacity.f_bavail * capacity.f_frsize - reserve
         check_mount()
-        if available() < (total or 96):
+        if available() < (total or minimum_bytes(kind)):
             raise ValueError("Insufficient writable ZIM storage capacity")
         temp = ".download-" + uuid4().hex
         fd = os.open(temp, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=staging)
@@ -111,7 +123,7 @@ def install_stream(source_id, config, stream, *, progress=lambda current, total:
             sha1 = hashlib.sha1(usedforsecurity=False) if expected_sha1 else None
             with os.fdopen(fd, "w+b") as target:
                 while block := stream.read(CHUNK):
-                    if count + len(block) > (total or MAX_BYTES):
+                    if count + len(block) > (total or byte_limit(kind)):
                         raise ValueError("ZIM exceeds download limit or expected size")
                     check_mount()
                     if len(block) > available():
@@ -138,6 +150,8 @@ def install_stream(source_id, config, stream, *, progress=lambda current, total:
                 if kind == "pmtiles":
                     from . import pmtiles_source
                     pmtiles_source.check_header(target.read(127), count)
+                elif kind in structured_source.FORMATS:
+                    structured_source.parse(target, config)
                 else:
                     check_header(target.read(80), count)
                 if kind == "zim":
@@ -173,7 +187,8 @@ def install_stream(source_id, config, stream, *, progress=lambda current, total:
 
 def download(source_id, config, *, progress=lambda current, total: None):
     url, expected, _ = candidate(config)
-    with pdf_transport.open_pdf(url, format_name="zim", limit=expected or MAX_BYTES,
+    with pdf_transport.open_pdf(url, format_name="zim", limit=expected or byte_limit(config["format"]),
+                                **({"media_type": structured_source.MEDIA_TYPES[config["format"]]} if config["format"] in structured_source.FORMATS else {}),
                                 total_seconds=TOTAL_SECONDS) as stream:
         return install_stream(source_id, config, stream, progress=progress)
 
@@ -206,7 +221,7 @@ def download_resumable(source_id, config, *, offset=0, validator=None,
     """
     url, expected, expected_digest = candidate(config)
     kind = config["format"]
-    if type(offset) is not int or offset < 0 or offset >= MAX_BYTES:
+    if type(offset) is not int or offset < 0 or offset >= byte_limit(kind):
         raise ValueError("Invalid saved ZIM offset")
     if offset and not validator:
         raise ValueError("Publisher supplied no stable ETag or Last-Modified; cannot safely resume")
@@ -249,13 +264,14 @@ def download_resumable(source_id, config, *, offset=0, validator=None,
                 raise ValueError("Saved ZIM offset disagrees with staged file; manual recovery required")
             if expected and offset >= expected:
                 raise ValueError("Staged ZIM offset exceeds expected total")
-            if available() < max(0, (expected or offset + 96) - offset):
+            if available() < max(0, (expected or offset + minimum_bytes(kind)) - offset):
                 raise ValueError("Insufficient writable ZIM storage capacity")
             if stopped():
                 raise TransferStopped()
             # This network context re-validates every redirect destination and pins TLS
             # to the DNS result, just like normal document acquisition.
-            with pdf_transport.open_pdf(url, format_name="zim", limit=expected or MAX_BYTES,
+            with pdf_transport.open_pdf(url, format_name="zim", limit=expected or byte_limit(config["format"]),
+                                **({"media_type": structured_source.MEDIA_TYPES[config["format"]]} if config["format"] in structured_source.FORMATS else {}),
                                         total_seconds=TOTAL_SECONDS, offset=offset,
                                         validator=validator) as stream:
                 total = stream.total_size or expected
@@ -300,7 +316,7 @@ def download_resumable(source_id, config, *, offset=0, validator=None,
                         if stopped():
                             raise TransferStopped()
                         block = batch
-                        if count + len(block) > (total or MAX_BYTES):
+                        if count + len(block) > (total or byte_limit(kind)):
                             raise ValueError("ZIM exceeds download limit or expected size")
                         # Keep the capacity check and write together across ZIM workers.
                         with write_lock():
@@ -320,7 +336,7 @@ def download_resumable(source_id, config, *, offset=0, validator=None,
                     return _verify_and_promote(
                         fd, staging, library, name, source_id, url, count,
                         expected_digest, check_mount, available, stopped,
-                        promote_lock, promoting, progress, expected_sha1=publisher_sha1(config), kind=kind, expected_md5=publisher_md5(config))
+                        promote_lock, promoting, progress, expected_sha1=publisher_sha1(config), kind=kind, expected_md5=publisher_md5(config), configuration=config)
 
         finally:
             os.close(fd)
@@ -328,7 +344,7 @@ def download_resumable(source_id, config, *, offset=0, validator=None,
 
 def _verify_and_promote(fd, staging, library, name, source_id, url, count,
                         expected_digest, check_mount, available, stopped,
-                        promote_lock, promoting, progress, *, expected_sha1="", kind="zim", expected_md5=""):
+                        promote_lock, promoting, progress, *, expected_sha1="", kind="zim", expected_md5="", configuration=None):
     """Verify a staged inode and promote it without copying archive bytes."""
     from contextlib import nullcontext
     check_mount()
@@ -371,6 +387,8 @@ def _verify_and_promote(fd, staging, library, name, source_id, url, count,
         if kind == "pmtiles":
             from . import pmtiles_source
             pmtiles_source.check_header(target.read(127), count)
+        elif kind in structured_source.FORMATS:
+            structured_source.parse(target, configuration)
         else:
             check_header(target.read(80), count)
         if kind == "zim":
@@ -437,7 +455,7 @@ def revalidate_retained(source_id, config, *, expected_bytes, progress=lambda cu
     """
     url, configured_size, expected_digest = candidate(config)
     kind = config["format"]
-    if (type(expected_bytes) is not int or not 96 <= expected_bytes <= MAX_BYTES
+    if (type(expected_bytes) is not int or not minimum_bytes(kind) <= expected_bytes <= byte_limit(kind)
             or configured_size is not None and expected_bytes != configured_size):
         raise ValueError("A known complete expected ZIM size is required for local revalidation")
     settings = storage_settings.load_settings()
@@ -476,6 +494,6 @@ def revalidate_retained(source_id, config, *, expected_bytes, progress=lambda cu
             return _verify_and_promote(
                 fd, staging, library, partial_name(source_id), source_id,
                 url, expected_bytes, expected_digest, check_mount, available,
-                stopped, promote_lock, promoting, progress, expected_sha1=publisher_sha1(config), kind=kind, expected_md5=publisher_md5(config))
+                stopped, promote_lock, promoting, progress, expected_sha1=publisher_sha1(config), kind=kind, expected_md5=publisher_md5(config), configuration=config)
         finally:
             os.close(fd)

@@ -1656,6 +1656,63 @@ def exercise_batch_update_journey(browser, viewport):
         page.close()
 
 
+def exercise_structured_reader(browser, viewport):
+    """Real reader template and query logic; no upstream network or production files."""
+    from hashlib import sha256
+    from io import BytesIO
+    from urllib.parse import urlsplit
+    from jinja2 import Environment, FileSystemLoader
+    from theaxiom import structured_source as data
+
+    raw = json.dumps([{"name": f"Station {i:02}", "city": "Lowell" if i == 25 else "Boston",
+                       "notes": "<img src=x onerror=alert(1)>"} for i in range(1, 26)]).encode()
+    dataset = data.parse(BytesIO(raw), {"format": "json", "data_title_field": "name"})
+    snapshot = dict(source_id="fixture-data", profile=dict(title="Offline directory", publisher="Fixture"),
+                    license="CC0", artifact={"sha256": sha256(raw).hexdigest()})
+    template = Environment(loader=FileSystemLoader(admin_api.ADMIN_TEMPLATE_DIR),
+                           autoescape=True).get_template("structured-reader.html.j2")
+    origin = "http://fixture.local"
+    path = "/api/library/data/fixture-data"
+    page = browser.new_page(viewport=viewport)
+    foreign = []
+    def serve(route):
+        url = urlsplit(route.request.url)
+        match = data.ROUTE.fullmatch(url.path)
+        if url.netloc != "fixture.local" or not match:
+            foreign.append(route.request.url)
+            route.abort()
+            return
+        params = data.reader_params(url.path + ("?" + url.query if url.query else ""), *match.groups()[1:])
+        route.fulfill(content_type="text/html", body=template.render(**data.reader_context(dataset, snapshot, params)))
+
+    try:
+        page.route("**/*", serve)
+        page.goto(origin + path)
+        expect(page.get_by_role("heading", name="Offline directory")).to_be_visible()
+        expect(page.get_by_role("link", name="Back to library", exact=False)).to_be_visible()
+        expect(page.locator(".record")).to_have_count(20)
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        page.get_by_role("link", name="Next →").click()
+        expect(page.locator(".record")).to_have_count(5)
+        page.get_by_label("Search records").fill("Lowell")
+        page.get_by_role("button", name="Search").click()
+        expect(page.locator(".record")).to_have_count(1)
+        expect(page.get_by_role("link", name="Station 25")).to_be_visible()
+        page.get_by_role("link", name="Table", exact=True).click()
+        expect(page.get_by_role("table")).to_be_visible()
+        expect(page.get_by_role("cell", name="Lowell")).to_be_visible()
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        page.get_by_role("link", name="25", exact=True).click()
+        expect(page.get_by_role("heading", name="Station 25")).to_be_visible()
+        expect(page.get_by_text("<img src=x onerror=alert(1)>", exact=True)).to_be_visible()
+        expect(page.locator(".record img")).to_have_count(0)
+        page.get_by_role("link", name="Back to records").click()
+        expect(page.locator(".record")).to_have_count(20)
+        assert not foreign
+    finally:
+        page.close()
+
+
 def main():
     artifacts = Path(os.environ.get("AXIOM_BROWSER_ARTIFACTS", "/tmp/axiom-browser-artifacts"))
     with tempfile.TemporaryDirectory(prefix="axiom-browser-fixtures-") as tmp:
@@ -1704,6 +1761,7 @@ def main():
                                         timed_case("compact-sources", name, exercise_compact_sources, browser, viewport)
                                     for scenario, run in (
                                         ("admin-navigation", exercise_admin_navigation),
+                                        ("structured-reader", exercise_structured_reader),
                                         ("source-activity", exercise_source_activity),
                                         ("batch-update", exercise_batch_update_journey),
                                         ("history-poll", exercise_history_poll),

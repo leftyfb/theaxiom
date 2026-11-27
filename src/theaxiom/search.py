@@ -2,13 +2,14 @@
 from dataclasses import dataclass
 from html.parser import HTMLParser
 import http.client
+import re
 from typing import Callable
 from urllib.parse import urlencode, urlsplit, unquote
 import threading
 import time
 import xml.etree.ElementTree as ET
 
-from . import document_search, publication
+from . import document_search, publication, structured_source
 
 MAX_QUERY = 160
 MAX_RESULTS = 20
@@ -57,6 +58,10 @@ def valid_link(href: str, route: dict) -> bool:
         parsed = urlsplit(href)
         decoded = unquote(parsed.path)
         prefix = route["path"]
+        if route.get("kind") == "structured":
+            digest = route["snapshot"]["artifact"]["sha256"]
+            return (not parsed.scheme and not parsed.netloc and not parsed.query and not parsed.fragment
+                    and re.fullmatch(re.escape(prefix) + "/record/" + digest + r"/[1-9][0-9]{0,5}", parsed.path) is not None)
         if route.get("kind") == "pdf":
             return (not parsed.scheme and not parsed.netloc and not parsed.query and parsed.path == prefix
                     and parsed.fragment.startswith("page=") and parsed.fragment[5:].isascii()
@@ -228,3 +233,4 @@ def search_kiwix(route, query):
 KIWIX_ADAPTER = Adapter(KIWIX_CAPABILITY, search_kiwix)
 
 DOCUMENT_ADAPTER = Adapter("Document text search", document_search.search_document)
+STRUCTURED_ADAPTER = Adapter("Data record search", structured_source.search_records)

@@ -15,7 +15,7 @@ from .storage_settings import validate_settings
 
 LOCAL_FILESYSTEMS = {"ext4", "ext3", "ext2", "xfs", "btrfs", "tmpfs", "zfs"}
 NETWORK_FILESYSTEMS = {"nfs", "nfs4"}
-ACQUISITION_FORMATS = frozenset({"zim", "pdf", "epub", "pmtiles"})
+ACQUISITION_FORMATS = frozenset({"zim", "pdf", "epub", "pmtiles", "json", "csv"})
 
 
 def _decode(field: str) -> str:
@@ -83,7 +83,7 @@ def inspect_storage(settings: dict[str, Any], *, required_bytes: int = 0, progre
             allowed = LOCAL_FILESYSTEMS | (NETWORK_FILESYSTEMS if config["storage_mount"] else set())
             if mount["type"] not in allowed:
                 raise ValueError("unsupported_storage_filesystem")
-            paths = {f"{branch}_{kind}": root / branch / ("zim" if branch == "staging" and kind == "pmtiles" else kind)
+            paths = {f"{branch}_{kind}": root / branch / ("zim" if branch == "staging" and kind in {"pmtiles", "json", "csv"} else kind)
                      for kind in formats for branch in ("staging", "library")}
         else:
             paths = {"staging": root / "staging", "library": root / "library" / "zim"}

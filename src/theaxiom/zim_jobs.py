@@ -299,7 +299,7 @@ def start_candidate_acquisition(sid, config, *, automatic_job=None, activity_tri
             with (pdf_source._directory("staging", writing=True, format_name="zim") as (sfd, sm, _),
                   pdf_source._directory("library", writing=True, format_name=configuration["format"]) as (_, lm, reserve)):
                 cap = os.fstatvfs(sfd)
-                need = max(96, int(configuration["expected_size_bytes"] or 0) - offset)
+                need = max(zim_source.minimum_bytes(configuration["format"]), int(configuration["expected_size_bytes"] or 0) - offset)
                 if sm != lm or cap.f_flag & os.ST_RDONLY or cap.f_bavail * cap.f_frsize < reserve + need:
                     raise ValueError("Insufficient writable archive storage capacity")
             candidate.pop("restart_pending", None)
@@ -955,7 +955,7 @@ def _promoted_artifact(job):
         if (not re.fullmatch("[a-f0-9]{64}", checksum)
                 or name != f'{job["source_id"]}.{checksum}.{job["configuration"]["format"]}'
                 or artifact["source_url"] != url or (digest and checksum != digest)
-                or type(length) is not int or not 96 <= length <= zim_source.MAX_BYTES
+                or type(length) is not int or not zim_source.minimum_bytes(job["configuration"]["format"]) <= length <= zim_source.byte_limit(job["configuration"]["format"])
                 or (size and length != size)):
             return None
         with pdf_source._directory("library", format_name=job["configuration"]["format"]) as (fd, mount, _):
@@ -1063,6 +1063,8 @@ def identity(config):
         result["publisher_sha1"] = publisher_sha1
     if publisher_md5 := zim_source.publisher_md5(config):
         result["publisher_md5"] = publisher_md5
+    if config["format"] in zim_source.structured_source.FORMATS:
+        result.update({field: config.get(field, "") for field in zim_source.structured_source.CONFIG_FIELDS})
     return result
 
 
@@ -1225,7 +1227,7 @@ def start(sid, config, *, resume=False, restart=False, retry=False, activity_tri
             with (pdf_source._directory("staging", writing=True, format_name="zim") as (sfd, sm, _),
                   pdf_source._directory("library", writing=True, format_name=configuration["format"]) as (_, lm, reserve)):
                 cap = os.fstatvfs(sfd)
-                need = max(96, (int(configuration["expected_size_bytes"] or 0) - offset))
+                need = max(zim_source.minimum_bytes(configuration["format"]), (int(configuration["expected_size_bytes"] or 0) - offset))
                 if sm != lm or cap.f_flag & os.ST_RDONLY or cap.f_bavail * cap.f_frsize < reserve + need:
                     raise ValueError("Insufficient writable ZIM storage capacity")
             job.pop("speed_bytes_per_second", None)
@@ -1277,7 +1279,7 @@ def revalidate(sid, config):
                 raise ValueError("Archive already installed")
             expected = old.get("expected_bytes")
             actual = staged_size(sid)
-            if type(expected) is not int or expected < 96 or actual != expected:
+            if type(expected) is not int or expected < zim_source.minimum_bytes(configuration["format"]) or actual != expected:
                 raise ValueError("Local revalidation requires a complete retained file of known size")
             with (pdf_source._directory("staging", writing=True, format_name="zim") as (sfd, sm, _),
                   pdf_source._directory("library", writing=True, format_name=configuration["format"]) as (_, lm, reserve)):

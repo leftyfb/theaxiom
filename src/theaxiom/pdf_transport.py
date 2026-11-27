@@ -190,7 +190,7 @@ class _BoundedBody:
 
 
 @contextmanager
-def open_pdf(url, *, format_name="pdf", limit=None, total_seconds=None, offset=0, validator=None, required_etag=None):
+def open_pdf(url, *, format_name="pdf", limit=None, total_seconds=None, offset=0, validator=None, required_etag=None, media_type=None):
     if format_name not in {"pdf", "epub", "zim"} or (format_name == "zim" and (limit is None or total_seconds is None)):
         raise ValueError("Unsupported document format")
     if offset and (format_name != "zim" or type(offset) is not int or not 0 < offset < limit
@@ -218,7 +218,7 @@ def open_pdf(url, *, format_name="pdf", limit=None, total_seconds=None, offset=0
         connection = _PinnedHTTPS(canonical.hostname, addresses[0], deadline)
         try:
             headers = {
-                "Accept": ({"epub": "application/epub+zip", "pdf": "application/pdf", "zim": "application/octet-stream"}[format_name]) + ", application/octet-stream",
+                "Accept": (media_type or {"epub": "application/epub+zip", "pdf": "application/pdf", "zim": "application/octet-stream"}[format_name]) + ", application/octet-stream",
                 "Accept-Encoding": "identity", "Connection": "close",
                 "User-Agent": "The-Axiom PDF acquisition",
             }

@@ -20,7 +20,8 @@ from . import source_catalog, source_activity
 SCHEMA_VERSION = 2
 PROFILE_FIELDS = {"title", "description", "publisher", "edition", "language", "author", "icon_png"}
 CANDIDATE_FIELDS = {"source_url", "expected_size_bytes", "sha256", "publisher_sha1", "publisher_md5", "provenance", "license"}
-ARTIFACT_CONFIG_FIELDS = CANDIDATE_FIELDS | {"format"}
+DATA_FIELDS = {"data_record_path", "data_columns", "data_title_field"}
+ARTIFACT_CONFIG_FIELDS = CANDIDATE_FIELDS | DATA_FIELDS | {"format"}
 DISCOVERY_FIELDS = {"update_method", "update_endpoint", "update_periodic"}
 UPDATE_POLICY_FIELDS = {"update_policy", "update_window_start", "update_window_end"}
 CONFIG_FIELDS = ARTIFACT_CONFIG_FIELDS | DISCOVERY_FIELDS | UPDATE_POLICY_FIELDS | {"search_enabled"}

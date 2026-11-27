@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ profile.title }} — The Axiom</title>
+<style>
+:root { color-scheme: light dark; --bg:#f4f6f4; --surface:#fff; --fg:#17241e; --muted:#506059; --border:#d2dcd6; --accent:#176b4d; }
+@media(prefers-color-scheme:dark){:root{--bg:#111b16;--surface:#1b2a21;--fg:#eef5ef;--muted:#bdcec2;--border:#43584a;--accent:#a9e7c6}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 system-ui,sans-serif;overflow-wrap:anywhere}
+a{color:var(--accent);text-underline-offset:3px}main{max-width:76rem;padding:1rem;margin:auto}header{border-bottom:1px solid var(--border);padding-bottom:1rem}
+h1{font-size:clamp(1.5rem,4vw,2rem);margin:.65rem 0 .2rem}h2{font-size:1.12rem;margin:0 0 .6rem}p{margin:.45rem 0}.muted{color:var(--muted);font-size:.9rem}
+nav,.toolbar,.pager{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center}.toolbar{margin:1rem 0;justify-content:space-between}
+form{display:flex;flex-wrap:wrap;gap:.4rem;flex:1;align-items:center}input,button,.control{font:inherit;border:1px solid var(--border);border-radius:.4rem;background:var(--surface);color:var(--fg);padding:.55rem .75rem;text-decoration:none}
+input{min-width:0;flex:1;max-width:30rem}button,.control{cursor:pointer}.selected{border-color:var(--accent);font-weight:700;color:var(--accent)}
+.records{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,22rem),1fr));gap:.75rem}.record{min-width:0;border:1px solid var(--border);background:var(--surface);border-radius:.6rem;padding:1rem}
+dl{display:grid;grid-template-columns:minmax(5rem,1fr) minmax(0,2fr);gap:.4rem .8rem;margin:0}dt{color:var(--muted);font-weight:600}dd{margin:0;white-space:pre-wrap}
+.table-shell{max-width:100%;overflow:auto;border:1px solid var(--border);border-radius:.6rem;background:var(--surface)}table{border-collapse:collapse;width:100%;text-align:left;font-size:.9rem}
+th,td{padding:.65rem;vertical-align:top;border-bottom:1px solid var(--border);min-width:7rem;max-width:24rem;white-space:pre-wrap}th{background:var(--bg)}.pager{justify-content:center;margin:1rem 0}footer{border-top:1px solid var(--border);padding:1rem 0;margin-top:1rem}
+@media(max-width:480px){main{padding:.75rem}dl{grid-template-columns:minmax(4rem,1fr) minmax(0,1.6fr)}.toolbar form{flex-basis:100%}}
+</style>
+</head>
+<body>
+<main>
+<header>
+<nav aria-label="Library navigation"><a href="/">← Back to library</a>{% if detail %}<span>·</span><a href="{{ path }}">Back to records</a>{% endif %}</nav>
+<h1>{{ profile.title }}</h1>
+{% if profile.description %}<p>{{ profile.description }}</p>{% endif %}
+<p class="muted">{% if profile.publisher %}{{ profile.publisher }} · {% endif %}{% if profile.edition %}{{ profile.edition }} · {% endif %}{{ row_count }} records · Offline data</p>
+</header>
+{% if not detail %}
+<div class="toolbar">
+<form action="{{ path }}" method="get" role="search"><label for="q">Search records</label><input id="q" name="q" value="{{ query }}" maxlength="160" placeholder="Search displayed fields"><input type="hidden" name="view" value="{{ view }}"><button type="submit">Search</button></form>
+<nav aria-label="View options"><a class="control{% if view == 'cards' %} selected{% endif %}" {% if view == 'cards' %}aria-current="true"{% endif %} href="{{ cards_url }}">Cards</a><a class="control{% if view == 'table' %} selected{% endif %}" {% if view == 'table' %}aria-current="true"{% endif %} href="{{ table_url }}">Table</a></nav>
+</div>
+<p class="muted" role="status">{{ total }} matching record{% if total != 1 %}s{% endif %}{% if entries %} · Page {{ page }}{% endif %}</p>
+{% endif %}
+{% if not entries %}<p>No records on this page. <a href="{{ path }}">Show all records</a>.</p>
+{% elif view == 'table' %}
+<div class="table-shell" tabindex="0" role="region" aria-label="Data records table"><table><thead><tr><th scope="col">Record</th>{% for column in columns %}<th scope="col">{{ column }}</th>{% endfor %}</tr></thead><tbody>{% for entry in entries %}<tr><td><a href="{{ entry.href }}">{{ entry.index }}</a></td>{% for cell in entry.cells %}<td>{{ cell or '—' }}</td>{% endfor %}</tr>{% endfor %}</tbody></table></div>
+{% else %}
+<div class="records">{% for entry in entries %}<article class="record"><h2>{% if detail %}{{ entry.title }}{% else %}<a href="{{ entry.href }}">{{ entry.title }}</a>{% endif %}</h2><dl>{% for column in columns %}<dt>{{ column }}</dt><dd>{{ entry.cells[loop.index0] or '—' }}</dd>{% endfor %}</dl></article>{% endfor %}</div>
+{% endif %}
+{% if previous or following %}<nav class="pager" aria-label="Record pages">{% if previous %}<a class="control" href="{{ previous }}">← Previous</a>{% endif %}<span>Page {{ page }}</span>{% if following %}<a class="control" href="{{ following }}">Next →</a>{% endif %}</nav>{% endif %}
+<footer class="muted">Source rights: {{ license }}. Search covers displayed fields. Content is presented as publisher-supplied text; verify important information against current authoritative sources.</footer>
+</main></body></html>

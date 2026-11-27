@@ -75,7 +75,7 @@ def _check_directory(fd, mount_id):
 
 @contextmanager
 def _directory(branch, *, writing=False, format_name="pdf"):
-    if format_name not in {"pdf", "epub", "zim", "pmtiles"}:
+    if format_name not in {"pdf", "epub", "zim", "pmtiles", "json", "csv"}:
         raise ValueError("Unsupported storage format")
     config = storage_settings.load_settings()
     root = Path(config["storage_root"])
