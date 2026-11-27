@@ -45,6 +45,9 @@ def reconcile(load_records, *, attempts=RETRIES, interval=INTERVAL):
                     )
                     raise
                 zim_catalog.activation_failure = None
+                # Journal recovery is advisory to reader readiness: an
+                # unavailable activity DB must never trigger an archive rollback.
+                _recover_activity(records)
                 return True
         except (OSError, ValueError, TypeError, KeyError) as exc:
             # A missing sidecar or a pending Kiwix --monitorLibrary reload is
@@ -56,6 +59,22 @@ def reconcile(load_records, *, attempts=RETRIES, interval=INTERVAL):
     return False
 
 
+def _recover_activity(records):
+    from . import zim_jobs
+    try:
+        enabled = publication.load()
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            sid = record["source_id"]
+            if enabled.get(sid) and record["configuration"].get("format") == "zim":
+                candidate = zim_jobs.read_candidate(sid)
+                if candidate and candidate.get("activity_id") and candidate["state"] == "activated":
+                    zim_jobs.confirm_activation(sid, candidate["configuration"])
+    except (OSError, ValueError, KeyError, TypeError):
+        LOGGER.warning("Unable to reconcile committed source activity; will retry")
+
+
 def reconcile_activation(load_records, *, source_id, configuration,
                          attempts=RETRIES, interval=INTERVAL):
     """Fail safe after a verified replacement cannot become reader-ready.
@@ -64,9 +83,10 @@ def reconcile_activation(load_records, *, source_id, configuration,
     compare-and-swap safety checks as an explicit rollback. Do not delete
     either installed archive. Refresh the restored reader manifest afterward.
     """
-    if reconcile(load_records, attempts=attempts, interval=interval):
-        return True
     from . import zim_jobs
+    if reconcile(load_records, attempts=attempts, interval=interval):
+        zim_jobs.confirm_activation(source_id, configuration)
+        return True
     try:
         zim_jobs.rollback_candidate(
             source_id, configuration,

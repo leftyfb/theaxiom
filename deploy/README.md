@@ -131,3 +131,23 @@ Read recent summaries in the systemd journal for the application and
 ID. Summary retention follows the host's journal settings. A cache hit
 includes the age of the original check and does not make another publisher
 request. Checking metadata does not transfer or change installed files.
+
+
+### Source activity
+
+Admin → Activity displays committed source changes newest first and can
+filter by action and source, including removed sources. History starts at
+installation of this release; it does not invent past events from the
+current catalog or transient queue. The journal is a private SQLite file
+`source-activity.sqlite3` next to the storage settings. Back it up with
+the application configuration. No download URLs, configuration values,
+credentials, or diagnostic messages are copied into events; source IDs,
+display names, editions, and outcomes are retained.
+
+Events have stable IDs and monotonically increasing sequence numbers.
+Consumers may use sequence cursors and durable acknowledgement via the
+journal's `acknowledge` method. Retention defaults to 10,000 acknowledged
+events; unacknowledged records are retained until all registered consumers
+have acknowledged them. The retain argument can be adjusted per consumer
+maintenance invocation. No automatic deletion occurs without consumer
+acknowledgement. Deduplication IDs are retained separately.

@@ -435,6 +435,16 @@ class HTTPAuthTests(unittest.TestCase):
             self.assertNotIn(b'id="storage-form"', body)
             self.assertNotIn(b'id="acquisition-monitor-script"', body)
 
+    def test_activity_view_and_api_require_authentication(self):
+        for route in ("/admin/activity", "/admin/activity/", "/api/source-activity"):
+            self.assertEqual(self.request(route)[0], 401)
+        code, headers, body = self.request("/admin/activity", auth=self.auth)
+        self.assertEqual(code, 200)
+        self.assertEqual(headers["Cache-Control"], "no-store")
+        self.assertIn(b'id="source-activity-script"', body)
+        self.assertNotIn(b'id="source-cards"', body)
+        self.assertEqual(self.request("/api/source-activity?limit=101", auth=self.auth)[0], 400)
+
     def test_cross_origin_and_simple_posts_rejected(self):
         for headers, expected in [
             ({"Origin":"http://attacker.invalid", "Content-Type":"application/json"}, 403),

@@ -38,6 +38,7 @@ catalog_store = importlib.import_module(f"{__package__}.catalog_store" if __pack
 
 security = importlib.import_module(f"{__package__}.admin_security" if __package__ else "theaxiom.admin_security")
 admin_sessions = importlib.import_module(f"{__package__}.admin_sessions" if __package__ else "theaxiom.admin_sessions")
+source_activity = importlib.import_module("theaxiom.source_activity")
 publication = importlib.import_module(f"{__package__}.publication" if __package__ else "theaxiom.publication")
 pdf_source = importlib.import_module(f"{__package__}.pdf_source" if __package__ else "theaxiom.pdf_source")
 epub_source = importlib.import_module(f"{__package__}.epub_source" if __package__ else "theaxiom.epub_source")
@@ -357,7 +358,7 @@ _DOCUMENT_RETRIES_LOCK = threading.Lock()
 
 
 def _acquire_document(sid, record, config, revision, is_epub, fields, *, adding=False,
-                      auto_title=False, stop=None):
+                      auto_title=False, stop=None, activity_trigger="manual"):
     """Acquire and commit a document using the caller's publication lock."""
     stopping = stop or (lambda: False)
     stop_options = {"stop": stop} if stop else {}
@@ -417,7 +418,8 @@ def _acquire_document(sid, record, config, revision, is_epub, fields, *, adding=
             fields[key] = extracted[key]
     if adding and auto_title and extracted.get("title"):
         fields["title"] = extracted["title"]
-    updated = SOURCE_CATALOG.mutate("add" if adding else "edit", sid, fields, revision)
+    updated = SOURCE_CATALOG.mutate("add" if adding else "edit", sid, fields, revision,
+                                    activity_action="downloaded", activity_trigger=activity_trigger)
     # Preserve only a strong ETag captured from the actual successful GET,
     # and only after the verified artifact and source catalog both commit.
     # This auxiliary evidence is advisory; failures must never convert an
@@ -565,13 +567,13 @@ def _prepare_queued_update(sid, record, revision, payload, *, automatic_job=None
     return config, candidate
 
 
-def _publish_queued_update(sid, config, recovering):
+def _publish_queued_update(sid, config, recovering, *, activity_trigger=None):
     candidate = zim_jobs.candidate_status(sid)
     if not candidate or candidate["configuration"] != zim_jobs.identity(config):
         raise ValueError("The verified candidate changed; review it again")
     enabled = publication.load().get(sid, False)
     if candidate["state"] != "activated" or not recovering:
-        zim_jobs.activate_candidate(sid, config)
+        zim_jobs.activate_candidate(sid, config, activity_trigger=activity_trigger)
     else:
         zim_jobs.recover_candidate_transition(sid)
     return enabled
@@ -819,6 +821,7 @@ def _execute_automatic_update(job, payload, stopping, shutdown):
     if kind == "zim" and published and not zim_refresh.reconcile_activation(
             lambda: SOURCE_CATALOG.get()["sources"], source_id=sid, configuration=config):
         return "failed", "Reader could not serve the update; review the replacement status"
+    zim_jobs.confirm_activation(sid, config)
     return "completed", "Update activated; publication setting preserved"
 
 
@@ -845,7 +848,7 @@ def _execute_batch_job(job, stopping, shutdown):
             if stopping():
                 raise acquisition_queue.Cancelled()
             try:
-                is_published = _publish_queued_update(sid, config, recovering)
+                is_published = _publish_queued_update(sid, config, recovering, activity_trigger="batch")
             except BlockingIOError:
                 return "running" if recovering else "queued", ""
         elif operation in {"pdf", "epub"}:
@@ -860,7 +863,7 @@ def _execute_batch_job(job, stopping, shutdown):
                 return "running", ""
             try:
                 _acquire_document(sid, record, config, catalog["revision"], operation == "epub",
-                                  {}, stop=stop_document)
+                                  {}, stop=stop_document, activity_trigger="batch")
             except acquisition_queue.Cancelled:
                 if shutdown.is_set() and not stopping():
                     return "running", ""
@@ -903,16 +906,17 @@ def _execute_batch_job(job, stopping, shutdown):
                     raise ValueError("Free space fell below the reserved download size")
                 try:
                     if replacement:
-                        zim_jobs.start_candidate_acquisition(sid, config)
+                        zim_jobs.start_candidate_acquisition(sid, config, activity_trigger="batch")
                     else:
                         zim_jobs.start(sid, config, resume=bool(retained),
-                                       restart=current is not None and not retained)
+                                       restart=current is not None and not retained, activity_trigger="batch")
                 except BlockingIOError:
                     return "running" if recovering else "queued", ""
     if operation == "publish-update":
         if kind == "zim" and is_published and not zim_refresh.reconcile_activation(
                 lambda: SOURCE_CATALOG.get()["sources"], source_id=sid, configuration=config):
             return "failed", "Reader could not serve the update; review the replacement status"
+        zim_jobs.confirm_activation(sid, config, trigger="batch")
         return "completed", "Update activated; publication setting preserved"
     while not shutdown.is_set():
         current = inspect(sid)
@@ -988,7 +992,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         # credentials that cannot be cleared by the application's Sign out.
         # Preserve Basic for explicit nonbrowser clients and deploy probes.
         browser_admin_navigation = (not post and self.path.rstrip("/") in {
-            "/admin", "/admin/sources", "/admin/settings", "/admin/groupings", "/admin/updates"
+            "/admin", "/admin/sources", "/admin/settings", "/admin/groupings", "/admin/updates", "/admin/activity"
         } and "text/html" in self.headers.get("Accept", "").lower())
         # Browser background fetches may omit Sec-Fetch-Mode (notably older
         # clients and some proxied requests). Other browser-only headers must
@@ -1015,7 +1019,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 self._session_csrf, self._session_token = csrf, token
         if not login and not basic and self._session_csrf is None:
             if not post and self.path.rstrip("/") in {
-                    "/admin", "/admin/sources", "/admin/settings", "/admin/groupings", "/admin/updates"}:
+                    "/admin", "/admin/sources", "/admin/settings", "/admin/groupings", "/admin/updates", "/admin/activity"}:
                 # Real browser navigation advertises HTML; render the branded
                 # login. Legacy curl/API probes still receive their expected
                 # 401 Basic challenge, preserving fixed deploy preflight checks.
@@ -1104,6 +1108,20 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802 - http.server convention
         if not self._guard():
+            return
+        if self.path.split("?", 1)[0] == "/api/source-activity":
+            try:
+                params = parse_qs(self.path.partition("?")[2], max_num_fields=4)
+                if set(params) - {"source", "action", "before", "limit"} or any(len(v) != 1 for v in params.values()):
+                    raise ValueError("Invalid activity filters")
+                def get(key):
+                    return params.get(key, [None])[0]
+                self._send_json(200, source_activity.query(get("source"), get("action"),
+                    int(get("before")) if get("before") else None, int(get("limit") or 50)))
+            except ValueError:
+                self._send_json(400, {"error": "Invalid activity filters"})
+            except (OSError, sqlite3.Error):
+                self._send_json(503, {"error": "Source activity unavailable"})
             return
         if self.path == "/api/acquisition-batch":
             try:
@@ -1279,8 +1297,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                             | {item["source_id"]: state for item, state in self._zim_publications()})
         elif self.path.rstrip("/") == "/health":
             self._send_json(200, health_response())
-        elif self.path.rstrip("/") in {"/admin", "/admin/sources", "/admin/settings", "/admin/groupings", "/admin/updates"}:
-            page = {"/admin/settings": "settings", "/admin/groupings": "groupings", "/admin/updates": "updates"}.get(self.path.rstrip("/"), "sources")
+        elif self.path.rstrip("/") in {"/admin", "/admin/sources", "/admin/settings", "/admin/groupings", "/admin/updates", "/admin/activity"}:
+            page = {"/admin/settings": "settings", "/admin/groupings": "groupings", "/admin/updates": "updates", "/admin/activity": "activity"}.get(self.path.rstrip("/"), "sources")
             self._send_admin_page(page)
         elif self.path.rstrip("/") == "/api/acquisitions":
             self._send_json(200, self._snapshot())
@@ -2712,7 +2730,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     provenance = note
                 fields.update(expected_size_bytes=str(observed["bytes"]), sha256=observed["sha256"],
                               provenance=provenance)
-                updated = SOURCE_CATALOG.mutate("add" if adding else "edit", sid, fields, revision)
+                updated = SOURCE_CATALOG.mutate("add" if adding else "edit", sid, fields, revision,
+                                                activity_action="uploaded")
             except catalog_store.RevisionConflict as exc:
                 self._send_json(409, {"error": str(exc)})
                 return
@@ -2836,6 +2855,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                         if enabled:
                             publication.save(sid, False)
                             unpublished = True
+                        activity_key = source_activity.prepare_delete(directory, [name for name, _, _ in opened],
+                                                                       sid=sid, name=record["profile"]["title"])
                         try:
                             for name, stream, _ in opened:
                                 pdf_source.unlink_managed_file(directory, stream, name)
@@ -2846,6 +2867,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                         finally:
                             if kind == "zim" and (unpublished or removed):
                                 zim_refresh.schedule(lambda: SOURCE_CATALOG.get()["sources"])
+                        source_activity.finish_delete(activity_key)
                         result = dict(deleted=removed)
         except (BlockingIOError, ValueError, OSError, sqlite3.Error, catalog_store.CatalogError) as exc:
             reason = (str(exc) if isinstance(exc, ValueError) else

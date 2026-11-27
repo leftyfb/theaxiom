@@ -3,6 +3,8 @@ from contextlib import contextmanager
 import fcntl
 import hashlib
 import json
+import logging
+import sqlite3
 import os
 import re
 from pathlib import Path
@@ -12,7 +14,7 @@ import threading
 import time
 from uuid import uuid4
 
-from . import acquisition_queue, catalog_store, storage_settings, zim_source, pdf_source, pdf_transport
+from . import acquisition_queue, catalog_store, storage_settings, zim_source, pdf_source, pdf_transport, source_activity
 
 HISTORY_LIMIT = 12
 MAX_RETRIES = 3
@@ -231,7 +233,7 @@ def acquire_candidate(sid, config):
         return candidate
 
 
-def start_candidate_acquisition(sid, config, *, automatic_job=None):
+def start_candidate_acquisition(sid, config, *, automatic_job=None, activity_trigger=None):
     """Queue a replacement download without blocking the HTTP request."""
     configuration = identity(config)
     with LOCK:
@@ -266,7 +268,11 @@ def start_candidate_acquisition(sid, config, *, automatic_job=None):
                 # failed attempt; those headers describe a different response.
                 candidate.pop("etag", None)
                 candidate.pop("last_modified", None)
-            candidate.update(state="downloading", automatic_retry_count=0)
+            candidate.update(state="downloading", automatic_retry_count=0,
+                             transfer_activity_id=uuid4().hex,
+                             transfer_activity_trigger=activity_trigger or (
+                                 ("scheduled" if config.get("update_policy") == "scheduled" else "automatic")
+                                 if automatic_job else "manual"))
             candidate.pop("error", None)
             candidate.pop("retry_delay_seconds", None)
             candidate.pop("retry_exhausted", None)
@@ -437,14 +443,15 @@ def rollback_token(candidate):
     return hashlib.sha256(json.dumps(candidate, sort_keys=True).encode()).hexdigest()
 
 
-def activate_candidate(sid, config, *, rollback_retry=None):
+def activate_candidate(sid, config, *, rollback_retry=None, activity_trigger=None):
     """Switch the serving record only after the replacement artifact is installed.
 
     The old content-addressed archive remains on disk. Candidate metadata is
     retained for a subsequent explicit rollback operation.
     """
     configuration = identity(config)
-    with LOCK:
+    from . import publication
+    with publication.LOCK, LOCK:
         with worker_lock():
             candidate = read_candidate(sid)
             if not candidate or candidate["configuration"] != configuration:
@@ -470,10 +477,19 @@ def activate_candidate(sid, config, *, rollback_retry=None):
             # Preserve the complete original serving record for rollback.
             candidate["previous_job"] = live
             candidate["state"] = "activated"
+            candidate["activity_id"] = uuid4().hex
+            candidate["activity_trigger"] = activity_trigger or (
+                ("scheduled" if config.get("update_policy") == "scheduled" else "automatic")
+                if candidate.get("automatic_job") or rollback_retry else "manual")
+            candidate["activity_name"] = source_activity.source_name(sid)
+            candidate["activity_old_edition"] = _activity_edition(live)
+            candidate["activity_new_edition"] = _activity_edition(replacement) or config.get("edition")
             if rollback_retry is not None:
                 candidate["automatic_job"] = rollback_retry[2]
             _save_candidate(candidate)
             save(replacement)
+            if not publication.load().get(sid) or config.get("format") != "zim":
+                confirm_activation(sid, config)
             return replacement
 
 
@@ -507,8 +523,44 @@ def rollback_candidate(sid, config, *, reason=None):
             if reason is not None:
                 candidate["error"] = reason
             _save_candidate(candidate)
-            save(previous)
+            save(previous, activity=_rollback_activity(candidate, reason))
+
             return previous
+
+
+def _activity_edition(job):
+    from . import kiwix_update_discovery
+    return (kiwix_update_discovery.installed_identity_from_job(job, job.get("artifact")) or {}).get("edition")
+
+
+def _rollback_activity(candidate, reason=None):
+    sid = candidate["source_id"]
+    return dict(sid=sid, name=candidate.get("activity_name") or source_activity.source_name(sid),
+                action="rolled_back", key=source_activity.event_id(sid, candidate["rollback_id"]),
+                old_edition=candidate.get("activity_new_edition"), new_edition=candidate.get("activity_old_edition"),
+                outcome="failed" if reason else "completed", trigger="automatic" if reason else "manual")
+
+
+def confirm_activation(sid, config, *, trigger=None):
+    with LOCK:
+        candidate = read_candidate(sid)
+        if not candidate or candidate["state"] != "activated" or candidate["configuration"] != identity(config):
+            return
+        if not candidate.get("activity_id"):
+            return  # pre-journal deployment: do not fabricate historical events
+        current = read(sid)
+        if not current or current.get("artifact") != candidate["artifact"] or current.get("state") != "completed":
+            return
+        try:
+            source_activity.record(sid, "updated", name=candidate.get("activity_name"),
+                                   trigger=trigger or candidate.get("activity_trigger", "unknown"),
+                                   old_edition=candidate.get("activity_old_edition"),
+                                   new_edition=candidate.get("activity_new_edition"),
+                                   key=source_activity.event_id(sid, candidate["activity_id"]))
+        except (OSError, sqlite3.Error):
+            # Keep the durable candidate activity ID for a later reconciliation.
+            # A journal write error is not a failed reader activation.
+            logging.getLogger(__name__).warning("Could not record committed activation activity")
 
 
 def recover_candidate_transition(sid):
@@ -518,7 +570,8 @@ def recover_candidate_transition(sid):
     writes the live job first. Reconcile only when the observed job matches
     exactly one of those two expected records.
     """
-    with LOCK:
+    from . import publication
+    with publication.LOCK, LOCK:
         with worker_lock():
             candidate = read_candidate(sid)
             if not candidate or candidate["state"] not in {"activated", "rolled_back"}:
@@ -530,12 +583,16 @@ def recover_candidate_transition(sid):
             current = read(sid)
             if candidate["state"] == "activated":
                 if current == replacement:
+                    if not publication.load().get(sid) or candidate["configuration"].get("format") != "zim":
+                        confirm_activation(sid, candidate["configuration"])
                     return False
                 if current != previous:
                     raise ValueError("Serving record diverged; recovery refused")
                 if not installed(replacement, candidate["configuration"]):
                     raise ValueError("Replacement archive missing; recovery refused")
                 save(replacement)
+                if not publication.load().get(sid) or candidate["configuration"].get("format") != "zim":
+                    confirm_activation(sid, candidate["configuration"])
                 return True
             if current == previous:
                 return False
@@ -543,16 +600,27 @@ def recover_candidate_transition(sid):
                 raise ValueError("Serving record diverged; recovery refused")
             if not installed(previous, previous["configuration"]):
                 raise ValueError("Previous archive missing; recovery refused")
-            save(previous)
+            save(previous, activity=_rollback_activity(candidate, candidate.get("error")) if candidate.get("rollback_id") else None)
             return True
 
 
 def _save_candidate(candidate):
     target = candidate_path_for(candidate["source_id"])
+    payload = json.dumps(candidate, separators=(",", ":")).encode()
+    action = {"verified":"staged", "failed":"download_failed", "cancelled":"download_cancelled"}.get(candidate["state"])
+    event = action and candidate.get("transfer_activity_id")
+    if event:
+        sid = candidate["source_id"]
+        source_activity.prepare_write(target, payload, sid=sid, name=source_activity.source_name(sid),
+            action=action, outcome={"failed":"failed", "cancelled":"cancelled"}.get(candidate["state"], "completed"),
+            trigger=candidate.get("transfer_activity_trigger", "unknown"),
+            key=source_activity.event_id(sid, event, action))
+    elif source_activity.path().exists():
+        source_activity.reconcile_write(target)
     fd, name = tempfile.mkstemp(prefix=".candidate-", dir=target.parent)
     try:
         with os.fdopen(fd, "w") as stream:
-            json.dump(candidate, stream, separators=(",", ":"))
+            stream.write(payload.decode())
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(name, target)
@@ -563,6 +631,9 @@ def _save_candidate(candidate):
             os.close(dfd)
     finally:
         Path(name).unlink(missing_ok=True)
+
+    if event:
+        source_activity.reconcile_write(target)
 
 
 def discard_candidate(sid, config):
@@ -683,9 +754,11 @@ def delete_installed(sid):
             raise ValueError("Unpublish the source before deleting installed content")
         with downloaded_zim(sid) as (directory, files):
             (name, stream, _), = files
+            activity_key = source_activity.prepare_delete(directory, [name], sid=sid)
             pdf_source.unlink_managed_file(directory, stream, name)
             forget_deleted_installation(sid)
             os.fsync(directory)
+    source_activity.finish_delete(activity_key)
     return {"accepted": True, "source_id": sid, "state": "deleted"}
 
 
@@ -712,7 +785,7 @@ def _record_attempt(job, *, started=False):
     """Keep bounded, durable acquisition outcomes without copying archive bytes."""
     history = job.setdefault("attempt_history", [])
     if started:
-        history.append({"started_at": time.time(), "resume_offset": job.get("downloaded_bytes", 0),
+        history.append({"activity_id": uuid4().hex, "started_at": time.time(), "resume_offset": job.get("downloaded_bytes", 0),
                         "source_url": job["configuration"]["source_url"]})
         del history[:-HISTORY_LIMIT]
     elif history:
@@ -725,13 +798,30 @@ def _record_attempt(job, *, started=False):
                      retained=job.get("retained", False))
 
 
-def save(job):
+def save(job, *, activity=None):
     target = path_for(job["source_id"])
     target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    payload = json.dumps(job, separators=(",", ":")).encode()
+    history = job.get("attempt_history", [])
+    if history and activity is None:
+        attempt = history[-1]
+        action = {"completed":"downloaded","failed":"download_failed","cancelled":"download_cancelled"}.get(job["state"])
+        if action and attempt.get("activity_id") and attempt.get("state") == job["state"] and attempt.get("operation") != "revalidate":
+            sid = job["source_id"]
+            activity = dict(sid=sid, name=source_activity.source_name(sid), action=action,
+                            trigger=job.get("activity_trigger", "manual"),
+                            outcome={"failed":"failed","cancelled":"cancelled"}.get(job["state"], "completed"),
+                            key=source_activity.event_id(sid, attempt["activity_id"], action),
+                            new_edition=_activity_edition(job) if action == "downloaded" else None)
+    if activity:
+        source_activity.prepare_write(target, payload, **activity)
+    elif source_activity.path().exists():
+        # Recover a committed intent before replacing this job record.
+        source_activity.reconcile_write(target)
     fd, name = tempfile.mkstemp(prefix=".job-", dir=target.parent)
     try:
-        with os.fdopen(fd, "w") as stream:
-            json.dump(job, stream, separators=(",", ":"))
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(payload)
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(name, target)
@@ -742,6 +832,8 @@ def save(job):
             os.close(fd)
     finally:
         Path(name).unlink(missing_ok=True)
+    if activity:
+        source_activity.reconcile_write(target)
 
 
 @contextmanager
@@ -986,7 +1078,7 @@ def staged_present(sid):
         return True
 
 
-def start(sid, config, *, resume=False, restart=False, retry=False):
+def start(sid, config, *, resume=False, restart=False, retry=False, activity_trigger="manual"):
     if retry and (resume or restart):
         raise ValueError("Retry cannot be combined with resume or restart")
     if restart and resume:
@@ -1054,6 +1146,7 @@ def start(sid, config, *, resume=False, restart=False, retry=False):
             job.update(automatic_retry_count=0)
             job.pop("retry_delay_seconds", None)
             job.pop("retry_exhausted", None)
+            job["activity_trigger"] = activity_trigger
             _record_attempt(job, started=True)
             if retry:
                 job["attempt_history"][-1]["operation"] = "retry"

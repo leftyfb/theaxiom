@@ -1196,6 +1196,48 @@ def exercise_admin_navigation(browser, viewport):
 
 
 
+def exercise_source_activity(browser, viewport):
+    from test_admin_page_template import render
+
+    page = browser.new_page(viewport=viewport)
+    events = [
+        dict(sequence=2, timestamp="2026-11-27T05:00:00+00:00", name="Removed fixture",
+             source_id="removed", action="removed", trigger="manual", outcome="completed"),
+        dict(sequence=1, timestamp="2026-11-26T05:00:00+00:00", name="Other fixture",
+             source_id="other", action="updated", trigger="scheduled", outcome="completed",
+             old_edition="1", new_edition="2"),
+    ]
+
+    def api(route):
+        from urllib.parse import urlsplit, parse_qs
+        filters = parse_qs(urlsplit(route.request.url).query)
+        rows = [row for row in events if
+                ("source" not in filters or row["source_id"] == filters["source"][0]) and
+                ("action" not in filters or row["action"] == filters["action"][0]) and
+                ("before" not in filters or row["sequence"] < int(filters["before"][0]))]
+        route.fulfill(json={"events": rows[:1], "next": rows[0]["sequence"] if len(rows) > 1 else None,
+                            "sources": [{"source_id": row["source_id"], "name": row["name"]} for row in events],
+                            "actions": ["removed", "updated"]})
+
+    try:
+        page.route("http://fixture.local/admin/activity", lambda route: route.fulfill(
+            content_type="text/html", body=render(admin_page="activity", session_csrf_token="fixture")))
+        page.route("http://fixture.local/api/source-activity*", api)
+        page.goto("http://fixture.local/admin/activity")
+        expect(page.get_by_text("Removed fixture — Source removed")).to_be_visible()
+        page.get_by_role("button", name="Older").click()
+        expect(page.get_by_text("Other fixture — Update activated")).to_be_visible()
+        expect(page.get_by_text("1 → 2", exact=False)).to_be_visible()
+        page.get_by_label("Source", exact=True).select_option("removed")
+        expect(page.get_by_text("Removed fixture — Source removed")).to_be_visible()
+        page.get_by_label("Action", exact=True).select_option("updated")
+        expect(page.get_by_text("No source activity recorded.")).to_be_visible()
+        assert page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth + 2")
+    finally:
+        page.close()
+
+
+
 def exercise_batch_update_journey(browser, viewport):
     from test_admin_page_template import profile, render
 
@@ -1420,6 +1462,7 @@ def main():
                                         timed_case("compact-sources", name, exercise_compact_sources, browser, viewport)
                                     for scenario, run in (
                                         ("admin-navigation", exercise_admin_navigation),
+                                        ("source-activity", exercise_source_activity),
                                         ("batch-update", exercise_batch_update_journey),
                                         ("history-poll", exercise_history_poll),
                                         ("automatic-eligibility", exercise_automatic_eligibility),

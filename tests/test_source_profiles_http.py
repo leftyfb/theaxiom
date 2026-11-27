@@ -1225,7 +1225,7 @@ def test_batch_restarts_zim_from_retained_bytes(app, monkeypatch):
                configuration=json.dumps(config),
                storage=json.dumps(admin_api.storage_settings.load_settings()))
     assert admin_api._execute_batch_job(job, lambda: False, threading.Event()) == ("completed", "")
-    start.assert_called_once_with("fixture", config, resume=True, restart=False)
+    start.assert_called_once_with("fixture", config, resume=True, restart=False, activity_trigger="batch")
 
 
 def test_existing_source_placeholders_are_configured_without_downloads(app, monkeypatch):
@@ -1428,6 +1428,10 @@ def test_batch_updates_keep_old_archives_and_isolate_download_and_activation_fai
     assert {job["source_id"]: job["state"] for job in queue.status() if job["operation"] == "publish-update"} == {
         "bad-reader": "failed", "ready-public": "completed", "ready-private": "completed",
     }
+    activity = request("/api/source-activity?action=updated")
+    assert {event["source_id"] for event in activity["events"]} == {"ready-public", "ready-private"}
+    assert all(event["trigger"] == "batch" for event in activity["events"])
+    assert request("/api/source-activity?action=rolled_back")["events"][0]["source_id"] == "bad-reader"
     for sid in ("bad-download", "bad-reader"):
         assert jobs.read(sid) == installed[sid]
     for sid in ("ready-public", "ready-private"):
@@ -1602,6 +1606,9 @@ def test_retry_rolled_back_automatic_update(app, disk, monkeypatch, policy, lega
     assert queue.run_next(admin_api._execute_batch_job, threading.Event()), queue.status()
     first, = queue.status()
     assert first["state"] == "completed", first
+    history = request("/api/source-activity?action=updated")["events"]
+    assert history[0]["trigger"] == policy
+    assert history[0]["old_edition"] == "2026-10-01" and history[0]["new_edition"] == "2026-11-01"
     latest = jobs.read(sid)
     assert latest
     latest_digest = latest["artifact"]["sha256"]

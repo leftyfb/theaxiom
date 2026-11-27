@@ -9,7 +9,7 @@ import xml.etree.ElementTree as ET
 from urllib.parse import urlsplit, quote
 from pathlib import Path
 
-from . import catalog_store, storage_settings
+from . import catalog_store, storage_settings, source_activity
 
 LOCK = threading.RLock()
 def state_path():
@@ -33,22 +33,31 @@ def save(source_id, enabled):
         raise ValueError("invalid publication request")
     with LOCK:
         data = load()
+        changed = bool(data.get(source_id)) != enabled
         if enabled:
             data[source_id] = enabled
         else:
             data.pop(source_id, None)
         target = state_path()
         target.parent.mkdir(parents=True, exist_ok=True)
+        payload = json.dumps(data).encode()
+        if changed:
+            source_activity.prepare_write(target, payload, sid=source_id, name=source_activity.source_name(source_id),
+                                          action="published" if enabled else "unpublished")
+        elif source_activity.path().exists():
+            source_activity.reconcile_write(target)
         fd, name = tempfile.mkstemp(prefix=".publication-", dir=target.parent)
         try:
             with os.fdopen(fd, "w") as stream:
                 os.fchmod(stream.fileno(), 0o600)
-                json.dump(data, stream)
+                stream.write(payload.decode())
                 stream.flush()
                 os.fsync(stream.fileno())
             os.replace(name, target)
         finally:
             Path(name).unlink(missing_ok=True)
+        if changed:
+            source_activity.reconcile_write(target)
 
 
 # Generic Kiwix book IDs are derived from verified digest-suffixed filenames.

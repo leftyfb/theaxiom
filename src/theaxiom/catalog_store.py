@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from . import source_catalog
+from . import source_catalog, source_activity
 
 SCHEMA_VERSION = 2
 PROFILE_FIELDS = {"title", "description", "publisher", "edition", "language", "author", "icon_png"}
@@ -487,7 +487,7 @@ class CatalogStore:
             finally:
                 os.close(fd)
 
-    def mutate(self, operation, source_id, fields, revision, busy=False):
+    def mutate(self, operation, source_id, fields, revision, busy=False, *, activity_action=None, activity_trigger="manual"):
         self._validate_id(source_id)
         if type(revision) is not int or revision < 0:
             raise CatalogError("revision precondition required")
@@ -505,6 +505,8 @@ class CatalogStore:
                 if state["revision"] != revision:
                     raise RevisionConflict("catalog revision changed")
                 records = {record["source_id"]: record for record in state["sources"]}
+                prior = records.get(source_id)
+                old = json.loads(json.dumps(prior)) if prior else None
                 if operation == "add":
                     if source_id in records:
                         raise CatalogError("source ID already exists")
@@ -522,7 +524,28 @@ class CatalogStore:
                             layout["source_order"] = [sid for sid in layout["source_order"] if sid != source_id]
                 state["revision"] += 1
                 state["updated_at"] = datetime.now(timezone.utc).isoformat()
-                self._atomic_write(self._validated_payload(state))
+                payload = self._validated_payload(state)
+                current = next((r for r in state["sources"] if r["source_id"] == source_id), None)
+                if old != current:
+                    source_activity.prepare_write(self.path, payload, sid=source_id,
+                        action={"add":"added","edit":"edited","remove":"removed"}[operation],
+                        name=(current or old)["profile"]["title"],
+                        old_edition=(old or {}).get("profile", {}).get("edition"),
+                        new_edition=(current or {}).get("profile", {}).get("edition"),
+                        trigger=activity_trigger,
+                        key=source_activity.event_id(str(self.path), state["revision"], source_id, operation),
+                        target=self.path.with_name("source-activity.sqlite3"))
+                if activity_action:
+                    source_activity.prepare_write(self.path, payload, sid=source_id,
+                        action=activity_action, name=current["profile"]["title"],
+                        old_edition=(old or {}).get("profile", {}).get("edition"),
+                        new_edition=current["profile"].get("edition"),
+                        trigger=activity_trigger, append=old != current,
+                        key=source_activity.event_id(str(self.path), state["revision"], source_id, activity_action),
+                        target=self.path.with_name("source-activity.sqlite3"))
+                self._atomic_write(payload)
+                if old != current or activity_action:
+                    source_activity.reconcile_write(self.path, target=self.path.with_name("source-activity.sqlite3"))
                 return self._snapshot(state)
             finally:
                 os.close(fd)
@@ -666,6 +689,11 @@ class CatalogStore:
                 os.close(fd)
 
     def _atomic_write(self, payload):
+        # The active mutation may have prepared an intent for this exact payload;
+        # do not discard it. Recover earlier committed events before replacement.
+        journal = self.path.with_name("source-activity.sqlite3")
+        if journal.exists():
+            source_activity.reconcile_write(self.path, target=journal)
         fd, name = tempfile.mkstemp(prefix="." + self.path.name + ".", dir=self.path.parent)
         try:
             with os.fdopen(fd, "wb") as stream:

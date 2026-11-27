@@ -48,6 +48,8 @@ def test_distinct_zim_downloads_run_concurrently_and_duplicate_is_rejected(disk)
     job = zim_jobs.status("ready")
     assert job["state"] == "completed"
     assert zim_jobs.status("other")["state"] == "completed"
+    from theaxiom import source_activity
+    assert {event["source_id"] for event in source_activity.query(action="downloaded")["events"]} == {"ready", "other"}
     assert zim_jobs.installed(job, CONFIG)["bytes"] == len(fixture_bytes())
     assert not zim_jobs.installed(job, CONFIG | {"source_url": "https://example.org/other.zim"})
     with pytest.raises(ValueError, match="already installed"):

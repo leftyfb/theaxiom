@@ -34,9 +34,9 @@
     #update-notice { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
     .update-nav-count { margin-left:.35rem; color:#176b4d; background:#e2f2e9; border-radius:.35rem; padding:.1rem .35rem; font-size:.75rem; }
     .update-nav-count[hidden] { display:none; }
-    #update-review-list { list-style:none; padding:0; margin:1rem 0; }
-    #update-review-list li { border-top:1px solid var(--line); padding:.75rem 0; overflow-wrap:anywhere; }
-    #update-review-list p { margin:.25rem 0; }
+    #update-review-list, #activity-list { list-style:none; padding:0; margin:1rem 0; }
+    #update-review-list li, #activity-list li { border-top:1px solid var(--line); padding:.75rem 0; overflow-wrap:anywhere; }
+    #update-review-list p, #activity-list p { margin:.25rem 0; }
     #update-review-list .update-row-heading { display:flex; align-items:center; flex-wrap:wrap; gap:.5rem; }
     #update-review-list .update-row-heading label { font-weight:700; }
     #update-review-list .update-row-heading input { width:1.1rem; height:1.1rem; vertical-align:middle; accent-color:var(--green); }
@@ -320,12 +320,12 @@
   </header>
   <main id="main-content"{% if page == "sources" %} class="sources-admin"{% endif %}>
     {% set available_updates = (catalog|default({})).available_updates|default(0) %}
-    <nav class="admin-nav" aria-label="Administration"><a class="button" href="/admin/sources"{% if page == "sources" %} aria-current="page"{% endif %}>Sources</a><a class="button" href="/admin/updates"{% if page == "updates" %} aria-current="page"{% endif %}>Updates{% if page == "sources" %}<span class="update-nav-count" data-update-nav-count aria-hidden="true"{% if not available_updates %} hidden{% endif %}>{{ available_updates }}</span>{% endif %}</a><a class="button" href="/admin/groupings"{% if page == "groupings" %} aria-current="page"{% endif %}>Groupings</a><a class="button" href="/admin/settings"{% if page == "settings" %} aria-current="page"{% endif %}>Settings</a></nav>
+    <nav class="admin-nav" aria-label="Administration"><a class="button" href="/admin/sources"{% if page == "sources" %} aria-current="page"{% endif %}>Sources</a><a class="button" href="/admin/updates"{% if page == "updates" %} aria-current="page"{% endif %}>Updates{% if page == "sources" %}<span class="update-nav-count" data-update-nav-count aria-hidden="true"{% if not available_updates %} hidden{% endif %}>{{ available_updates }}</span>{% endif %}</a><a class="button" href="/admin/groupings"{% if page == "groupings" %} aria-current="page"{% endif %}>Groupings</a><a class="button" href="/admin/activity"{% if page == "activity" %} aria-current="page"{% endif %}>Activity</a><a class="button" href="/admin/settings"{% if page == "settings" %} aria-current="page"{% endif %}>Settings</a></nav>
     <nav class="mobile-admin-toolbar" aria-label="Administration tools">
       <a href="/" class="brand desktop-library-link">The Axiom</a>
       <details><summary class="button">{{ page|capitalize }} ▾{% if page == "sources" %}<span class="update-nav-count" data-update-nav-count aria-hidden="true"{% if not available_updates %} hidden{% endif %}>{{ available_updates }}</span>{% endif %}</summary><div>
         <a class="button" href="/">Back to library</a>
-        {% for section in ['sources', 'updates', 'groupings', 'settings'] %}
+        {% for section in ['sources', 'updates', 'activity', 'groupings', 'settings'] %}
         <a class="button" href="/admin/{{ section }}"{% if section == page %} aria-current="page"{% endif %}>{{ section|capitalize }}{% if section == "updates" and page == "sources" %}<span class="update-nav-count" data-update-nav-count aria-hidden="true"{% if not available_updates %} hidden{% endif %}>{{ available_updates }}</span>{% endif %}</a>
         {% endfor %}
       </div></details>
@@ -606,6 +606,17 @@
       kind.addEventListener('change',render); search.addEventListener('input',render); render();
     })();
     </script>
+    {% elif page == "activity" %}
+    <h1>Source activity</h1>
+    <section class="group-panel">
+      <div class="update-filters">
+        <label for="activity-source">Source<select id="activity-source" aria-label="Source"><option value="">All sources</option></select></label>
+        <label for="activity-action">Action<select id="activity-action" aria-label="Action"><option value="">All actions</option></select></label>
+      </div>
+      <p id="activity-status" role="status">Loading activity…</p>
+      <ul id="activity-list" class="activity-list"></ul>
+      <div class="source-actions"><button class="button" id="activity-newest">Newest</button><button class="button" disabled id="activity-older">Older</button></div>
+    </section>
     {% elif page == "updates" %}
     <h1>Updates</h1>
     <section class="group-panel" id="update-review" aria-labelledby="update-review-title">
@@ -3172,6 +3183,58 @@
       if (location.hash === '#update-review') location.replace('/admin/updates');
       render();
     })();
+  </script>
+  {% elif page == "activity" %}
+  <script id="source-activity-script">
+  (() => {
+    const source = document.getElementById('activity-source'), action = document.getElementById('activity-action');
+    const list = document.getElementById('activity-list'), status = document.getElementById('activity-status');
+    const older = document.getElementById('activity-older');
+    const labels = {added:'Source added', removed:'Source removed', edited:'Source edited', published:'Published',
+      unpublished:'Unpublished', downloaded:'Downloaded', uploaded:'Uploaded', staged:'Update downloaded and staged', deleted:'Installed content deleted',
+      updated:'Update activated', rolled_back:'Rolled back', download_failed:'Download failed', download_cancelled:'Download cancelled'};
+    let cursor = null, request = 0;
+    function options(select, values) {
+      const selected = select.value;
+      select.replaceChildren(new Option(select === source ? 'All sources' : 'All actions', ''));
+      for (const [id, name] of values) select.add(new Option(name, id));
+      select.value = selected;
+    }
+    async function load(before) {
+      const id = ++request;
+      older.disabled = true;
+      const params = new URLSearchParams();
+      if (source.value) params.set('source', source.value);
+      if (action.value) params.set('action', action.value);
+      if (before) params.set('before', before);
+      try {
+        const response = await fetch('/api/source-activity?' + params);
+        if (!response.ok) throw Error();
+        const data = await response.json();
+        if (id !== request) return;
+        options(source, data.sources.map(item => [item.source_id, item.name]));
+        options(action, data.actions.map(item => [item, labels[item] || item]));
+        list.replaceChildren();
+        for (const event of data.events) {
+          const row = document.createElement('li'), title = document.createElement('strong');
+          title.textContent = event.name + ' — ' + (labels[event.action] || event.action);
+          row.append(title);
+          const detail = document.createElement('p');
+          detail.textContent = new Date(event.timestamp).toLocaleString() + ' · ' + event.trigger +
+            ' · ' + event.outcome + (event.old_edition || event.new_edition ? ' · ' +
+            (event.old_edition || '—') + ' → ' + (event.new_edition || '—') : '');
+          row.append(detail); list.append(row);
+        }
+        status.textContent = data.events.length ? data.events.length + ' events' : 'No source activity recorded.';
+        cursor = data.next; older.disabled = !cursor;
+      } catch (_) { if (id === request) status.textContent = 'Source activity unavailable.'; }
+    }
+    source.addEventListener('change', () => load(null));
+    action.addEventListener('change', () => load(null));
+    document.getElementById('activity-newest').addEventListener('click', () => load(null));
+    older.addEventListener('click', () => load(cursor));
+    load(null);
+  })();
   </script>
   {% elif page == "updates" %}
   <script id="update-review-script">
