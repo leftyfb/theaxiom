@@ -1136,6 +1136,16 @@ def exercise_source_revision_reconciliation(browser, viewport):
         expect(page.locator("#catalog-update-policy")).to_have_value("notify")
         assert rows[0]["configuration"]["update_policy"] == "automatic"
         page.locator("#source-cancel").click()
+        first.locator("[data-catalog-edit]").click()
+        page.locator("#catalog-update-policy").select_option("notify")
+        rows.pop(0)
+        revision += 1
+        before = len(requests)
+        page.locator('#source-form [type="submit"]').click()
+        expect(page.locator("#source-form-feedback")).to_contain_text("Source was removed")
+        expect(page.locator("#catalog-update-policy")).to_have_value("notify")
+        assert len(requests) == before
+        page.locator("#source-cancel").click()
         assert len(navigations) == 1, navigations
         assert not errors, errors
     finally:
