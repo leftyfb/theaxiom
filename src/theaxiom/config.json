@@ -130,7 +130,7 @@
         "license": "OpenStreetMap ODbL; OpenMapTiles CC BY 4.0; Sentinel-2 imagery CC BY-NC-SA 4.0 (noncommercial); other data retains upstream attribution.",
         "update_method": "archive",
         "update_endpoint": "https://archive.org/metadata/streetzim-united-states",
-        "update_periodic": "yes",
+        "update_policy": "notify",
         "search_enabled": "no"
       }
     },
@@ -156,7 +156,7 @@
         "provenance": "Official Protomaps full planet build 4.15.2; MD5 and BLAKE3 listed by publisher; local SHA-256 measured on acquisition.",
         "update_method": "builds",
         "update_endpoint": "https://build-metadata.protomaps.dev/builds.json",
-        "update_periodic": "yes",
+        "update_policy": "notify",
         "search_enabled": "no"
       }
     },

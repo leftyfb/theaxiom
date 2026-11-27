@@ -11,7 +11,8 @@ from uuid import uuid4
 from . import storage_settings
 
 ACTIONS = ("added", "removed", "edited", "published", "unpublished", "downloaded",
-           "uploaded", "staged", "deleted", "updated", "rolled_back", "download_failed", "download_cancelled")
+           "uploaded", "staged", "deleted", "updated", "rolled_back", "download_failed", "download_cancelled",
+           "update_discovered", "update_queued", "update_started", "update_deferred", "update_failed", "update_cancelled")
 TRIGGERS = ("manual", "batch", "automatic", "scheduled", "unknown")
 
 
@@ -34,6 +35,12 @@ def connect(target=None):
                "event_id TEXT UNIQUE NOT NULL, timestamp TEXT NOT NULL, source_id TEXT NOT NULL, "
                "name TEXT NOT NULL, action TEXT NOT NULL, outcome TEXT NOT NULL, "
                "old_edition TEXT, new_edition TEXT, trigger TEXT NOT NULL)")
+    if "reason" not in {row[1] for row in db.execute("PRAGMA table_info(events)")}:
+        try:
+            db.execute("ALTER TABLE events ADD COLUMN reason TEXT")
+        except sqlite3.OperationalError:
+            if "reason" not in {row[1] for row in db.execute("PRAGMA table_info(events)")}:
+                raise
     db.execute("CREATE INDEX IF NOT EXISTS events_source ON events(source_id, sequence)")
     db.execute("CREATE TABLE IF NOT EXISTS consumers (name TEXT PRIMARY KEY, acknowledged INTEGER NOT NULL)")
     db.execute("CREATE TABLE IF NOT EXISTS pending (event_id TEXT PRIMARY KEY, target TEXT NOT NULL, "
@@ -57,23 +64,24 @@ def source_name(sid):
 
 
 def record(sid, action, *, name=None, old_edition=None, new_edition=None,
-           trigger="manual", outcome="completed", key=None, target=None):
+           trigger="manual", outcome="completed", key=None, target=None, reason=None):
     if action not in ACTIONS or trigger not in TRIGGERS or outcome not in {"completed", "failed", "cancelled"}:
         raise ValueError("Invalid activity event")
     if name is None:
         name = source_name(sid)
     event = dict(event_id=key or uuid4().hex, timestamp=datetime.now(timezone.utc).isoformat(),
                  source_id=sid, name=name, action=action, outcome=outcome,
-                 old_edition=old_edition, new_edition=new_edition, trigger=trigger)
+                 old_edition=old_edition, new_edition=new_edition, trigger=trigger, reason=reason)
     with closing(connect(target)) as db, db:
         _insert(db, event)
 
 
 def _insert(db, event):
+    event.setdefault("reason", None)
     if db.execute("INSERT OR IGNORE INTO seen VALUES (?)", (event["event_id"],)).rowcount:
         db.execute("INSERT INTO events(event_id,timestamp,source_id,name,action,outcome,"
-                   "old_edition,new_edition,trigger) VALUES(:event_id,:timestamp,:source_id,:name,:action,:outcome,"
-                   ":old_edition,:new_edition,:trigger)", event)
+                   "old_edition,new_edition,trigger,reason) VALUES(:event_id,:timestamp,:source_id,:name,:action,:outcome,"
+                   ":old_edition,:new_edition,:trigger,:reason)", event)
 
 
 def prepare_write(file, payload, *, sid, name, action, old_edition=None, new_edition=None, key=None, target=None, trigger="manual", outcome="completed", append=False):

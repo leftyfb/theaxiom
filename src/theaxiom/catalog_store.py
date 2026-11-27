@@ -160,7 +160,12 @@ class CatalogStore:
         changed = self._add_versioned_seeds(state)
         changed = self._configure_planned_sources(state) or changed
         defaults = source_catalog.source_defaults()
+        from . import update_discovery_config
         for record in state["sources"]:
+            normalized = update_discovery_config.migrate_periodic(record["configuration"])
+            if normalized != record["configuration"]:
+                record["configuration"] = normalized
+                changed = True
             default = defaults.get(record["source_id"])
             if default is None:
                 continue
@@ -228,7 +233,7 @@ class CatalogStore:
         discovery = update_discovery_config.settings(config)
         if discovery["method"] != "manual":
             config.update(update_method=discovery["method"], update_endpoint=discovery["endpoint"],
-                          update_periodic="yes" if discovery["periodic"] else "no")
+                          update_policy=update_discovery_config.policy(config)[0])
             return True
         return False
 
@@ -522,6 +527,10 @@ class CatalogStore:
                             group["source_ids"] = [sid for sid in group["source_ids"] if sid != source_id]
                         if layout := state.get("library_layout"):
                             layout["source_order"] = [sid for sid in layout["source_order"] if sid != source_id]
+                if operation != "remove":
+                    from . import update_discovery_config
+                    current_record = next(r for r in state["sources"] if r["source_id"] == source_id)
+                    current_record["configuration"] = update_discovery_config.migrate_periodic(current_record["configuration"])
                 state["revision"] += 1
                 state["updated_at"] = datetime.now(timezone.utc).isoformat()
                 payload = self._validated_payload(state)

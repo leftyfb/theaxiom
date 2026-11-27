@@ -122,7 +122,7 @@ def candidate_status(sid):
         return candidate
     with LOCK:
         try:
-            with worker_lock():
+            with worker_lock(source_id=sid):
                 candidate = read_candidate(sid)
                 if candidate and candidate["state"] in CANDIDATE_ACTIVE:
                     candidate["restart_pending"] = candidate["state"] != "cancelling"
@@ -138,7 +138,7 @@ def prepare_candidate(sid, config, *, replace_activated=False, automatic_job=Non
     """Persist replacement intent only; do not download or activate it."""
     configuration = identity(config)
     with LOCK:
-        with worker_lock():
+        with worker_lock(source_id=sid):
             live = read(sid)
             if (not live or live.get("state") != "completed"
                     or live.get("verified") is not True
@@ -194,7 +194,7 @@ def acquire_candidate(sid, config):
     On failure, candidate metadata and the installed job remain intact.
     """
     configuration = identity(config)
-    with worker_lock():
+    with worker_lock(source_id=sid):
         candidate = read_candidate(sid)
         live = read(sid)
         if not candidate or candidate["configuration"] != configuration:
@@ -213,7 +213,7 @@ def acquire_candidate(sid, config):
             raise ValueError("Replacement staging already exists; manual recovery required")
         artifact = zim_source.download_resumable(
             sid, configuration, offset=0, promote_lock=LOCK,
-            staging_id=replacement_id)
+            staging_id=replacement_id, write_lock=_write_lock)
         candidate["state"] = "verified"
         candidate["artifact"] = artifact
         target = candidate_path_for(sid)
@@ -238,7 +238,7 @@ def start_candidate_acquisition(sid, config, *, automatic_job=None, activity_tri
     """Queue a replacement download without blocking the HTTP request."""
     configuration = identity(config)
     with LOCK:
-        guard = worker_lock()
+        guard = worker_lock(source_id=sid)
         guard.__enter__()
         try:
             candidate = read_candidate(sid)
@@ -273,6 +273,12 @@ def start_candidate_acquisition(sid, config, *, automatic_job=None, activity_tri
                 # failed attempt; those headers describe a different response.
                 candidate.pop("etag", None)
                 candidate.pop("last_modified", None)
+            with (pdf_source._directory("staging", writing=True, format_name="zim") as (sfd, sm, _),
+                  pdf_source._directory("library", writing=True, format_name=configuration["format"]) as (_, lm, reserve)):
+                cap = os.fstatvfs(sfd)
+                need = max(96, int(configuration["expected_size_bytes"] or 0) - offset)
+                if sm != lm or cap.f_flag & os.ST_RDONLY or cap.f_bavail * cap.f_frsize < reserve + need:
+                    raise ValueError("Insufficient writable archive storage capacity")
             candidate.pop("restart_pending", None)
             candidate["restart_recovery"] = recovering
             candidate.update(state="downloading", automatic_retry_count=candidate.get("automatic_retry_count", 0) if recovering else 0,
@@ -287,6 +293,12 @@ def start_candidate_acquisition(sid, config, *, automatic_job=None, activity_tri
             signal = threading.Event()
             CANDIDATE_CONTROLS[sid] = signal
             _save_candidate(candidate)
+            if not automatic_job and candidate.get("transfer_activity_trigger") == "manual":
+                try:
+                    source_activity.record(sid, "update_started", key=source_activity.event_id(
+                        sid, candidate["transfer_activity_id"], "manual_update_started"))
+                except (OSError, sqlite3.Error):
+                    logging.getLogger(__name__).warning("Could not journal replacement start")
             try:
                 threading.Thread(target=_run_candidate, args=(sid, configuration, guard, signal, offset, validator),
                                  kwargs={"restart_from": restart_from} if restart_from else {},
@@ -384,7 +396,7 @@ def _run_candidate(sid, configuration, guard, signal, offset, validator, *, rest
         last = 0.0
         return zim_source.download_resumable(
             sid, configuration, offset=start, validator=stable, promote_lock=LOCK,
-            staging_id=sid + "-candidate", progress=progress, stopped=signal.is_set, **kwargs)
+            staging_id=sid + "-candidate", progress=progress, stopped=signal.is_set, write_lock=_write_lock, **kwargs)
 
     try:
         artifact = _retry_archive(transfer, sid + "-candidate", signal, offset, validator, load, _save_candidate,
@@ -462,7 +474,7 @@ def activate_candidate(sid, config, *, rollback_retry=None, activity_trigger=Non
     configuration = identity(config)
     from . import publication
     with publication.LOCK, LOCK:
-        with worker_lock():
+        with worker_lock(source_id=sid):
             candidate = read_candidate(sid)
             if not candidate or candidate["configuration"] != configuration:
                 raise ValueError("No matching replacement candidate")
@@ -510,7 +522,7 @@ def rollback_candidate(sid, config, *, reason=None):
         raise ValueError("Invalid replacement rollback reason")
     configuration = identity(config)
     with LOCK:
-        with worker_lock():
+        with worker_lock(source_id=sid):
             candidate = read_candidate(sid)
             if not candidate or candidate["configuration"] != configuration:
                 raise ValueError("No matching replacement candidate")
@@ -582,7 +594,7 @@ def recover_candidate_transition(sid):
     """
     from . import publication
     with publication.LOCK, LOCK:
-        with worker_lock():
+        with worker_lock(source_id=sid):
             candidate = read_candidate(sid)
             if not candidate or candidate["state"] not in {"activated", "rolled_back"}:
                 return False
@@ -655,7 +667,7 @@ def discard_candidate(sid, config):
     """
     configuration = identity(config)
     with LOCK:
-        with worker_lock():
+        with worker_lock(source_id=sid):
             candidate = read_candidate(sid)
             if not candidate or candidate["configuration"] != configuration:
                 raise ValueError("No matching replacement candidate")
@@ -690,7 +702,7 @@ def discard_candidate(sid, config):
 
 def delete_verified_candidate(sid, config, digest, *, restore_profile):
     """Delete only the verified replacement that the operator reviewed."""
-    with LOCK, worker_lock():
+    with LOCK, worker_lock(source_id=sid):
         candidate = read_candidate(sid)
         if (not candidate or candidate["state"] not in {"verified", "rolled_back"}
                 or candidate["artifact"].get("sha256") != digest):
@@ -731,7 +743,7 @@ def delete_verified_candidate(sid, config, digest, *, restore_profile):
 def downloaded_zim(sid):
     """Hold the acquisition locks and exact managed archive open for deletion."""
     from . import publication
-    with publication.LOCK, LOCK, worker_lock():
+    with publication.LOCK, LOCK, worker_lock(source_id=sid):
         if read_candidate(sid) is not None:
             raise ValueError("Retire the replacement candidate before deleting installed content")
         job = read(sid)
@@ -858,7 +870,12 @@ def worker_lock(*, source_id=None):
             yield
             return
         catalog_store.CatalogStore._validate_id(source_id)
-        source_fd = os.open(root / f".worker-{source_id}.lock",
+        # A replacement uses the staging identity <source>-candidate.
+        # Serialize that namespace with any literal source ID that aliases it.
+        lock_id = source_id
+        while lock_id.endswith("-candidate") and lock_id != "-candidate":
+            lock_id = lock_id.removesuffix("-candidate")
+        source_fd = os.open(root / f".worker-{lock_id}.lock",
                             os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
         try:
             fcntl.flock(source_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -1202,7 +1219,7 @@ def revalidate(sid, config):
     """Explicitly recheck a complete retained ZIM with no network request."""
     configuration = identity(config)
     with LOCK:
-        guard = worker_lock()
+        guard = worker_lock(source_id=sid)
         guard.__enter__()
         try:
             old = read(sid)

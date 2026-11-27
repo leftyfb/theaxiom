@@ -1876,3 +1876,16 @@ def test_restart_recovery_resumes_replacement_without_activating(disk):
     assert seen == [(7, '"stable"')]
     assert zim_jobs.read_candidate("ready")["state"] == "verified"
     assert zim_jobs.read("ready") == live
+
+def test_archive_locks_allow_independent_sources_but_exclude_storage_changes(disk):
+    with zim_jobs.worker_lock(source_id="large"):
+        with zim_jobs.worker_lock(source_id="small"):
+            with pytest.raises(BlockingIOError):
+                with zim_jobs.worker_lock(source_id="small"):
+                    pass
+            with pytest.raises(BlockingIOError):
+                with zim_jobs.worker_lock(source_id="small-candidate"):
+                    pass
+            with pytest.raises(BlockingIOError):
+                with zim_jobs.worker_lock():
+                    pass

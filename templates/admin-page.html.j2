@@ -746,19 +746,13 @@
               <option value="manual">Manual / unsupported</option>
             </select>
           </div>
-          <div><label for="catalog-update-periodic">Periodically check for updates</label>
-            <select id="catalog-update-periodic" name="update_periodic">
-              <option value="">Use method default</option>
-              <option value="yes">Enabled</option><option value="no">Disabled</option>
-            </select>
-          </div>
           <div class="editor-wide"><label for="catalog-update-endpoint">Update discovery endpoint (optional)</label>
             <input id="catalog-update-endpoint" name="update_endpoint" type="url" maxlength="512" aria-describedby="update-endpoint-hint">
             <small id="update-endpoint-hint">Leave blank to use the provider default.</small>
           </div>
           <div><label for="catalog-update-policy">Update policy</label>
             <select id="catalog-update-policy" name="update_policy">
-              <option value="">Notify only (default)</option><option value="notify" hidden>Notify only</option>
+              <option value="notify">Notify only</option><option value="" hidden>Notify only (legacy default)</option>
               <option value="automatic">Automatic</option><option value="scheduled">Scheduled</option>
               <option value="disabled">Disabled (no periodic checks)</option>
             </select>
@@ -956,7 +950,7 @@
         {% set discovery = source.discovery|default({}) %}
         <p class="source-note" data-field="discovery-status">
           {% if discovery %}
-            {{ 'Automatic update checks enabled' if discovery.periodic else 'Automatic update checks disabled' }}
+            {% set effective_policy = (source.automatic_update|default({})).policy|default('notify' if discovery.periodic else 'disabled') %}{{ 'Update policy: ' ~ ('Notify only' if effective_policy == 'notify' else effective_policy|capitalize) }}
           {% endif %}
         </p>
         <p class="source-note" data-field="discovery-evidence" role="status" aria-live="polite"></p>
@@ -1041,7 +1035,7 @@
         <details class="source-technical">
           <summary>Technical details</summary>
           {% if discovery %}
-          <p class="source-note">Update discovery: {{ {'head': 'HTTPS / ETag', 'kiwix': 'Kiwix OPDS / Metalink', 'archive': 'Internet Archive editions', 'builds': 'Protomaps map builds', 'manual': 'Manual update discovery'}.get(discovery.method, 'Unknown') }} · Periodic checks {{ 'enabled' if discovery.periodic else 'disabled' }}</p>
+          <p class="source-note">Update discovery: {{ {'head': 'HTTPS / ETag', 'kiwix': 'Kiwix OPDS / Metalink', 'archive': 'Internet Archive editions', 'builds': 'Protomaps map builds', 'manual': 'Manual update discovery'}.get(discovery.method, 'Unknown') }}</p>
           {% endif %}
           {% set auto = source.automatic_update %}
           <p class="source-note" data-field="automatic-update"{% if not auto %} hidden{% endif %}>{% if auto %}Update policy: {{ 'Notify only' if auto.policy == 'notify' else auto.policy|capitalize }}{% if auto.next %} · {{ auto.next }}{% endif %}{% if auto.check %} · {{ auto.check }}{% endif %}{% if auto.attempt %} · Last automatic attempt: {{ auto.attempt }}{% endif %}{% if auto.server_time %} · Server local: {{ auto.server_time }} ({{ auto.time_zone }}){% endif %}{% endif %}</p>
@@ -1914,15 +1908,14 @@
         for (const option of policy.options) {
           if (['automatic', 'scheduled'].includes(option.value)) option.disabled = !supportsUnattended;
         }
-        if (policy.selectedOptions[0]?.disabled) policy.value = '';
+        if (policy.selectedOptions[0]?.disabled) policy.value = 'notify';
         for (const name of ['update_window_start', 'update_window_end']) {
           input(name).required = policy.value === 'scheduled';
         }
         endpoint.disabled = manual;
-        input('update_periodic').options[1].disabled = manual;
         if (manual) {
           endpoint.value = '';
-          if (input('update_periodic').value === 'yes') input('update_periodic').value = 'no';
+          policy.value = 'disabled';
         }
         endpoint.placeholder = method.value === 'kiwix' || (!method.value && format.value === 'zim')
           ? 'https://opds.library.kiwix.org/catalog/v2/entries'
@@ -1940,7 +1933,7 @@
         endpointTest.disabled = true;
         endpointFeedback.textContent = 'Checking endpoint metadata…';
         try {
-          const fields = Object.fromEntries(['format','source_url','update_method','update_endpoint','update_periodic']
+          const fields = Object.fromEntries(['format','source_url','update_method','update_endpoint']
             .map(name => [name, input(name).value]));
           const response = await fetch('/api/update-endpoint-test', {
             method: 'POST',
@@ -2056,7 +2049,8 @@
             field.value = value;
           }
         }
-        if (!card) input('update_periodic').value = 'no';
+        if (!card) input('update_policy').value = 'disabled';
+        else if (!input('update_policy').value) input('update_policy').value = input('update_method').value ? 'disabled' : 'notify';
         discoveryOptions();
         showIcon(iconValue);
         dialog.showModal();
@@ -2154,7 +2148,7 @@
         try {
           if (form.dataset.operation === 'add' && file) {
             if (!file.size || file.size > 16 * 1024 * 1024) throw new Error('Choose a PDF or EPUB up to 16 MiB');
-            const metadata = Object.fromEntries(Object.entries(fields).filter(([k]) => ['title','description','author','publisher','edition','language','source_url','license','update_method','update_endpoint','update_periodic','update_policy','icon_png'].includes(k)));
+            const metadata = Object.fromEntries(Object.entries(fields).filter(([k]) => ['title','description','author','publisher','edition','language','source_url','license','update_method','update_endpoint','update_policy','icon_png'].includes(k)));
             const headers = {...window.axiomCsrfHeaders(), 'Content-Type':format.value === 'epub' ? 'application/epub+zip' : 'application/pdf', 'X-Document-Format':format.value, 'X-Source-ID':source_id,
               'X-Catalog-Revision':String(revision), 'X-PDF-Add':'1',
               'X-PDF-Metadata':encodeURIComponent(JSON.stringify(metadata))};
@@ -2164,7 +2158,7 @@
             if (!response.ok || !result.installed_verified) throw acquisitionError(response, result, 'Document upload was not confirmed');
             reloadSources();
           } else if (form.dataset.operation === 'add' && format.value === 'epub' && fields.source_url) {
-            const metadata = Object.fromEntries(Object.entries(fields).filter(([k]) => ['title','description','author','publisher','edition','language','source_url','license','update_method','update_endpoint','update_periodic','update_policy','icon_png'].includes(k)));
+            const metadata = Object.fromEntries(Object.entries(fields).filter(([k]) => ['title','description','author','publisher','edition','language','source_url','license','update_method','update_endpoint','update_policy','icon_png'].includes(k)));
             const response = await acquisitionFetch('/api/action', {method:'POST', headers:{...((typeof window !== 'undefined' && window.axiomCsrfHeaders?.()) || {}),'Content-Type':'application/json'},
               body:JSON.stringify({source_id, action:'epub-add-download', revision, fields:metadata, auto_title:automaticTitle})});
             const result = await response.json().catch(() => ({}));
@@ -3192,7 +3186,8 @@
     const older = document.getElementById('activity-older');
     const labels = {added:'Source added', removed:'Source removed', edited:'Source edited', published:'Published',
       unpublished:'Unpublished', downloaded:'Downloaded', uploaded:'Uploaded', staged:'Update downloaded and staged', deleted:'Installed content deleted',
-      updated:'Update activated', rolled_back:'Rolled back', download_failed:'Download failed', download_cancelled:'Download cancelled'};
+      updated:'Update activated', rolled_back:'Rolled back', download_failed:'Download failed', download_cancelled:'Download cancelled', update_discovered:'Update discovered', update_queued:'Update queued',
+      update_started:'Update processing started', update_deferred:'Update deferred', update_failed:'Update failed', update_cancelled:'Update cancelled'};
     let cursor = null, request = 0;
     function options(select, values) {
       const selected = select.value;
@@ -3223,6 +3218,7 @@
           detail.textContent = new Date(event.timestamp).toLocaleString() + ' · ' + event.trigger +
             ' · ' + event.outcome + (event.old_edition || event.new_edition ? ' · ' +
             (event.old_edition || '—') + ' → ' + (event.new_edition || '—') : '');
+          if (event.reason) detail.textContent += ' · ' + event.reason;
           row.append(detail); list.append(row);
         }
         status.textContent = data.events.length ? data.events.length + ' events' : 'No source activity recorded.';

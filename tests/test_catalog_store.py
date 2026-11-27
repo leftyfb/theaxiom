@@ -411,3 +411,20 @@ class CatalogStoreTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+def test_periodic_opt_out_migrates_to_disabled_and_policy_controls_checks(tmp_path):
+    from theaxiom import update_discovery_config as discovery
+    store = catalog_store.CatalogStore(tmp_path / "sources.json")
+    rev = store.get()["revision"]
+    config = {"format": "zim", "source_url": "https://download.kiwix.org/zim/zimit/example_2026-10.zim",
+              "update_method": "kiwix", "update_periodic": "no", "update_policy": "automatic"}
+    saved = store.mutate("add", "fixture", {"title": "Fixture", **config}, rev)
+    row = next(r for r in saved["sources"] if r["source_id"] == "fixture")
+    assert "update_periodic" not in row["configuration"]
+    assert row["configuration"]["update_policy"] == "disabled"
+    for policy in ("notify", "automatic", "scheduled"):
+        updated = row["configuration"] | {"update_policy": policy}
+        if policy == "scheduled":
+            updated |= {"update_window_start": "01:00", "update_window_end": "02:00"}
+        assert discovery.settings(updated)["periodic"]
+    assert not discovery.settings(row["configuration"])["periodic"]

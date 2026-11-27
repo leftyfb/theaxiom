@@ -1522,7 +1522,8 @@ def test_automatic_replacement(app, disk, monkeypatch, outcome):
     elif outcome == "window":
         hour = 2
 
-    queue.run_next(admin_api._execute_batch_job, threading.Event())
+    with jobs.worker_lock(source_id="unrelated-large-download"):
+        queue.run_next(admin_api._execute_batch_job, threading.Event())
     expected = {"success": "completed", "cancel": "cancelled", "storage": "queued", "window": "queued"}.get(outcome, "failed")
     assert queue.status()[0]["state"] == expected
     assert queue.automatic_attempts()[0]["state"] == expected
@@ -1606,6 +1607,8 @@ def test_retry_rolled_back_automatic_update(app, disk, monkeypatch, policy, lega
     assert queue.run_next(admin_api._execute_batch_job, threading.Event()), queue.status()
     first, = queue.status()
     assert first["state"] == "completed", first
+    events = request("/api/source-activity?source=" + sid)["events"]
+    assert {"update_discovered", "update_queued", "update_started", "staged", "updated"} <= {event["action"] for event in events}
     history = request("/api/source-activity?action=updated")["events"]
     assert history[0]["trigger"] == policy
     assert history[0]["old_edition"] == "2026-10-01" and history[0]["new_edition"] == "2026-11-01"

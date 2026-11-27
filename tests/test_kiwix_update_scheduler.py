@@ -94,15 +94,16 @@ def test_policy_defaults_and_local_window():
 
     legacy = {"format": "zim", "source_url": "https://download.kiwix.org/zim/zimit/example_2026-10.zim",
               "update_periodic": "no"}
-    assert discovery.policy(legacy)[0] == "notify"
+    assert discovery.policy(legacy)[0] == "disabled"
     assert not discovery.settings(legacy)["periodic"]
     midnight = datetime(2026, 11, 27, 0, 0)
     assert not discovery.window_open(legacy, midnight)
-    assert discovery.window_open(legacy | {"update_policy": "automatic"}, midnight)
+    assert not discovery.window_open(legacy | {"update_policy": "automatic"}, midnight)
+    assert discovery.window_open(discovery.migrate_periodic(legacy) | {"update_policy": "automatic"}, midnight)
     disabled = legacy | {"update_policy": "disabled", "update_periodic": "yes"}
     assert not discovery.settings(disabled)["periodic"]
     assert discovery.settings(disabled)["method"] == "kiwix"
-    scheduled = legacy | {"update_policy": "scheduled", "update_window_start": "23:00", "update_window_end": "02:00"}
+    scheduled = discovery.migrate_periodic(legacy) | {"update_policy": "scheduled", "update_window_start": "23:00", "update_window_end": "02:00"}
     assert discovery.window_open(scheduled, midnight)
     assert discovery.window_open(scheduled, midnight.replace(hour=23))
     assert not discovery.window_open(scheduled, midnight.replace(hour=2))

@@ -329,7 +329,7 @@ def exercise(browser, base, name, viewport, artifacts):
         page.locator("#catalog-url").fill("https://publisher.org/download.pdf")
         page.locator("#catalog-update-method").select_option("head")
         page.locator("#catalog-update-endpoint").fill("https://publisher.org/metadata")
-        page.locator("#catalog-update-periodic").select_option("yes")
+        page.locator("#catalog-update-policy").select_option("notify")
         with page.expect_response(lambda r: r.url.endswith("/api/update-endpoint-test") and r.status == 200):
             page.locator("#test-update-endpoint").click()
         expect(page.locator("#update-endpoint-feedback")).to_contain_text("strong ETag")
@@ -395,7 +395,8 @@ def exercise(browser, base, name, viewport, artifacts):
         expect(page.locator("#catalog-url")).to_have_value("https://publisher.org/download.pdf")
         expect(page.locator("#catalog-update-endpoint")).to_have_value("https://publisher.org/metadata")
         expect(page.locator("#catalog-update-method")).to_have_value("head")
-        expect(page.locator("#catalog-update-periodic")).to_have_value("yes")
+        expect(page.locator("#catalog-update-policy")).to_have_value("notify")
+        expect(page.locator("#catalog-update-periodic")).to_have_count(0)
         icon_file = page.locator("#source-icon-file")
         icon_file.set_input_files(str(Path(__file__).resolve().parents[1] / "templates" / "favicon.png"))
         expect(page.locator("#source-icon-preview img")).to_be_visible()

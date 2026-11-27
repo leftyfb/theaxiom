@@ -34,7 +34,7 @@ class SourceUpdateStatusPresentationTests(unittest.TestCase):
         start = self.template.index('data-field="discovery-status"')
         end = self.template.index('data-field="discovery-evidence"', start)
         primary = self.template[start:end]
-        self.assertIn("Automatic update checks enabled", primary)
+        self.assertIn("Update policy:", primary)
         self.assertNotIn("Kiwix OPDS / Metalink", primary)
         technical = self.template[self.template.index('<details class="source-technical">'):]
         self.assertIn("Update discovery:", technical)

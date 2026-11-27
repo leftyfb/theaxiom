@@ -6,7 +6,7 @@ from urllib.parse import urlsplit
 
 from . import kiwix_metadata_transport as kiwix, kiwix_opds, pdf_source, pdf_transport, versioned_archive_catalog as archives
 
-from .catalog_store import DISCOVERY_FIELDS as FIELDS
+from .catalog_store import DISCOVERY_FIELDS as FIELDS  # noqa: F401 - public alias
 OPDS = f"https://{kiwix.CATALOG_HOST}{kiwix.CATALOG_PATH}"
 UNATTENDED = {"automatic", "scheduled"}
 POLICIES = UNATTENDED | {"notify", "disabled"}
@@ -14,7 +14,20 @@ POLICIES = UNATTENDED | {"notify", "disabled"}
 
 def policy(config, method=None):
     """Legacy records never imply permission to acquire content."""
-    selected = config.get("update_policy") or "notify"
+    selected = config.get("update_policy") or (
+        "disabled" if config.get("update_method") not in (None, "", "auto") else "notify")
+    if selected not in POLICIES:
+        raise ValueError("Invalid update policy")
+    # Legacy explicit opt-outs always win, including contradictory unattended
+    # settings. A new explicit policy no longer needs a second switch.
+    if "update_periodic" in config:
+        legacy = config.get("update_periodic")
+        if legacy not in {"", "yes", "no"}:
+            raise ValueError("Invalid update discovery settings")
+        if legacy == "no" or (not legacy and config.get("update_method") not in (None, "", "auto")):
+            selected = "disabled"
+        elif legacy == "yes" and not config.get("update_policy"):
+            selected = "notify"
     if selected not in POLICIES:
         raise ValueError("Invalid update policy")
     if selected in UNATTENDED and (config.get("format") not in {"zim", "pmtiles"}
@@ -55,7 +68,7 @@ def window_start(config, now):
 def current_unattended_evidence(config, now, evidence):
     if evidence.get("state") in (None, "unable_to_determine") or evidence.get("stale"):
         return False
-    return (policy(config)[0] != "scheduled" or not settings(config)["periodic"]
+    return (policy(config)[0] != "scheduled"
             or evidence.get("checked_at", 0) >= window_start(config, now).timestamp())
 
 
@@ -103,12 +116,17 @@ def settings(config):
             raise ValueError("Document discovery requires a plain HTTPS endpoint")
     elif endpoint or periodic == "yes":
         raise ValueError("Manual discovery has no endpoint or periodic checks")
-    # Explicit methods opt in. Existing sources retain their previous schedule.
-    enabled = resolved != "manual" and (periodic == "yes" or not periodic and method == "auto")
     selected, _, _ = policy(config, resolved)
-    if selected == "disabled":
-        enabled = False
+    enabled = resolved != "manual" and selected != "disabled"
     return dict(method=resolved, endpoint=endpoint, periodic=enabled)
+
+
+def migrate_periodic(config):
+    """Canonicalize legacy profiles without enabling opted-out transfers."""
+    if "update_periodic" not in config:
+        return config
+    selected, _, _ = policy(config)
+    return {key: value for key, value in config.items() if key != "update_periodic"} | {"update_policy": selected}
 
 
 def cache_identity(config, digest):

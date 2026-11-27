@@ -181,6 +181,18 @@ def save(source_id: str, installed_sha256: str, result: dict, *, now=None, reche
         os.fsync(directory_fd)
     finally:
         os.close(directory_fd)
+    if result.get("state") == "update_available":
+        from . import source_activity, update_diagnostics
+        import sqlite3
+        digest = result.get("candidate_sha256") or result.get("candidate_sha1") or result.get("candidate_md5")
+        if digest:
+            try:
+                source_activity.record(source_id, "update_discovered", trigger=update_diagnostics.current_trigger(),
+                    old_edition=result.get("installed_edition"), new_edition=result.get("candidate_edition"),
+                    key=source_activity.event_id("discovery", source_id, installed_sha256, digest))
+            except (OSError, sqlite3.Error):
+                LOG.warning("Unable to journal update discovery")
+
 
 
 def load(source_id: str, installed_sha256: str, *, now=None) -> dict:

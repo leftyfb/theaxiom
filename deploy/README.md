@@ -160,3 +160,14 @@ the source configuration changed, or a safe validator is unavailable, review
 the source status; recovery never silently discards retained content.
 Queued automatic replacements retain their existing policy and maintenance
 window restrictions.
+
+Update policy is the only background discovery control. Disabled allows
+explicit checks only; Notify only checks at the global cadence; Automatic
+and Scheduled also apply eligible verified updates. Legacy periodic opt-outs
+(including contradictory Automatic/Scheduled profiles) migrate to Disabled;
+previous opt-ins retain their selected policy. Manual discovery never runs
+periodic checks. Existing maintenance windows and archive bytes are retained.
+
+Activity records update discovery and queue transitions independently from
+completed activations. Repeated deferrals with the same reason are deduplicated
+per job; only fixed, sanitized reason categories are retained.

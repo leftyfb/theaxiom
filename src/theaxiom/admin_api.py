@@ -534,12 +534,12 @@ def _publisher_update_job(record, reviewed_digest, operation, *, rollback_retry=
 
 
 def _queued_update_configuration(payload):
-    return payload["original"] | {key: value for key, value in payload["fields"].items()
+    return update_discovery_config.migrate_periodic(payload["original"]) | {key: value for key, value in payload["fields"].items()
                                   if key in catalog_store.CONFIG_FIELDS}
 
 
 def _prepare_queued_update(sid, record, revision, payload, *, automatic_job=None):
-    original, fields = payload["original"], payload["fields"]
+    original, fields = update_discovery_config.migrate_periodic(payload["original"]), payload["fields"]
     config = _queued_update_configuration(payload)
     if record["configuration"] not in (original, config):
         raise ValueError("Source configuration changed after queuing")
@@ -784,7 +784,7 @@ def _poll_automatic_updates():
 
 def _execute_automatic_update(job, payload, stopping, shutdown):
     sid, job_id = job["source_id"], job["id"]
-    original = payload["original"]
+    original = update_discovery_config.migrate_periodic(payload["original"])
     config = _queued_update_configuration(payload)
     kind = config["format"]
     # Legacy queued jobs still have to pass current policy and rollback checks.
@@ -818,6 +818,8 @@ def _execute_automatic_update(job, payload, stopping, shutdown):
                                          for expected in (original, config)):
                     return "interrupted", "Source configuration or update policy changed; review manually"
                 current_config = record["configuration"]
+                if update_discovery_config.policy(current_config)[0] == "disabled":
+                    return "interrupted", "Automatic updates disabled; retained files preserved"
                 if owned and candidate["state"] in {"verified", "activated"}:
                     if not same_configuration(current_config, config):
                         return "interrupted", "Source configuration changed; review manually"
@@ -879,7 +881,7 @@ def _execute_automatic_update(job, payload, stopping, shutdown):
                     zim_jobs.start_candidate_acquisition(sid, config, automatic_job=job_id,
                         **({"recovering": True} if owned and candidate.get("restart_pending") else {}))
                 except BlockingIOError:
-                    return "deferred", "Waiting for the archive worker"
+                    return "deferred", "Waiting for source archive worker or storage maintenance"
         shutdown.wait(1)
     else:
         return "running", ""
@@ -896,6 +898,8 @@ def _execute_batch_job(job, stopping, shutdown):
     config = json.loads(job["configuration"])
     if operation == "automatic-update":
         return _execute_automatic_update(job, config, stopping, shutdown)
+    if operation != "download-update":
+        config = update_discovery_config.migrate_periodic(config)
     kind = config["original"]["format"] if operation == "download-update" else config["format"]
 
     def stop_document():
@@ -963,7 +967,7 @@ def _execute_batch_job(job, stopping, shutdown):
                 if current and current["state"] not in {"prepared", "paused", "interrupted"}:
                     return current["state"] if current["state"] in {"failed", "cancelled"} else "interrupted", "Review the existing ZIM job"
                 try:
-                    with zim_jobs.worker_lock():
+                    with zim_jobs.worker_lock(source_id=sid):
                         pass
                 except BlockingIOError:
                     return "running" if recovering else "queued", ""
@@ -2105,7 +2109,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             admin_page=page,
             catalog=self._source_profiles(catalog_snapshot) if page in {"sources", "updates"} else catalog_snapshot if page == "groupings" else None,
             selection_presets={key: value[0] for key, value in library_selection.PRESETS.items()},
-            editable_fields=sorted(catalog_store.EDITABLE),
+            editable_fields=sorted(catalog_store.EDITABLE - {"update_periodic"}),
             action_labels=ACTION_LABELS,
             password_change_enabled=bool(getattr(getattr(self.server, "axiom_config", None), "store", None)),
             session_csrf_token=getattr(self, "_session_csrf", None),

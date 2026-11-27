@@ -39,8 +39,9 @@ def _check_source(record, *, manual=False, unattended=None):
         now = datetime.now(update_schedule.timezone())
         if not discovery.window_open(config, now) or _window(config, now) != unattended["window"]:
             return None
+    trigger = "manual" if manual else ("automatic" if unattended and discovery.policy(config)[0] == "automatic" else "scheduled")
     with update_diagnostics.attempt(sid, discovery.settings(config),
-                                    trigger="manual" if manual else "scheduled") as diagnostic:
+                                    trigger=trigger) as diagnostic:
         if config["format"] in {"zim", "pmtiles"}:
             options = {"expected_identity": unattended["installed"]} if unattended else {}
             outcome = kiwix_update_discovery.refresh_checked_source(

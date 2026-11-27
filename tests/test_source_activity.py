@@ -75,3 +75,27 @@ def test_delete_recovery_requires_original_directory_and_all_files(tmp_path, mon
         assert len(source_activity.query()["events"]) == 1
     finally:
         os.close(fd)
+
+def test_update_queue_history_deferral_deduplicates_and_excludes_error_text(tmp_path, monkeypatch):
+    from theaxiom import acquisition_queue as queue
+    import threading
+    monkeypatch.setattr(storage_settings, "SETTINGS_PATH", tmp_path / "storage.json")
+    job = dict(source_id="fixture", title="Fixture", operation="automatic-update", bytes=12,
+               configuration={"original": {"update_policy": "scheduled"}, "fields": {"edition": "2"},
+                              "digest": "a" * 64})
+    jid, = queue.enqueue([job], 100, {})
+    for _ in range(2):
+        with queue.database() as db:
+            db.execute("UPDATE automatic_attempts SET ready_at=0")
+        queue.run_next(lambda *_: ("deferred", "Waiting for source archive worker or storage maintenance"), threading.Event())
+    history = source_activity.query()["events"]
+    assert [row["action"] for row in history] == ["update_deferred", "update_started", "update_queued"]
+    assert history[0]["reason"] == "Archive worker or storage maintenance busy"
+    assert all(row["trigger"] == "scheduled" for row in history)
+    with queue.database() as db:
+        db.execute("UPDATE automatic_attempts SET ready_at=0")
+    queue.run_next(lambda *_: ("failed", "private-secret-fixture"), threading.Event())
+    assert source_activity.query()["events"][0]["action"] == "update_failed"
+    assert "private-secret-fixture" not in str(source_activity.query())
+    assert not source_activity.query(action="updated")["events"]
+    assert jid

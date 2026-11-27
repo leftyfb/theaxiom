@@ -9,7 +9,7 @@ import threading
 import time
 from uuid import uuid4
 
-from . import storage_settings
+from . import storage_settings, source_activity
 
 LOG = logging.getLogger(__name__)
 PENDING = ("queued", "running")
@@ -41,7 +41,43 @@ def database():
         db.execute("""CREATE TABLE IF NOT EXISTS automatic_rollback_retries (
             rollback_token TEXT PRIMARY KEY
         )""")
+        db.execute("CREATE TABLE IF NOT EXISTS activity_outbox (event_id TEXT PRIMARY KEY, payload TEXT NOT NULL)")
         yield db
+
+
+UPDATE_OPERATIONS = {"automatic-update", "download-update", "publish-update", "replacement"}
+# Never copy arbitrary worker/publisher error strings into durable activity.
+REASONS = {
+    "Waiting for source archive worker or storage maintenance": "Archive worker or storage maintenance busy",
+    "Waiting for the archive worker": "Archive worker busy",
+    "Waiting for the maintenance window or automatic updates to resume": "Maintenance window closed or automatic updates paused",
+    "Waiting for current publisher evidence": "Waiting for current publisher evidence",
+    "Waiting for free storage": "Waiting for free storage",
+}
+
+def _activity(db, job, action, *, detail="", outcome="completed"):
+    if job["operation"] not in UPDATE_OPERATIONS:
+        return
+    config = json.loads(job["configuration"]) if isinstance(job["configuration"], str) else job["configuration"]
+    trigger = ("scheduled" if config.get("original", config).get("update_policy") == "scheduled" else "automatic") if job["operation"] == "automatic-update" else "batch"
+    reason = REASONS.get(detail, "See source status for details" if detail and action in {"update_deferred", "update_failed"} else None)
+    key = source_activity.event_id("queue", job["id"], action, reason)
+    payload = dict(sid=job["source_id"], name=job["title"], action=action, trigger=trigger, outcome=outcome,
+                   old_edition=config.get("original", {}).get("edition"),
+                   new_edition=config.get("fields", {}).get("edition"), reason=reason, key=key)
+    db.execute("INSERT OR IGNORE INTO activity_outbox VALUES (?,?)", (key, json.dumps(payload)))
+
+
+def flush_activity():
+    try:
+        with database() as db:
+            rows = db.execute("SELECT * FROM activity_outbox ORDER BY rowid LIMIT 200").fetchall()
+        for row in rows:
+            source_activity.record(**json.loads(row["payload"]))
+            with database() as db:
+                db.execute("DELETE FROM activity_outbox WHERE event_id=?", (row["event_id"],))
+    except (OSError, sqlite3.Error):
+        LOG.warning("Update activity journal unavailable; retaining queued events")
 
 
 def enqueue(jobs, available, settings):
@@ -88,10 +124,12 @@ def enqueue(jobs, available, settings):
                           VALUES (?, ?, ?, ?, ?, ?, ?, 'queued')""",
                        (job_id, job["source_id"], job["title"], job["operation"],
                         json.dumps(job["configuration"]), snapshot, job["bytes"]))
+            _activity(db, dict(job, id=job_id), "update_queued")
             ids.append(job_id)
         db.execute("""DELETE FROM jobs WHERE state NOT IN ('queued', 'running') AND rowid NOT IN (
                       SELECT rowid FROM jobs ORDER BY rowid DESC LIMIT 100)""")
-        return ids
+    flush_activity()
+    return ids
 
 
 def status():
@@ -108,6 +146,7 @@ def automatic_attempts():
 
 def cancel(job_id):
     with database() as db:
+        job = db.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
         result = db.execute("""UPDATE jobs SET stop = 1,
             state = CASE WHEN state = 'queued' THEN 'cancelled' ELSE state END
             WHERE id = ? AND state IN (?, ?)""", (job_id, *PENDING))
@@ -115,6 +154,9 @@ def cancel(job_id):
             raise ValueError("Download is no longer pending")
         db.execute("""UPDATE automatic_attempts SET state = 'cancelled' WHERE job_id = ?
                    AND EXISTS (SELECT 1 FROM jobs WHERE id = ? AND state = 'cancelled')""", (job_id, job_id))
+        if job["state"] == "queued":
+            _activity(db, job, "update_cancelled", outcome="cancelled")
+    flush_activity()
 
 
 def stopping(job_id):
@@ -141,6 +183,8 @@ def run_next(execute, shutdown):
                 return False
             db.execute("UPDATE jobs SET state = 'running' WHERE id = ?", (job["id"],))
             db.execute("UPDATE automatic_attempts SET state = 'running' WHERE job_id = ?", (job["id"],))
+            _activity(db, job, "update_started")
+        flush_activity()
         try:
             state, detail = execute(job, lambda: stopping(job["id"]), shutdown)
         except Cancelled:
@@ -155,12 +199,18 @@ def run_next(execute, shutdown):
             if deferred:
                 state = "queued"
             with database() as db:
+                if deferred or state == "queued":
+                    _activity(db, job, "update_deferred", detail=detail)
+                elif state in {"failed", "interrupted", "cancelled"}:
+                    _activity(db, job, "update_cancelled" if state == "cancelled" else "update_failed",
+                              detail=detail, outcome="cancelled" if state == "cancelled" else "failed")
                 db.execute("""UPDATE jobs SET state = CASE
                     WHEN ? = 'queued' AND stop = 1 THEN 'cancelled' ELSE ? END,
                     detail = ? WHERE id = ?""", (state, state, detail, job["id"]))
                 db.execute("""UPDATE automatic_attempts SET ready_at = ?,
                            state = (SELECT state FROM jobs WHERE id = ?) WHERE job_id = ?""",
                            (time.time() + 60 if deferred else 0, job["id"], job["id"]))
+        flush_activity()
         return state not in PENDING
 
 
@@ -169,6 +219,7 @@ def start(execute, poll=None):
 
     def run():
         next_poll = 0
+        flush_activity()
         while not shutdown.is_set():
             try:
                 if poll is not None and time.monotonic() >= next_poll:

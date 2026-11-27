@@ -24,6 +24,11 @@ _PHASES = {
 }
 
 
+def current_trigger():
+    event = _CURRENT.get()
+    return event["trigger"] if event else "unknown"
+
+
 def mark(phase, *, http_status=None, cache=None):
     event = _CURRENT.get()
     if event is None or phase not in _PHASES:
