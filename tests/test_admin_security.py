@@ -178,6 +178,27 @@ class HTTPAuthTests(unittest.TestCase):
         self.assertEqual(self.request("/api/action", "POST", body='{"action":"import"}')[0], 401)
         self.assertEqual(self.request("/api/library/pdf/fixture-guide/document.pdf")[0], 403)
 
+    def test_morse_public_utility_and_exact_routes(self):
+        status, _, home = self.request("/")
+        self.assertEqual(status, 200)
+        self.assertIn(b'href="/api/tools/morse"', home)
+        status, headers, body = self.request("/api/tools/morse")
+        self.assertEqual(status, 200)
+        self.assertNotIn("WWW-Authenticate", headers)
+        self.assertIn("text/html", headers["Content-Type"])
+        self.assertIn("connect-src 'none'", headers["Content-Security-Policy"])
+        self.assertIn("microphone=(self)", headers["Permissions-Policy"])
+        self.assertIn(b'id="morse-input"', body)
+        self.assertIn(b'id="mic-start"', body)
+        self.assertIn(b'href="/"', body)
+        status, headers, body = self.request("/api/tools/morse.js")
+        self.assertEqual(status, 200)
+        self.assertIn("text/javascript", headers["Content-Type"])
+        self.assertIn(b"TimingDecoder", body)
+        for route in ("/api/tools/morse/unknown", "/api/tools/morse.js?bad=1"):
+            self.assertEqual(self.request(route)[0], 401)
+        self.assertEqual(self.request("/api/tools/morse", method="POST")[0], 401)
+
     def test_brand_icons_load_without_admin_credentials(self):
         """Browser favicon requests must not trigger an admin password prompt."""
         icons = {
@@ -550,7 +571,7 @@ class BrandingAssetTests(unittest.TestCase):
             "templates/admin-page.html.j2", "templates/library.html.j2",
             "templates/search.html.j2", "templates/document-page.html.j2",
             "templates/epub-reader.html.j2", "templates/pdf-reader.html.j2",
-            "templates/admin-login.html.j2",
+            "templates/admin-login.html.j2", "templates/morse.html.j2",
         ]
         for page in pages:
             with self.subTest(page=page):
