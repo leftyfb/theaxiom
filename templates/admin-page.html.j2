@@ -372,7 +372,7 @@
         </fieldset>
       </form>
       <p id="update-schedule-feedback" role="status"></p>
-      <h3>Unattended archive updates</h3>
+      <h3>Unattended source updates</h3>
       <p>Pause new unattended downloads without changing metadata checks or manual actions. Transfers already started can finish and activate, even after the maintenance window closes.</p>
       <button type="button" class="button" id="automatic-update-pause" disabled>Loading pause status…</button>
       <p id="automatic-update-feedback" role="status"></p>
@@ -761,7 +761,7 @@
             <input id="catalog-update-window-start" name="update_window_start" type="time"></div>
           <div><label for="catalog-update-window-end">Maintenance window end (server local)</label>
             <input id="catalog-update-window-end" name="update_window_end" type="time"></div>
-          <p class="source-note editor-wide">Unattended replacement requires an installed, verified ZIM or PMTiles archive and current publisher evidence. PDF and EPUB updates are notify-only. Windows may cross midnight; work that has already started can run past the end.</p>
+          <p class="source-note editor-wide">Unattended replacement requires installed, verified content and current publisher evidence. PDF and EPUB require a strong validator at the exact configured HTTPS URL; a changed file is not proof of a newer edition. Windows may cross midnight; work that has already started can run past the end.</p>
           <div class="editor-wide"><button class="button" type="button" id="test-update-endpoint">Test endpoint</button>
             <p class="source-note" id="update-endpoint-feedback" role="status"></p>
           </div>
@@ -928,7 +928,7 @@
 
             {% if pub %}<span class="compact-publication" data-field="publication-summary">{{ "Published" if pub.published else (pub.publication_reason or "Reader unavailable") if pub.enabled and pub.ready_for_publication else "Reader unavailable" if pub.enabled else "" }}</span>{% endif %}
           </div>
-          <span class="badge enabled" data-field="update-status" role="status"{% if not source.update_check or source.update_check.state != "update_available" %} hidden{% endif %}>Update available</span>
+          <span class="badge enabled" data-field="update-status" role="status"{% if not source.update_check or source.update_check.state != "update_available" and not source.update_check.candidate_token %} hidden{% endif %}>Update available</span>
           <span class="badge{% if source.installed_verified %} enabled{% endif %}" data-field="status" role="status">{% if not source.adapter %}Not yet supported{% elif source.installed_verified %}{{ source.artifact.bytes | filesizeformat if source.artifact and source.artifact.bytes is number and source.artifact.bytes > 0 else 'Installed · size unavailable' }}{% elif source.adapter in ('pdf','epub') %}{{ 'Not installed or invalid' if source.artifact else 'Not downloaded' }}{% elif source.acquisition and not catalog.acquisition_stale %}{{ {'downloading':'Downloading','verifying':'Verifying','publishing':'Installing','failed':'Failed','retrying':'Retrying','interrupted':'Interrupted','not_started':'Not downloaded','unavailable':'Service unavailable'}.get(source.acquisition.state,'Waiting for status') }}{% elif catalog.acquisition_stale %}Status unavailable{% elif not source.artifact and not source.mutation_blocked %}Not downloaded{% else %}Waiting for status…{% endif %}</span>
           <span class="badge" data-batch-status role="status" hidden></span>
           <progress class="summary-progress" data-field="summary-progress" max="100" value="0" aria-label="Active download progress" hidden></progress>
@@ -954,16 +954,16 @@
           {% endif %}
         </p>
         <p class="source-note" data-field="discovery-evidence" role="status" aria-live="polite"></p>
-        {% if source.zim_download %}
+        {% if source.zim_download or (document and url_managed) %}
         <p class="source-note" data-zim-replacement-status role="status" aria-live="polite"></p>
         {% endif %}
         <div class="source-actions" aria-label="Source actions">
           {# Legacy pinned-action placeholders cannot execute and must not
              masquerade as Download/Re-download/Update controls. #}
-          {% if source.zim_download %}
+          {% if source.zim_download or (document and url_managed) %}
           <button class="button" type="button" data-review-zim-update
-                  {% if not source.update_check or source.update_check.state != "update_available" or not source.update_check.candidate_bytes or (source.replacement and source.replacement.state != "activated") %} hidden{% endif %}
-                  data-update-sha256="{{ (source.update_check.candidate_sha256 or source.update_check.candidate_sha1 or source.update_check.candidate_md5) if source.update_check else '' }}"
+                  {% if not source.update_check or (source.update_check.state != "update_available" and not source.update_check.candidate_token) or not source.update_check.candidate_bytes or (source.replacement and source.replacement.state != "activated") %} hidden{% endif %}
+                  data-update-sha256="{{ (source.update_check.candidate_sha256 or source.update_check.candidate_sha1 or source.update_check.candidate_md5 or source.update_check.candidate_token) if source.update_check else '' }}"
                   data-update-bytes="{{ source.update_check.candidate_bytes if source.update_check else '' }}">
             Download update
           </button>
@@ -990,6 +990,10 @@
           <button class="button danger-action" type="button" data-zim-control="cancel" hidden>Cancel · discard partial</button>
           {% endif %}
           {% if document %}
+          {% if url_managed %}
+          <button class="button" type="button" data-zim-replacement="activate" hidden>Publish update</button>
+          <button class="button" type="button" data-zim-replacement="rollback" hidden>Roll back replacement</button>
+          {% endif %}
           {% if source.pdf_download %}
           <button class="button" type="button" data-pdf-download{% if pub.enabled %} hidden{% endif %}{% if pub.enabled or source.mutation_blocked or pub.error %} disabled{% endif %}>{{ 'Re-download' if source.installed_verified else 'Download from URL' }}</button>
           {% elif not url_managed %}
@@ -1009,8 +1013,8 @@
               <button class="button danger-action" type="button" data-delete-downloads{% if not document and not source.installed_verified %} hidden{% endif %}{% if source.mutation_blocked or pub.error or source.replacement %} disabled{% endif %}>Delete downloaded files</button>
               {% if source.zim_download %}
               <button class="button" type="button" data-zim-replacement="prepare" hidden>Prepare replacement from profile</button>
-              <button class="button danger-action" type="button" data-delete-staged-update hidden>Delete staged update files</button>
               {% endif %}
+              {% if source.zim_download or (document and url_managed) %}<button class="button danger-action" type="button" data-delete-staged-update hidden>Delete staged update files</button>{% endif %}
               {% endif %}
               <button class="button danger-action" type="button" data-catalog-remove="{{ source.source_id }}"{% if source.mutation_blocked or pub.error %} disabled{% endif %}>Remove source</button>
             </div>
@@ -1043,9 +1047,9 @@
           <p class="source-note" data-field="update-evidence">
             {% if source.update_check %}{{ source.update_check.evidence }}{% endif %}
           </p>
-        {% if source.zim_download %}
-        <p class="source-note" data-field="update-details"{% if not source.update_check or source.update_check.state != "update_available" %} hidden{% endif %}>
-        {% if source.update_check and source.update_check.state == "update_available" %}
+        {% if source.zim_download or (document and url_managed) %}
+        <p class="source-note" data-field="update-details"{% if not source.update_check or source.update_check.state != "update_available" and not source.update_check.candidate_token %} hidden{% endif %}>
+        {% if source.update_check and (source.update_check.state == "update_available" or source.update_check.candidate_token) %}
           Installed edition: {{ source.update_check.installed_edition }} · Publisher edition: {{ source.update_check.candidate_edition }}
           {% if source.update_check.candidate_bytes %}
             · Estimated transfer and staging: {{ source.update_check.candidate_bytes | filesizeformat }}
@@ -1904,7 +1908,10 @@
         if (method.selectedOptions[0]?.disabled) method.value = '';
         const manual = method.value === 'manual';
         const policy = input('update_policy');
-        const supportsUnattended = !manual && ['zim', 'pmtiles'].includes(format.value);
+        const downloadUrl = input('source_url').value.trim();
+        const supportsDocuments = ['pdf','epub'].includes(format.value) &&
+          /^https:\/\//.test(downloadUrl) && (!endpoint.value.trim() || endpoint.value.trim() === downloadUrl);
+        const supportsUnattended = !manual && (['zim', 'pmtiles'].includes(format.value) || supportsDocuments);
         for (const option of policy.options) {
           if (['automatic', 'scheduled'].includes(option.value)) option.disabled = !supportsUnattended;
         }
@@ -2061,7 +2068,7 @@
           if (button.hidden || button.disabled) return;
           const card = button.closest('.source-card');
           const candidateBytes = Number(button.dataset.updateBytes);
-          if (!Number.isSafeInteger(candidateBytes) || candidateBytes < 96) return;
+          if (!Number.isSafeInteger(candidateBytes) || candidateBytes <= 0) return;
           const feedback = card.querySelector('[data-zim-replacement-status]');
           button.disabled = true;
           try {
@@ -2289,7 +2296,7 @@
           const result = await response.json().catch(() => ({}));
           if (!response.ok) throw new Error(result.error || 'Update check failed');
           const badge = card.querySelector('[data-field="update-status"]');
-          if (badge) badge.hidden = result.state !== 'update_available';
+          if (badge) badge.hidden = result.state !== 'update_available' && !result.candidate_token;
           feedback.textContent = {
             update_available: 'Update available',
             up_to_date: 'Up to date',
@@ -2369,7 +2376,7 @@
         const card = button.closest('.source-card');
         const operation = button.dataset.zimReplacement;
         if (['activate','rollback'].includes(operation) &&
-            !window.confirm(operation === 'activate' ? 'Switch to the verified update? The source will keep its current publication setting.' : 'Restore the previous verified archive?')) return;
+            !window.confirm(operation === 'activate' ? 'Switch to the verified update? The source will keep its current publication setting.' : 'Restore the previous verified content?')) return;
         const feedback = card.querySelector('[data-zim-replacement-status]');
         card.dataset.zimReplacementPosting = 'true';
         card.querySelectorAll('[data-zim-replacement]').forEach(b => b.disabled = true);
@@ -2915,7 +2922,7 @@
         }
         if (deleteButton) {
           deleteButton.hidden = canDeleteStaged || (['zim', 'pmtiles'].includes(card.dataset.filterFormat) && !source?.installed_verified);
-          deleteButton.disabled = blocked || !!source?.replacement || card.dataset.deletePosting === 'true';
+          deleteButton.disabled = blocked || (!!source?.replacement && !['pdf','epub'].includes(source?.adapter)) || card.dataset.deletePosting === 'true';
         }
         const replacement = source?.replacement;
         const replacementState = replacement?.state || '';
@@ -2955,7 +2962,7 @@
             // Replacement controls use their own durable state and backend
             // preconditions. A changed catalog URL makes the old acquisition
             // appear unmatched; it must not disable a safe replacement action.
-            button.disabled = card.dataset.zimReplacementPosting === 'true' ||
+            button.disabled = (['pdf','epub'].includes(source?.adapter) && blocked) || card.dataset.zimReplacementPosting === 'true' ||
               card.dataset.stagedDeletePosting === 'true' ||
               (op === 'prepare' && !source?.replacement_available) ||
               (op === 'download' && !['prepared','failed','interrupted','cancelled'].includes(replacementState));
@@ -3085,7 +3092,7 @@
                 update.candidate_sha256 ? 'SHA-256 ' + update.candidate_sha256 : update.candidate_sha1 ? 'SHA-1 ' + update.candidate_sha1 : update.candidate_md5 ? 'MD5 ' + update.candidate_md5 : ''
               ].filter(Boolean).join(' · ') : '';
             }
-            const hasUpdate = update?.state === "update_available";
+            const hasUpdate = update?.state === "update_available" || !!update?.candidate_token;
             if (updateBadge) updateBadge.hidden = !hasUpdate;
             if (updateDetails) {
               updateDetails.hidden = !hasUpdate;
@@ -3093,22 +3100,22 @@
               const installed = source?.installed_verified === true ? source.artifact?.bytes : null;
               const estimate = Number.isSafeInteger(incoming) && incoming > 0 ?
                 ' · Estimated transfer and staging: ' + size(incoming) +
-                ' · Installed and candidate archives together: ' +
+                ' · Installed and candidate files together: ' +
                 (Number.isSafeInteger(installed) && installed > 0 && Number.isSafeInteger(installed + incoming) ?
                   size(installed + incoming) : 'unknown') : '';
               updateDetails.textContent = hasUpdate
-                ? 'Installed edition: ' + (update.installed_edition || 'unknown') +
-                  ' · Publisher edition: ' + (update.candidate_edition || 'unknown') +
+                ? (update.candidate_token ? 'Publisher file changed; newer edition not independently verified' : 'Installed edition: ' + (update.installed_edition || 'unknown') +
+                  ' · Publisher edition: ' + (update.candidate_edition || 'unknown')) +
                   estimate + ' · Candidate: ' + (update.candidate_url || 'unavailable') +
                   ' · The installed edition remains in service until you publish the verified update.'
                 : '';
             }
             const review = card.querySelector('[data-review-zim-update]');
             if (review) {
-              review.hidden = !hasUpdate || !Number.isSafeInteger(update?.candidate_bytes) ||
+              review.hidden = !hasUpdate || !Number.isSafeInteger(update?.candidate_bytes) || !!source?.mutation_blocked ||
                 (!!source?.replacement && source.replacement.state !== 'activated');
               if (!review.hidden) {
-                review.dataset.updateSha256 = update.candidate_sha256 || update.candidate_sha1 || update.candidate_md5 || '';
+                review.dataset.updateSha256 = update.candidate_sha256 || update.candidate_sha1 || update.candidate_md5 || update.candidate_token || '';
                 review.dataset.updateBytes = String(update.candidate_bytes);
               }
             }
@@ -3318,11 +3325,11 @@
           if (!source.installed_verified && !job && !replacement.state) return [];
           const pending = job && activeStates.includes(job.state) || activeStates.includes(replacement.state);
           const verified = source.installed_verified && replacement.state === 'verified';
-          const available = source.installed_verified && !update.stale && update.state === 'update_available' &&
+          const available = source.installed_verified && !update.stale && (update.state === 'update_available' || !!update.candidate_token) &&
             Number.isFinite(update.candidate_bytes) && update.candidate_bytes > 0 &&
             (!replacement.state || replacement.state === 'activated');
           const operation = pending || source.mutation_blocked ? null : verified ? 'publish-update' : available ? 'download-update' : null;
-          const digest = verified ? replacement.sha256 : (update.candidate_sha256 || update.candidate_sha1 || update.candidate_md5);
+          const digest = verified ? replacement.sha256 : (update.candidate_sha256 || update.candidate_sha1 || update.candidate_md5 || update.candidate_token);
           let state = 'unknown', label;
           if (pending) {
             state = 'active';
@@ -3333,7 +3340,7 @@
           else if (failedStates.includes(replacement.state)) {
             state = 'failed';
             if (replacement.state === 'rolled_back') label = 'Rolled back';
-          } else if (available) state = 'available';
+          } else if (available) { state = 'available'; if (update.candidate_token) label = 'Publisher file changed · ready to download'; }
           else if (job && failedStates.includes(job.state) || rejected.has(sid)) state = 'failed';
           else if (replacement.state === 'activated' || job?.state === 'completed' && ['publish-update','automatic-update'].includes(job.operation)) state = 'applied';
           else if (update.state === 'representation_changed') label = 'Publisher file changed · newer edition unverified';
