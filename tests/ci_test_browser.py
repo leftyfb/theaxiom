@@ -1303,7 +1303,7 @@ def exercise_batch_update_journey(browser, viewport):
         expect(review.get_by_role("link", name="Update schedule settings")).to_have_attribute("href", "/admin/settings#update-schedule-title")
         assert page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth + 2")
         filters.select_option("all")
-        expect(review.get_by_text("Up to date", exact=True)).to_have_count(2)
+        expect(review.locator('[data-update-state="current"] .badge')).to_have_text(["Up to date", "Up to date"])
         expect(review.get_by_text("Update policy: Scheduled", exact=False)).to_have_count(2)
         expect(review.get_by_text("Next window: tomorrow", exact=False)).to_have_count(2)
         filters.select_option("attention")
@@ -1328,16 +1328,16 @@ def exercise_batch_update_journey(browser, viewport):
         expect(download).to_have_text("Download 1 update")
         download.click()
         expect(publish).to_have_text("Publish 1 update")
-        expect(review.get_by_text("Verified / staged", exact=True)).to_be_visible()
+        expect(review.locator('[data-update-state="staged"] .badge')).to_have_text("Verified / staged")
         expect(review.get_by_text("Download completed")).to_be_visible()
         publish.click()
         filters.select_option("applied")
-        expect(review.get_by_text("Applied", exact=True)).to_be_visible()
+        expect(review.locator('[data-update-state="applied"] .badge')).to_have_text("Applied")
         expect(review.get_by_text("Publication completed")).to_be_visible()
         # Live refresh: automatic job appears without navigating or submitting.
         filters.select_option("attention")
         jobs.insert(0, {"source_id": "second", "operation": "automatic-update", "state": "queued"})
-        expect(review.get_by_text("Queued", exact=True)).to_be_visible(timeout=12000)
+        expect(review.locator('[data-update-state="active"] .badge')).to_have_text("Queued", timeout=12000)
         jobs[0]["state"] = "failed"
         jobs[0]["detail"] = "fixture failure"
         expect(review.get_by_text("Automatic update failed · fixture failure")).to_be_visible(timeout=12000)
@@ -1348,7 +1348,7 @@ def exercise_batch_update_journey(browser, viewport):
         expect(page.locator("#updates-pause")).to_have_text("Resume automatic updates")
         review.get_by_role("button", name="Check for updates for Second archive").click()
         filters.select_option("available")
-        expect(review.get_by_text("Update available", exact=True)).to_be_visible()
+        expect(review.locator('[data-update-state="available"] .badge')).to_have_text("Update available")
         assert checks == ["all", {"source_id": "second", "revision": 1}]
         assert pause_calls == [True]
         assert calls == [
