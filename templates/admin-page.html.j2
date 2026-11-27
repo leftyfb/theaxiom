@@ -1148,8 +1148,9 @@
       // One authoritative snapshot for the rendered cards and one mutation
       // lane for catalog-revision-sensitive actions. Downloads themselves
       // remain independent; only short revision-sensitive requests serialize.
-      let latest = {{ catalog|default({})|tojson }};
-      let rendered = latest;
+      let rendered = {{ catalog|default({})|tojson }};
+      let mutationEpoch = 0;
+      window.axiomSourceEpoch = () => mutationEpoch;
       window.axiomMarkSourcesRendered = data => { rendered = data; };
       let mutationTail = Promise.resolve();
       let editorBase = null;
@@ -1181,7 +1182,6 @@
           window.axiomHandleStaleSources?.();
           return false;
         }
-        latest = data;
         window.axiomSetSourceRevision(data.revision);
         return true;
       }
@@ -1191,18 +1191,23 @@
         mutationTail = result.catch(() => {});
         return result;
       }
-      async function freshSnapshot() {
-        const response = await fetch('/api/sources', {cache:'no-store'});
-        if (!response.ok) throw new Error('Current source profiles unavailable. No changes submitted.');
-        const data = await response.json();
-        if (!acceptSnapshot(data)) throw new Error('Source list or groupings changed. Reload sources and review before retrying.');
-        return data;
+      async function freshSnapshot(sid) {
+        const controller = new AbortController();
+        const timer = window.setTimeout(() => controller.abort(), 5000);
+        try {
+          const response = await fetch('/api/sources', {cache:'no-store', signal:controller.signal});
+          if (!response.ok) throw new Error('Current source profiles unavailable. No changes submitted.');
+          const data = await response.json();
+          if (sid && !sourceAt(data,sid)) throw new Error('Source was removed. No changes submitted; any unsaved edits are retained.');
+          if (!acceptSnapshot(data)) throw new Error('Source list or groupings changed. Reload sources and review before retrying.');
+          return data;
+        } finally { window.clearTimeout(timer); }
       }
       const revisionConflict = (response, result) => response.status === 409 && /revision changed|catalog changed/i.test(result.error || '');
       async function checkedMutation(url, payload, validate, fallback) {
         return serializeMutation(async () => {
           for (let attempt = 0; attempt < 3; attempt++) {
-            const data = await freshSnapshot();
+            const data = await freshSnapshot(payload.source_id);
             const extra = validate(data);
             const response = await acquisitionFetch(url, {method:'POST',
               headers:{...(window.axiomCsrfHeaders?.() || {}),'Content-Type':'application/json'},
@@ -1210,6 +1215,7 @@
             const result = await response.json().catch(() => ({}));
             if (revisionConflict(response, result) && attempt < 2) continue;
             if (!response.ok) throw acquisitionError(response, result, fallback);
+            mutationEpoch++;
             window.axiomSetSourceRevision(result.revision);
             // A mutation succeeded even if the next status poll fails.
             // Never retry an accepted request merely because rendering failed.
@@ -2221,7 +2227,7 @@
           await serializeMutation(async () => {
             let result;
             for (let attempt = 0; attempt < 3; attempt++) {
-              const data = await freshSnapshot();
+              const data = await freshSnapshot(source_id);
               const current = sourceAt(data, source_id);
               if (!current || !base.source) throw new Error('Source removed or unavailable; unsaved changes retained.');
               const value = (source, key) => source.profile?.[key] ?? source.configuration?.[key] ?? '';
@@ -2237,6 +2243,7 @@
               result = await response.json().catch(() => ({}));
               if (revisionConflict(response,result) && attempt < 2) continue;
               if (!response.ok) throw acquisitionError(response,result,'Catalog update failed');
+              mutationEpoch++;
               window.axiomSetSourceRevision(result.revision);
               break;
             }
@@ -3134,6 +3141,7 @@
         const controller = new AbortController();
         const timer = window.setTimeout(() => controller.abort(), 5000);
         try {
+          const epoch = window.axiomSourceEpoch?.();
           const response = await fetch('/api/sources', {cache: 'no-store', signal: controller.signal});
           if (response.status === 401) {
             redirectExpiredSession();
@@ -3141,7 +3149,8 @@
           }
           if (!response.ok) throw new Error('Status unavailable');
           const data = await response.json();
-          if (Number.isInteger(window.axiomSourceRevision()) && data.revision < window.axiomSourceRevision()) return;
+          if (epoch !== window.axiomSourceEpoch?.()) { pollAgain = true; return; }
+          if (Number.isInteger(window.axiomSourceRevision()) && data.revision < window.axiomSourceRevision()) { pollAgain = true; return; }
           if (window.axiomAcceptSourceSnapshot && !window.axiomAcceptSourceSnapshot(data)) return;
           showUpdateSummary(data.update_summary || '');
           window.axiomShowUpdateAvailability?.(data.available_updates, data.update_stages);
