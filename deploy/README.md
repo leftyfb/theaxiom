@@ -14,7 +14,9 @@ access only to its private application state (and eventually separately
 authorized content storage). Do not change ownership of an existing NFS export
 or create content directories during deployment.
 
-1. Install Nginx and Python prerequisites using the host package manager. Install
+1. Install Nginx and Python prerequisites using the host package manager (see
+   [dependency inventory](../docs/dependencies.md)). For offline HTTPS, include
+   OpenSSL and follow the certificate setup below. Install
    the application into `/opt/theaxiom/app/.venv` using `pip install -e .`.
 2. Create `/var/lib/theaxiom` owned by the service account, mode 0700. From a
    trusted local terminal initialize its credential file (interactive, never
@@ -28,6 +30,8 @@ or create content directories during deployment.
    `systemctl daemon-reload` and `systemctl enable --now theaxiom.service`.
    Verify only 127.0.0.1:8080 is listening.
 5. Install the two Nginx files from `nginx/` as indicated by their comments.
+   If HTTPS is already provisioned, preserve the local TLS include as described
+   below before replacing the live site configuration.
    The site listens on all IPv4 and IPv6 interfaces on port 80, including
    LAN and Tailscale interfaces, and accepts any requested hostname or IP.
    Enable the site, resolve conflicting default/listening sites with operator
@@ -53,6 +57,83 @@ the scheme forwarded by the configured local Nginx proxy when checking Origin.
 The example IP and host names are deployment examples, not application defaults.
 Ansible may consume these files from the application repository. Keep actual
 host inventory, custom firewall rules and secrets outside Git.
+
+## Offline HTTPS (local certificate authority)
+
+HTTPS is recommended for administration and password-manager compatibility.
+This optional setup works without internet access or an external CA. The
+Vancouver pilot was verified on 2026-11-27, including trusted HTTPS and
+1Password detection in Chrome on iOS over Tailscale. Automated provisioning
+and renewal remain tracked in [#140](https://github.com/leftyfb/theaxiom/issues/140).
+
+### Initial provisioning
+
+- Install the Ubuntu `openssl` package and ensure Nginx supports TLS.
+- Provision a unique appliance-local root CA and a server certificate signed
+  by that CA. The pilot uses RSA 3072-bit keys, SHA-256 signatures, a ten-year
+  CA and a one-year server certificate with the TLS server authentication
+  extended key usage. Keep the CA stable across software updates.
+- Include DNS and IP subject alternative names (SANs) for the actual access
+  addresses: the appliance hostname, its advertised local hostname, configured
+  aliases and the planned appliance IP `10.10.10.10`. Include actual LAN
+  addresses and Tailscale hostname/IP when applicable. A SAN does not configure
+  an address or make a hostname resolve; DNS/mDNS and network setup are separate.
+- For the pilot layout, keep certificates and keys under `/etc/theaxiom/tls/`
+  (`ca.pem`, `ca.key`, `server.pem`, `server.key`, and
+  `server-openssl.cnf`). Protect both keys with root ownership and mode 0600.
+  Keep private material outside Git, public web roots, and application storage.
+- Configure an operator-managed Nginx snippet at
+  `/etc/nginx/snippets/theaxiom-local-tls.conf` for IPv4/IPv6 HTTPS on port
+  443, TLS 1.2/1.3 and the server certificate/key paths. Include it inside
+  the existing site server block. Retain port 80 for initial onboarding;
+  do not force redirects during this pilot. Preserve all existing proxy,
+  authorization and reader routes, including forwarding the actual scheme.
+- Expose only the public CA certificate (pilot path
+  `/etc/theaxiom/tls/public/theaxiom-local-ca.crt`) at the exact URL
+  `/theaxiom-local-ca.crt`. Do not expose the TLS directory or any private key.
+  Communicate its SHA-256 fingerprint via a separate trusted channel.
+  Back up the existing vhost, run `nginx -t`, then reload Nginx. Restore
+  the prior configuration if validation fails. No Python restart is required.
+
+### Client trust and verification
+
+1. Download the public CA certificate from the appliance using a reachable
+   hostname or IP (use its Tailscale address when remote). Verify its SHA-256
+   fingerprint against the trusted value before installing it. On a computer:
+   `openssl x509 -in theaxiom-local-ca.crt -noout -fingerprint -sha256`.
+2. Import the verified CA into the client/browser trusted root store. On iOS,
+   install the downloaded profile in Settings, then explicitly enable full trust
+   in Settings → General → About → Certificate Trust Settings. In desktop Chrome,
+   use `chrome://certificate-manager/` to manage local trust.
+3. Open HTTPS using a reachable address covered by a SAN. Verify no certificate
+   warning, public library and reader navigation, admin login and password
+   manager autofill. Check that unauthenticated protected routes remain denied
+   and that reader launches preserve the HTTPS scheme. Do not bypass certificate
+   warnings or submit credentials over untrusted HTTP.
+
+### Subsequent deployments and renewal
+
+When replacing the live Nginx vhost from `deploy/nginx/theaxiom.conf`,
+preserve the following line **inside the existing server block** on HTTPS-enabled
+hosts:
+
+```nginx
+include /etc/nginx/snippets/theaxiom-local-tls.conf;
+```
+
+Do not add an unconditional include on HTTP-only hosts. Keep the snippet
+and TLS directory outside the checkout and untouched by application updates.
+Back up the live configuration, validate with `nginx -t` before reload, and
+restore the previous vhost if validation fails. Verify HTTPS after deployment
+as well as existing HTTP smoke checks. Until the deployment controller
+implements preservation, the operator must ensure this step is performed;
+the pilot does not establish automated deployment support.
+
+Before the server certificate expires, refresh the SANs for current addresses
+and renew the leaf using the existing CA, then validate and reload Nginx.
+Clients should not have to reinstall trust for routine leaf renewal. Back up
+private CA data securely and document its expiry; replacing the CA requires
+a new client trust installation. Do not regenerate the CA on each deployment.
 
 ## Acquisition monitoring
 

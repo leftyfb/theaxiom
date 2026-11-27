@@ -15,7 +15,7 @@ actual candidate versions must be recorded during qualification.
 |---|---|---|
 | python3 | Backend, PDF/EPUB processing, metadata, health checks | pyproject.toml; deploy/theaxiom.service |
 | python3-venv | Isolated installation | deploy/README.md |
-| nginx | LAN HTTP frontend and authorization proxy | deploy/nginx/theaxiom.conf |
+| nginx | LAN HTTP/HTTPS frontend and authorization proxy | deploy/nginx/theaxiom.conf |
 | systemd | Application service; optional ZIM acquisition monitoring | deploy/theaxiom.service; acquisition_monitor.py |
 | ca-certificates | TLS trust for explicit HTTPS acquisition and preparation | pdf_transport.py; acquire_kiwix_zim.sh |
 | bash, coreutils, util-linux | Shell, file/hash commands, flock, mount inspection and operational checks | scripts/acquire_kiwix_zim.sh |
@@ -63,6 +63,7 @@ See [PDF language detection](pdf-language.md) for limits and operator preparatio
 
 | Feature | Requirement | Scope |
 |---|---|---|
+| Offline HTTPS | openssl; appliance-local CA and server certificate; Nginx TLS support | Optional TLS provisioning/renewal; recommended for administrator access. See [deployment steps](../deploy/README.md#offline-https-local-certificate-authority). |
 | ZIM/Wikipedia | kiwix-serve (candidate Ubuntu package kiwix-tools), compatible libkiwix | Separate local service on 127.0.0.1:8081 |
 | ZIM acquisition | curl, bash, coreutils, util-linux; systemd and journal monitoring | Optional, explicitly approved external acquisition only |
 | PDF reading | Mozilla PDF.js legacy generic distribution, pinned 6.5.438 | Local static asset distribution at /opt/pdfjs/current |
@@ -109,10 +110,11 @@ must be selected according to features.
 
 ```sh
 apt-cache policy python3 python3-venv python3-pip nginx systemd ca-certificates \
-  bash coreutils util-linux curl git kiwix-tools nfs-common nodejs
+  bash coreutils util-linux curl git kiwix-tools nfs-common nodejs openssl
 # On a clean authorized host only, after package review:
 # sudo apt install python3 python3-venv python3-pip nginx systemd \
 #   ca-certificates bash coreutils util-linux curl
+# Optional offline HTTPS provisioning: sudo apt install openssl
 ```
 
 Prepare a wheelhouse for the target Python/architecture using the canonical
@@ -138,7 +140,7 @@ Do not run apt update/install or initiate archive downloads.
 printf 'OS=%s VERSION=%s\n' "$ID" "$VERSION_ID"
 dpkg --print-architecture
 for p in python3 python3-venv python3-pip nginx systemd ca-certificates \
-         bash coreutils util-linux curl git nfs-common kiwix-tools; do
+         bash coreutils util-linux curl git nfs-common kiwix-tools openssl; do
   dpkg-query -W -f='${Package} ${Version} ${db:Status-Abbrev}\n' "$p" 2>/dev/null || true
 done
 nginx -V 2>&1
