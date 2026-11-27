@@ -46,6 +46,7 @@ pdf_language = importlib.import_module(f"{__package__}.pdf_language" if __packag
 pdf_transport = importlib.import_module(f"{__package__}.pdf_transport" if __package__ else "theaxiom.pdf_transport")
 document_origin_evidence = importlib.import_module(f"{__package__}.document_origin_evidence" if __package__ else "theaxiom.document_origin_evidence")
 document_update_discovery = importlib.import_module(f"{__package__}.document_update_discovery" if __package__ else "theaxiom.document_update_discovery")
+document_replacement = importlib.import_module(f"{__package__}.document_replacement" if __package__ else "theaxiom.document_replacement")
 zim_jobs = importlib.import_module(f"{__package__}.zim_jobs" if __package__ else "theaxiom.zim_jobs")
 pmtiles_source = importlib.import_module(f"{__package__ or 'theaxiom'}.pmtiles_source")
 zim_source = importlib.import_module(f"{__package__}.zim_source" if __package__ else "theaxiom.zim_source")
@@ -264,7 +265,7 @@ def _update_stage(source):
     replacement = source["replacement"] or {}
     if replacement.get("state") == "verified":
         return "publish"
-    if (check.get("state") == "update_available" and check.get("candidate_bytes")
+    if ((check.get("state") == "update_available" or check.get("candidate_token")) and check.get("candidate_bytes")
             and replacement.get("state") in (None, "activated")):
         return "download"
     return None
@@ -280,7 +281,7 @@ def _source_update_summary(sources):
             continue
         result = source["update_check"] or {}
         state = result.get("state")
-        if state == "update_available":
+        if state == "update_available" or result.get("candidate_token"):
             available += 1
         elif (state == "representation_changed" or
               (state in (None, "unable_to_determine")
@@ -492,9 +493,50 @@ def _reviewed_update_fields(update, reviewed_digest):
     return fields
 
 
+def _document_pending(sid):
+    return any(job["source_id"] == sid and job["state"] in acquisition_queue.PENDING
+               for job in acquisition_queue.status())
+
+
+def _document_update_job(record, reviewed_digest, operation, *, previous=None):
+    sid, config = record["source_id"], record["configuration"]
+    pin = document_replacement.installed(record)
+    if not pin:
+        raise ValueError("No verified installed document")
+    candidate = document_replacement.read(record)
+    state = document_replacement.status(record, candidate)
+    payload = {"document": True, "original": config, "base": pin, "digest": reviewed_digest}
+    reservation = 0
+    if operation == "publish-update":
+        if not state or state["state"] != "verified" or state["sha256"] != reviewed_digest:
+            raise ValueError("The verified document changed; review again")
+    else:
+        evidence = document_replacement.checked(record)
+        _, tag, reservation = document_replacement.reviewed(record, reviewed_digest, evidence)
+        if state and state["state"] != "activated":
+            if operation != "automatic-update" or state["state"] != "rolled_back":
+                raise ValueError("Resolve the existing document replacement first")
+            if candidate["target"]["etag"] == tag and candidate["target"]["bytes"] == reservation:
+                payload["reuse"] = state["sha256"]
+                reservation = 0
+        if previous:
+            if previous["state"] != "completed":
+                raise ValueError("Previous automatic update did not complete; review manually")
+            if payload.get("reuse"):
+                payload["rollback_retry"] = [previous["job_id"], candidate["rollback_token"]]
+            elif not candidate or state["state"] == "rolled_back":
+                payload["redownload_after"] = previous["job_id"]
+            else:
+                raise ValueError("The previously applied representation is not eligible again")
+    return dict(source_id=sid, title=record["profile"]["title"], operation=operation,
+                configuration=payload, bytes=reservation)
+
+
 def _publisher_update_job(record, reviewed_digest, operation, *, rollback_retry=None) -> dict[str, Any]:
     sid = record["source_id"]
     config = record["configuration"]
+    if config["format"] in document_replacement.FORMATS:
+        return _document_update_job(record, reviewed_digest, operation)
     if config["format"] not in {"zim", "pmtiles"}:
         raise ValueError("This source has no verifiable replacement workflow")
     current = zim_jobs.candidate_status(sid)
@@ -732,6 +774,22 @@ def _poll_automatic_updates():
                 _log_automatic_skip(sid, reason, int(time.monotonic() // 900))
 
             try:
+                if config["format"] in document_replacement.FORMATS:
+                    evidence = document_replacement.checked(record)
+                    digest = evidence.get("candidate_token")
+                    if not digest or not update_discovery_config.current_unattended_evidence(config, now, evidence):
+                        continue
+                    actionable = True
+                    previous = attempted.get((sid, digest))
+                    job = _document_update_job(record, digest, "automatic-update", previous=previous)
+                    settings = storage_settings.load_settings()
+                    available = _batch_available(settings, {config["format"]}) if job["bytes"] else None
+                    current_now = datetime.now(update_schedule.timezone())
+                    if (update_schedule.automatic_paused() or not update_discovery_config.window_open(config, current_now)
+                            or not update_discovery_config.current_unattended_evidence(config, current_now, evidence)):
+                        continue
+                    acquisition_queue.enqueue([job], available, settings)
+                    return
                 live = zim_jobs.read(sid)
                 if not live or live.get("state") != "completed":
                     continue
@@ -892,10 +950,113 @@ def _execute_automatic_update(job, payload, stopping, shutdown):
     return "completed", "Update activated; publication setting preserved"
 
 
+def _execute_document_update(job, payload, stopping, shutdown):
+    """Shared queue execution; network transfer never holds the publication lock."""
+    sid, operation = job["source_id"], job["operation"]
+    automatic = operation == "automatic-update"
+    original = update_discovery_config.migrate_periodic(payload["original"])
+    trigger = ("scheduled" if original.get("update_policy") == "scheduled" else "automatic") if automatic else "batch"
+
+    def stop():
+        return stopping() or shutdown.is_set()
+
+    def snapshot():
+        catalog = SOURCE_CATALOG.get()
+        record = next((row for row in catalog["sources"] if row["source_id"] == sid), None)
+        if not record:
+            raise ValueError("Document source was removed")
+        if storage_settings.load_settings() != json.loads(job["storage"]):
+            raise ValueError("Storage settings changed; review and queue again")
+        return catalog, record
+
+    try:
+        with zim_jobs.worker_lock(source_id=sid):
+            with publication.LOCK:
+                catalog, record = snapshot()
+                candidate = document_replacement.read(record)
+                state = document_replacement.status(record, candidate)
+                config = record["configuration"]
+                owned = candidate and candidate["job"] == job["id"]
+                if state and state["state"] == "activated" and (
+                        automatic and owned or operation == "publish-update"
+                        and state["sha256"] == payload["digest"]):
+                    return "completed", "Update already activated; publication setting preserved"
+                if config != original:
+                    return "interrupted", "Document configuration changed; review manually"
+                if stop():
+                    if shutdown.is_set() and not stopping():
+                        return "running", ""
+                    raise acquisition_queue.Cancelled()
+                if operation == "publish-update":
+                    if not state or state["state"] != "verified" or state["sha256"] != payload["digest"]:
+                        raise ValueError("Verified document replacement changed")
+                    document_replacement.switch(SOURCE_CATALOG, record, catalog["revision"], trigger=trigger)
+                    return "completed", "Update activated; publication setting preserved"
+                if document_replacement.installed(record) != payload["base"]:
+                    raise ValueError("Serving document changed after queuing")
+                if owned and state and state["state"] == "verified":
+                    # Recovery after verified bytes were durably recorded.
+                    if automatic:
+                        document_replacement.switch(SOURCE_CATALOG, record, catalog["revision"],
+                                                    trigger=trigger, job=job["id"])
+                    return "completed", "Update activated; publication setting preserved" if automatic else "Replacement ready for activation"
+                if automatic:
+                    now = datetime.now(update_schedule.timezone())
+                    if update_schedule.automatic_paused() or not update_discovery_config.window_open(config, now):
+                        return "deferred", "Waiting for the maintenance window or automatic updates to resume"
+                evidence = document_replacement.checked(record)
+                if automatic and not update_discovery_config.current_unattended_evidence(config, now, evidence):
+                    return "deferred", "Waiting for current publisher evidence"
+                _, tag, size = document_replacement.reviewed(record, payload["digest"], evidence)
+                if payload.get("reuse"):
+                    if (not state or state["state"] != "rolled_back" or state["sha256"] != payload["reuse"]
+                            or candidate["target"]["etag"] != tag or candidate["target"]["bytes"] != size):
+                        raise ValueError("Retained document no longer matches publisher evidence")
+                    retry = payload.get("rollback_retry")
+                    if retry and candidate["rollback_token"] != retry[1]:
+                        raise ValueError("Document rollback changed")
+                    candidate["job"] = job["id"]
+                    document_replacement._save(record, candidate)
+                    document_replacement.switch(SOURCE_CATALOG, record, catalog["revision"],
+                                                trigger=trigger, job=job["id"])
+                    return "completed", "Update activated; publication setting preserved"
+                if job["bytes"] != size or _batch_available(json.loads(job["storage"]), {config["format"]}) < size:
+                    return ("deferred", "Waiting for free storage") if automatic else ("failed", "Insufficient free storage")
+            # Only this source's lock is held, so unrelated sources and readers
+            # remain available while the bounded document transfer runs.
+            try:
+                candidate = document_replacement.download(record, payload["digest"], evidence,
+                                                          job=job["id"], stopped=stop)
+            except acquisition_queue.Cancelled:
+                if shutdown.is_set() and not stopping():
+                    return "running", ""
+                raise
+            if candidate is None:
+                return "completed", "Publisher validator changed; document bytes unchanged"
+            with publication.LOCK:
+                catalog, record = snapshot()
+                if record["configuration"] != original:
+                    return "interrupted", "Document configuration changed; verified files retained"
+                if stop():
+                    if shutdown.is_set() and not stopping():
+                        return "running", ""
+                    raise acquisition_queue.Cancelled()
+                if automatic:
+                    # A transfer started in its window may finish outside it.
+                    document_replacement.switch(SOURCE_CATALOG, record, catalog["revision"],
+                                                trigger=trigger, job=job["id"])
+                    return "completed", "Update activated; publication setting preserved"
+                return "completed", "Replacement ready for activation"
+    except BlockingIOError:
+        return "deferred", "Waiting for source archive worker or storage maintenance"
+
+
 def _execute_batch_job(job, stopping, shutdown):
     sid, operation = job["source_id"], job["operation"]
     recovering = job["state"] == "running"
     config = json.loads(job["configuration"])
+    if config.get("document") is True and operation in {"automatic-update", "download-update", "publish-update"}:
+        return _execute_document_update(job, config, stopping, shutdown)
     if operation == "automatic-update":
         return _execute_automatic_update(job, config, stopping, shutdown)
     if operation != "download-update":
@@ -2016,6 +2177,13 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             except (OSError, sqlite3.Error):
                 pass  # Source profiles remain available when queue status is unknown.
         sources = []
+        document_pending = set()
+        if any(row["configuration"]["format"] in document_replacement.FORMATS for row in catalog["sources"]):
+            try:
+                document_pending = {job["source_id"] for job in acquisition_queue.status()
+                                    if job["state"] in acquisition_queue.PENDING}
+            except (OSError, sqlite3.Error):
+                document_pending = {row["source_id"] for row in catalog["sources"]}
         for record in catalog["sources"]:
             sid = record["source_id"]
             busy = source_busy(snapshot, sid)
@@ -2023,11 +2191,11 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             discovery = update_discovery_config.settings(record["configuration"])
             state = None
             if self._pdf_record(record):
-                busy = False
+                busy = sid in document_pending
                 pdf_state = pdf_source.status(record, artifacts[sid])
                 state = pdf_state
             elif self._epub_record(record):
-                busy = False
+                busy = sid in document_pending
                 state = epub_source.status(record, artifacts[sid])
             verified = (bool(state and state["verified"]) if self._pdf_record(record) or self._epub_record(record)
                         else False)
@@ -2092,6 +2260,11 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                         or (job and job.get("state") == "not_started")):
                     download_filter = "not-downloaded"
             replacement = candidate = None
+            if record["configuration"]["format"] in document_replacement.FORMATS:
+                try:
+                    replacement = document_replacement.status(record)
+                except (ValueError, OSError):
+                    replacement = {"state": "unavailable", "error": "Document replacement status unavailable"}
             if lifecycles[sid].get("zim_download"):
                 try:
                     candidate = zim_jobs.candidate_status(sid)
@@ -2108,7 +2281,9 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             source_attempts = attempts.get(sid, [])
             automatic = _automatic_status(sid, record["configuration"], paused, local_now,
                                           source_attempts[0]["state"] if source_attempts else "",
-                                          local_job if verified else None, update_check)
+                                          (artifacts[sid] if record["configuration"]["format"] in document_replacement.FORMATS else local_job) if verified else None, update_check)
+            if update_check:
+                update_check = {key: value for key, value in update_check.items() if key != "candidate_etag"}
 
             sources.append(dict(record, **lifecycles[sid], acquisition=_public_acquisition(job), replacement=replacement, replacement_available=replacement_available,
                                 update_check=update_check if discovery["method"] != "manual" else None,
@@ -2390,7 +2565,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             except OSError:
                 self._send_json(503, {"error": "Metadata check unavailable"})
                 return
-            self._send_json(200, dict(source_id=sid, **result))
+            self._send_json(200, dict(source_id=sid, **{key: value for key, value in result.items() if key != "candidate_etag"}))
         elif self.path == "/api/upstream-kiwix-catalog":
             if not self.headers.get("Origin"):
                 self._send_json(403, {"error": "same-origin request required"})
@@ -2529,7 +2704,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     is_pdf = (existing and (self._pdf_record(existing) or self._epub_record(existing))) or (
                         existing is None and isinstance(sid, str)
                         and isinstance(fields, dict) and fields.get("format") in {"pdf", "epub"})
-                    busy = not is_pdf and source_busy(self._snapshot(), sid)
+                    busy = (_document_pending(sid) if is_pdf and isinstance(sid, str) else source_busy(self._snapshot(), sid))
                     if isinstance(sid, str):
                         local_job = zim_jobs.status(sid)
                         if local_job and local_job.get("active"):
@@ -2558,6 +2733,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                         self._guard_published_mutation(operation, sid, fields, revision)
                     try:
                         result = SOURCE_CATALOG.mutate(operation, sid, fields, revision, busy)
+                        if operation == "remove" and is_pdf:
+                            document_replacement.forget(sid)
                     except (catalog_store.CatalogError, OSError) as exc:
                         if unpublished:
                             # Never restore public access automatically after a failed removal.
@@ -2599,6 +2776,9 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 is_epub = record is not None and self._epub_record(record)
                 is_pdf = record is not None and self._pdf_record(record)
                 is_document = is_pdf or is_epub
+                if is_document and _document_pending(source_id):
+                    self._send_json(409, {"error": "Finish or cancel the document update first"})
+                    return
                 is_zim = record is not None and self._archive_record(record)
                 if not (is_document or is_zim):
                     self._send_json(400, {"error": "source has no publication adapter"})
@@ -2762,6 +2942,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 record = next((item for item in catalog["sources"] if item["source_id"] == sid), None)
                 if record is None or not self._pdf_record(record):
                     raise ValueError("source has no PDF import adapter")
+                if _document_pending(sid):
+                    raise ValueError("Finish or cancel the document update first")
                 artifact = pdf_source.pin(sid, record["configuration"])
                 pdf_source.import_local(sid, artifact)
                 if not record["profile"].get("language"):
@@ -2838,6 +3020,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                         raise ValueError("source ID already exists or catalog is full")
                 elif record is None or not (self._pdf_record(record) if requested_format == "pdf" else self._epub_record(record)):
                     raise ValueError("source has no matching document upload adapter")
+                if _document_pending(sid):
+                    raise ValueError("Finish or cancel the document update first")
                 if publication.load().get(sid, False):
                     raise ValueError("Unpublish source before uploading")
                 config = {} if adding else record["configuration"]
@@ -2925,6 +3109,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                         raise ValueError("source ID already exists or catalog is full")
                 elif record is None or not (self._epub_record(record) if is_epub else self._pdf_record(record)):
                     raise ValueError("source has no matching document download adapter")
+                if _document_pending(sid):
+                    raise ValueError("Finish or cancel the document update first")
                 if publication.load().get(sid, False):
                     raise ValueError("Unpublish source before downloading")
                 config = fields if adding else record["configuration"]
@@ -3004,6 +3190,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                                 removed += 1
                             if kind in {"zim", "pmtiles"}:
                                 zim_jobs.forget_deleted_installation(sid)
+                            else:
+                                document_replacement.forget(sid)
                             os.fsync(directory)
                         finally:
                             if kind == "zim" and (unpublished or removed):
@@ -3038,6 +3226,13 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 if revision != catalog["revision"]:
                     raise ValueError("Catalog changed. Reload and review the staged update.")
                 record = next((row for row in catalog["sources"] if row["source_id"] == sid), None)
+                if record and record["configuration"]["format"] in document_replacement.FORMATS:
+                    if _document_pending(sid):
+                        raise ValueError("Finish or cancel the document update first")
+                    with zim_jobs.worker_lock(source_id=sid):
+                        document_replacement.delete_staged(record, digest)
+                    self._send_json(200, {"accepted": True, "source_id": sid, "state": "discarded", "revision": revision})
+                    return
                 if not record or not self._archive_record(record):
                     raise ValueError("No matching archive source")
                 def restore_profile(live):
@@ -3084,6 +3279,13 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 if revision != catalog["revision"]:
                     raise ValueError("Catalog changed. Reload and review the update again.")
                 record = next((row for row in catalog["sources"] if row["source_id"] == sid), None)
+                if record and record["configuration"]["format"] in document_replacement.FORMATS:
+                    job = _document_update_job(record, digest, "download-update")
+                    settings = storage_settings.load_settings()
+                    available = _batch_available(settings, {record["configuration"]["format"]})
+                    ids = acquisition_queue.enqueue([job], available, settings)
+                    self._send_json(202, {"accepted": True, "job_id": ids[0]})
+                    return
                 if not record or not self._archive_record(record):
                     raise ValueError("Source does not support archive updates")
                 config = record["configuration"]
@@ -3132,6 +3334,17 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 if data["revision"] != catalog["revision"]:
                     raise ValueError("catalog revision changed")
                 record = next((r for r in catalog["sources"] if r["source_id"] == sid), None)
+                if record and record["configuration"]["format"] in document_replacement.FORMATS:
+                    action = data["action"]
+                    if action not in {"zim-replacement-activate", "zim-replacement-rollback"}:
+                        raise ValueError("Use the document update controls")
+                    if _document_pending(sid):
+                        raise ValueError("Finish or cancel the document update first")
+                    with zim_jobs.worker_lock(source_id=sid):
+                        updated = document_replacement.switch(SOURCE_CATALOG, record, catalog["revision"],
+                                                              rollback=action == "zim-replacement-rollback")
+                    self._send_json(200, {"accepted": True, "revision": updated["revision"]})
+                    return
                 if not record or not select_lifecycle(sid, record["configuration"]).get("zim_download"):
                     raise ValueError("Source has no supported ZIM download URL")
                 operation = data["action"]
