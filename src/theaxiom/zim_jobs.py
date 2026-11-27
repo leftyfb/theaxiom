@@ -6,6 +6,7 @@ import json
 import os
 import re
 from pathlib import Path
+import stat
 import tempfile
 import threading
 import time
@@ -15,6 +16,7 @@ from . import acquisition_queue, catalog_store, storage_settings, zim_source, pd
 
 HISTORY_LIMIT = 12
 MAX_RETRIES = 3
+RECORD_OPEN_ATTEMPTS = 3
 
 ACTIVE = {"queued", "downloading", "retrying", "verifying", "pausing", "cancelling", "publishing"}
 CANDIDATE_ACTIVE = {"downloading", "retrying", "verifying", "cancelling"}
@@ -56,22 +58,34 @@ def candidate_path_for(sid):
     return directory() / (sid + ".candidate.json")
 
 
+def _read_record_bytes(target, kind):
+    for attempt in range(RECORD_OPEN_ATTEMPTS):
+        try:
+            fd = os.open(target, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+        except FileNotFoundError as exc:
+            if attempt == 0:
+                return None
+            raise ValueError(f"Unsafe ZIM {kind} record") from exc
+        try:
+            info = os.fstat(fd)
+            # Atomic replacement can unlink the inode between open and fstat.
+            # Discard that descriptor without reading and validate a fresh one.
+            if stat.S_ISREG(info.st_mode) and info.st_nlink == 0:
+                continue
+            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                raise ValueError(f"Unsafe ZIM {kind} record")
+            with os.fdopen(fd, "rb", closefd=False) as stream:
+                return stream.read(16385)
+        finally:
+            os.close(fd)
+    raise ValueError(f"Unsafe ZIM {kind} record")
+
+
 def read_candidate(sid):
     """Read candidate metadata without modifying the installed archive."""
-    target = candidate_path_for(sid)
-    try:
-        fd = os.open(target, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-    except FileNotFoundError:
+    raw = _read_record_bytes(candidate_path_for(sid), "candidate")
+    if raw is None:
         return None
-    try:
-        import stat
-        info = os.fstat(fd)
-        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
-            raise ValueError("Unsafe ZIM candidate record")
-        with os.fdopen(fd, "rb", closefd=False) as stream:
-            raw = stream.read(16385)
-    finally:
-        os.close(fd)
     if len(raw) > 16384:
         raise ValueError("ZIM candidate record exceeds size limit")
     try:
@@ -681,20 +695,9 @@ def read(sid):
     An untrusted symlink or hardlink must not be used as authority for archive
     replacement, publication, or explicit deletion.
     """
-    import stat
-    target = path_for(sid)
-    try:
-        fd = os.open(target, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
-    except FileNotFoundError:
+    raw = _read_record_bytes(path_for(sid), "job")
+    if raw is None:
         return None
-    try:
-        info = os.fstat(fd)
-        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
-            raise ValueError("Unsafe ZIM job record")
-        with os.fdopen(fd, "rb", closefd=False) as stream:
-            raw = stream.read(16385)
-    finally:
-        os.close(fd)
     if len(raw) > 16384:
         raise ValueError("ZIM job record exceeds size limit")
     job = json.loads(raw)

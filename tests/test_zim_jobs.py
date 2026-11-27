@@ -1,6 +1,8 @@
 """Regression tests for durable ZIM lifecycle and safe cross-process serialization."""
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 from io import BytesIO
+import os
 import threading
 import time
 from unittest.mock import patch
@@ -790,6 +792,42 @@ def test_retry_counter_survives_failed_fresh_retry(disk):
     assert zim_jobs.read("ready")["retry_count"] == 2
 
 
+@pytest.mark.parametrize("kind", ["job", "candidate"])
+def test_record_read_reopens_after_concurrent_save(disk, monkeypatch, kind):
+    original = dict(source_id="ready", configuration=zim_jobs.identity(CONFIG),
+                    state="failed", retry_count=1)
+    if kind == "candidate":
+        original["base_artifact"] = {}
+        read, save = zim_jobs.read_candidate, zim_jobs._save_candidate
+        zim_jobs.directory().mkdir()
+    else:
+        read, save = zim_jobs.read, zim_jobs.save
+    replacement = original | {"retry_count": 2}
+    save(original)
+
+    reader_opened = threading.Event()
+    reader_thread = threading.current_thread()
+    real_fstat = os.fstat
+
+    def replace_record():
+        assert reader_opened.wait(timeout=5)
+        save(replacement)
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        writer = executor.submit(replace_record)
+
+        def fstat_after_save(fd):
+            if threading.current_thread() is reader_thread and not reader_opened.is_set():
+                reader_opened.set()
+                writer.result(timeout=5)
+                assert real_fstat(fd).st_nlink == 0
+            return real_fstat(fd)
+
+        with monkeypatch.context() as scoped:
+            scoped.setattr(os, "fstat", fstat_after_save)
+            assert read("ready") == replacement
+
+
 def test_changed_candidate_cannot_replace_completed_installed_job(disk):
     """Editing remote metadata must never orphan a published archive."""
     data = fixture_bytes()
@@ -907,7 +945,6 @@ def test_replacement_candidate_refuses_hardlinked_record(disk):
     path.parent.mkdir(parents=True, exist_ok=True)
     other = path.parent / "other"
     other.write_text("{}")
-    import os
     os.link(other, path)
     with pytest.raises(ValueError, match="Unsafe ZIM candidate"):
         zim_jobs.read_candidate("ready")
