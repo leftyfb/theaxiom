@@ -59,7 +59,7 @@ def _activity(db, job, action, *, detail="", outcome="completed"):
     if job["operation"] not in UPDATE_OPERATIONS:
         return
     config = json.loads(job["configuration"]) if isinstance(job["configuration"], str) else job["configuration"]
-    trigger = ("scheduled" if config.get("original", config).get("update_policy") == "scheduled" else "automatic") if job["operation"] == "automatic-update" else "batch"
+    trigger = ("scheduled" if config.get("original", config).get("update_policy") == "scheduled" else "automatic") if job["operation"] == "automatic-update" else ("manual" if config.get("trigger") == "manual" else "batch")
     reason = REASONS.get(detail, "See source status for details" if detail and action in {"update_deferred", "update_failed"} else None)
     key = source_activity.event_id("queue", job["id"], action, reason)
     payload = dict(sid=job["source_id"], name=job["title"], action=action, trigger=trigger, outcome=outcome,
