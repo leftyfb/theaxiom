@@ -1047,7 +1047,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             self._send_json(403, {"error": "cross-origin request rejected"})
             return False
         public_paths = set(PUBLIC_ICON_PATHS) | {
-            "/", "/index.html", "/health", "/health/", "/api/pdf-reader.mjs", "/api/update-notifications.js"}
+            "/", "/index.html", "/health", "/health/", "/api/pdf-reader.mjs", "/api/update-notifications.js",
+            "/api/tools/morse", "/api/tools/morse.js"}
         if not post and (self.path in public_paths or self.path == "/admin/login"
                          or self.path.split("?", 1)[0] in {"/", "/index.html", "/search"}
                          or pdf_source.ROUTE.fullmatch(self.path) or epub_source.ROUTE.fullmatch(self.path)
@@ -1245,6 +1246,20 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             self.send_header("X-Content-Type-Options", "nosniff")
             self.end_headers()
             self.wfile.write(payload)
+            return
+        if self.path in {"/api/tools/morse", "/api/tools/morse.js"}:
+            is_script = self.path.endswith(".js")
+            filename = "morse.js" if is_script else "morse.html.j2"
+            body = (ADMIN_TEMPLATE_DIR / filename).read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/javascript; charset=utf-8" if is_script else "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src 'self'; connect-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
+            self.send_header("Permissions-Policy", "microphone=(self), camera=(), geolocation=()")
+            self.end_headers()
+            self.wfile.write(body)
             return
         if self.path in {"/api/pdf-reader.mjs", "/api/update-notifications.js"}:
             body = (ADMIN_TEMPLATE_DIR / self.path.rsplit("/", 1)[-1]).read_bytes()
