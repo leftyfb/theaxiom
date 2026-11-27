@@ -151,3 +151,12 @@ events; unacknowledged records are retained until all registered consumers
 have acknowledged them. The retain argument can be adjusted per consumer
 maintenance invocation. No automatic deletion occurs without consumer
 acknowledgement. Deduplication IDs are retained separately.
+
+
+Active archive transfers interrupted by service restart automatically resume
+from retained bytes and matching publisher validators. Downloads explicitly
+paused or cancelled by the operator remain stopped. If the partial is missing,
+the source configuration changed, or a safe validator is unavailable, review
+the source status; recovery never silently discards retained content.
+Queued automatic replacements retain their existing policy and maintenance
+window restrictions.

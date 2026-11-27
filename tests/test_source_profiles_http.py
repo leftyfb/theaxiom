@@ -1976,3 +1976,43 @@ def test_kiwix_http_redownload_after_rollback_and_cleanup(app, disk, monkeypatch
 
         fixture_server.shutdown()
         fixture_thread.join(timeout=5)
+
+def test_service_recovery_resumes_without_browser(app, disk, monkeypatch):
+    from contextlib import contextmanager
+    from io import BytesIO
+    request, _ = app
+    sid = "resume-fixture"
+    updated = mutate(request, request("/api/sources"), "add", {
+        "title": "Restart fixture", "format": "zim",
+        "source_url": "https://example.org/resume.zim"}, sid=sid)
+    config = source(updated, sid)["configuration"]
+    jobs, archives = admin_api.zim_jobs, admin_api.zim_source
+    data = fixture_bytes()
+    offset = 48
+    stage = disk / "staging/zim"
+    stage.mkdir(exist_ok=True)
+    partial = stage / (".download-" + sid + ".partial")
+    partial.write_bytes(data[:offset])
+    partial.chmod(0o600)
+    jobs.save(dict(source_id=sid, state="downloading", active=True,
+                   configuration=jobs.identity(config), downloaded_bytes=offset,
+                   expected_bytes=len(data), etag='"stable"'))
+    calls = []
+    class Body(BytesIO):
+        total_size = len(data)
+        etag = '"stable"'
+        last_modified = None
+    @contextmanager
+    def transport(url, *, offset, validator, **kwargs):
+        calls.append((offset, validator))
+        yield Body(data[offset:])
+    monkeypatch.setattr(archives.pdf_transport, "open_pdf", transport)
+    admin_api._recover_archive_downloads()
+    for thread in threading.enumerate():
+        if thread.name == "zim-acquisition":
+            thread.join(5)
+            assert not thread.is_alive()
+    admin_api._recover_archive_downloads()
+    assert calls == [(offset, '"stable"')]
+    assert jobs.read(sid)["state"] == "completed"
+    assert not partial.exists()

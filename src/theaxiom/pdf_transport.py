@@ -74,9 +74,10 @@ def _wait_for_retry(delay, stopped):
     raise Cancelled()
 
 
-def run_with_download_retries(attempt: Callable[[], T], *, stopped=None, on_retry=None, wait=None) -> T:
+def run_with_download_retries(attempt: Callable[[], T], *, stopped=None, on_retry=None, wait=None, retries_used=0) -> T:
     """Run a transfer in the caller's existing job/lock, never retrying publication."""
-    for count in range(len(RETRY_DELAYS) + 1):
+    remaining = max(0, len(RETRY_DELAYS) - retries_used)
+    for count in range(remaining + 1):
         if stopped is not None and stopped():
             raise Cancelled()
         try:
@@ -84,9 +85,9 @@ def run_with_download_retries(attempt: Callable[[], T], *, stopped=None, on_retr
         except RetryableDownloadError as exc:
             if stopped is not None and stopped():
                 raise Cancelled() from exc
-            if count == len(RETRY_DELAYS):
+            if count == remaining:
                 raise
-            delay = max(RETRY_DELAYS[count], min(MAX_RETRY_AFTER, exc.retry_after))
+            delay = max(RETRY_DELAYS[count + retries_used], min(MAX_RETRY_AFTER, exc.retry_after))
             if on_retry is not None:
                 on_retry(count + 1, delay, exc)
             if wait is None:

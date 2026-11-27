@@ -176,7 +176,7 @@ def test_resume_after_backend_restart_uses_original_etag_and_full_verification(d
         yield Body(data[offset:])
 
     monkeypatch.setattr(zim_source.pdf_transport, "open_pdf", transport)
-    zim_jobs.start("ready", CONFIG, resume=True)
+    zim_jobs.start("ready", CONFIG, recovering=True)
     join_worker()
     job = zim_jobs.status("ready")
     assert job["state"] == "completed" and job["verified"]
@@ -1819,3 +1819,60 @@ def test_delete_published_zim_from_source_action(download_app, disk, monkeypatch
     assert not publication.load().get(sid)
     assert source(request("/api/sources"), sid)["configuration"] == source(catalog, sid)["configuration"]
     assert len(refresh) == 1
+
+
+@pytest.mark.parametrize("state", ["paused", "cancelled", "pausing", "cancelling"])
+def test_restart_recovery_never_restarts_operator_stop(disk, state):
+    zim_jobs.save(dict(source_id="ready", state=state, active=state in zim_jobs.ACTIVE,
+                       configuration=zim_jobs.identity(CONFIG), downloaded_bytes=0))
+    assert not zim_jobs.status("ready").get("restart_pending")
+    with pytest.raises(ValueError, match="No interrupted download"):
+        zim_jobs.start("ready", CONFIG, recovering=True)
+
+
+def test_restart_recovery_retains_partial_without_validator(disk):
+    stage = disk / "staging/zim"
+    stage.mkdir(exist_ok=True)
+    partial = stage / ".download-ready.partial"
+    partial.write_bytes(b"retained")
+    partial.chmod(0o600)
+    zim_jobs.save(dict(source_id="ready", state="downloading", active=True,
+                       configuration=zim_jobs.identity(CONFIG), downloaded_bytes=8))
+    assert zim_jobs.status("ready")["restart_pending"]
+    with pytest.raises(ValueError, match="publisher validator"):
+        zim_jobs.start("ready", CONFIG, recovering=True)
+    assert partial.read_bytes() == b"retained"
+
+
+def test_restart_recovery_does_not_restart_missing_partial(disk):
+    zim_jobs.save(dict(source_id="ready", state="downloading", active=True,
+                       configuration=zim_jobs.identity(CONFIG), downloaded_bytes=100))
+    assert zim_jobs.status("ready")["restart_pending"]
+    with pytest.raises(ValueError, match="retained bytes are missing"):
+        zim_jobs.start("ready", CONFIG, recovering=True)
+
+def test_restart_recovery_resumes_replacement_without_activating(disk):
+    artifact = zim_source.install_stream("ready", CONFIG, BytesIO(fixture_bytes()))
+    live = dict(source_id="ready", state="completed", active=False, verified=True,
+                configuration=zim_jobs.identity(CONFIG), artifact=artifact)
+    zim_jobs.save(live)
+    changed = CONFIG | {"source_url": "https://example.org/replacement.zim"}
+    zim_jobs.prepare_candidate("ready", changed)
+    candidate = zim_jobs.read_candidate("ready")
+    candidate.update(state="downloading", etag='"stable"', downloaded_bytes=7)
+    zim_jobs._save_candidate(candidate)
+    assert zim_jobs.candidate_status("ready")["restart_pending"]
+    seen = []
+    def download(sid, config, *, offset, validator, **kwargs):
+        seen.append((offset, validator))
+        return artifact
+    with (patch.object(zim_jobs, "staged_size", return_value=7),
+          patch.object(zim_source, "download_resumable", download)):
+        zim_jobs.start_candidate_acquisition("ready", changed, recovering=True)
+        for thread in threading.enumerate():
+            if thread.name == "zim-replacement":
+                thread.join(5)
+                assert not thread.is_alive()
+    assert seen == [(7, '"stable"')]
+    assert zim_jobs.read_candidate("ready")["state"] == "verified"
+    assert zim_jobs.read("ready") == live

@@ -646,6 +646,70 @@ def _automatic_status(sid, config, paused, now, attempt, job, evidence):
                 server_time=f"{now:%Y-%m-%d %H:%M:%S %Z}", time_zone=zone)
 
 
+def _recover_archive_downloads():
+    """Recover independently initiated transfers without waiting for a browser.
+    Batch/automatic jobs keep their own durable queue ownership and policy gates.
+    """
+    with publication.LOCK:
+        pending = {job["source_id"] for job in acquisition_queue.status()
+                   if job["state"] in acquisition_queue.PENDING}
+        enabled = publication.load()
+        for record in SOURCE_CATALOG.get()["sources"]:
+            sid, config = record["source_id"], record["configuration"]
+            if sid in pending or config.get("format") not in {"zim", "pmtiles"}:
+                continue
+            try:
+                with zim_jobs.LOCK:
+                    job = zim_jobs.read(sid)
+                    if job and job["state"] in zim_jobs.ACTIVE:
+                        job = zim_jobs.status(sid)
+                    if job and job.get("restart_pending") and job["state"] == "paused":
+                        if enabled.get(sid) or not zim_jobs.matches(job, config):
+                            raise ValueError("Source configuration or publication changed")
+                        retained = zim_jobs.staged_size(sid)
+                        if retained and retained == job.get("expected_bytes"):
+                            zim_jobs.revalidate(sid, config)
+                        else:
+                            zim_jobs.start(sid, config, recovering=True,
+                                           activity_trigger=job.get("activity_trigger", "manual"))
+                    candidate = zim_jobs.read_candidate(sid)
+                    if candidate and candidate["state"] in zim_jobs.CANDIDATE_ACTIVE:
+                        candidate = zim_jobs.candidate_status(sid)
+                    if (candidate and candidate.get("restart_pending") and
+                            not candidate.get("automatic_job")):
+                        zim_jobs.start_candidate_acquisition(sid, config, recovering=True,
+                            activity_trigger=candidate.get("transfer_activity_trigger"))
+            except BlockingIOError:
+                continue
+            except ValueError as exc:
+                # A validator/configuration mismatch needs operator review, not
+                # repeated automatic attempts or a destructive fresh transfer.
+                with zim_jobs.LOCK:
+                    job = zim_jobs.read(sid)
+                    if job and job.get("restart_pending"):
+                        job.update(restart_pending=False, detail="Automatic resume refused: " + str(exc)[:180])
+                        zim_jobs.save(job)
+                    candidate = zim_jobs.read_candidate(sid)
+                    if candidate and candidate.get("restart_pending"):
+                        candidate.update(restart_pending=False, error="Automatic resume refused: " + str(exc)[:180])
+                        zim_jobs._save_candidate(candidate)
+            except (OSError, sqlite3.Error):
+                continue
+
+
+def _start_archive_recovery():
+    shutdown = threading.Event()
+    def run():
+        while not shutdown.is_set():
+            try:
+                _recover_archive_downloads()
+            except (OSError, ValueError, sqlite3.Error):
+                logging.getLogger(__name__).warning("Archive restart recovery temporarily unavailable")
+            shutdown.wait(10)
+    threading.Thread(target=run, daemon=True, name="archive-restart-recovery").start()
+    return shutdown
+
+
 def _poll_automatic_updates():
     """Use cached metadata only; offer at most one job per bounded poll."""
     with publication.LOCK, zim_jobs.LOCK:
@@ -762,7 +826,7 @@ def _execute_automatic_update(job, payload, stopping, shutdown):
                     except BlockingIOError:
                         return "running", ""
                     break
-                if owned and candidate["state"] != "prepared":
+                if owned and candidate["state"] != "prepared" and not (candidate["state"] == "interrupted" and candidate.get("restart_pending")):
                     state = candidate["state"]
                     return state if state in {"failed", "cancelled"} else "interrupted", "Review replacement on the source card"
                 if (update_schedule.automatic_paused() or not update_discovery_config.window_open(
@@ -812,7 +876,8 @@ def _execute_automatic_update(job, payload, stopping, shutdown):
                         raise acquisition_queue.Cancelled()
                     if shutdown.is_set():
                         return "running", ""
-                    zim_jobs.start_candidate_acquisition(sid, config, automatic_job=job_id)
+                    zim_jobs.start_candidate_acquisition(sid, config, automatic_job=job_id,
+                        **({"recovering": True} if owned and candidate.get("restart_pending") else {}))
                 except BlockingIOError:
                     return "deferred", "Waiting for the archive worker"
         shutdown.wait(1)
@@ -893,6 +958,8 @@ def _execute_batch_job(job, stopping, shutdown):
             if not recovering and operation != "download-update":
                 _batch_job(record, publication.load())
             if not current or current["state"] not in zim_jobs.ACTIVE:
+                if current and current.get("restart_pending") is False:
+                    return "interrupted", "Explicit stop retained; review source"
                 if current and current["state"] not in {"prepared", "paused", "interrupted"}:
                     return current["state"] if current["state"] in {"failed", "cancelled"} else "interrupted", "Review the existing ZIM job"
                 try:
@@ -906,10 +973,17 @@ def _execute_batch_job(job, stopping, shutdown):
                     raise ValueError("Free space fell below the reserved download size")
                 try:
                     if replacement:
-                        zim_jobs.start_candidate_acquisition(sid, config, activity_trigger="batch")
+                        zim_jobs.start_candidate_acquisition(sid, config, activity_trigger="batch",
+                            **({"recovering": True} if current and current.get("restart_pending") else {}))
                     else:
-                        zim_jobs.start(sid, config, resume=bool(retained),
-                                       restart=current is not None and not retained, activity_trigger="batch")
+                        if current and current.get("restart_pending"):
+                            if retained and retained == current.get("expected_bytes"):
+                                zim_jobs.revalidate(sid, config)
+                            else:
+                                zim_jobs.start(sid, config, recovering=True, activity_trigger="batch")
+                        else:
+                            zim_jobs.start(sid, config, resume=bool(retained),
+                                           restart=current is not None and not retained, activity_trigger="batch")
                 except BlockingIOError:
                     return "running" if recovering else "queued", ""
     if operation == "publish-update":
@@ -3119,6 +3193,7 @@ def main() -> None:
     server = ThreadingHTTPServer((config.host, config.port), AdminAPIHandler)
     server.axiom_config = config
     server.managed_acquisition_only = True
+    recovery_shutdown = _start_archive_recovery()
     queue_shutdown = acquisition_queue.start(_execute_batch_job, poll=_poll_automatic_updates)
     schedule_shutdown = kiwix_update_scheduler.start()
     try:
@@ -3126,6 +3201,7 @@ def main() -> None:
     except KeyboardInterrupt:
         pass
     finally:
+        recovery_shutdown.set()
         queue_shutdown.set()
         schedule_shutdown.set()
         server.server_close()

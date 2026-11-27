@@ -276,3 +276,12 @@ def test_download_can_return_capture_time_validator_without_changing_default(mon
     assert pdf_transport.download("test", "https://publisher.org/guide.pdf") == artifact
     assert pdf_transport.download("test", "https://publisher.org/guide.pdf",
                                   capture_validator=True) == (artifact, '"exact-get-etag"')
+
+def test_restart_preserves_remaining_retry_budget():
+    calls = []
+    def attempt():
+        calls.append(1)
+        raise pdf_transport.RetryableDownloadError("fixture")
+    with pytest.raises(pdf_transport.RetryableDownloadError):
+        pdf_transport.run_with_download_retries(attempt, retries_used=2, wait=lambda _: False)
+    assert len(calls) == max(0, len(pdf_transport.RETRY_DELAYS) - 2) + 1
