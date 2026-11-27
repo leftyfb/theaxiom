@@ -103,6 +103,9 @@ def test_catalog_management_form_exposes_metadata_and_confirmation_controls():
     assert '<dialog id="source-dialog"' in page
     assert 'id="source-form"' in page
     assert 'name="update_periodic"' not in page
+    import re
+    policy = page.split('id="catalog-update-policy"', 1)[1].split("</select>", 1)[0]
+    assert re.findall(r'<option value="([^"]*)"', policy) == ["notify", "automatic", "scheduled", "disabled"]
     for field in (EDITABLE - {"icon_png", "update_periodic"}) | {"source_id"}:
         assert f'name="{field}"' in page
     assert 'data-catalog-edit="field-guide"' in page

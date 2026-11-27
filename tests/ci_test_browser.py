@@ -329,6 +329,7 @@ def exercise(browser, base, name, viewport, artifacts):
         page.locator("#catalog-url").fill("https://publisher.org/download.pdf")
         page.locator("#catalog-update-method").select_option("head")
         page.locator("#catalog-update-endpoint").fill("https://publisher.org/metadata")
+        assert page.locator("#catalog-update-policy option").evaluate_all("(options) => options.map(o => o.value)") == ["notify", "automatic", "scheduled", "disabled"]
         page.locator("#catalog-update-policy").select_option("notify")
         with page.expect_response(lambda r: r.url.endswith("/api/update-endpoint-test") and r.status == 200):
             page.locator("#test-update-endpoint").click()
