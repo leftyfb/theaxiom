@@ -126,7 +126,9 @@ class HTTPAuthTests(unittest.TestCase):
         self.server.axiom_config = ServerConfig("127.0.0.1", self.port, frozenset({self.host}),
                                                 "admin", PasswordStore(self.credential_path))
         self.auth = "Basic " + base64.b64encode(b"admin:fixture-password-only").decode()
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        # Keep the real per-test server without socketserver's 500 ms shutdown wait.
+        self.thread = threading.Thread(target=self.server.serve_forever,
+                                       kwargs={"poll_interval": 0.05}, daemon=True)
         self.thread.start()
         self.addCleanup(self.server.server_close)
         self.addCleanup(self.thread.join, 5)

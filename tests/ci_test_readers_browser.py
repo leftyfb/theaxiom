@@ -16,6 +16,7 @@ from unittest.mock import patch
 
 from playwright.sync_api import expect, sync_playwright
 
+from browser_timing import timed_case
 from theaxiom import (
     admin_api, admin_sessions, catalog_store, pdf_source, epub_source,
     publication, storage, storage_settings,
@@ -557,8 +558,10 @@ def main():
                                                ("tablet", {"width": 768, "height": 1024}),
                                                ("mobile", {"width": 390, "height": 844}),
                                                ("narrow", {"width": 320, "height": 640})):
-                            exercise(browser, f"http://{host}:{port}", name, viewport, artifacts)
-                        exercise_bulk(browser, f"http://{host}:{port}", artifacts, catalog)
+                            timed_case("pdf-epub", name, exercise, browser, f"http://{host}:{port}", name, viewport,
+                                       artifacts)
+                        timed_case("reader-bulk", "desktop", exercise_bulk, browser, f"http://{host}:{port}",
+                                   artifacts, catalog)
                         # Publication is independent of browser sessions. Withdraw only the
                         # disposable fixtures, then verify every reader entry/asset fails closed.
                         publication.save("reader-pdf", False)

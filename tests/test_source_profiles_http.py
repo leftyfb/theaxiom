@@ -50,7 +50,9 @@ def app(tmp_path, monkeypatch):
     with admin_api.ThreadingHTTPServer(("127.0.0.1", 0), admin_api.AdminAPIHandler) as server:
         server.acquisition_monitor = Mock()
         server.acquisition_monitor.snapshot.return_value = snapshot
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        # Keep the real per-test server without socketserver's 500 ms shutdown wait.
+        thread = threading.Thread(target=server.serve_forever,
+                                  kwargs={"poll_interval": 0.05}, daemon=True)
         thread.start()
 
         def request(path, payload=None, status=200, *, raw=False, origin=None, upload_headers=None, get_headers=None):
@@ -1814,7 +1816,8 @@ def test_kiwix_http_redownload_after_rollback_and_cleanup(app, disk, monkeypatch
             pass
 
     with http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler) as fixture_server:
-        fixture_thread = threading.Thread(target=fixture_server.serve_forever, daemon=True)
+        fixture_thread = threading.Thread(target=fixture_server.serve_forever,
+                                          kwargs={"poll_interval": 0.05}, daemon=True)
         fixture_thread.start()
         port = fixture_server.server_address[1]
         host = "127.0.0.1"

@@ -17,13 +17,19 @@ def _store(tmp_path, pwd="oldpass8"):
 def test_sessions_are_bounded_opaque_and_not_saved_with_password(tmp_path):
     store = _store(tmp_path)
     sessions = admin_sessions.Sessions()
-    for index in range(admin_sessions.MAX_SESSIONS + 2):
+    credential_file = tmp_path / "auth.json"
+    assert store.verify("oldpass8")
+    original_credentials = credential_file.read_bytes()
+    for _ in range(admin_sessions.MAX_SESSIONS + 2):
         token, csrf = sessions.issue(store)
         assert token != csrf
         assert len(token) >= 40
-        assert store.verify("oldpass8")
+        # Prove each issuance leaves the verified credential record unchanged;
+        # do not rerun PBKDF2 against the same bytes hundreds of times.
+        assert credential_file.read_bytes() == original_credentials
     assert len(sessions._entries) == admin_sessions.MAX_SESSIONS
-    assert "theaxiom_session" not in (tmp_path / "auth.json").read_text()
+    assert "theaxiom_session" not in credential_file.read_text()
+    assert store.verify("oldpass8")
 
 
 def test_session_expires_revokes_and_password_rotation_invalidates(tmp_path):

@@ -35,7 +35,7 @@ jobs:
       - name: Run application tests
         run: |
           set -o pipefail
-          python -m pytest -q | tee "$RUNNER_TEMP/axiom-pytest.log"
+          python -m pytest -q --durations=15 --junitxml="$RUNNER_TEMP/axiom-junit.xml" | tee "$RUNNER_TEMP/axiom-pytest.log"
       - name: Install Chromium browser regression dependencies
         run: |
           python -m pip install 'playwright>=1.50,<2'
@@ -58,12 +58,14 @@ jobs:
       - name: Run real Chromium desktop and mobile usability journeys
         env:
           AXIOM_BROWSER_ARTIFACTS: ${{ runner.temp }}/axiom-browser
+          AXIOM_PROFILE_BROWSER: '1'
         run: python tests/ci_test_browser.py
       - name: Install pinned offline PDF.js renderer for reader fixtures
         run: npm install --no-save --prefix "$RUNNER_TEMP/pdfjs" pdfjs-dist@6.5.438
       - name: Run real PDF and EPUB Chromium reader regression
         env:
           AXIOM_BROWSER_ARTIFACTS: ${{ runner.temp }}/axiom-browser
+          AXIOM_PROFILE_BROWSER: '1'
           AXIOM_TEST_PDFJS_ROOT: ${{ runner.temp }}/pdfjs/node_modules/pdfjs-dist
         run: python tests/ci_test_readers_browser.py
       - name: Upload browser failure screenshots
@@ -78,7 +80,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: pytest-output
-          path: ${{ runner.temp }}/axiom-pytest.log
+          path: |
+            ${{ runner.temp }}/axiom-pytest.log
+            ${{ runner.temp }}/axiom-junit.xml
           if-no-files-found: ignore
 
   report:

@@ -14,6 +14,7 @@ from unittest.mock import patch
 
 from playwright.sync_api import sync_playwright, expect
 
+from browser_timing import timed_case
 from theaxiom import admin_api, admin_sessions, catalog_store
 from theaxiom.admin_security import PasswordStore, ServerConfig
 
@@ -1328,20 +1329,25 @@ def main():
                                     ("narrow", {"width": 320, "height": 640}),
                                 ):
                                     if name == "desktop":
-                                        exercise(browser, f"http://{host}:{port}", name, viewport, artifacts)
-                                        exercise_source_actions(browser, viewport)
+                                        timed_case("desktop-journey", name, exercise, browser,
+                                                   f"http://{host}:{port}", name, viewport, artifacts)
+                                        timed_case("source-actions", name, exercise_source_actions, browser, viewport)
                                     else:
                                         mobile_page = browser.new_page(viewport=viewport, is_mobile=True, has_touch=True)
                                         try:
-                                            check_kiwix_article_navigation(mobile_page, f"http://{host}:{port}")
+                                            timed_case("kiwix-navigation", name, check_kiwix_article_navigation,
+                                                       mobile_page, f"http://{host}:{port}")
                                         finally:
                                             mobile_page.close()
-                                        exercise_compact_sources(browser, viewport)
-                                    exercise_admin_navigation(browser, viewport)
-                                    exercise_batch_update_journey(browser, viewport)
-                                    exercise_history_poll(browser, viewport)
-                                    exercise_automatic_eligibility(browser, viewport)
-                                    exercise_source_order(browser, viewport)
+                                        timed_case("compact-sources", name, exercise_compact_sources, browser, viewport)
+                                    for scenario, run in (
+                                        ("admin-navigation", exercise_admin_navigation),
+                                        ("batch-update", exercise_batch_update_journey),
+                                        ("history-poll", exercise_history_poll),
+                                        ("automatic-eligibility", exercise_automatic_eligibility),
+                                        ("source-order", exercise_source_order),
+                                    ):
+                                        timed_case(scenario, name, run, browser, viewport)
                             finally:
                                 browser.close()
                     finally:
