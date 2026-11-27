@@ -1070,7 +1070,7 @@ def exercise_source_revision_reconciliation(browser, viewport):
             else:
                 assert p["expected_replacement"] == row["replacement"]["review_token"]
                 if action == "zim-replacement-activate":
-                    assert row["replacement"]["state"] == "verified"
+                    assert row["replacement"]["state"] in {"verified", "rolled_back"}
                     row["replacement"].update(state="activated", review_token="d" * 64)
                     row["artifact"] = {"bytes": 200, "sha256":"b" * 64}
                 else:
@@ -1108,6 +1108,18 @@ def exercise_source_revision_reconciliation(browser, viewport):
             expect(card.locator('[data-field="status"]')).to_have_text("100 B")
             expect(card).to_have_attribute("open", "")
         assert [r["revision"] for r in requests] == [0,1,2,3], requests
+        # Republish retained verified bytes after rollback, without re-download.
+        for card in (first, second):
+            expect(card.locator('[data-zim-replacement="activate"]')).to_be_visible()
+        page.evaluate("""() => document.querySelectorAll('[data-zim-replacement="activate"]').forEach(b => b.click())""")
+        for card in (first, second):
+            expect(card.locator('[data-zim-replacement="rollback"]')).to_be_visible()
+            expect(card.locator('[data-field="status"]')).to_have_text("200 B")
+        page.evaluate("""() => document.querySelectorAll('[data-zim-replacement="rollback"]').forEach(b => b.click())""")
+        for card in (first, second):
+            expect(card.locator("[data-delete-staged-update]")).to_be_visible()
+            expect(card.locator('[data-field="status"]')).to_have_text("100 B")
+        assert [r["revision"] for r in requests] == list(range(8)), requests
         second.locator("[data-delete-staged-update]").click()
         expect(second.locator("[data-delete-staged-update]")).to_be_hidden()
         # Keep an open editor through an unrelated update.
