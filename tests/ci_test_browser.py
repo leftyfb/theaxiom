@@ -778,6 +778,7 @@ def exercise_automatic_eligibility(browser, viewport):
                                  ("automatic", "Paused for new downloads"),
                                  ("scheduled", "Next window: 2026-11-27 23:00 (server local)")):
             fixture["automatic_update"] = {"policy": policy, "next": upcoming, "attempt": "completed"}
+            mock_idle_update_notifications(page)
             page.goto("http://fixture.local/admin/sources")
             card = page.locator('.source-card[data-source-id="devdocs"]')
             card.locator(":scope > summary").click()
@@ -838,6 +839,7 @@ def exercise_history_poll(browser, viewport):
         page.route("http://fixture.local/admin/sources", lambda route: route.fulfill(
             content_type="text/html", body=render([first, second])))
         page.route("http://fixture.local/api/sources", poll)
+        mock_idle_update_notifications(page)
         page.goto("http://fixture.local/admin/sources")
         card = page.locator('[data-source-id="history-first"]')
         other = page.locator('[data-source-id="history-second"]')
@@ -924,6 +926,7 @@ def exercise_source_actions(browser, viewport):
         page.route("http://fixture.local/admin/sources", lambda route: route.fulfill(
             content_type="text/html", body=markup))
         page.route("http://fixture.local/api/*", api)
+        mock_idle_update_notifications(page)
         page.goto("http://fixture.local/admin/sources")
         card = page.locator('[data-source-id="action-target"]')
         summary = card.locator(".source-header")
@@ -1039,6 +1042,7 @@ def exercise_source_order(browser, viewport):
     try:
         page.route("http://fixture.local/admin/sources", admin)
         page.route("http://fixture.local/api/*", api)
+        mock_idle_update_notifications(page)
         page.goto("http://fixture.local/admin/sources")
         cards = page.locator(".source-card")
         expect(cards.first).to_have_attribute("data-source-id", "first")
@@ -1094,6 +1098,7 @@ def exercise_compact_sources(browser, viewport):
         page.route("**/admin/sources", lambda route: route.fulfill(
             content_type="text/html", body=render(sources)))
         page.route("**/api/sources", lambda route: route.fulfill(json={"sources": sources, "revision": 0}))
+        mock_idle_update_notifications(page)
         page.goto("http://fixture.local/admin/sources")
         toolbar = page.get_by_role("navigation", name="Administration tools")
         cards = page.locator(".source-card")
@@ -1168,6 +1173,7 @@ def exercise_admin_navigation(browser, viewport):
                 admin_page=section, session_csrf_token="fixture"))
         page.route("http://fixture.local/admin/*", admin)
         page.route("http://fixture.local/api/**", lambda route: route.fulfill(json={}))
+        mock_idle_update_notifications(page)
         page.goto("http://fixture.local/admin/sources")
         toolbar = page.get_by_role("navigation", name="Administration tools")
         for current, next_page in (("Sources", "Updates"), ("Updates", "Settings"),
@@ -1195,6 +1201,15 @@ def exercise_admin_navigation(browser, viewport):
     finally:
         page.close()
 
+
+
+def mock_idle_update_notifications(page):
+    """Serve the real shared script in mocked UI journeys, with an empty queue."""
+    script = (Path(__file__).parents[1] / "templates/update-notifications.js").read_text()
+    page.route("http://fixture.local/api/update-notifications.js", lambda route: route.fulfill(
+        content_type="text/javascript", body=script))
+    page.route("http://fixture.local/api/admin/update-notifications", lambda route: route.fulfill(
+        json={"notification": None}))
 
 
 def exercise_update_notifications(browser, viewport):
@@ -1274,6 +1289,7 @@ def exercise_source_activity(browser, viewport):
         page.route("http://fixture.local/admin/activity", lambda route: route.fulfill(
             content_type="text/html", body=render(admin_page="activity", session_csrf_token="fixture")))
         page.route("http://fixture.local/api/source-activity*", api)
+        mock_idle_update_notifications(page)
         page.goto("http://fixture.local/admin/activity")
         expect(page.get_by_text("Removed fixture — Source removed")).to_be_visible()
         page.get_by_role("button", name="Older").click()
@@ -1377,6 +1393,7 @@ def exercise_batch_update_journey(browser, viewport):
         page.route("http://fixture.local/admin/*", admin)
         page.route("http://fixture.local/api/**", api)
         page.on("dialog", lambda dialog: dialog.accept())
+        mock_idle_update_notifications(page)
         page.goto("http://fixture.local/admin/sources")
         toolbar = page.get_by_role("navigation", name="Administration tools")
         expect(page.locator("#review-updates-link")).to_have_count(0)
