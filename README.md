@@ -89,6 +89,25 @@ browser acceptance before declaring #67 complete.
 The local loopback development server remains available for tests without credentials
 when no Nginx mode is configured. The legacy /api/action acquisition adapter remains disabled; dedicated ZIM and document acquisition/import flows have separate safeguards.
 
+### Offline utilities
+
+The public library includes an optional Morse code reference and text translator
+under **Utilities**. It is original application code, covered by the project's
+Apache-2.0 license; there is no external download, third-party JavaScript or
+content publication required. The reference and translator work offline with
+JavaScript enabled. Searching for Morse or telegraph in the unfiltered library
+search also links to this utility. The route `/api/tools/morse` uses the existing
+Nginx API proxy, requiring no change to the local TLS configuration.
+
+Experimental microphone decoding requires a secure context (trusted local HTTPS
+or supported localhost), user permission and a browser supporting Web Audio.
+Set the sender's speed (5–30 WPM), pitch (400–1200 Hz) and detection threshold.
+The decoder is fixed-speed, tuned for a single clean tone; noise, variable
+spacing, browser timing and microphone processing can cause errors. No audio or
+transcript is sent to the server or saved; leaving or hiding the page stops the
+microphone. Use the text decoder if access is unavailable or decoding is
+unreliable. This tool is not a substitute for reliable emergency communication.
+
 ### Source profiles
 
 For a step-by-step offline content guide, open **Administration → Sources → Content source guide**. The guide is bundled with the application; its upstream links require internet access. See also [adding content sources](docs/adding-sources.md).
