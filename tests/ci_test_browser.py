@@ -531,14 +531,13 @@ def exercise(browser, base, name, viewport, artifacts):
         batch_jobs[0].update(state="completed", id="b" * 32)
         expect(queued_card.locator("[data-batch-status]")).to_be_hidden()
         page.unroute("**/api/acquisition-batch", batch_downloads)
-        def stale_sources(route):
-            response = route.fetch().json()
-            response["revision"] += 1
-            route.fulfill(json=response)
-
-        page.route("**/api/sources", stale_sources, times=1)
-        expect(page.get_by_role("button", name="Reload sources")).to_be_visible(timeout=10000)
-        page.get_by_role("button", name="Reload sources").click()
+        # An unrelated profile change should reconcile without reload.
+        before = admin_api.SOURCE_CATALOG.get()
+        unrelated = next(row for row in before["sources"] if row["source_id"] != sid)
+        updated = admin_api.SOURCE_CATALOG.mutate("edit", unrelated["source_id"],
+            {"description": "Updated by the fixture while the page is open"}, before["revision"])
+        page.wait_for_function("(rev) => window.axiomSourceRevision() === rev", arg=updated["revision"])
+        expect(page.get_by_role("button", name="Reload sources")).to_have_count(0)
         expect(page.locator('[data-group-select][value="' + sid + '"]')).to_be_checked()
         page.locator("#bulk-more-actions summary").click()
         page.get_by_role("button", name="Export ZIM verification manifest").click()
@@ -1004,6 +1003,139 @@ def exercise_source_actions(browser, viewport):
         page.locator("#source-filter-publication").select_option("")
         expect(card).to_have_attribute("open", "")
         expect(selected).to_be_checked()
+        assert len(navigations) == 1, navigations
+        assert not errors, errors
+    finally:
+        page.close()
+
+
+
+def exercise_source_revision_reconciliation(browser, viewport):
+    """Use actual source-page JS with controlled independent document mutations."""
+    from copy import deepcopy
+    from test_admin_page_template import profile, render
+
+    rows = []
+    for sid, kind in (("fixture-pdf", "pdf"), ("fixture-epub", "epub")):
+        row = profile(sid, title=sid, format=kind, source_url=f"https://publisher.org/test.{kind}",
+                      sha256="a" * 64, expected_size_bytes="100", update_policy="notify")
+        row.update(installed_verified=True, artifact={"bytes": 100, "sha256": "a" * 64},
+                   publication={"enabled": True, "published": True, "entry_path": "/reader/" + sid},
+                   publication_filter="published", download_filter="downloaded",
+                   discovery={"method":"head","periodic":True}, automatic_update={"policy":"notify"},
+                   replacement={"state":"verified","sha256":"b" * 64,"review_token":"c" * 64})
+        rows.append(row)
+    revision = 0
+    requests = []
+    conflict_once = True
+    page = browser.new_page(viewport=viewport)
+    navigations = []
+    errors = []
+    page.on("framenavigated", lambda frame: navigations.append(frame.url))
+    page.on("pageerror", lambda error: errors.append(str(error)))
+
+    def snapshot():
+        return dict(revision=revision, sources=deepcopy(rows), groups=[])
+
+    def api(route):
+        nonlocal revision, conflict_once
+        if route.request.method == "GET":
+            route.fulfill(json=snapshot())
+            return
+        p = route.request.post_data_json
+        sid = p["source_id"]
+        row = next((r for r in rows if r["source_id"] == sid), None)
+        requests.append(deepcopy(p))
+        if p["revision"] != revision:
+            route.fulfill(status=409, json={"error":"catalog revision changed"})
+            return
+        if row is None:
+            route.fulfill(status=409, json={"error":"source not found"})
+            return
+        if route.request.url.endswith("/api/sources"):
+            if conflict_once:
+                conflict_once = False
+                # An unrelated change in the interval between GET and POST.
+                revision += 1
+                route.fulfill(status=409, json={"error":"catalog revision changed"})
+                return
+            row["configuration"].update(p["fields"])
+            row["automatic_update"]["policy"] = row["configuration"]["update_policy"]
+        else:
+            action = p["action"]
+            if action == "zim-replacement-delete-verified":
+                assert row["replacement"]["state"] == "rolled_back"
+                assert p["candidate_sha256"] == "b" * 64
+                row["replacement"] = None
+            else:
+                assert p["expected_replacement"] == row["replacement"]["review_token"]
+                if action == "zim-replacement-activate":
+                    assert row["replacement"]["state"] == "verified"
+                    row["replacement"].update(state="activated", review_token="d" * 64)
+                    row["artifact"] = {"bytes": 200, "sha256":"b" * 64}
+                else:
+                    assert action == "zim-replacement-rollback"
+                    assert row["replacement"]["state"] == "activated"
+                    row["replacement"].update(state="rolled_back", review_token="e" * 64)
+                    row["artifact"] = {"bytes": 100, "sha256":"a" * 64}
+                row["configuration"].update(sha256=row["artifact"]["sha256"],
+                                            expected_size_bytes=str(row["artifact"]["bytes"]))
+        revision += 1
+        route.fulfill(json={"revision":revision,"accepted":True})
+
+    try:
+        markup = render(catalog=snapshot())
+        page.route("http://fixture.local/admin/sources", lambda route: route.fulfill(
+            content_type="text/html", body=markup))
+        page.route("http://fixture.local/api/*", api)
+        mock_idle_update_notifications(page)
+        page.goto("http://fixture.local/admin/sources")
+        page.on("dialog", lambda dialog: dialog.accept())
+        first, second = [page.locator(f'[data-source-id="{row["source_id"]}"]') for row in rows]
+        for card in (first, second):
+            card.locator(".source-header").click()
+            expect(card.locator('[data-zim-replacement="activate"]')).to_be_visible()
+        # Trigger both clicks in the same browser task; do not wait for polling.
+        page.evaluate("""() => document.querySelectorAll('[data-zim-replacement="activate"]').forEach(b => b.click())""")
+        for card in (first, second):
+            expect(card.locator('[data-zim-replacement="rollback"]')).to_be_visible()
+            expect(card.locator('[data-field="status"]')).to_have_text("200 B")
+        assert [r["revision"] for r in requests] == [0,1], requests
+        page.evaluate("""() => document.querySelectorAll('[data-zim-replacement="rollback"]').forEach(b => b.click())""")
+        for card in (first, second):
+            card.get_by_text("More actions", exact=True).click()
+            expect(card.locator("[data-delete-staged-update]")).to_be_visible()
+            expect(card.locator('[data-field="status"]')).to_have_text("100 B")
+            expect(card).to_have_attribute("open", "")
+        assert [r["revision"] for r in requests] == [0,1,2,3], requests
+        second.locator("[data-delete-staged-update]").click()
+        expect(second.locator("[data-delete-staged-update]")).to_be_hidden()
+        # Keep an open editor through an unrelated update.
+        first.locator("[data-catalog-edit]").click()
+        page.locator("#catalog-update-policy").select_option("disabled")
+        rows[1]["configuration"]["update_policy"] = "disabled"
+        rows[1]["automatic_update"]["policy"] = "disabled"
+        revision += 1
+        page.wait_for_function("(rev) => window.axiomSourceRevision() === rev", arg=revision)
+        expect(page.locator("#catalog-update-policy")).to_have_value("disabled")
+        page.locator('#source-form [type="submit"]').click()
+        expect(page.locator("#source-dialog")).to_be_hidden()
+        expect(first.locator('[data-field="discovery-status"]')).to_have_text("Update policy: Disabled")
+        edits = [r for r in requests if r.get("operation") == "edit"]
+        assert len(edits) == 2 and all(r["fields"] == {"update_policy":"disabled"} for r in edits), edits
+
+        # A conflicting edit to the same field is not overwritten.
+        first.locator("[data-catalog-edit]").click()
+        page.locator("#catalog-update-policy").select_option("notify")
+        rows[0]["configuration"]["update_policy"] = "automatic"
+        rows[0]["automatic_update"]["policy"] = "automatic"
+        revision += 1
+        page.wait_for_function("(rev) => window.axiomSourceRevision() === rev", arg=revision)
+        page.locator('#source-form [type="submit"]').click()
+        expect(page.locator("#source-form-feedback")).to_contain_text("Source changed in: update_policy")
+        expect(page.locator("#catalog-update-policy")).to_have_value("notify")
+        assert rows[0]["configuration"]["update_policy"] == "automatic"
+        page.locator("#source-cancel").click()
         assert len(navigations) == 1, navigations
         assert not errors, errors
     finally:
@@ -1537,6 +1669,7 @@ def main():
                                         ("history-poll", exercise_history_poll),
                                         ("automatic-eligibility", exercise_automatic_eligibility),
                                         ("source-order", exercise_source_order),
+                                        ("source-reconciliation", exercise_source_revision_reconciliation),
                                     ):
                                         timed_case(scenario, name, run, browser, viewport)
                             finally:
