@@ -1575,6 +1575,18 @@ def exercise_batch_update_journey(browser, viewport):
         expect(review.get_by_text("Update policy: Scheduled", exact=False)).to_have_count(2)
         expect(review.get_by_text("Next window: tomorrow", exact=False)).to_have_count(2)
         filters.select_option("attention")
+        sources[0]["replacement"] = {"state": "downloading", "downloaded_bytes": 512,
+                                     "expected_bytes": 2048, "speed_bytes_per_second": 128, "eta_seconds": 12}
+        progress = review.get_by_role("progressbar", name="Download progress for First archive")
+        expect(progress).to_have_js_property("value", 25)
+        expect(review.get_by_text("Downloading update · 25.0%", exact=False)).to_contain_text("128 B/s")
+        sources[0]["replacement"] = {"state": "verifying", "downloaded_bytes": 2048,
+                                     "expected_bytes": 2048, "checksum_bytes": 1024,
+                                     "checksum_pass": 1, "checksum_passes": 1}
+        expect(review.get_by_role("progressbar", name="Verification progress for First archive")).to_have_js_property("value", 50)
+        sources[0]["replacement"] = None
+        expect(progress).to_have_count(0)
+        expect(review.get_by_text("Verifying update", exact=False)).to_have_count(0)
         check_all.click()
         expect(download).to_have_text("Download 2 updates")
         expect(review.get_by_text("Could not determine update status for 1 source.", exact=False)).to_be_visible()

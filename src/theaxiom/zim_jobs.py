@@ -24,6 +24,8 @@ ACTIVE = {"queued", "downloading", "retrying", "verifying", "pausing", "cancelli
 CANDIDATE_ACTIVE = {"downloading", "retrying", "verifying", "cancelling"}
 CHECKSUM_FIELDS = ("checksum_bytes", "checksum_pass", "checksum_passes")
 CHECKSUM_SAMPLE_MAX_AGE = 10
+TRANSFER_SAMPLE_MAX_AGE = 10
+TRANSFER_FIELDS = ("sampled_at", "speed_bytes_per_second", "eta_seconds")
 CONTROLS = {}
 CANDIDATE_CONTROLS = {}
 LOCK = threading.RLock()
@@ -42,6 +44,27 @@ def current_checksum(job):
             and all(field in job for field in CHECKSUM_FIELDS)):
         return {field: job[field] for field in CHECKSUM_FIELDS}
     return {}
+
+
+def _transfer_sample(current, offset, elapsed):
+    """Measure only bytes received during the current transfer attempt."""
+    return {"downloaded_bytes": current, "sampled_at": time.time(),
+            "speed_bytes_per_second": max(0, current - offset) / max(1, elapsed)}
+
+
+def current_transfer(job):
+    """Expose recent, positive transfer measurements, not verification or backoff."""
+    sampled = job.get("sampled_at")
+    speed = job.get("speed_bytes_per_second")
+    if (job.get("state") != "downloading" or type(sampled) not in (int, float)
+            or not 0 <= time.time() - sampled <= TRANSFER_SAMPLE_MAX_AGE
+            or type(speed) not in (int, float) or not 0 < speed < float("inf")):
+        return {}
+    result = {"sampled_at": sampled, "speed_bytes_per_second": speed}
+    current, total = job.get("downloaded_bytes"), job.get("expected_bytes")
+    if (type(current) is int and type(total) is int and 0 <= current < total):
+        result["eta_seconds"] = (total - current) / speed
+    return result
 
 
 def directory():
@@ -290,6 +313,10 @@ def start_candidate_acquisition(sid, config, *, automatic_job=None, activity_tri
             candidate.pop("retry_delay_seconds", None)
             candidate.pop("retry_exhausted", None)
             candidate["downloaded_bytes"] = offset
+            if configuration["expected_size_bytes"]:
+                candidate["expected_bytes"] = int(configuration["expected_size_bytes"])
+            for field in (*TRANSFER_FIELDS, *CHECKSUM_FIELDS, "checksum_sampled_at"):
+                candidate.pop(field, None)
             signal = threading.Event()
             CANDIDATE_CONTROLS[sid] = signal
             _save_candidate(candidate)
@@ -361,6 +388,7 @@ def _retry_archive(transfer, staging_id, signal, offset, validator, load, persis
 
 def _run_candidate(sid, configuration, guard, signal, offset, validator, *, restart_from=0):
     last = 0.0
+    begun = time.monotonic()
 
     def load():
         candidate = read_candidate(sid)
@@ -379,7 +407,10 @@ def _run_candidate(sid, configuration, guard, signal, offset, validator, *, rest
                                     for key in ("etag", "last_modified"))
             if now - last < 0.5 and not metadata.get("verifying") and not validator_changed:
                 return
-            candidate["downloaded_bytes"] = current
+            if candidate["state"] == "downloading" and not metadata.get("verifying"):
+                candidate.update(_transfer_sample(current, offset, now - begun))
+            else:
+                candidate["downloaded_bytes"] = current
             if total is not None:
                 candidate["expected_bytes"] = total
             _update_validators(candidate, metadata)
@@ -392,8 +423,8 @@ def _run_candidate(sid, configuration, guard, signal, offset, validator, *, rest
         last = now
 
     def transfer(start, stable, **kwargs):
-        nonlocal last
-        last = 0.0
+        nonlocal last, offset, begun
+        last, offset, begun = 0.0, start, time.monotonic()
         return zim_source.download_resumable(
             sid, configuration, offset=start, validator=stable, promote_lock=LOCK,
             staging_id=sid + "-candidate", progress=progress, stopped=signal.is_set, write_lock=_write_lock, **kwargs)
@@ -639,6 +670,9 @@ def recover_candidate_transition(sid):
 
 
 def _save_candidate(candidate):
+    if candidate["state"] != "downloading":
+        for field in TRANSFER_FIELDS:
+            candidate.pop(field, None)
     target = candidate_path_for(candidate["source_id"])
     payload = json.dumps(candidate, separators=(",", ":")).encode()
     action = {"verified":"staged", "failed":"download_failed", "cancelled":"download_cancelled"}.get(candidate["state"])
@@ -1347,8 +1381,7 @@ def _run(job, guard, signal, offset, validator, *, local=False, restart_from=0):
                 if "checksum_bytes" in metadata:
                     _record_checksum(job, metadata)
             if now - last >= 1 or metadata.get("verifying") or current == offset:
-                job.update(downloaded_bytes=current, sampled_at=time.time(),
-                           speed_bytes_per_second=max(0, current-offset) / max(1, now-begun))
+                job.update(_transfer_sample(current, offset, now - begun))
                 save(job)
                 last = now
 

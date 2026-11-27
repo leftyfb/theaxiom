@@ -1897,3 +1897,22 @@ def test_archive_locks_allow_independent_sources_but_exclude_storage_changes(dis
             with pytest.raises(BlockingIOError):
                 with zim_jobs.worker_lock():
                     pass
+
+
+def test_replacement_public_transfer_sample_freshness_and_attempt_offset():
+    from theaxiom.admin_api import _public_zim_replacement
+
+    with patch.object(zim_jobs.time, "time", return_value=100):
+        sample = zim_jobs._transfer_sample(600, 500, 2)
+        candidate = dict(state="downloading", expected_bytes=1000, **sample)
+        public = _public_zim_replacement(candidate)
+        assert public["downloaded_bytes"] == 600
+        assert public["speed_bytes_per_second"] == 50
+        assert public["eta_seconds"] == 8
+        for state in ("retrying", "verifying", "failed", "interrupted", "cancelled"):
+            assert "speed_bytes_per_second" not in _public_zim_replacement(dict(candidate, state=state))
+        assert "speed_bytes_per_second" not in _public_zim_replacement(dict(candidate, sampled_at=89))
+        assert "speed_bytes_per_second" not in _public_zim_replacement(dict(candidate, sampled_at=101))
+        assert "speed_bytes_per_second" not in _public_zim_replacement(dict(candidate, speed_bytes_per_second=0))
+        assert "eta_seconds" not in _public_zim_replacement(dict(candidate, expected_bytes=None))
+        assert "eta_seconds" not in _public_zim_replacement(dict(candidate, downloaded_bytes=1000))

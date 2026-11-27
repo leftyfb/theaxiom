@@ -208,3 +208,37 @@ def test_document_origin_status_is_informational_not_an_update_badge():
     assert states[1]["discovery-evidence"]["textContent"] == "No change detected"
     assert states[2]["discovery-evidence"]["textContent"] == "Couldn’t compare with the installed file"
     assert states[2]["update-evidence"]["textContent"] == "No saved ETag"
+
+
+def test_replacement_transfer_updates_without_reload_and_preserves_installed_size():
+    def sample(state, **fields):
+        data = job("completed")
+        data["sources"][0].update(installed_verified=True, artifact={"bytes": 140_000_000_000},
+                                  replacement=dict(state=state, **fields))
+        return data
+
+    states = run_ui([
+        sample("downloading", downloaded_bytes=50, expected_bytes=200, speed_bytes_per_second=10, eta_seconds=15),
+        sample("downloading", downloaded_bytes=100, expected_bytes=200),
+        sample("retrying", downloaded_bytes=100, expected_bytes=200, speed_bytes_per_second=10),
+        sample("verifying", downloaded_bytes=200, expected_bytes=200, checksum_bytes=40, checksum_pass=1, checksum_passes=1),
+        sample("verified", downloaded_bytes=200, expected_bytes=200),
+        sample("failed"),
+        sample("downloading", downloaded_bytes=20),
+    ])["states"]
+    assert all(s["status"]["textContent"] == "140 GB" for s in states)
+    assert states[0]["replacement-summary-progress"]["value"] == 25
+    assert states[0]["replacement-progress"]["value"] == 25
+    assert "50 B / 200 B" in states[0]["replacement-summary"]["textContent"]
+    assert "10 B/s" in states[0]["replacement-summary"]["textContent"]
+    assert "remaining" in states[0]["replacement-summary"]["textContent"]
+    assert states[1]["replacement-summary-progress"]["value"] == 50
+    assert "B/s" not in states[1]["replacement-summary"]["textContent"]
+    assert "B/s" not in states[2]["replacement-summary"]["textContent"]
+    assert states[3]["replacement-progress"]["value"] == 20
+    assert "Checksum" in states[3]["replacement-summary"]["textContent"]
+    for index in (4, 5):
+        assert states[index]["replacement-summary-progress"]["hidden"]
+        assert states[index]["replacement-progress"]["hidden"]
+    assert "total unknown" in states[6]["replacement-summary"]["textContent"]
+    assert "value" not in states[6]["replacement-progress"]

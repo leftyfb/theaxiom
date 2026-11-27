@@ -256,7 +256,7 @@ def _public_zim_replacement(candidate):
     if candidate["state"] in {"verified", "activated", "rolled_back"}:
         result["sha256"] = candidate["artifact"].get("sha256")
         result["review_token"] = zim_jobs.candidate_review_token(candidate)
-    return result | zim_jobs.current_checksum(candidate)
+    return result | zim_jobs.current_checksum(candidate) | zim_jobs.current_transfer(candidate)
 
 
 def _update_stage(source):

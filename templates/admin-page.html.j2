@@ -1,3 +1,49 @@
+{% macro transfer_helpers() %}
+      function checksumSample(job) {
+        if (job?.state !== 'verifying' ||
+            !Number.isFinite(job.checksum_bytes) || job.checksum_bytes < 0 ||
+            !Number.isFinite(job.expected_bytes) || job.expected_bytes <= 0 ||
+            job.checksum_bytes > job.expected_bytes) return null;
+        const pass = Number.isInteger(job.checksum_pass) && Number.isInteger(job.checksum_passes) &&
+          job.checksum_pass > 0 && job.checksum_pass <= job.checksum_passes ?
+          ' pass ' + job.checksum_pass + ' of ' + job.checksum_passes : '';
+        return {percent: 100 * job.checksum_bytes / job.expected_bytes, pass};
+      }
+      const checksumLabel = sample => 'Checksum' + sample.pass + ' verification in progress — ' +
+        sample.percent.toFixed(1) + '% read (digest not yet confirmed).';
+      function size(bytes) {
+        if (!Number.isFinite(bytes) || bytes < 0) return 'Installed';
+        const units = ['B', 'kB', 'MB', 'GB', 'TB', 'PB'];
+        let i = 0;
+        while (bytes >= 1000 && i < units.length - 1) { bytes /= 1000; i++; }
+        return bytes.toLocaleString(undefined, {maximumFractionDigits: 2}) + ' ' + units[i];
+      }
+
+      function replacementTransfer(job) {
+        const state = job?.state;
+        if (!['downloading','retrying','verifying','cancelling'].includes(state)) return null;
+        const bytes = job.downloaded_bytes, total = job.expected_bytes;
+        const knownBytes = Number.isFinite(bytes) && bytes >= 0;
+        const knownTotal = Number.isFinite(total) && total > 0;
+        const valid = knownBytes && knownTotal && bytes <= total;
+        const percent = valid ? 100 * bytes / total : null;
+        const progress = valid ? percent.toFixed(1) + '% · ' + size(bytes) + ' / ' + size(total) :
+          knownBytes ? size(bytes) + ' downloaded' + (knownTotal ? ' · expected ' + size(total) : ' · total unknown') :
+          knownTotal ? 'Expected ' + size(total) + ' · transferred size unknown' : 'Transfer size unknown';
+        const rate = state === 'downloading' && Number.isFinite(job.speed_bytes_per_second) && job.speed_bytes_per_second > 0 ?
+          size(job.speed_bytes_per_second) + '/s' +
+          (Number.isFinite(job.eta_seconds) && job.eta_seconds >= 0 ?
+            ' · ' + Math.ceil(job.eta_seconds / 60) + ' min remaining (transfer only)' : '') : '';
+        const label = {downloading:'Downloading update', retrying:'Waiting to retry update',
+          verifying:'Verifying update', cancelling:'Cancelling update download'}[state];
+        const checksum = checksumSample(job);
+        const verification = state === 'verifying';
+        return {label, text: verification ? label + ' · ' +
+          (checksum ? checksumLabel(checksum) : 'Checksum percentage unavailable.') :
+          [label, progress, rate].filter(Boolean).join(' · '),
+          percent: verification ? checksum?.percent ?? null : percent, verification};
+      }
+{% endmacro %}
 <!doctype html>
 <html lang="en">
 <head>
@@ -63,6 +109,8 @@
     .source-symbol { background: var(--accent); border-radius: .6rem; padding: .65rem; font-weight: 800; }
     .source-subtitle, .source-note { color: var(--muted); margin: .35rem 0; }
     [data-zim-replacement-status]:empty { display:none; }
+    .source-header [data-field="replacement-summary"] { font-size:.8rem; overflow-wrap:anywhere; }
+    .source-header [data-field="replacement-summary-progress"] { height:.45rem; max-width:12rem; }
     [data-zim-replacement="activate"] { background:var(--dark); color:white; }
     .source-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .75rem; }
     .button:disabled { opacity: .55; cursor: not-allowed; }
@@ -926,6 +974,8 @@
             <h3>{{ source.profile.title }}</h3>
             <p class="source-subtitle">{{ source.configuration.format|upper }}{% if source.profile.description %} · {{ source.profile.description }}{% endif %}</p>
 
+            <p class="source-note" data-field="replacement-summary" hidden></p>
+            <progress data-field="replacement-summary-progress" max="100" aria-label="Replacement update progress" hidden></progress>
             {% if pub %}<span class="compact-publication" data-field="publication-summary">{{ "Published" if pub.published else (pub.publication_reason or "Reader unavailable") if pub.enabled and pub.ready_for_publication else "Reader unavailable" if pub.enabled else "" }}</span>{% endif %}
           </div>
           <span class="badge enabled" data-field="update-status" role="status"{% if not source.update_check or source.update_check.state != "update_available" and not source.update_check.candidate_token %} hidden{% endif %}>Update available</span>
@@ -956,6 +1006,7 @@
         <p class="source-note" data-field="discovery-evidence" role="status" aria-live="polite"></p>
         {% if source.zim_download or (document and url_managed) %}
         <p class="source-note" data-zim-replacement-status role="status" aria-live="polite"></p>
+        <progress data-field="replacement-progress" max="100" aria-label="Replacement update progress" hidden></progress>
         <p class="source-note" data-replacement-feedback role="status" aria-live="polite"></p>
         {% endif %}
         <div class="source-actions" aria-label="Source actions">
@@ -2924,25 +2975,7 @@
         paused: 'Paused', pausing: 'Pausing', cancelling: 'Cancelling', cancelled: 'Cancelled',
         not_started: 'Not downloaded', unavailable: 'Service not installed', unknown: 'Status unknown'};
 
-      function checksumSample(job) {
-        if (job?.state !== 'verifying' ||
-            !Number.isFinite(job.checksum_bytes) || job.checksum_bytes < 0 ||
-            !Number.isFinite(job.expected_bytes) || job.expected_bytes <= 0 ||
-            job.checksum_bytes > job.expected_bytes) return null;
-        const pass = Number.isInteger(job.checksum_pass) && Number.isInteger(job.checksum_passes) &&
-          job.checksum_pass > 0 && job.checksum_pass <= job.checksum_passes ?
-          ' pass ' + job.checksum_pass + ' of ' + job.checksum_passes : '';
-        return {percent: 100 * job.checksum_bytes / job.expected_bytes, pass};
-      }
-      const checksumLabel = sample => 'Checksum' + sample.pass + ' verification in progress — ' +
-        sample.percent.toFixed(1) + '% read (digest not yet confirmed).';
-      function size(bytes) {
-        if (!Number.isFinite(bytes) || bytes < 0) return 'Installed';
-        const units = ['B', 'kB', 'MB', 'GB', 'TB', 'PB'];
-        let i = 0;
-        while (bytes >= 1000 && i < units.length - 1) { bytes /= 1000; i++; }
-        return bytes.toLocaleString(undefined, {maximumFractionDigits: 2}) + ' ' + units[i];
-      }
+      {{ transfer_helpers() }}
       function render(card, job, stale, installedSource = null) {
         const field = name => card.querySelector('[data-field="' + name + '"]');
         const put = (name, value) => {
@@ -3068,14 +3101,19 @@
         const replacementState = replacement?.state || '';
         const replacementStatus = card.querySelector('[data-zim-replacement-status]');
         if (replacementStatus) {
-          const bytes = Number(replacement?.downloaded_bytes);
-          const total = Number(replacement?.expected_bytes);
-          const percent = replacementState === 'downloading' &&
-            Number.isFinite(bytes) && Number.isFinite(total) && total > 0 ?
-            ' · ' + (100 * bytes / total).toFixed(1) + '%' : '';
-          const sample = checksumSample(replacement);
-          const verification = replacementState === 'verifying' ?
-            ' · ' + (sample ? checksumLabel(sample) : 'Checksum percentage unavailable.') : '';
+          const transfer = replacementTransfer(replacement);
+          const summary = field('replacement-summary');
+          if (summary) {
+            summary.hidden = !transfer;
+            summary.textContent = transfer?.text || '';
+          }
+          for (const name of ['replacement-progress','replacement-summary-progress']) {
+            const bar = field(name);
+            if (!bar) continue;
+            bar.hidden = !transfer;
+            if (transfer?.percent != null) bar.value = transfer.percent;
+            else bar.removeAttribute('value');
+          }
           const replacementLabels = {
             prepared: 'Update ready to download', downloading: 'Downloading update', retrying: 'Waiting to retry update',
             verifying: 'Verifying update', cancelling: 'Cancelling update download',
@@ -3085,8 +3123,8 @@
             unavailable: 'Update status unavailable'
           };
           const replacementText = replacementState ?
-            (replacementLabels[replacementState] || 'Update status unavailable') + percent +
-            verification + (replacement.automatic_retry_count ? ' · automatic retries: ' + replacement.automatic_retry_count + ' of 3' : '') +
+            (transfer?.text || replacementLabels[replacementState] || 'Update status unavailable') +
+            (replacement.automatic_retry_count ? ' · automatic retries: ' + replacement.automatic_retry_count + ' of 3' : '') +
             (replacement.error ? ' · ' + replacement.error : '') : '';
           if (replacementStatus.textContent !== replacementText) replacementStatus.textContent = replacementText;
           for (const button of (card.querySelectorAll?.('[data-zim-replacement]') || [])) {
@@ -3402,6 +3440,7 @@
   {% elif page == "updates" %}
   <script id="update-review-script">
     (() => {
+      {{ transfer_helpers() }}
       const byId = id => document.getElementById(id);
       const list = byId('update-review-list');
       const all = byId('select-all-updates');
@@ -3600,13 +3639,14 @@
             line([row.problem, row.job ? action + ' ' + row.job.state + (row.job.detail ? ' · ' + row.job.detail : '') : '',
               row.replacement.error].filter(Boolean).join(' · '));
           }
-          if (row.state === 'active' && Number.isFinite(row.replacement.downloaded_bytes) && row.replacement.expected_bytes > 0) {
+          const transfer = replacementTransfer(row.replacement);
+          if (row.state === 'active' && transfer) {
             const progress = document.createElement('progress');
-            progress.max = row.replacement.expected_bytes;
-            progress.value = Math.min(progress.max, row.replacement.downloaded_bytes);
-            progress.setAttribute('aria-label', 'Download progress for ' + row.title);
+            progress.max = 100;
+            if (transfer.percent != null) progress.value = transfer.percent;
+            progress.setAttribute('aria-label', (transfer.verification ? 'Verification' : 'Download') + ' progress for ' + row.title);
             item.append(progress);
-            line(byteSize(row.replacement.downloaded_bytes) + ' of ' + byteSize(row.replacement.expected_bytes));
+            line(transfer.text);
           }
           const actions = document.createElement('div');
           actions.className = 'source-actions';
