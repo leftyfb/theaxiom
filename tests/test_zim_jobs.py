@@ -1071,8 +1071,16 @@ def test_rollback_candidate_restores_previous_serving_record(disk):
     candidate = zim_jobs.read_candidate("ready")
     candidate.update(state="verified", artifact=artifact)
     zim_jobs._save_candidate(candidate)
-    zim_jobs.activate_candidate("ready", changed)
-    assert zim_jobs.rollback_candidate("ready", changed) == live
+    reviewed = zim_jobs.candidate_review_token(candidate)
+    with pytest.raises(ValueError, match="Reviewed replacement changed"):
+        zim_jobs.activate_candidate("ready", changed, expected_replacement="0" * 64)
+    assert zim_jobs.read("ready") == live
+    zim_jobs.activate_candidate("ready", changed, expected_replacement=reviewed)
+    with pytest.raises(ValueError, match="Reviewed replacement changed"):
+        zim_jobs.rollback_candidate("ready", changed, expected_replacement=reviewed)
+    assert zim_jobs.read_candidate("ready")["state"] == "activated"
+    assert zim_jobs.rollback_candidate("ready", changed,
+        expected_replacement=zim_jobs.candidate_review_token(zim_jobs.read_candidate("ready"))) == live
     assert zim_jobs.read("ready") == live
     assert zim_jobs.read_candidate("ready")["state"] == "rolled_back"
     assert (disk / "library/zim" / artifact["filename"]).read_bytes() == data
