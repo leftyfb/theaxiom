@@ -9,10 +9,11 @@ existing publication and per-source worker locks.
 from hashlib import sha256
 import json
 import os
+import sqlite3
 from uuid import uuid4
 
 from . import (acquisition_queue, catalog_store, document_origin_evidence,
-               epub_source, pdf_source, pdf_transport, update_check_store,
+               epub_source, pdf_source, pdf_transport, source_activity, update_check_store,
                update_discovery_config)
 
 FORMATS = {"pdf": pdf_source, "epub": epub_source}
@@ -106,8 +107,12 @@ def _save(record, data):
     raw = json.dumps(data, separators=(",", ":"), sort_keys=True).encode()
     if len(raw) > update_check_store.MAX_RECORD:
         raise ValueError("Document replacement ledger too large")
-    update_check_store._write(path, raw)
-    _sync(path)
+    fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        update_check_store._write(path, raw)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
 
 
 def _sync(path):
@@ -211,7 +216,7 @@ def reviewed(record, review_token, result):
     return pin, tag, size
 
 
-def download(record, review_token, result, *, job="", stopped=None, on_retry=None):
+def download(record, review_token, result, *, job="", stopped=None, on_retry=None, trigger="manual"):
     """Verify incoming bytes without mutating the serving catalog."""
     pin, tag, size = reviewed(record, review_token, result)
     sid, config = record["source_id"], record["configuration"]
@@ -246,6 +251,11 @@ def download(record, review_token, result, *, job="", stopped=None, on_retry=Non
             "target": {"sha256": artifact["sha256"], "bytes": artifact["bytes"], "etag": tag},
             "job": job, "rollback_token": ""}
     _save(record, data)
+    try:
+        source_activity.record(sid, "staged", name=record["profile"]["title"], trigger=trigger,
+                               key=source_activity.event_id("document-stage", sid, job, artifact["sha256"]))
+    except (OSError, sqlite3.Error):
+        pass  # The verified ledger remains authoritative.
     return data
 
 
@@ -283,8 +293,9 @@ def switch(catalog, record, revision, *, rollback=False, trigger="manual", job=N
 
 def delete_staged(record, digest):
     data = read(record)
-    state = status(record, data)
-    if (not state or state["state"] not in {"verified", "rolled_back"}
+    if (not data or data["identity"] != identity(record["configuration"])
+            or record["configuration"].get("sha256") != data["base"]["sha256"]
+            or record["configuration"].get("expected_size_bytes") != str(data["base"]["bytes"])
             or data["target"]["sha256"] != digest):
         raise ValueError("Verified staged document changed")
     config, sid = record["configuration"], record["source_id"]
@@ -297,7 +308,10 @@ def delete_staged(record, digest):
                                   base["sha256"], data["base"]["etag"])
     update_check_store.require_recheck(sid)
     with pdf_source._directory("library", writing=True, format_name=config["format"]) as (directory, mount, _):
-        with pdf_source._file(directory, mount, target["filename"], target["bytes"]) as stream:
-            pdf_source.unlink_managed_file(directory, stream, target["filename"])
+        try:
+            with pdf_source._file(directory, mount, target["filename"], target["bytes"]) as stream:
+                pdf_source.unlink_managed_file(directory, stream, target["filename"])
+        except FileNotFoundError:
+            pass  # Complete a previously interrupted explicit staged deletion.
         os.fsync(directory)
     forget(sid)
