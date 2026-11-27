@@ -1169,7 +1169,7 @@
         configuration: source.configuration, artifact: source.artifact?.sha256 || '',
         verified: !!source.installed_verified, enabled: !!source.publication?.enabled,
         rights: !!source.publication?.requires_rights_acknowledgement,
-        replacement: source.replacement ? [source.replacement.state, source.replacement.sha256 || ''] : null
+        replacement: source.replacement ? [source.replacement.state, source.replacement.sha256 || '', source.replacement.review_token || ''] : null
       };
       function acceptSnapshot(data) {
         if (!Number.isInteger(data?.revision) || !Array.isArray(data.sources) ||
@@ -2516,7 +2516,11 @@
         card.querySelectorAll('[data-zim-replacement]').forEach(b => b.disabled = true);
         try {
           await sourceMutation('/api/action', card, {action:'zim-replacement-' + operation,
-            ...(['activate','rollback'].includes(operation) ? {confirm_restart:true} : {})}, 'Replacement operation failed');
+            ...(['activate','rollback'].includes(operation) ? {confirm_restart:true} : {})}, 'Replacement operation failed', current => {
+              if (['activate','rollback'].includes(operation) && current.replacement?.review_token)
+                return {expected_replacement:current.replacement.review_token};
+              return {};
+            });
           feedback.textContent = operation === 'activate' ? 'Update publication accepted.' : operation === 'rollback' ? 'Rollback accepted.' : 'Replacement ' + operation + ' accepted.';
         } catch(error) {
           feedback.textContent = error.message;
