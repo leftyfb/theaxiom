@@ -15,7 +15,7 @@ import sys
 from threading import Event, Lock, Thread
 from hashlib import sha256
 
-from . import (catalog_store, document_update_discovery, kiwix_update_discovery,
+from . import (catalog_store, document_replacement, document_update_discovery, kiwix_update_discovery,
                storage_settings, update_check_store, update_diagnostics,
                update_discovery_config as discovery, update_schedule, zim_jobs)
 
@@ -47,6 +47,8 @@ def _check_source(record, *, manual=False, unattended=None):
             outcome = kiwix_update_discovery.refresh_checked_source(
                 sid, force=manual or bool(unattended), installed_only=True, **options)
         else:
+            if unattended and document_replacement.installed(record) != unattended["installed"]:
+                return None
             outcome = document_update_discovery.check_installed_document(record, installed_only=True)
         diagnostic.update(outcome or {})
         return outcome
@@ -142,7 +144,8 @@ def _retry_state(sid, key):
 
 
 def unattended_status(sid, config, job, now):
-    installed = kiwix_update_discovery.installed_identity_from_job(job, job.get("artifact") or {})
+    installed = (job if config.get("format") in document_replacement.FORMATS else
+                 kiwix_update_discovery.installed_identity_from_job(job, job.get("artifact") or {}))
     if not installed or not discovery.settings(config)["periodic"]:
         return ""
     state = _retry_state(sid, _retry_key(config, installed, _window(config, now)))
@@ -165,13 +168,18 @@ def poll_unattended(path):
             sid, config = record["source_id"], record["configuration"]
             if not discovery.window_open(config, now) or not discovery.settings(config)["periodic"]:
                 continue
-            job = zim_jobs.read(sid)
-            if not job:
-                continue
-            installed = kiwix_update_discovery.installed_identity_from_job(job, job.get("artifact") or {})
-            if not installed or not zim_jobs.installed(job, job["configuration"]):
-                continue
-            evidence = update_check_store.load(sid, installed["sha256"], now=now.timestamp())
+            if config.get("format") in document_replacement.FORMATS:
+                installed = document_replacement.installed(record)
+                if not installed:
+                    continue
+            else:
+                job = zim_jobs.read(sid)
+                if not job:
+                    continue
+                installed = kiwix_update_discovery.installed_identity_from_job(job, job.get("artifact") or {})
+                if not installed or not zim_jobs.installed(job, job["configuration"]):
+                    continue
+            evidence = update_check_store.load(sid, discovery.cache_identity(config, installed["sha256"]), now=now.timestamp())
             if (discovery.current_unattended_evidence(config, now, evidence)
                     or (evidence.get("state") == "unable_to_determine"
                         and 0 <= now.timestamp() - evidence.get("checked_at", 0) < SOURCE_BACKOFF)):
