@@ -3,6 +3,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from theaxiom import document_origin_evidence
 from theaxiom import document_update_discovery as discovery
 
 SID = "guide"
@@ -18,7 +19,7 @@ def test_document_check_requires_verified_installed_file_and_get_etag(monkeypatc
     adapter = discovery.pdf_source if kind == "pdf" else discovery.epub_source
     monkeypatch.setattr(adapter, "pin", lambda sid, config: ARTIFACT)
     monkeypatch.setattr(adapter, "ready", lambda artifact, **kwargs: True)
-    monkeypatch.setattr(discovery.document_origin_evidence, "load",
+    monkeypatch.setattr(document_origin_evidence, "load",
                         lambda sid, k, url, digest: ETAG)
     saved = []
     monkeypatch.setattr(discovery.update_check_store, "save",
@@ -36,7 +37,7 @@ def test_document_check_requires_verified_installed_file_and_get_etag(monkeypatc
 def test_conditional_304_confirms_same_representation(monkeypatch):
     monkeypatch.setattr(discovery.pdf_source, "pin", lambda *args: ARTIFACT)
     monkeypatch.setattr(discovery.pdf_source, "ready", lambda *args, **kwargs: True)
-    monkeypatch.setattr(discovery.document_origin_evidence, "load",
+    monkeypatch.setattr(document_origin_evidence, "load",
                         lambda *args: ETAG)
     result = discovery.check_installed_document(
         {"source_id": SID, "configuration": {"format": "pdf", "source_url": URL}},
@@ -52,7 +53,7 @@ def test_unverified_or_missing_etag_never_performs_network_request(monkeypatch):
     rec = {"source_id": SID, "configuration": {"format": "pdf", "source_url": URL}}
     assert discovery.check_installed_document(rec, probe=forbidden)["state"] == "unable_to_determine"
     monkeypatch.setattr(discovery.pdf_source, "ready", lambda *args, **kwargs: True)
-    monkeypatch.setattr(discovery.document_origin_evidence, "load",
+    monkeypatch.setattr(document_origin_evidence, "load",
                         lambda *args: None)
     save = Mock()
     monkeypatch.setattr(discovery.update_check_store, "save", save)
@@ -75,7 +76,7 @@ def test_separate_endpoint_does_not_reuse_installed_validator(monkeypatch):
     monkeypatch.setattr(discovery.pdf_source, "pin", lambda *args: ARTIFACT)
     monkeypatch.setattr(discovery.pdf_source, "ready", lambda *args, **kwargs: True)
     original_validator = Mock(side_effect=AssertionError("Cross-URL validator access"))
-    monkeypatch.setattr(discovery.document_origin_evidence, "load", original_validator)
+    monkeypatch.setattr(document_origin_evidence, "load", original_validator)
     probe = Mock(return_value={"reachable": True, "etag": '"other-representation"'})
     monkeypatch.setattr(discovery.pdf_transport, "probe_document_metadata", probe)
     save = Mock()
@@ -95,7 +96,7 @@ def test_separate_endpoint_does_not_reuse_installed_validator(monkeypatch):
 def test_range_fallback_result_describes_publisher_response(monkeypatch, status, reachable, state):
     monkeypatch.setattr(discovery.pdf_source, "pin", lambda *args: ARTIFACT)
     monkeypatch.setattr(discovery.pdf_source, "ready", lambda *args: True)
-    monkeypatch.setattr(discovery.document_origin_evidence, "load", lambda *args: ETAG)
+    monkeypatch.setattr(document_origin_evidence, "load", lambda *args: ETAG)
     result = discovery.check_installed_document(
         {"source_id": SID, "configuration": {"format": "pdf", "source_url": URL}},
         probe=lambda *args, **kwargs: dict(source_url=URL, head_status=403, status=status,
