@@ -5,7 +5,7 @@ authorized newer edition. No acquisition, update or deletion is possible here.
 """
 from __future__ import annotations
 
-from . import (document_origin_evidence, epub_source, freshness_probe,
+from . import (document_replacement, epub_source, freshness_probe,
                pdf_source, pdf_transport, update_check_store, update_discovery_config, update_diagnostics)
 
 UNKNOWN = {"state": "unable_to_determine",
@@ -37,7 +37,8 @@ def check_installed_document(record, *, probe=None, persist=True, installed_only
         url = artifact["source_url"]
         digest = artifact["sha256"]
         endpoint = selected["endpoint"]
-        etag = document_origin_evidence.load(sid, kind, url, digest) if endpoint == url else None
+        etag = document_replacement.validator(record, artifact) if endpoint == url else None
+        recheck_token = update_check_store.pending_recheck_token(sid)
         cache_id = update_discovery_config.cache_identity(config, digest)
         if not etag:
             result = dict(UNKNOWN, evidence="No strong ETag was saved for the installed file and this URL.")
@@ -47,7 +48,7 @@ def check_installed_document(record, *, probe=None, persist=True, installed_only
                 result["evidence"] = (diagnostic["evidence"] if diagnostic["state"] == "failed"
                                       else "Endpoint reachable; no capture-time ETag for this exact URL")
             if persist:
-                update_check_store.save(sid, cache_id, result)
+                update_check_store.save(sid, cache_id, result, recheck_token=recheck_token)
             return result
         probe = pdf_transport.probe_document_metadata if probe is None else probe
         try:
@@ -59,6 +60,7 @@ def check_installed_document(record, *, probe=None, persist=True, installed_only
                 "verified": True, "source_url": url,
                 "sha256": digest, "etag": etag,
             }, response)
+            result = document_replacement.evidence(record, result, response, etag, artifact)
             status = response.get("status")
             if response.get("head_status"):
                 prefix = f'HEAD returned HTTP {response["head_status"]}; conditional range GET returned HTTP {status}. '
@@ -69,7 +71,7 @@ def check_installed_document(record, *, probe=None, persist=True, installed_only
         except (OSError, ValueError):
             result = dict(UNKNOWN, evidence="Publisher metadata request failed HTTPS, public address, response, or timeout checks")
         if persist:
-            update_check_store.save(sid, cache_id, result)
+            update_check_store.save(sid, cache_id, result, recheck_token=recheck_token)
         return result
     except (OSError, ValueError, TypeError, KeyError):
         return dict(UNKNOWN)
