@@ -48,16 +48,23 @@ def _validated(source_id: str, installed_sha256: str, checked_at: float, result:
     if type(checked_at) not in (int, float) or not 0 < checked_at < 4102444800:
         raise ValueError("Invalid update-check timestamp")
     allowed = {"state", "evidence", "installed_edition", "candidate_edition",
-               "candidate_url", "candidate_sha256", "candidate_sha1", "candidate_md5", "candidate_bytes"}
+               "candidate_url", "candidate_sha256", "candidate_sha1", "candidate_md5", "candidate_bytes",
+               "candidate_etag", "candidate_token"}
     if set(result) - allowed:
         raise ValueError("Unexpected update-check fields")
     for field, value in result.items():
         if field == "candidate_bytes":
-            if type(value) is not int or not 96 <= value <= 2**63 - 1:
+            if type(value) is not int or not (1 if result["state"] == "representation_changed" else 96) <= value <= 2**63 - 1:
                 raise ValueError("Invalid candidate size")
             continue
         if not isinstance(value, str) or len(value) > 2048 or any(ord(c) < 32 for c in value):
             raise ValueError("Invalid update-check value")
+    if {"candidate_etag", "candidate_token"} & result.keys():
+        if (result["state"] != "representation_changed" or not _digest(result.get("candidate_token"))
+                or not re.fullmatch(r'"[\x21\x23-\x7e]{1,200}"', result.get("candidate_etag", ""))
+                or not isinstance(result.get("candidate_url"), str) or not result["candidate_url"].startswith("https://")
+                or type(result.get("candidate_bytes")) is not int or not 0 < result["candidate_bytes"] <= 16 * 1024 * 1024):
+            raise ValueError("Invalid reviewed document representation")
     if result["state"] == "update_available":
         algorithms = {"candidate_sha256": 64, "candidate_sha1": 40, "candidate_md5": 32}
         digests = [(result[key], length) for key, length in algorithms.items() if key in result]
@@ -181,10 +188,10 @@ def save(source_id: str, installed_sha256: str, result: dict, *, now=None, reche
         os.fsync(directory_fd)
     finally:
         os.close(directory_fd)
-    if result.get("state") == "update_available":
+    if result.get("state") == "update_available" or result.get("candidate_token"):
         from . import source_activity, update_diagnostics
         import sqlite3
-        digest = result.get("candidate_sha256") or result.get("candidate_sha1") or result.get("candidate_md5")
+        digest = result.get("candidate_sha256") or result.get("candidate_sha1") or result.get("candidate_md5") or result.get("candidate_token")
         if digest:
             try:
                 source_activity.record(source_id, "update_discovered", trigger=update_diagnostics.current_trigger(),
