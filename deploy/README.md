@@ -186,3 +186,7 @@ notifications, using public display names. Admin-only events remain pending
 for an authenticated admin. No URLs, errors, policy or other private activity
 details are returned by the notification endpoint. Unacknowledged update
 events are excluded from journal retention pruning.
+
+The script-free EPUB chapter view retains its restrictive content security
+policy; pending notices are delivered on the next eligible library/admin
+navigation instead of enabling script execution in that reader.
