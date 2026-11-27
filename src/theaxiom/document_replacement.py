@@ -150,7 +150,7 @@ def status(record, data=None):
     adapter = _adapter(config)
     if not all(adapter.ready(_pin(record, data[key]), verify=False) for key in ("base", "target")):
         return {"state": "unavailable", "error": "Retained document missing or invalid"}
-    return {"state": state, "sha256": data["target"]["sha256"],
+    return {"state": state, "review_token": review_token(data, state), "sha256": data["target"]["sha256"],
             "expected_bytes": data["target"]["bytes"], "downloaded_bytes": data["target"]["bytes"]}
 
 
@@ -259,13 +259,19 @@ def download(record, review_token, result, *, job="", stopped=None, on_retry=Non
     return data
 
 
-def switch(catalog, record, revision, *, rollback=False, trigger="manual", job=None):
+def review_token(data, state):
+    return sha256(json.dumps([state, data["base"], data["target"]], sort_keys=True).encode()).hexdigest()
+
+
+def switch(catalog, record, revision, *, rollback=False, trigger="manual", job=None, expected_replacement=None):
     """Atomically change only the serving pin, preserving publication settings."""
     data = read(record)
     current = status(record, data)
     expected = {"activated"} if rollback else {"verified", "rolled_back"}
     if not current or current["state"] not in expected:
         raise ValueError("No eligible verified document replacement")
+    if expected_replacement is not None and current["review_token"] != expected_replacement:
+        raise ValueError("Reviewed replacement changed; review again")
     if not rollback and job is not None and data["job"] != job:
         raise ValueError("Document replacement is not owned by this attempt")
     adapter = _adapter(record["configuration"])
