@@ -116,3 +116,137 @@ removing repeated work over caching or adding parallel workers on the single
 trusted runner. Existing superseded-run cancellation and the reporting job
 remain; no extra status job or runner capacity is required. The local pytest
 saving alone does not establish a 4–5 minute hosted workflow.
+
+## AC-301: request-to-validation profile
+
+These six November 26–27, 2026 UTC requests are a historical sample, not an
+experiment. The linked mailbox issues provide issue timestamps, label events,
+and result comments; Actions provides exact-SHA workflow, attempt, job and
+step timestamps. Durations below are seconds. `—` means not measured or not
+reported, not zero.
+
+| Request | Open → requested | Requested → running | Running → result comment | Review label → close | Open → close |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| [AC-285 #1147](https://github.com/leftyfb/agent-coordination/issues/1147) | 1 | 32 | 973 | 331 | 1341 |
+| [AC-287 #1150](https://github.com/leftyfb/agent-coordination/issues/1150) | 30 | 34 | 1150 | 345 | 1561 |
+| [AC-290 #1154](https://github.com/leftyfb/agent-coordination/issues/1154) | 2 | 48 | 1086 | 26 | 1165 |
+| [AC-292 #1157](https://github.com/leftyfb/agent-coordination/issues/1157) | 2 | 4 | 971 | 97 | 1077 |
+| [AC-295 #1162](https://github.com/leftyfb/agent-coordination/issues/1162) | 2 | 15 | 929 | 82 | 1031 |
+| [AC-300 #1168](https://github.com/leftyfb/agent-coordination/issues/1168) | 1 | 45 | 1078 | 232 | 1359 |
+| Median | 2 | 33 | 1025.5 | 164.5 | 1253 |
+
+`ac:requested` → `ac:running` is a poller pickup proxy, not time spent inside
+the poller. Running → comment includes work, local checks, and any retries,
+pushes or reporting in that interval; implementation-only time is unavailable
+for every row. The comment → review-label transition took 2–4 s. Review label
+→ close is a mailbox interval, not reviewer labor or proof of CI or deploy
+completion. For #1168, the final `closed` event (04:41:07Z) is used; issue
+metadata gives 04:41:06Z. CI can start before a request reports or finish
+after it closes; do not sum all columns and CI as a serial critical path.
+
+| AC | Targeted local pytest (passing) | Full local pytest (passing) | Local browser / smoke | Retry / push evidence |
+| --- | --- | --- | --- | --- |
+| 285 | 197 in 68.87 s | — | — | No repairs or new commit in direct verification; push timing — |
+| 287 | — | 944 + 196 subtests; time — | PDF/EPUB not run locally (missing PDF.js); other timing — | Push auth failed; [AC-288 #1151](https://github.com/leftyfb/agent-coordination/issues/1151) pushed the same SHA without retesting. Retry pickup 215 s; initial result comment → CI creation 299 s; push command times — |
+| 290 | 234 passing; narrow follow-up 3 passing; times — | 944 + 196 subtests; time — | Admin, maps and synthetic ZIM passed; PDF/EPUB not run; times — | System Python lacked pytest; existing venv worked. Push reported successful; command time — |
+| 292 | Direct rerun: 172 in 71.73 s | — | — | No repairs or push in direct rerun. Exact-head CI failed; later repair used a different SHA |
+| 295 | 117 passing; time — | 952 + 196 subtests; time — | Desktop Chromium passed; time — | Two fixture corrections (missing staging dir; global check already due); retry time —. Push reported successful; command time — |
+| 300 | — | Profile 153.75 s wall; post-push rerun 952 + 196 subtests in 152.99 s (pytest footer) | 184.87 s wall across five profiled checks, including 177.12 s in the two browser scripts | CI creation 04:33:55Z; post-push recheck reported at 04:37:12Z while CI was still running. Push command time — |
+
+For push timing, CI creation is the earliest available workflow marker, not
+push start, end, duration, or networking time. For example, #1162 reported
+20 s and #1168 reported 197 s after their workflow was created. Those gaps
+do not measure Git push latency. Missing local test timings cannot be derived
+by subtraction from the mailbox interval.
+
+| AC / exact head (unambiguous Git prefix) | Push CI run / attempt | Tests queue / job | Pytest / admin Chromium / reader Chromium steps | Report queue / job | Run created → updated | Conclusion |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| 285 / `08c63b66932f` | `45914480572/1` | 1 / 403 | 207 / 89 / 68 | 1 / 19 | 426 | success |
+| 287 / `0254b952a9ee` | `45924783178/1` | 1 / 418 | 218 / 93 / 68 | 1 / 18 | 438 | success after push retry |
+| 290 / `6fc9bb12f8ec` | `45927694246/1` | 2 / 434 | 230 / 95 / 69 | 1 / 17 | 455 | success |
+| 292 / `1ae0e9328e9f` | `45931369853/1` | 1 / 244 | 220 (failed) / skipped / skipped | 1 / 18 | 265 | failure |
+| 295 / `f624b0bae096` | `45936719385/1` | 0 / 433 | 222 / 102 / 69 | 1 / 19 | 454 | success |
+| 300 / `f375fa745a3e` | `45940679473/1` | 1 / 355 | 156 / 96 / 65 | 1 / 17 | 377 | success |
+
+Each run is for a push to `main`, with no CI reruns observed for these SHAs;
+the successful `report` job for AC-292 did not mean tests passed. Successful
+test jobs took a median 418 s (355–434 s); queue time was 0–2 s. A green
+targeted local rerun on AC-292 did not catch the CI failure. The repair request
+[#1159](https://github.com/leftyfb/agent-coordination/issues/1159) verified
+`4d48d013d331` (full local pytest: 219.23 s), with a new CI report at 03:19:33Z,
+1037 s after the failed run's update. This is a recovery interval, not retry
+execution time or a passing result for the original SHA.
+
+Deployment was separate from development. The observed `ac:running` →
+timestamped deployment outcome intervals are handoff proxies, not command
+durations: [#1149](https://github.com/leftyfb/agent-coordination/issues/1149)
+22 s, [#1153](https://github.com/leftyfb/agent-coordination/issues/1153) 23 s,
+and [#1156](https://github.com/leftyfb/agent-coordination/issues/1156) 23 s.
+For AC-292, [#1161](https://github.com/leftyfb/agent-coordination/issues/1161)
+was 21 s and deployed the repaired SHA, not the failed one. For AC-295,
+[#1164](https://github.com/leftyfb/agent-coordination/issues/1164) reported
+rollback after 22 s, then [#1167](https://github.com/leftyfb/agent-coordination/issues/1167)
+reported a successful guarded retry after 19 s (562 s from first failure to
+successful outcome, including pickup and intervening checks). No deployment
+timing for AC-300 was established in the bounded mailbox read. Exact operator
+review, authorization and deployment command durations are unavailable.
+
+### Duplicate work and savings estimate
+
+Four of six mailbox results report full local pytest for the same SHA later
+validated in full CI (AC-287/290/295/300); at least three report running both
+targeted and full local pytest or full pytest plus browser checks (AC-290,
+295 and 300). The overlap is work, not necessarily wasted coverage: local
+checks are useful for risky changes and can give feedback before a push.
+AC-300 is the measured example: 153.75 s local pytest and 184.87 s local
+integration/browser wall time versus 156 s in CI pytest and 161 s in the
+two CI Chromium steps (plus CI Kiwix and nginx checks). Its 152.99 s
+post-push pytest recheck also duplicated the CI pytest scope; the reported
+timings overlap the workflow window, so that time cannot simply be subtracted
+from push-to-green or request-to-close time.
+
+AC-301 timed one representative fixture-only session regression module on
+tux at the AC-300 SHA (Python 3.14.9, pytest 9.2.0). This measures a small
+local check, not coverage specific to the Markdown change:
+
+```sh
+mkdir .cache/ac-301  # use a fresh directory for each sample
+TMPDIR="$PWD/.cache/ac-301" PYTHONDONTWRITEBYTECODE=1 \
+  /usr/bin/time -f 'targeted wall=%e exit=%x' \
+  .venv/bin/python -m pytest -q -p no:cacheprovider \
+  --basetemp=.cache/ac-301/pytest-targeted tests/test_admin_sessions.py
+```
+
+Four tests passed (exit 0) in 3.42 s wall (3.07 s pytest footer). Against
+AC-300's 153.75 s full pytest wall sample, this is an estimated **150.33 s
+less local execution (97.8%)** for a change that only needs that subset.
+Against the 338.62 s local pytest + five-check bundle, the estimated reduction
+is **335.20 s (99.0%)** if none of those integration checks need local
+iteration. These are differences between measured samples with different
+scopes and flags, not reduced CI time or measured end-to-end gains. Actual
+savings depend on the relevant subset, which checks would otherwise run,
+overlap with CI, retries, queueing and review. AC-301 did not rerun full local
+pytest or browsers for this documentation-only change.
+
+## Validation policy
+
+1. **Low risk:** For docs, test-only changes that do not weaken safeguards,
+   and narrowly scoped behavior changes with known coverage, check the diff
+   and run the affected fixture-backed regressions before pushing. For pure
+   prose, check changed links and examples; do not run an unrelated full suite
+   just for a duplicate green result. Record the selected commands and why
+   they cover the edited surface.
+2. **High risk, debugging, or CI unavailable:** Run full local pytest and the
+   relevant integration/browser checks with isolated fixtures. Examples include
+   authentication, permissions or publication, storage/acquisition/rollback,
+   shared UI/reader behavior, and dependency or workflow changes. Debug with
+   the smallest reproducing fixture first, then run broader checks. A passing
+   local result does not replace the deployment gate if CI is unavailable.
+3. **Before deployment:** Require green full Application CI on the exact
+   authorized deploy SHA, including pytest and all Kiwix, nginx and Chromium
+   checks. Record the run ID, attempt, head SHA and conclusion; do not rely on
+   a report-job success, older or superseding SHA, canceled run or targeted
+   run. A new commit needs new exact-head evidence. Separately require operator
+   authorization and the existing deployment safety checks. No change to CI
+   jobs, test coverage, or runner isolation: untrusted PRs stay on hosted
+   runners, off the persistent trusted runner and out of mailbox reporting.

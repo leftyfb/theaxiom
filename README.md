@@ -41,17 +41,28 @@ The supported development baseline is Ubuntu 24.04 LTS and Ubuntu 26.04 LTS with
 ```shell
 python3 -m venv .venv
 .venv/bin/python -m pip install -e '.[dev]'
-.venv/bin/python -m pytest
 ```
 
 The test suite is local and deterministic by default. Fixtures and generated reports are used to exercise the preserved POC behavior without requiring Ansible, nginx, systemd, Projectwright, or outbound network access.
 
-To run the fixture-backed smoke checks and full test suite after installation:
+For a low-risk change, start with the affected fixture-backed tests (and check
+links, examples, and the diff for documentation edits). Run full local pytest
+and the relevant local integration/browser checks for high-risk changes,
+when debugging failures, or when CI is unavailable. For example:
 
 ```shell
+# Targeted offline-verification example
 .venv/bin/python -m pytest -q tests/test_offline_verification.py tests/test_live_poc_verify.py tests/test_live_poc_verify_json.py
+# Full local pytest
+.venv/bin/python -m pytest
+# POC suite entrypoint (also runs local pytest)
 .venv/bin/python scripts/test_poc_suite.py
 ```
+
+Do not run both full pytest entrypoints just to duplicate the same checks.
+Deployment still requires successful full Application CI for the exact commit
+being deployed, separate operator authorization, and all deployment safeguards.
+See [the validation policy and measurements](docs/ci-performance.md#validation-policy).
 
 For a local admin UI and API development check, start the backend and open the admin page in a browser. The API is also available at `/health`:
 
