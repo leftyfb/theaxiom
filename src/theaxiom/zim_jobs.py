@@ -1228,6 +1228,8 @@ def start(sid, config, *, resume=False, restart=False, retry=False, activity_tri
                 need = max(96, (int(configuration["expected_size_bytes"] or 0) - offset))
                 if sm != lm or cap.f_flag & os.ST_RDONLY or cap.f_bavail * cap.f_frsize < reserve + need:
                     raise ValueError("Insufficient writable ZIM storage capacity")
+            job.pop("speed_bytes_per_second", None)
+            job.pop("eta_seconds", None)
             job.update(state="queued", active=True, detail="", downloaded_bytes=offset, sampled_at=time.time())
             if recovering:
                 job["automatic_retry_count"] = old.get("automatic_retry_count", 0)

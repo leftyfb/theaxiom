@@ -213,6 +213,10 @@ def _public_acquisition(job):
     if job is None:
         return None
     job = {key: value for key, value in job.items() if key not in {"promotion_intent", "adopted_from_legacy", "installed_provenance"}}
+    transfer = zim_jobs.current_transfer(job)
+    for field in ("speed_bytes_per_second", "eta_seconds"):
+        job.pop(field, None)
+    job.update(transfer)
     if "checksum_sampled_at" in job:
         sample = zim_jobs.current_checksum(job)
         job.pop("checksum_sampled_at")

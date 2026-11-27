@@ -829,7 +829,9 @@ def exercise_history_poll(browser, viewport):
             ],
             "last_successful_acquisition": 1700000000,
         }), dict(second, acquisition={
-            "state": "completed" if changed else "paused",
+            "state": "completed" if changed else "downloading",
+            "active": not changed, "downloaded_bytes": 25, "expected_bytes": 100,
+            "speed_bytes_per_second": 5, "eta_seconds": 15,
             "attempt_history": [{"state": "completed" if changed else "paused",
                                  "finished_at": 1700000300}],
         })]
@@ -861,7 +863,10 @@ def exercise_history_poll(browser, viewport):
         expect(feedback).to_be_visible()
         expect(progress).to_be_visible()
         expect(progress).to_have_attribute("value", "50")
-        expect(other.locator('[data-field="status"]')).to_have_text("Paused")
+        expect(other.locator('[data-field="status"]')).to_have_text("Downloading")
+        expect(other.locator('[data-field="transfer-summary"]')).to_contain_text("25.0% · 25 B / 100 B")
+        expect(other.locator('[data-field="transfer-summary"]')).to_contain_text("5 B/s")
+        expect(other.locator('[data-field="transfer-summary"]')).to_contain_text("remaining")
         expect(card).to_have_attribute("data-filter-publication", "published")
         fail_poll = False
         changed = True
@@ -870,6 +875,7 @@ def exercise_history_poll(browser, viewport):
         expect(details).to_be_hidden()
         expect(technical.locator('[data-field="update-evidence"]')).to_contain_text("Last known candidate 2026-11")
         expect(other.locator('[data-field="status"]')).to_have_text("Acquisition completed")
+        expect(other.locator('[data-field="transfer-summary"]')).to_be_hidden()
         expect(card).to_have_attribute("open", "")
         expect(technical).to_have_attribute("open", "")
         expect(summary).to_be_focused()

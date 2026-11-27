@@ -121,3 +121,25 @@ def test_acquisition_history_exposes_only_finished_outcomes_and_timestamps():
     ]
     assert exposed["retry_count"] == 1
     assert job["attempt_history"] == [first, latest, running]
+
+
+def test_initial_and_replacement_use_same_fresh_transfer_projection():
+    sample = {"state": "downloading", "active": True, "downloaded_bytes": 200,
+              "expected_bytes": 800, "sampled_at": 98, "speed_bytes_per_second": 50,
+              "eta_seconds": 999}
+    with patch.object(admin_api.time, "time", return_value=100):
+        for project in (admin_api._public_acquisition, admin_api._public_zim_replacement):
+            visible = project(sample)
+            assert visible["speed_bytes_per_second"] == 50
+            assert visible["eta_seconds"] == 12
+            for fields in ({"sampled_at": 89}, {"sampled_at": 101}, {"state": "retrying"},
+                           {"state": "verifying"}, {"state": "failed"}, {"state": "completed"},
+                           {"state": "interrupted"}, {"speed_bytes_per_second": 0}):
+                # A completed replacement uses the verified state; this fixture
+                # tests rate suppression without an artifact or review token.
+                result = project(sample | fields)
+                assert "speed_bytes_per_second" not in result
+                assert "eta_seconds" not in result
+            assert "eta_seconds" not in project(sample | {"expected_bytes": None})
+            assert "eta_seconds" not in project(sample | {"downloaded_bytes": 800})
+    assert sample["eta_seconds"] == 999

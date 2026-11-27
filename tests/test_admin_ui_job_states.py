@@ -68,9 +68,13 @@ def test_live_states_and_read_only_polling():
     assert states[0]["summary-progress"]["value"] == 50
     assert not states[0]["summary-progress"]["hidden"]
     assert "remaining" in states[0]["rate"]["textContent"]
+    assert "50.0% · 50 B / 100 B" in states[0]["transfer-summary"]["textContent"]
+    assert "10 B/s" in states[0]["transfer-summary"]["textContent"]
+    assert "remaining" in states[0]["transfer-summary"]["textContent"]
+    assert states[3]["transfer-summary"]["hidden"]
     assert not states[1]["verification"]["hidden"]
     assert not states[2]["verification"]["hidden"]
-    assert "100.00%" in states[1]["metrics"]["textContent"]
+    assert "100.0%" in states[1]["metrics"]["textContent"]
     assert states[3]["transfer"]["hidden"]
     assert states[3]["summary-progress"]["hidden"]
     assert states[4]["summary-progress"]["hidden"]
@@ -229,16 +233,35 @@ def test_replacement_transfer_updates_without_reload_and_preserves_installed_siz
     assert all(s["status"]["textContent"] == "140 GB" for s in states)
     assert states[0]["replacement-summary-progress"]["value"] == 25
     assert states[0]["replacement-progress"]["value"] == 25
-    assert "50 B / 200 B" in states[0]["replacement-summary"]["textContent"]
-    assert "10 B/s" in states[0]["replacement-summary"]["textContent"]
-    assert "remaining" in states[0]["replacement-summary"]["textContent"]
+    assert "50 B / 200 B" in states[0]["transfer-summary"]["textContent"]
+    assert "10 B/s" in states[0]["transfer-summary"]["textContent"]
+    assert "remaining" in states[0]["transfer-summary"]["textContent"]
     assert states[1]["replacement-summary-progress"]["value"] == 50
-    assert "B/s" not in states[1]["replacement-summary"]["textContent"]
-    assert "B/s" not in states[2]["replacement-summary"]["textContent"]
+    assert "B/s" not in states[1]["transfer-summary"]["textContent"]
+    assert "B/s" not in states[2]["transfer-summary"]["textContent"]
     assert states[3]["replacement-progress"]["value"] == 20
-    assert "Checksum" in states[3]["replacement-summary"]["textContent"]
+    assert "Checksum" in states[3]["transfer-summary"]["textContent"]
     for index in (4, 5):
         assert states[index]["replacement-summary-progress"]["hidden"]
         assert states[index]["replacement-progress"]["hidden"]
-    assert "total unknown" in states[6]["replacement-summary"]["textContent"]
+    assert "total unknown" in states[6]["transfer-summary"]["textContent"]
     assert "value" not in states[6]["replacement-progress"]
+
+
+def test_initial_transfer_summary_matches_replacement_metrics_and_clears_rate():
+    initial = job("downloading", speed_bytes_per_second=25, eta_seconds=6)
+    initial["sources"][0]["acquisition"].update(downloaded_bytes=50, expected_bytes=200)
+    replacement = job("completed")
+    replacement["sources"][0].update(installed_verified=True, replacement=dict(
+        initial["sources"][0]["acquisition"]))
+    retry = job("downloading")
+    retry["sources"][0]["acquisition"].update(state="retrying", downloaded_bytes=50, expected_bytes=200,
+                                              speed_bytes_per_second=25, eta_seconds=6)
+    stale = dict(initial, acquisition_stale=True)
+    states = run_ui([initial, replacement, retry, stale, job("completed")])["states"]
+    first, second, third, fourth, fifth = states
+    assert first["transfer-summary"]["textContent"].replace("Downloading ·", "Downloading update ·") == second["transfer-summary"]["textContent"]
+    assert "25 B/s" not in third["transfer-summary"]["textContent"]
+    assert "remaining" not in third["transfer-summary"]["textContent"]
+    assert fourth["transfer-summary"]["hidden"]
+    assert fifth["transfer-summary"]["hidden"]
