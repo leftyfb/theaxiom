@@ -232,5 +232,5 @@ def search_kiwix(route, query):
 
 KIWIX_ADAPTER = Adapter(KIWIX_CAPABILITY, search_kiwix)
 
-DOCUMENT_ADAPTER = Adapter("Document text search", document_search.search_document)
+DOCUMENT_ADAPTER = Adapter("Document metadata and text search", document_search.search_document)
 STRUCTURED_ADAPTER = Adapter("Data record search", structured_source.search_records)

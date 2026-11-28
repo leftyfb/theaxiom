@@ -1855,7 +1855,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             except ValueError:
                 continue
             targets[sid] = (dict(name=source["name"], kind=kind, artifact=artifact,
-                                 path=source["entry_path"]), library_search.DOCUMENT_ADAPTER)
+                                 path=source["entry_path"], author=source.get("author", ""),
+                                 description=source.get("description", "")), library_search.DOCUMENT_ADAPTER)
 
         for source in sources:
             if source["category"] != "Data":
@@ -1935,7 +1936,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     profile = record["profile"]
                     sources.append(dict(source_id=record["source_id"], entry_path=state["entry_path"],
                                         symbol="E" if self._epub_record(record) else "P", category="EPUB" if self._epub_record(record) else "PDF", name=profile["title"],
-                                        description=profile.get("description", ""),
+                                        description=profile.get("description", ""), author=profile.get("author", ""),
                                         icon_png=profile.get("icon_png", ""),
                                         language=profile.get("language") or "Unspecified language"))
             for record, state in self._zim_publications(catalog):

@@ -110,17 +110,33 @@ def search_document(route, query):
     from .search import MAX_RESULTS, Page, Result
 
     artifact, kind = route["artifact"], route["kind"]
+    skip = route.get("offset", 0)
+    needle = query.casefold()
+    # Catalog metadata is already local and publication-gated by the shared
+    # coordinator. It must remain searchable even for image-only documents.
+    metadata = " · ".join(value for value in (
+        route.get("name", ""), route.get("author", ""), route.get("description", "")
+    ) if value)
+    metadata_match = needle in metadata.casefold()
+    matches = []
+    if metadata_match:
+        if skip:
+            skip -= 1
+        else:
+            href = route["path"] + ("#page=1" if kind == "pdf" else "/chapter/0")
+            matches.append(Result(f"{route['name']} · Document details", href, metadata[:600]))
     data = _load(artifact)
     if data is None:
         schedule(artifact, kind)
+        if metadata_match:
+            return Page(matches, partial=True)
         if _failed and _failed[:2] == (_path(artifact), artifact["sha256"]) and time.monotonic() < _failed[2]:
             raise ValueError("Document indexing temporarily unavailable")
         raise IndexPending
     if not data["sections"]:
+        if metadata_match:
+            return Page(matches, partial=data["partial"])
         raise NoText
-    matches = []
-    skip = route.get("offset", 0)
-    needle = query.casefold()
     for number, content in data["sections"]:
         offset = content.casefold().find(needle)
         if offset < 0:

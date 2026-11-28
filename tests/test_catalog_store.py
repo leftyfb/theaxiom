@@ -525,3 +525,40 @@ def test_versioned_icon_replacement_preserves_custom_blank_and_deleted_sources(t
         upgraded = store.get()
         assert upgraded["sources"] == saved["sources"]
         assert store.get() == upgraded
+
+
+def test_internet_archive_starter_is_bounded_opt_in_and_preserves_custom_configuration(tmp_path):
+    from theaxiom import pdf_source, update_discovery_config
+
+    store = catalog_store.CatalogStore(tmp_path / "sources.json")
+    state = store.get()
+    sid = "internet-archive"
+    row = next(r for r in state["sources"] if r["source_id"] == sid)
+    setup = source_catalog.source_defaults()[sid]["setup"]
+    pin = pdf_source.pin(sid, row["configuration"])
+    assert pin["bytes"] == 3904570
+    assert pin["sha256"] == "b3416ab75ff1986947bc28e52045ea2eb81fcc5a3d33c4723c6cafc20fc3d942"
+    assert row["configuration"]["publisher_sha1"] == "e7c2380a5222d5c1677924a1e5f804e9ced69f83"
+    assert row["configuration"]["license"].startswith("Public domain")
+    assert row["profile"]["author"] == setup["author"]
+    assert row["profile"]["icon_png"]
+    assert update_discovery_config.settings(row["configuration"]) == dict(
+        method="head", endpoint=pin["source_url"], periodic=True)
+    # An old unconfigured placeholder gets the defaults on an existing install.
+    saved = json.loads(store.path.read_bytes())
+    old = next(r for r in saved["sources"] if r["source_id"] == sid)
+    old["configuration"] = {"format": "unspecified"}
+    old["profile"]["title"] = "Internet Archive"
+    old["profile"]["description"] = "curated offline reference collections"
+    old["profile"].pop("author", None)
+    store.path.write_text(json.dumps(saved))
+    upgraded = store.get()
+    current = next(r for r in upgraded["sources"] if r["source_id"] == sid)
+    assert current["configuration"] == row["configuration"]
+    assert current["profile"]["title"] == setup["title"]
+    assert upgraded["groups"] == saved["groups"]
+    custom = store.mutate("edit", sid, {"title": "My archive",
+        "source_url": "https://example.org/other.pdf"}, upgraded["revision"])
+    assert store.get() == custom
+    removed = store.mutate("remove", sid, {}, custom["revision"])
+    assert store.get() == removed

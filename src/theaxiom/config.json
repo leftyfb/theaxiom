@@ -465,7 +465,25 @@
       "kind": "planned",
       "issue": 43,
       "availability": "planned",
-      "icon_png": "iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAD3klEQVR42rWWv09USxTHPzNzf+xeYnBFshiigQsxgQJCoLEylv4RNPSU1r5K/RtsrOz8E+iAigqyJPJDCMkGEkJ0o2aXnbt3jgWZ8S4Pi/de3mlm5szM+fk9Z0bleS5USCmF1hqlFGVZMhgMsNZyfX1NvV4HoNfrkSQJaZoSRRFRFAHgnENEEPktMqoKd84FgUVRUK/XuX//PouLiywsLLC0tISI0Gq1ODg44PPnz3z9+pVOpwNArVYjiiKMMSilbgz2HiiliOOYsbEx5ubmgtD5+XkePnzIXfTz509OTk7Y29tjf3+fVqvF2dkZvV4P59yNgpmZGbHWMj09zfr6OtPT02RZFsJRFAVFUTAYDIaEG2OIoog4jjHGYK2l2+3S6XR4+/YtrVaLer1OJCJEUcTFxQWHh4d0u90hC7y71bh6j0WEsiwREbTW1Ot1jo+POT4+Jk1TnHM3OVBKYa3lxYsXPHv2jP9CGxsbfPjwgVqthoj8ViAifPz4kYODAw4PD7HWIiI0m01GR0f58uVL8MIYw8zMDFdXV1xdXaGUIssy8jxna2sLY8xvjXmey9OnT+XBgwfy6tUrabfb8vLlSxkZGZGRkRF5//69nJ6eSp7n0mg05N69e7K8vCztdlvevHkjaZpKlmWyuroq7XZb1tbWZHx8XGZnZyXPc4mqEJ2YmGBycpKpqSl2d3dJ05Q8z5mamuLx48cAlGXJkydPmJycJM9zxsfHh3iPHj2iLEu01jjn0NWk+VDFcUxRFABorRERkiShKAqstcRxjAeHR1oUReFuFRAaQEQwxlCr1VBKBQRorQOvVquFS1WeMQbnHEmSoJQiSZKhpAcFWmviOAYgTdPA8xeSJAltwJ9LkgStdfC0Og4pqIbpT+s/zW/zbu9p/mfS1Trw1eucQymFcy7wyrIMFvp5WZZDd6od9W8eOOfo9/sAYXTOYa0NPI80v18URRB227g7FXho9vv9AE+vwI9esD/nMX/XufAe+BD59mCtDfDr9Xqho3ql19fXQ+eNMUO8Oz2ouueF9/t9nHOheHzMu91uqBfP8yH0cA5tvdFo/OUXSZJQliWbm5t0Oh2MMSRJwuXlJdvb2xRFEeoiTVN2dnY4OjoiTVO01hhj2N7e5vz8PFS2yvNcfOJev37N8vLyUOX2ej0GgwFZloUuWZYl3W6XKIpCVfsQbW5u8u7dO7Isu2knSikGgwHNZhNrLe12eyhR1Q/A7Y9BFdreK+cczWaTb9++3XwIjDF8//6d58+fs7CwwI8fP8Jj8U/IG7GyssLR0RGfPn1idHR0+NG/3aj+DYnIUH38AqZyX/Av/vAiAAAAAElFTkSuQmCC"
+      "icon_png": "iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAD3klEQVR42rWWv09USxTHPzNzf+xeYnBFshiigQsxgQJCoLEylv4RNPSU1r5K/RtsrOz8E+iAigqyJPJDCMkGEkJ0o2aXnbt3jgWZ8S4Pi/de3mlm5szM+fk9Z0bleS5USCmF1hqlFGVZMhgMsNZyfX1NvV4HoNfrkSQJaZoSRRFRFAHgnENEEPktMqoKd84FgUVRUK/XuX//PouLiywsLLC0tISI0Gq1ODg44PPnz3z9+pVOpwNArVYjiiKMMSilbgz2HiiliOOYsbEx5ubmgtD5+XkePnzIXfTz509OTk7Y29tjf3+fVqvF2dkZvV4P59yNgpmZGbHWMj09zfr6OtPT02RZFsJRFAVFUTAYDIaEG2OIoog4jjHGYK2l2+3S6XR4+/YtrVaLer1OJCJEUcTFxQWHh4d0u90hC7y71bh6j0WEsiwREbTW1Ot1jo+POT4+Jk1TnHM3OVBKYa3lxYsXPHv2jP9CGxsbfPjwgVqthoj8ViAifPz4kYODAw4PD7HWIiI0m01GR0f58uVL8MIYw8zMDFdXV1xdXaGUIssy8jxna2sLY8xvjXmey9OnT+XBgwfy6tUrabfb8vLlSxkZGZGRkRF5//69nJ6eSp7n0mg05N69e7K8vCztdlvevHkjaZpKlmWyuroq7XZb1tbWZHx8XGZnZyXPc4mqEJ2YmGBycpKpqSl2d3dJ05Q8z5mamuLx48cAlGXJkydPmJycJM9zxsfHh3iPHj2iLEu01jjn0NWk+VDFcUxRFABorRERkiShKAqstcRxjAeHR1oUReFuFRAaQEQwxlCr1VBKBQRorQOvVquFS1WeMQbnHEmSoJQiSZKhpAcFWmviOAYgTdPA8xeSJAltwJ9LkgStdfC0Og4pqIbpT+s/zW/zbu9p/mfS1Trw1eucQymFcy7wyrIMFvp5WZZDd6od9W8eOOfo9/sAYXTOYa0NPI80v18URRB227g7FXho9vv9AE+vwI9esD/nMX/XufAe+BD59mCtDfDr9Xqho3ql19fXQ+eNMUO8Oz2ouueF9/t9nHOheHzMu91uqBfP8yH0cA5tvdFo/OUXSZJQliWbm5t0Oh2MMSRJwuXlJdvb2xRFEeoiTVN2dnY4OjoiTVO01hhj2N7e5vz8PFS2yvNcfOJev37N8vLyUOX2ej0GgwFZloUuWZYl3W6XKIpCVfsQbW5u8u7dO7Isu2knSikGgwHNZhNrLe12eyhR1Q/A7Y9BFdreK+cczWaTb9++3XwIjDF8//6d58+fs7CwwI8fP8Jj8U/IG7GyssLR0RGfPn1idHR0+NG/3aj+DYnIUH38AqZyX/Av/vAiAAAAAElFTkSuQmCC",
+      "setup": {
+        "format": "pdf",
+        "title": "Internet Archive — Farm Mechanics and Drawing",
+        "description": "Historical illustrated reference (1911): agricultural machinery, machine-shop practice and technical drawing. Not modern machinery safety guidance.",
+        "publisher": "University of the State of New York; Library of Congress via Internet Archive",
+        "author": "University of the State of New York",
+        "edition": "1911",
+        "language": "eng",
+        "source_url": "https://archive.org/download/farmmechanicsdra00newy/farmmechanicsdra00newy.pdf",
+        "expected_size_bytes": "3904570",
+        "sha256": "b3416ab75ff1986947bc28e52045ea2eb81fcc5a3d33c4723c6cafc20fc3d942",
+        "publisher_sha1": "e7c2380a5222d5c1677924a1e5f804e9ced69f83",
+        "provenance": "Library of Congress scan, Internet Archive item farmmechanicsdra00newy (https://archive.org/details/farmmechanicsdra00newy). Current Text PDF size and SHA-1 verified against item metadata; SHA-256 measured from matching bytes on 2026-11-28 UTC.",
+        "license": "Public domain in the United States (published 1911). Library of Congress reports no known copyright restrictions. https://commons.wikimedia.org/wiki/File:Farm_mechanics_and_drawing_(IA_farmmechanicsdra00newy).pdf ; retain source and digitization attribution; check local jurisdiction.",
+        "update_method": "head",
+        "update_endpoint": "https://archive.org/download/farmmechanicsdra00newy/farmmechanicsdra00newy.pdf",
+        "update_policy": "notify"
+      }
     },
     {
       "source_id": "hearham",

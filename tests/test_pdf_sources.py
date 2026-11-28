@@ -686,3 +686,61 @@ def test_explicit_capability_recheck_preserves_published_document_and_policy(pdf
     assert row["artifact"]["sha256"] == artifact["sha256"]
     assert request(READER + "/document.pdf", raw=True)[0] == data
     assert not request("/api/acquisition-batch")["jobs"]
+
+
+def test_archive_reference_metadata_and_text_search_is_publication_gated(pdf_app, disk, monkeypatch):
+    import io
+    from pypdf import PdfWriter
+    from pypdf.generic import DictionaryObject, NameObject, DecodedStreamObject
+    from theaxiom import document_search
+    request, _ = pdf_app
+    sid = "internet-archive"
+    path = pdf_source.ROUTE_PREFIX + sid
+    def lookup(query, status=200):
+        from urllib.parse import urlencode
+        return request("/search?" + urlencode(dict(q=query, mode="source", source=sid)), status=status)
+    lookup("University", 404)
+    request(path, status=403)
+
+    # Local generated text PDF; no upstream network access is required by CI.
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=300, height=300)
+    font = DictionaryObject({NameObject("/Type"): NameObject("/Font"),
+        NameObject("/Subtype"): NameObject("/Type1"), NameObject("/BaseFont"): NameObject("/Helvetica")})
+    page[NameObject("/Resources")] = DictionaryObject({NameObject("/Font"):
+        DictionaryObject({NameObject("/F1"): writer._add_object(font)})})
+    stream = DecodedStreamObject()
+    stream.set_data(b"BT /F1 12 Tf 20 200 Td (offline lathe fixture) Tj ET")
+    page[NameObject("/Contents")] = writer._add_object(stream)
+    out = io.BytesIO()
+    writer.write(out)
+    raw = out.getvalue()
+    sections, partial = document_search._sections(raw, "pdf")
+    assert any("offline lathe" in text for _, text in sections)
+    # Use the real extractor output, avoiding timing-dependent background indexing.
+    monkeypatch.setattr(document_search, "_load", lambda artifact: dict(sections=sections, partial=partial))
+    monkeypatch.setattr(document_search, "schedule", lambda *_: None)
+    catalog = request("/api/sources")
+    record = source(catalog, sid)
+    assert record["adapter"] == "pdf" and record["configuration_valid"]
+    catalog = mutate(request, catalog, "edit", {
+        "expected_size_bytes": str(len(raw)), "sha256": hashlib.sha256(raw).hexdigest(),
+        "publisher_sha1": ""}, sid=sid)
+    inbox, _ = disk
+    local = inbox.with_name(sid + ".pdf")
+    local.write_bytes(raw)
+    local.chmod(0o600)
+    request("/api/action", dict(source_id=sid, action="import", revision=catalog["revision"]))
+    lookup("University", 404)
+    catalog = request("/api/sources")
+    pub = request("/api/publication", dict(source_id=sid, enabled=True, revision=catalog["revision"]))
+    for query in ("University", "agricultural machinery", "Farm Mechanics", "offline lathe"):
+        result = lookup(query)
+        assert result["source_id"] == sid
+        assert result["results"][0]["href"] == path + "#page=1"
+    assert request(path + "/document.pdf", raw=True)[0] == raw
+    assert "Back to library" in request(path)
+    request("/api/publication", dict(source_id=sid, enabled=False, revision=pub["revision"]))
+    lookup("offline lathe", 404)
+    lookup("University", 404)
+    request(path, status=403)

@@ -226,3 +226,31 @@ def test_slow_kiwix_book_leaves_time_for_other_books_and_documents(monkeypatch):
     assert [(group["source_id"], group["status"]) for group in results] == [
         ("slow", "timeout"), ("fast", "ok"), ("document", "ok"),
     ]
+
+
+@pytest.mark.parametrize("kind", ["pdf", "epub"])
+def test_document_metadata_matches_locally_and_combines_with_text_pagination(kind, monkeypatch):
+    from theaxiom import document_search
+    route = dict(kind=kind, name="Farm Mechanics and Drawing", author="University of New York",
+                 description="Agricultural machinery", artifact={}, path="/document")
+    suffix = "#page=1" if kind == "pdf" else "/chapter/0"
+    monkeypatch.setattr(document_search, "_load", lambda artifact: dict(
+        sections=[(n, "drawing tools") for n in range(1, 23)], partial=False))
+    for query in ("University of New York", "agricultural machinery"):
+        page = document_search.search_document(route, query)
+        assert len(page.results) == 1 and page.results[0].href == route["path"] + suffix
+        assert search.valid_link(page.results[0].href, route)
+    first = document_search.search_document(route, "drawing")
+    second = document_search.search_document(dict(route, offset=20), "drawing")
+    assert len(first.results) == 20 and first.has_more
+    assert first.results[0].title.endswith("Document details")
+    assert len(second.results) == 3 and not second.has_more
+    assert second.results[0].title.endswith("20")
+    monkeypatch.setattr(document_search, "_load", lambda artifact: dict(sections=[], partial=False))
+    assert len(document_search.search_document(route, "University").results) == 1
+    with pytest.raises(document_search.NoText):
+        document_search.search_document(route, "unrelated")
+    monkeypatch.setattr(document_search, "_load", lambda artifact: None)
+    monkeypatch.setattr(document_search, "schedule", lambda *_: None)
+    assert document_search.search_document(route, "University").partial
+    assert not document_search.search_document(dict(route, offset=20), "University").results
