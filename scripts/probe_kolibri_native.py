@@ -289,7 +289,7 @@ from kolibri.core.auth.models import FacilityUser
 from kolibri.core.content.models import ContentNode
 from kolibri.core.logger.models import ContentSummaryLog
 from kolibri.utils.time_utils import local_now
-learner=FacilityUser.objects.create_user("probe-learner", password={secrets.token_urlsafe(24)!r}, full_name="Probe Learner")
+learner=FacilityUser.objects.create_user("probe_learner", password={secrets.token_urlsafe(24)!r}, full_name="Probe Learner")
 node=ContentNode.objects.get(pk={video_node!r})
 ContentSummaryLog.objects.create(user=learner, content_id=node.content_id, channel_id={CID!r},
     start_timestamp=local_now(), end_timestamp=local_now(), kind="video", progress=.5, time_spent=30)
@@ -337,7 +337,7 @@ ContentSummaryLog.objects.create(user=learner, content_id=node.content_id, chann
                 manage("shell","-c",f"""
 from kolibri.core.auth.models import FacilityUser
 from kolibri.core.logger.models import ContentSummaryLog
-learner=FacilityUser.objects.get(username="probe-learner")
+learner=FacilityUser.objects.get(username="probe_learner")
 assert ContentSummaryLog.objects.filter(user=learner, channel_id={CID!r}, progress=.5,time_spent=30).exists()
 """)
                 print("NATIVE CHANNEL RESTORE AND LEARNER ACCOUNT/PROGRESS PRESERVATION PASSED",flush=True)

@@ -82,7 +82,7 @@ provision = {
     "facility_name": "Axiom offline learning", "preset": "informal",
     "device_settings": {"language_id": "en", "landing_page": "learn", "allow_guest_access": True,
                         "allow_peer_unlisted_channel_import": False, "allow_learner_unassigned_resource_access": True},
-    "superuser": {"username": "kolibri-admin", "password": password},
+    "superuser": {"username": "kolibri_admin", "password": password},
 }
 with (home/"provision.json").open("x") as output:
     json.dump(provision, output)
