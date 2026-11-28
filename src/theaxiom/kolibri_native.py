@@ -7,12 +7,15 @@ manifest SHA-256 in its trusted job ledger. No public service is modified here.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
+import threading
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import stat
+import time
 
 from . import kolibri_scope as scope, pdf_transport, pdf_source
 
@@ -78,7 +81,7 @@ def metadata_url(channel_id, version=None, *, base_url=STUDIO):
 
 
 def _download(url, path, limit, *, exact=None, md5=None, guard=lambda n: None,
-              progress=lambda n: None, total_seconds=180):
+              progress=lambda n: None, total_seconds=180, pool=None, stop=lambda: False):
     sha = hashlib.sha256()
     publisher = hashlib.md5(usedforsecurity=False)
     count = 0
@@ -86,17 +89,29 @@ def _download(url, path, limit, *, exact=None, md5=None, guard=lambda n: None,
     # HTTPS endpoints. The format argument controls transport policy, not file
     # format or rendering. Content is never executed by Axiom.
     with pdf_transport.open_pdf(url, format_name="zim", limit=limit,
-                                total_seconds=total_seconds) as stream:
+                                total_seconds=total_seconds, pool=pool) as stream:
         with path.open("xb") as out:
+            pending = bytearray()
+            last = time.monotonic()
             while block := stream.read(CHUNK):
+                if stop():
+                    raise pdf_transport.Cancelled()
                 count += len(block)
                 if count > limit:
                     raise scope.ScopeError("Publisher file exceeds reviewed size.")
-                guard(len(block))
-                out.write(block)
+                pending.extend(block)
+                if len(pending) >= CHUNK or time.monotonic() - last >= .5:
+                    guard(len(pending))
+                    out.write(pending)
+                    pending.clear()
+                    last = time.monotonic()
                 sha.update(block)
                 publisher.update(block)
                 progress(count)
+            if pending:
+                guard(len(pending))
+                out.write(pending)
+            out.flush()
     if count == 0 or (exact is not None and count != exact):
         raise scope.ScopeError("Publisher file size mismatch.")
     if md5 is not None and publisher.hexdigest() != md5:
@@ -147,34 +162,135 @@ def _manifest(selection, metadata_size, records):
             "files": records}
 
 
-def acquire(root, selection, *, progress=lambda n, total: None, guard=lambda n: None):
-    """Create a disk-import package for native Kolibri, including exercises.
-
-    Download only the explicit scope. The manifest is written last; incomplete
-    directories cannot pass verification. The caller owns retry/cleanup.
-    Returns the local manifest SHA-256, to be retained outside shared storage.
-    """
+def acquire(root, selection, *, progress=lambda n, total: None, guard=lambda n: None,
+            stop=lambda: False, resume=False, workers=8):
+    """Acquire the reviewed scope; only verified resources contribute to progress."""
+    if type(workers) is not int or not 1 <= workers <= 8:
+        raise ValueError("Invalid acquisition worker count")
     root = Path(root)
-    guard(scope.MAX_DATABASE_BYTES + selection.media_bytes)
-    root.mkdir(exist_ok=False)
+    guard(0)
+    if resume and root.exists():
+        # Inspect existing directories before opening any files or removing partials.
+        if root.is_symlink() or not root.is_dir():
+            raise scope.ScopeError("Invalid partial package directory.")
+        for parent, dirs, files in os.walk(root, followlinks=False):
+            for name in dirs:
+                if not stat.S_ISDIR((Path(parent) / name).lstat().st_mode):
+                    raise scope.ScopeError("Partial package contains a linked directory.")
+            for name in files:
+                _regular(Path(parent) / name)
+        if (root / MANIFEST).exists():
+            guard(0)
+            # The ledger has not acknowledged this manifest. Rebuild it from
+            # publisher-verified resources, including after a torn write.
+            (root / MANIFEST).unlink()
+    else:
+        guard(scope.MAX_DATABASE_BYTES + selection.media_bytes)
+        root.mkdir(exist_ok=False)
     database = _database(root, selection.channel_id)
-    database.parent.mkdir(parents=True)
-    _, _, metadata_size = fetch_metadata(selection.channel_id, database,
-        version=selection.version, digest=selection.metadata_sha256, guard=guard, base_url=selection.base_url)
+    database.parent.mkdir(parents=True, exist_ok=True)
+    if database.exists():
+        metadata_size = _regular(database)
+        if (not 0 < metadata_size <= scope.MAX_DATABASE_BYTES
+                or _hash(database, metadata_size) != selection.metadata_sha256):
+            database.unlink()
+    if not database.exists():
+        _, _, metadata_size = fetch_metadata(selection.channel_id, database,
+            version=selection.version, digest=selection.metadata_sha256, guard=guard,
+            base_url=selection.base_url)
     plan = _plan(database, selection)
-    records = []
-    done = 0
     total = plan.total_bytes
-    progress(done, total)
+    expected = {database.relative_to(root).as_posix()}
+    expected.update(_file(root, item).relative_to(root).as_posix() for item in plan.files)
+    for parent, _, files in os.walk(root, followlinks=False):
+        for name in files:
+            if (Path(parent) / name).relative_to(root).as_posix() not in expected:
+                raise scope.ScopeError("Partial package contains unexpected files.")
+    lock = threading.Lock()
+    stopped = threading.Event()
+    done = 0
+    records = {}
+    remaining = []
     for item in plan.files:
+        if stop():
+            raise pdf_transport.Cancelled()
         target = _file(root, item)
+        if target.exists():
+            try:
+                digest = _hash(target, item.size, md5=item.checksum)
+            except scope.ScopeError:
+                guard(0)
+                target.unlink()
+            else:
+                records[item.storage_path] = _record(item, digest)
+                done += item.size
+                continue
+        remaining.append(item)
+    guard(total - done)
+    progress(done, total)
+
+    def is_stopped():
+        return stopped.is_set() or stop()
+
+    def checked_guard(n):
+        if is_stopped():
+            raise pdf_transport.Cancelled()
+        guard(n * workers)
+
+    def fetch(item):
+        nonlocal done
+        target = _file(root, item)
+        checked_guard(0)
         target.parent.mkdir(parents=True, exist_ok=True)
-        digest, size = _download(selection.base_url + "storage/" + item.storage_path, target,
-            item.size, exact=item.size, md5=item.checksum, guard=guard,
-            total_seconds=3600, progress=lambda n: progress(done + n, total))
-        records.append(_record(item, digest))
-        done += size
-    data = json.dumps(_manifest(selection, metadata_size, records), sort_keys=True,
+
+        def attempt():
+            checked_guard(0)
+            return _download(selection.base_url + "storage/" + item.storage_path,
+                target, item.size, exact=item.size, md5=item.checksum,
+                guard=checked_guard, total_seconds=3600, pool=connections, stop=is_stopped)
+
+        def retry(number, delay, error):
+            checked_guard(0)
+            target.unlink(missing_ok=True)
+
+        try:
+            digest, size = pdf_transport.run_with_download_retries(
+                attempt, stopped=is_stopped, on_retry=retry)
+            with lock:
+                records[item.storage_path] = _record(item, digest)
+                done += size
+                progress(done, total)
+        except BaseException:
+            stopped.set()
+            raise
+
+    first_error = None
+    with pdf_transport.ConnectionPool(maximum=workers) as connections:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            items = iter(remaining)
+            futures = {pool.submit(fetch, item) for item in
+                       (next(items, None) for _ in range(workers)) if item is not None}
+            while futures:
+                completed, futures = wait(futures, return_when=FIRST_COMPLETED)
+                for future in completed:
+                    try:
+                        future.result()
+                    except BaseException as exc:
+                        if first_error is None or isinstance(first_error, pdf_transport.Cancelled):
+                            first_error = exc
+                        stopped.set()
+                if not is_stopped():
+                    for _ in completed:
+                        item = next(items, None)
+                        if item is not None:
+                            futures.add(pool.submit(fetch, item))
+            if is_stopped() and first_error is None:
+                first_error = pdf_transport.Cancelled()
+    if first_error is not None:
+        raise first_error
+    checked_guard(0)
+    data = json.dumps(_manifest(selection, metadata_size,
+                      [records[item.storage_path] for item in plan.files]), sort_keys=True,
                       separators=(",", ":")).encode("utf-8")
     if len(data) > MAX_MANIFEST:
         raise scope.ScopeError("Native package manifest exceeds limit.")

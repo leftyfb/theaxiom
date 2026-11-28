@@ -7,7 +7,6 @@ paths; no production installation or service startup is performed here.
 """
 from contextlib import contextmanager
 from dataclasses import asdict
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -123,28 +122,38 @@ class Jobs:
                     raise ValueError("Resolve existing staged or rollback package first")
             elif job.get("installed"):
                 raise ValueError("Educational content already installed")
-            token = secrets.token_hex(16)
-            artifact = {"selection": asdict(selection), "token": token}
+            partial = job.get("partial")
+            if partial:
+                if self._selection(partial) != selection or partial.get("update") != update:
+                    raise ValueError("Delete the interrupted package before changing its selection")
+                artifact = {"selection": asdict(selection), "token": partial["token"]}
+            else:
+                artifact = {"selection": asdict(selection), "token": secrets.token_hex(16)}
             target = self._package(sid, artifact)
             with self.lock:
                 required = selection.media_bytes + scope.MAX_DATABASE_BYTES
-                self.guard(required + sum(self.reservations.values()))
+                self.guard((0 if partial else required) + sum(self.reservations.values()))
                 self.reservations[sid] = required
             target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-            job = dict(job, state="downloading", active=True,
-                       downloaded_bytes=0, expected_bytes=selection.media_bytes, detail="")
+            job = dict(job, state="downloading", active=True, speed_bytes_per_second=0,
+                       downloaded_bytes=0, expected_bytes=selection.media_bytes, detail="",
+                       partial=dict(artifact, update=update))
             self._write(sid, job)
             started = time.monotonic()
             last = 0
+            baseline = None
 
             def progress(done, total):
-                nonlocal last
+                nonlocal last, baseline, started
                 now = time.monotonic()
+                if baseline is None:
+                    baseline = done
+                    started = now
                 if now-last < .5 and done != total:
                     return
                 last = now
                 self._write(sid, dict(job, downloaded_bytes=done, expected_bytes=total,
-                    sampled_at=time.time(), speed_bytes_per_second=done/max(now-started, .1)))
+                    sampled_at=time.time(), speed_bytes_per_second=(done-baseline)/max(now-started, .1)))
 
             def checked_guard(required):
                 if stop():
@@ -153,17 +162,16 @@ class Jobs:
 
             try:
                 artifact["manifest_sha256"] = native.acquire(target, selection,
-                    progress=progress, guard=checked_guard)
+                    progress=progress, guard=checked_guard, stop=stop, resume=bool(partial))
                 self.verify(sid, artifact)
                 job.pop("reviewed", None)
+                job.pop("partial", None)
                 self._write(sid, dict(job, state="completed", active=False,
-                    downloaded_bytes=selection.media_bytes,
+                    downloaded_bytes=selection.media_bytes, speed_bytes_per_second=0,
                     **{"candidate" if update else "installed": artifact}))
             except BaseException as exc:
-                # Incomplete files never become a verified artifact.
-                if target.exists() and not target.is_symlink():
-                    self.guard(0)
-                    shutil.rmtree(target)
+                # Retain recovery identity; incomplete packages are never published.
+                job = self.read(sid)
                 self._write(sid, dict(job, state="cancelled" if isinstance(exc, acquisition_queue.Cancelled) else "failed", active=False, detail=str(exc)[:300]))
                 raise
 
@@ -275,6 +283,14 @@ class Jobs:
                     self.verify(sid, artifact)
                     shutil.rmtree(self._package(sid, artifact))
                     job.pop(field)
+            partial = job.get("partial")
+            if partial and (not staged or partial.get("update")):
+                target = self._package(sid, partial)
+                if target.is_symlink():
+                    raise ValueError("Invalid interrupted package directory")
+                if target.exists():
+                    shutil.rmtree(target)
+                job.pop("partial")
             self._write(sid, job if staged else {})
 
 

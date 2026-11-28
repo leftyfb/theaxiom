@@ -2748,6 +2748,16 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     else:
                         kolibri_admin.start_download(manager, record, selected, update=action == "download-update")
                         result = {"queued": True}
+                elif action == "resume":
+                    partial = manager.read(sid).get("partial")
+                    if not partial or data.get("confirm") is not True:
+                        raise ValueError("Confirm resuming the previously reviewed educational selection")
+                    selected = manager._selection(partial)
+                    if (selected.channel_id != kolibri_admin.channel(record)
+                            or selected.base_url != kolibri_admin.native.source_base(record["configuration"])):
+                        raise ValueError("Educational source changed since review")
+                    kolibri_admin.start_download(manager, record, selected, update=partial["update"])
+                    result = {"queued": True}
                 elif action in {"publish", "unpublish"}:
                     manager.publish(sid, action == "publish")
                     result = kolibri_admin.status(manager, record)
@@ -2766,7 +2776,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     result = kolibri_admin.status(manager, record)
                 else:
                     raise ValueError("Unknown educational source action")
-                self._send_json(202 if action in {"download", "download-update"} else 200, result)
+                self._send_json(202 if action in {"download", "download-update", "resume"} else 200, result)
             except (StopIteration, OSError, ValueError, KeyError, sqlite3.Error, subprocess.SubprocessError) as exc:
                 self._send_json(409, {"error": str(exc)[:300] or "Native educational source unavailable"})
         elif self.path == "/api/update-sweep":
@@ -3052,7 +3062,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                         manager = kolibri_admin.configured()
                         if manager:
                             native_job = manager.read(sid)
-                            if (sid in manager.active or native_job.get("installed") or native_job.get("candidate")
+                            if (sid in manager.active or native_job.get("installed") or native_job.get("candidate") or native_job.get("partial")
                                     or sid in manager.registry.read()):
                                 if operation == "remove" or (isinstance(fields, dict) and
                                     any(key in fields and fields[key] != existing["configuration"].get(key)
@@ -3262,7 +3272,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         """Check local acquisition records without probing the managed mount."""
         manager = kolibri_admin.configured()
         if manager and (manager.active or manager.registry.pending.exists()
-                or any(manager.read(path.stem).get("installed") for path in manager.state.glob("*.json"))):
+                or any(any(manager.read(path.stem).get(key) for key in ("installed", "partial")) for path in manager.state.glob("*.json"))):
             raise BlockingIOError("Educational content installed or acquisition unresolved")
         monitor = getattr(self.server, "acquisition_monitor", None)
         if monitor is not None:

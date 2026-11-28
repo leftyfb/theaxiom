@@ -163,3 +163,42 @@ the standard versioned endpoint. Multi-version promotion/rollback is
 therefore covered with deterministic versioned fixture packages, while the
 live official probe exercises removal and restoration of the verified
 available version. No unsupported historical metadata is synthesized.
+
+### Acquisition throughput and recovery (#151)
+
+Acquisitions use up to eight workers, with at most eight queued resource
+operations and an acquisition-local HTTPS connection pool. Each request and
+redirect still validates the complete current DNS answer and uses the pinned
+public address and TLS hostname. Only fully consumed, unambiguously framed
+responses are eligible for reuse. Partial responses and failed requests close
+their connection.
+
+Short network reads are accumulated before a guarded storage write (1 MiB or
+0.5 seconds, whichever comes first). Each worker checks storage before writing,
+with capacity headroom for concurrent writes. Cancellation is checked between
+reads and during retry delays. Resource progress counts checksummed complete
+files only: retrying a failed file does not advance the byte count, and
+resumed verified bytes do not inflate the newly transferred speed.
+
+The private job ledger binds the staging token to the exact reviewed selection.
+Resume verifies the metadata SHA-256 and each retained resource's publisher
+checksum and size, retrieves missing/invalid resources, and rebuilds the
+deterministic manifest. No partial package is published. Interrupted updates
+remain separate from the installed version; explicit deletion discards partial
+files. Storage/source identity cannot be changed while a partial exists.
+
+Controlled local benchmark (32 x 256 KiB synthetic resources, 15 ms request
+latency, 1 ms per 16 KiB short read, 2 ms per storage guard):
+
+| Workers | Elapsed | Throughput |
+| ---: | ---: | ---: |
+| 1 | 1.322 s | 6.05 MiB/s |
+| 4 | 0.340 s | 23.55 MiB/s |
+| 8 | 0.181 s | 44.30 MiB/s |
+
+The guard regression also demonstrates two guarded writes for 128 individual
+16 KiB reads. These figures isolate simulated latency and are not a publisher
+or NFS benchmark. The development environment could not resolve the upstream
+through direct DNS or access the Vancouver library mount. Measure real
+publisher throughput and NFS latency independently on Vancouver after the
+active transfer completes, before accepting the performance improvement.

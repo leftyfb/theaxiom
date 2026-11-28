@@ -117,3 +117,122 @@ def test_no_unreviewed_full_or_invalid_selection(source,tmp_path):
     with pytest.raises(scope.ScopeError,match="Full-channel"):
         native.acquire(tmp_path/"full",native.Selection(CID,(ROOT,),5,
             selection.metadata_sha256,selection.media_bytes))
+
+
+def test_resume_reuses_verified_resources_and_replaces_corruption(source, tmp_path):
+    selected, urls, requested = source
+    root = tmp_path / "package"
+    digest = native.acquire(root, selected)
+    (root / native.MANIFEST).unlink()
+    corrupt = next(root.rglob("*.perseus"))
+    corrupt.write_bytes(b"?" * corrupt.stat().st_size)
+    requested.clear()
+    progress = []
+    recovered = native.acquire(root, selected, resume=True,
+                               progress=lambda n, t: progress.append(n))
+    assert recovered == digest
+    assert requested == [next(u for u in urls if u.endswith(".perseus"))]
+    assert 0 < progress[0] < selected.media_bytes
+    assert progress == sorted(progress)
+    native.verify(root, selected, recovered)
+
+
+def test_retry_preserves_other_resources_and_progress(source, tmp_path, monkeypatch):
+    selected, urls, requested = source
+    broken = next(u for u in urls if u.endswith(".mp4"))
+    attempts = []
+    original = native.pdf_transport.open_pdf
+
+    @contextmanager
+    def flaky(url, **kwargs):
+        if url == broken:
+            attempts.append(url)
+            if len(attempts) == 1:
+                class Interrupted(io.BytesIO):
+                    def read(self, size):
+                        if self.tell():
+                            raise native.pdf_transport.RetryableDownloadError("temporary")
+                        return super().read(2)
+                yield Interrupted(urls[url])
+                return
+        with original(url, **kwargs) as stream:
+            yield stream
+
+    monkeypatch.setattr(native.pdf_transport, "open_pdf", flaky)
+    monkeypatch.setattr(native.pdf_transport, "RETRY_DELAYS", (0,))
+    progress = []
+    root = tmp_path / "package"
+    digest = native.acquire(root, selected, progress=lambda n,t: progress.append(n))
+    assert len(attempts) == 2
+    assert progress == sorted(progress)
+    assert progress[-1] == selected.media_bytes
+    assert len(requested) == 4
+    native.verify(root, selected, digest)
+
+
+def test_concurrent_resources_overlap(source, tmp_path, monkeypatch):
+    import threading
+    selected, _, _ = source
+    original = native.pdf_transport.open_pdf
+    barrier = threading.Barrier(3, timeout=5)
+
+    @contextmanager
+    def overlapping(url, **kwargs):
+        with original(url, **kwargs) as stream:
+            if "/storage/" in url:
+                barrier.wait()
+            yield stream
+
+    monkeypatch.setattr(native.pdf_transport, "open_pdf", overlapping)
+    digest = native.acquire(tmp_path/"package", selected, workers=4)
+    native.verify(tmp_path/"package", selected, digest)
+
+
+def test_guard_batches_short_network_reads(tmp_path, monkeypatch):
+    payload = b"x" * (native.CHUNK * 2)
+    checks = []
+
+    class ShortReads(io.BytesIO):
+        def read(self, size):
+            return super().read(min(size, 16384))
+
+    @contextmanager
+    def transport(*args, **kwargs):
+        yield ShortReads(payload)
+
+    monkeypatch.setattr(native.pdf_transport, "open_pdf", transport)
+    native._download("unused", tmp_path/"file", len(payload), guard=checks.append)
+    assert sum(checks) == len(payload)
+    assert len(checks) == 2
+
+
+def test_cancelled_resume_retains_verified_resources(source, tmp_path):
+    selected, _, requested = source
+    root = tmp_path/"package"
+    cancelled = False
+
+    def progress(n, total):
+        nonlocal cancelled
+        cancelled = n > 0
+
+    with pytest.raises(native.pdf_transport.Cancelled):
+        native.acquire(root, selected, workers=1, progress=progress, stop=lambda: cancelled)
+    assert not (root/native.MANIFEST).exists()
+    assert len(requested) == 2
+    requested.clear()
+    digest = native.acquire(root, selected, resume=True)
+    assert len(requested) == 2
+    native.verify(root, selected, digest)
+
+
+def test_storage_guard_failure_prevents_completion(source, tmp_path):
+    selected, _, _ = source
+
+    def guard(n):
+        if n == selected.media_bytes:
+            raise ValueError("storage changed")
+
+    root = tmp_path/"package"
+    with pytest.raises(ValueError, match="storage changed"):
+        native.acquire(root, selected, guard=guard)
+    assert not (root/native.MANIFEST).exists()

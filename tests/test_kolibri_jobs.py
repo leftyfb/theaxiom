@@ -66,3 +66,32 @@ def test_native_job_lifecycle(tmp_path, monkeypatch):
     assert not registry.acknowledged()
     jobs.delete("school")
     assert not jobs.read("school").get("installed")
+
+
+def test_interrupted_job_keeps_token(tmp_path, monkeypatch):
+    jobs = kolibri_jobs.Jobs(tmp_path/"jobs", tmp_path/"packages", None,
+                            "/bin/kolibri", tmp_path/"home")
+    selected = kolibri_native.Selection(CID, (NODE,), 1, "f"*64, 100)
+    attempts = []
+
+    def acquire(root, selection, **kwargs):
+        attempts.append(root)
+        if len(attempts) == 1:
+            root.mkdir()
+            raise OSError("network interrupted")
+        assert kwargs["resume"]
+        kwargs["progress"](50, 100)
+        assert jobs.read("school")["speed_bytes_per_second"] == 0
+        kwargs["progress"](100, 100)
+        return "a"*64
+
+    monkeypatch.setattr(kolibri_native, "acquire", acquire)
+    monkeypatch.setattr(kolibri_native, "verify", lambda *args: True)
+    with pytest.raises(OSError):
+        jobs.download("school", selected)
+    assert attempts[0].exists()
+    assert jobs.read("school")["partial"]
+    jobs.download("school", selected)
+    assert attempts[0] == attempts[1]
+    assert "partial" not in jobs.read("school")
+    assert jobs.read("school")["installed"]
