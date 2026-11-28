@@ -346,3 +346,16 @@ def test_pool_reuses_only_fully_consumed_response(monkeypatch):
             stream.read(10)
         assert len(created) == 2
     assert created[1].sock is None
+
+
+def test_pool_revalidates_dns_before_reuse(monkeypatch):
+    mock_response(monkeypatch, 200, [("Content-Length", "3")])
+    # A pool must not be consulted at all if the current DNS answer is unsafe.
+    class Pool:
+        def take(self, *args):
+            pytest.fail("Unsafe DNS must be rejected before connection lookup")
+
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: addresses("192.168.1.1"))
+    with pytest.raises(ValueError, match="non-public"):
+        with pdf_transport.open_pdf("https://publisher.org/guide.pdf", pool=Pool()):
+            pass

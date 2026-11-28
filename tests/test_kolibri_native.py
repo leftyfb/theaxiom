@@ -168,3 +168,71 @@ def test_retry_preserves_other_resources_and_progress(source, tmp_path, monkeypa
     assert progress[-1] == selected.media_bytes
     assert len(requested) == 4
     native.verify(root, selected, digest)
+
+
+def test_concurrent_resources_overlap(source, tmp_path, monkeypatch):
+    import threading
+    selected, _, _ = source
+    original = native.pdf_transport.open_pdf
+    barrier = threading.Barrier(3, timeout=5)
+
+    @contextmanager
+    def overlapping(url, **kwargs):
+        with original(url, **kwargs) as stream:
+            if "/storage/" in url:
+                barrier.wait()
+            yield stream
+
+    monkeypatch.setattr(native.pdf_transport, "open_pdf", overlapping)
+    digest = native.acquire(tmp_path/"package", selected, workers=4)
+    native.verify(tmp_path/"package", selected, digest)
+
+
+def test_guard_batches_short_network_reads(tmp_path, monkeypatch):
+    payload = b"x" * (native.CHUNK * 2)
+    checks = []
+
+    class ShortReads(io.BytesIO):
+        def read(self, size):
+            return super().read(min(size, 16384))
+
+    @contextmanager
+    def transport(*args, **kwargs):
+        yield ShortReads(payload)
+
+    monkeypatch.setattr(native.pdf_transport, "open_pdf", transport)
+    native._download("unused", tmp_path/"file", len(payload), guard=checks.append)
+    assert sum(checks) == len(payload)
+    assert len(checks) == 2
+
+
+def test_cancelled_resume_retains_verified_resources(source, tmp_path):
+    selected, _, requested = source
+    root = tmp_path/"package"
+    cancelled = False
+
+    def progress(n, total):
+        nonlocal cancelled
+        cancelled = n > 0
+
+    with pytest.raises(native.pdf_transport.Cancelled):
+        native.acquire(root, selected, workers=1, progress=progress, stop=lambda: cancelled)
+    assert not (root/native.MANIFEST).exists()
+    assert len(requested) == 2
+    requested.clear()
+    digest = native.acquire(root, selected, resume=True)
+    assert len(requested) == 2
+    native.verify(root, selected, digest)
+
+
+def test_storage_guard_failure_prevents_completion(source, tmp_path):
+    selected, _, _ = source
+
+    def guard(n):
+        if n == selected.media_bytes:
+            raise ValueError("storage changed")
+
+    root = tmp_path/"package"
+    with pytest.raises(ValueError, match="storage changed"):
+        native.acquire(root, selected, guard=guard)
+    assert not (root/native.MANIFEST).exists()

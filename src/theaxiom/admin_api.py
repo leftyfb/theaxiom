@@ -3062,7 +3062,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                         manager = kolibri_admin.configured()
                         if manager:
                             native_job = manager.read(sid)
-                            if (sid in manager.active or native_job.get("installed") or native_job.get("candidate")
+                            if (sid in manager.active or native_job.get("installed") or native_job.get("candidate") or native_job.get("partial")
                                     or sid in manager.registry.read()):
                                 if operation == "remove" or (isinstance(fields, dict) and
                                     any(key in fields and fields[key] != existing["configuration"].get(key)
@@ -3272,7 +3272,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         """Check local acquisition records without probing the managed mount."""
         manager = kolibri_admin.configured()
         if manager and (manager.active or manager.registry.pending.exists()
-                or any(manager.read(path.stem).get("installed") for path in manager.state.glob("*.json"))):
+                or any(any(manager.read(path.stem).get(key) for key in ("installed", "partial")) for path in manager.state.glob("*.json"))):
             raise BlockingIOError("Educational content installed or acquisition unresolved")
         monitor = getattr(self.server, "acquisition_monitor", None)
         if monitor is not None:
