@@ -14,6 +14,7 @@ from urllib.request import urlopen
 import ssl
 
 from playwright.sync_api import sync_playwright
+from theaxiom import kolibri_native as native, kolibri_scope as scope
 
 CID = "c9d7f950ab6b5a1199e3d6c10d7f0103"
 CONFIG = Path(__file__).resolve().parents[1] / "deploy" / "kolibri"
@@ -51,9 +52,9 @@ def main():
         manage("provisiondevice", "--noinput", "--facility", "Axiom native probe",
                "--preset", "informal", "--language_id", "en", "--superusername", "probe",
                "--superuserpassword", secrets.token_urlsafe(24))
-        manage("importchannel", "network", CID)
-        db = home / "content" / "databases" / (CID + ".sqlite3")
-        assert db.is_file(), "Native channel database missing"
+        db = root / "preview.sqlite3"
+        channel, metadata_digest, metadata_size = native.fetch_metadata(CID, db)
+        print("PINNED CHANNEL",channel.version,metadata_digest,metadata_size,flush=True)
         with sqlite3.connect(db.absolute().as_uri()+"?mode=ro", uri=True) as conn:
             rows = {}
             for kind, required in (("video", "mp4"), ("exercise", "perseus")):
@@ -62,7 +63,7 @@ def main():
                     SELECT n.id,n.title,SUM(l.file_size) AS total
                     FROM content_contentnode n JOIN content_file f ON f.contentnode_id=n.id
                     JOIN content_localfile l ON l.id=f.local_file_id
-                    WHERE n.kind=?
+                    WHERE n.kind=? AND n.license_name IS NOT NULL AND n.license_name != ''
                     GROUP BY n.id,n.title
                     HAVING total BETWEEN 100 AND 5000000
                     AND SUM(CASE WHEN l.extension=? THEN 1 ELSE 0 END)>0
@@ -70,7 +71,17 @@ def main():
                 assert row, f"No bounded {kind} in publisher metadata"
                 rows[kind] = row
                 print("SELECTED",kind,row,flush=True)
-        manage("importcontent", "--node_ids", ",".join(r[0] for r in rows.values()), "network", CID)
+        nodes=tuple(r[0] for r in rows.values())
+        plan=scope.plan_scope(db,CID,nodes)
+        assert plan.total_bytes < 10_000_000, "Probe media exceeded bounded scope"
+        selection=native.Selection(CID,nodes,channel.version,metadata_digest,plan.total_bytes)
+        package=root/"verified-package"
+        digest=native.acquire(package,selection)
+        native.verify(package,selection,digest)
+        print("VERIFIED NATIVE DISK PACKAGE",plan.total_bytes,digest,flush=True)
+        for command in native.import_commands(kolibri,package,selection):
+            subprocess.run(command,env=env,check=True,timeout=240)
+        print("NATIVE DISK IMPORT COMPLETE",flush=True)
         subprocess.run(["openssl","req","-x509","-newkey","rsa:2048","-nodes","-days","1",
                         "-subj","/CN=localhost","-keyout",str(root/"key.pem"),
                         "-out",str(root/"cert.pem")],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
@@ -146,7 +157,7 @@ http {{
                     assert "Axiom library" in page.locator("body").inner_text()
                     print("MOBILE BACK TO LIBRARY PASSED",flush=True)
                     node,title,_=rows["video"]
-                    page.goto(origin+"/kolibri/en/learn/#/topics/c/"+node,wait_until="domcontentloaded")
+                    page.goto(origin+"/kolibri/viewcontent?node_id="+node,wait_until="domcontentloaded")
                     page.get_by_text(title,exact=True).first.wait_for(timeout=45000)
                     video=page.locator("video").first
                     video.wait_for(state="attached",timeout=30000)
@@ -154,7 +165,7 @@ http {{
                     page.wait_for_function("document.querySelector('video').currentTime > 0",timeout=15000)
                     print("NATIVE OFFLINE VIDEO PLAYBACK PASSED",flush=True)
                     node,title,_=rows["exercise"]
-                    page.goto(origin+"/kolibri/en/learn/#/topics/c/"+node,wait_until="domcontentloaded")
+                    page.goto(origin+"/kolibri/viewcontent?node_id="+node,wait_until="domcontentloaded")
                     page.get_by_text(title,exact=True).first.wait_for(timeout=45000)
                     page.locator(".perseus-root .perseus").first.wait_for(state="visible",timeout=45000)
                     assert page.locator(".perseus-root .perseus").first.inner_text().strip()
