@@ -1,0 +1,5 @@
+# Include once in nginx http context. Ports are browser origin boundaries.
+map $scheme $axiom_kolibri_zip_port {
+    http 8084;
+    https 8443;
+}

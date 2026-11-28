@@ -35,7 +35,7 @@ def configured():
             previous, manager = _INSTANCE
             if previous == identity:
                 return manager
-            if manager.active or any(manager.state.glob("*.json")):
+            if manager.active or any(manager.read(path.stem).get("installed") for path in manager.state.glob("*.json")):
                 raise ValueError("Existing Kolibri content must be resolved before changing storage")
         def guard(required):
             if storage_settings.load_settings() != settings:

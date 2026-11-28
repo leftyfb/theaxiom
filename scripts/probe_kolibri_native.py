@@ -41,10 +41,10 @@ def main():
         root = Path(temp)
         home = root / "kolibri"
         home.mkdir()
-        port, zip_port, https_port, zip_https = free_ports(4)
+        port, zip_port, https_port, zip_https, http_port, zip_http = free_ports(6)
         env = dict(os.environ, KOLIBRI_HOME=str(home),
                    DJANGO_SETTINGS_MODULE="axiom_kolibri_settings",
-                   PYTHONPATH=str(CONFIG))
+                   PYTHONPATH=str(CONFIG), AXIOM_KOLIBRI_HTTP_ZIP_PORT=str(zip_http))
         options = (CONFIG / "options.ini.example").read_text()
         options = options.replace("HTTP_PORT = 8082", f"HTTP_PORT = {port}")
         options = options.replace("ZIP_CONTENT_PORT = 8083", f"ZIP_CONTENT_PORT = {zip_port}")
@@ -114,6 +114,8 @@ def main():
         gate_port = gate_server.server_address[1]
         main_proxy = (CONFIG / "main-proxy.conf.example").read_text().replace("127.0.0.1:8082",f"127.0.0.1:{port}").replace("/opt/theaxiom/app/deploy/kolibri/navigation.css",str(CONFIG/"navigation.css"))
         zip_proxy = (CONFIG / "zip-proxy.conf.example").read_text().replace("127.0.0.1:8083",f"127.0.0.1:{zip_port}")
+        main_proxy = main_proxy.replace('"__zipContentPort":"8443"',f'"__zipContentPort":"{zip_https}"')
+        origin_map = (CONFIG/"origin-map.conf.example").read_text().replace("8084",str(zip_http)).replace("8443",str(zip_https))
         main_proxy = main_proxy.replace("127.0.0.1:8080",f"127.0.0.1:{gate_port}")
         zip_proxy = zip_proxy.replace("127.0.0.1:8080",f"127.0.0.1:{gate_port}")
         for name in ("body","proxy","fastcgi","uwsgi","scgi"):
@@ -126,6 +128,7 @@ pid {root}/nginx.pid;
 error_log {root}/nginx.log info;
 events {{ worker_connections 128; }}
 http {{
+ {origin_map}
  access_log off;
  client_body_temp_path {root}/body;
  proxy_temp_path {root}/proxy;
@@ -134,12 +137,14 @@ http {{
  scgi_temp_path {root}/scgi;
  server {{
   listen 127.0.0.1:{https_port} ssl;
+  listen 127.0.0.1:{http_port};
   {cert}
   location = / {{ return 200 'Axiom library'; }}
   {main_proxy}
  }}
  server {{
   listen 127.0.0.1:{zip_https} ssl;
+  listen 127.0.0.1:{zip_http};
   {cert}
   {zip_proxy}
  }}
@@ -172,6 +177,12 @@ http {{
                 with urlopen(origin+"/kolibri/en/learn/",context=ssl._create_unverified_context(),timeout=10) as response:
                     assert f"https://*:{zip_https}" in response.headers.get("Content-Security-Policy", "")
                 print("SEPARATE HTTPS SANDBOX ENDPOINT PASSED",flush=True)
+                with urlopen(f"http://localhost:{http_port}/kolibri/en/learn/",timeout=10) as response:
+                    assert f"http://*:{zip_http}" in response.headers.get("Content-Security-Policy", "")
+                    assert f'"__zipContentPort":"{zip_http}"' in response.read().decode()
+                with urlopen(f"http://localhost:{zip_http}"+sandbox_path,timeout=10) as response:
+                    assert response.status == 200
+                print("SCHEME-SPECIFIC HTTP SANDBOX ENDPOINT PASSED",flush=True)
                 def public_json(path, params=None):
                     url=origin+"/kolibri/api/public/v2/"+path
                     if params:

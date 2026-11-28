@@ -784,7 +784,7 @@
           <div class="editor-wide"><label for="catalog-title">Source name</label><input id="catalog-title" name="title" required maxlength="512"></div>
           <div class="editor-wide"><label for="catalog-url">Download URL</label><input id="catalog-url" name="source_url" type="url" maxlength="512">
             <small>Direct HTTP(S) download URL, if available.</small></div>
-          <div><label for="catalog-format">Content format</label><select id="catalog-format" name="format"><option value="unspecified">Auto / not yet specified</option><option value="zim">Kiwix / ZIM</option><option value="pmtiles">PMTiles map</option><option value="pdf">PDF</option><option value="epub">EPUB</option><option value="json">JSON data</option><option value="csv">CSV data</option></select></div>
+          <div><label for="catalog-format">Content format</label><select id="catalog-format" name="format"><option value="unspecified">Auto / not yet specified</option><option value="zim">Kiwix / ZIM</option><option value="pmtiles">PMTiles map</option><option value="pdf">PDF</option><option value="epub">EPUB</option><option value="json">JSON data</option><option value="csv">CSV data</option><option value="kolibri">Kolibri education</option></select></div>
           <div class="editor-wide"><label for="catalog-description">Description (optional)</label><textarea id="catalog-description" name="description" maxlength="512"></textarea></div>
         </div>
         <fieldset class="editor-grid">
@@ -852,6 +852,7 @@
             <div><label for="catalog-search-enabled">Include in global search</label><select id="catalog-search-enabled" name="search_enabled"><option value="">Default (enabled)</option><option value="yes">Enabled</option><option value="no">Disabled</option></select></div>
             <div class="editor-wide"><label for="catalog-publisher-md5">Publisher MD5 (optional map checksum)</label><input id="catalog-publisher-md5" name="publisher_md5" pattern="[a-fA-F0-9]{32}" maxlength="32"></div>
             <div class="editor-wide"><label for="catalog-publisher-sha1">Publisher SHA-1 (optional ZIM checksum)</label><input id="catalog-publisher-sha1" name="publisher_sha1" pattern="[a-fA-F0-9]{40}" maxlength="40"></div>
+            <div class="editor-wide"><label for="catalog-kolibri-channel-id">Kolibri channel ID (education only)</label><input id="catalog-kolibri-channel-id" name="kolibri_channel_id" maxlength="32" pattern="[a-f0-9]{32}"></div>
             <div class="editor-wide" data-structured-field hidden><label for="catalog-data-record-path">JSON record path (optional)</label><input id="catalog-data-record-path" name="data_record_path" maxlength="512" placeholder="e.g. results.items"><p class="source-note">Leave empty for a top-level array. Use dot-separated object keys.</p></div>
             <div class="editor-wide" data-structured-field hidden><label for="catalog-data-columns">Displayed columns (optional)</label><input id="catalog-data-columns" name="data_columns" maxlength="512" placeholder="name,city,frequency"><p class="source-note">Comma-separated field names in display order; leave empty to discover columns. JSON nested scalar fields may use dot-separated paths.</p></div>
             <div class="editor-wide" data-structured-field hidden><label for="catalog-data-title-field">Record title field (optional)</label><input id="catalog-data-title-field" name="data_title_field" maxlength="512" placeholder="name"><p class="source-note">Use a displayed column for record headings.</p></div>
@@ -1064,7 +1065,31 @@
           <input type="file" accept=".{{ source.adapter }},{{ 'application/epub+zip' if source.adapter == 'epub' else 'application/pdf' }}" data-pdf-file hidden aria-label="Choose {{ source.adapter|upper }} file">
           {% endif %}
           {% endif %}
-          {% if pub %}
+          {% if source.adapter == "kolibri" %}
+          <section data-kolibri-controls>
+            <button class="button" type="button" data-kolibri-action="select">Select content</button>
+            <button class="button" type="button" data-kolibri-action="update" hidden>Check for updates</button>
+            <button class="button" type="button" data-kolibri-action="publish" hidden>Publish</button>
+            <button class="button" type="button" data-kolibri-action="unpublish" hidden>Unpublish</button>
+            <button class="button" type="button" data-kolibri-action="publish-update" hidden>Publish update</button>
+            <button class="button" type="button" data-kolibri-action="rollback" hidden>Rollback to installed</button>
+            <button class="button" type="button" data-kolibri-action="delete-staged" hidden>Delete staged update files</button>
+            <button class="button" type="button" data-kolibri-action="delete" hidden>Delete downloaded files</button>
+            <a class="button" data-kolibri-browse href="/kolibri/en/learn/" hidden>Browse</a>
+            <p class="source-note" data-kolibri-feedback role="status"></p>
+            <progress data-kolibri-progress max="100" hidden></progress>
+            <section data-kolibri-selector hidden>
+              <button class="button" data-kolibri-root type="button">Channel root</button>
+              <p data-kolibri-topic></p>
+              <div data-kolibri-topics></div>
+              <p data-kolibri-count></p>
+              <button class="button" data-kolibri-plan type="button">Estimate selection</button>
+              <p data-kolibri-estimate></p>
+              <button class="button" data-kolibri-download type="button" hidden>Download selected content</button>
+            </section>
+          </section>
+          {% endif %}
+          {% if pub and source.adapter != "kolibri" %}
           <button class="button" type="button" data-field="publication-toggle" data-enabled="{{ 'true' if pub.enabled else 'false' }}" data-acknowledge-rights="{{ 'true' if pub.requires_rights_acknowledgement else 'false' }}"{% if not pub.enabled and ((not pub.serving and not pub.requires_rights_acknowledgement and not pub.ready_for_publication) or source.mutation_blocked) %} disabled{% endif %}>{{ 'Unpublish' if pub.enabled else 'Publish' }}</button>
           <a class="button" data-field="publication-browse" href="{{ pub.entry_path }}"{% if not pub.published %} hidden{% endif %}>Browse</a>
           {% endif %}
@@ -1211,6 +1236,122 @@
       window.axiomSetSourceRevision = value => {
         if (Number.isInteger(value) && (revision === null || value >= revision)) revision = value;
       };
+      // Native educational selection is intentionally explicit and scoped.
+      for (const panel of document.querySelectorAll('[data-kolibri-controls]')) {
+        const card = panel.closest('[data-source-id]');
+        const sid = card.dataset.sourceId;
+        const feedback = panel.querySelector('[data-kolibri-feedback]');
+        const selector = panel.querySelector('[data-kolibri-selector]');
+        const topics = panel.querySelector('[data-kolibri-topics]');
+        const count = panel.querySelector('[data-kolibri-count]');
+        const estimate = panel.querySelector('[data-kolibri-estimate]');
+        const download = panel.querySelector('[data-kolibri-download]');
+        const progress = panel.querySelector('[data-kolibri-progress]');
+        const chosen = new Set();
+        let root = null, reviewed = null, updating = false, working = false, status = null;
+        const bytes = size => new Intl.NumberFormat(undefined,{maximumFractionDigits:2}).format(size/1073741824)+' GiB';
+        const post = async (action, extra={}) => {
+          const response = await fetch('/api/kolibri', {method:'POST',
+            headers:{...window.axiomCsrfHeaders(), 'Content-Type':'application/json'},
+            body:JSON.stringify({source_id:sid,revision:window.axiomSourceRevision(),action,...extra})});
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || 'Kolibri operation failed');
+          return data;
+        };
+        const get = async (parent) => {
+          const response = await fetch('/api/kolibri?'+new URLSearchParams({source_id:sid,...(parent?{parent}:{})}));
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || 'Kolibri unavailable');
+          return data;
+        };
+        const refreshStatus = async () => {
+          if (working) return;
+          try {
+            status = await get();
+            const job = status.job || {};
+            const active = status.active;
+            for (const button of panel.querySelectorAll('[data-kolibri-action]')) {
+              const action = button.dataset.kolibriAction;
+              button.hidden = !({
+                select: !status.installed, update: !!status.installed && !status.candidate && !status.previous,
+                publish: !!status.installed && !status.published, unpublish: status.published,
+                'publish-update': status.candidate, rollback: status.previous,
+                'delete-staged': status.candidate || status.previous, delete: !!status.installed && !status.published
+              })[action];
+              button.disabled = active || !status.configured;
+            }
+            panel.querySelector('[data-kolibri-browse]').hidden = !status.published;
+            progress.hidden = !active || !job.expected_bytes;
+            if (!progress.hidden) progress.value = 100*job.downloaded_bytes/job.expected_bytes;
+            if (active) feedback.textContent = 'Downloading '+bytes(job.downloaded_bytes || 0)+' / '+bytes(job.expected_bytes || 0);
+            else if (job.state === 'failed') feedback.textContent = job.detail || 'Download failed';
+            else if (status.installed) feedback.textContent = 'Installed version '+status.installed.version+' · '+bytes(status.installed.media_bytes);
+            else if (!selector.hidden) { /* preserve the active selection status */ }
+            else feedback.textContent = status.configured ? 'Select topics or lessons to download.' : 'Optional native service unavailable.';
+          } catch (error) { feedback.textContent = error.message; }
+        };
+        const invalidate = () => {
+          reviewed = null; download.hidden = true; estimate.textContent = '';
+          count.textContent = chosen.size+' selected';
+        };
+        const render = (items, label) => {
+          topics.replaceChildren();
+          panel.querySelector('[data-kolibri-topic]').textContent = label || '';
+          for (const item of items) {
+            const row = document.createElement('div');
+            const checkbox = document.createElement('input'); checkbox.type='checkbox';
+            checkbox.checked=chosen.has(item.node_id);
+            checkbox.setAttribute('aria-label','Select '+item.title);
+            checkbox.addEventListener('change',()=>{checkbox.checked?chosen.add(item.node_id):chosen.delete(item.node_id); invalidate();});
+            const text = document.createElement(item.kind === 'topic' ? 'button' : 'span');
+            text.textContent=item.title;
+            if (item.kind === 'topic') {
+              text.type='button'; text.className='button';
+              text.addEventListener('click',async()=>{try { render((await get(item.node_id)).children,item.title); } catch(e){feedback.textContent=e.message;}});
+            }
+            row.append(checkbox,text); topics.append(row);
+          }
+          count.textContent=chosen.size+' selected';
+        };
+        panel.querySelector('[data-kolibri-root]').addEventListener('click',()=>{if (root) render(root.children,root.channel.name);});
+        panel.querySelector('[data-kolibri-plan]').addEventListener('click',async()=>{
+          try {
+            reviewed=await post('plan',{nodes:[...chosen]});
+            estimate.textContent=bytes(reviewed.total_bytes)+' · '+reviewed.resources+' resources · '+reviewed.licenses.join(', ');
+            download.hidden=reviewed.missing_license_count!==0;
+            if (reviewed.missing_license_count) feedback.textContent='Selection contains resources without license metadata.';
+          } catch(e){feedback.textContent=e.message;}
+        });
+        download.addEventListener('click',async()=>{
+          if (!reviewed || !confirm('Download this reviewed selection? Confirm you accept the publisher terms.')) return;
+          try {
+            await post(updating?'download-update':'download',{nodes:[...chosen],total_bytes:reviewed.total_bytes,
+              metadata_sha256:reviewed.metadata_sha256,acknowledge_rights:true});
+            selector.hidden=true; feedback.textContent='Download queued.'; await refreshStatus();
+          } catch(e){feedback.textContent=e.message;}
+        });
+        for (const button of panel.querySelectorAll('[data-kolibri-action]')) button.addEventListener('click',async()=>{
+          working=true; button.disabled=true;
+          try {
+            const action=button.dataset.kolibriAction;
+            if (action==='select' || action==='update') {
+              feedback.textContent='Loading official channel metadata…';
+              root=await post('refresh'); chosen.clear(); updating=action==='update';
+              if (updating) {
+                if (root.channel.version<=status.installed.version) {feedback.textContent='No update available.';return;}
+                for (const id of status.installed.nodes) chosen.add(id);
+              }
+              selector.hidden=false; invalidate(); render(root.children,root.channel.name);
+            } else {
+              if (action.startsWith('delete') && !confirm('Delete the selected downloaded educational files?')) return;
+              await post(action,{confirm:true});
+            }
+          } catch(e){feedback.textContent=e.message;}
+          finally {working=false; button.disabled=false; if(selector.hidden)await refreshStatus();}
+        });
+        card.addEventListener('toggle',()=>{if(card.open)refreshStatus();});
+        setInterval(()=>{if(card.open)refreshStatus();},2500);
+      }
       // One authoritative snapshot for the rendered cards and one mutation
       // lane for catalog-revision-sensitive actions. Downloads themselves
       // remain independent; only short revision-sensitive requests serialize.

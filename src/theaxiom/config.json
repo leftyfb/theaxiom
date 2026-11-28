@@ -323,11 +323,23 @@
     },
     {
       "source_id": "kolibri",
+      "icon_png": "iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAE9ElEQVR42o2WS2xV1RrHf9+31j6nD0qF9vgotkFACaOGGIPegQklmHslRCShGB+Jzhz4IDaaODCnjQNjDCrXiQMTiMaIXBW4A3MnV1ATrQNNfBBtFF8tJOqhpfR1ztl7rc/B3uUlBPfO3oO1Vv7ft9b3/3//JVzuMYT/HFAGBwN7qy10L9tJjM8AoPostam3eWikzoEDjh2DEcEuBaN/BTahWlUEY3AwcGjPRrq63sW5fahbjbrVOLePrq53ObRnI4ODAcGoVhUzuRjuwoEjVc/GkQyA9/dcTxaHUXcPpaSdhXo4L6FIa4ujmc4Rw368DnPn4xN/wTgvgFCtCiMjkTefW0ZH64OYPU1LqUIzgxAzFfEq+fJoRjTLcOopeag3/0DkOWYW9nHf01NUq8rIiAEmRZD8/A69fDeJPknib6ORQowRM0FEiAFCmqfjElAHZoaIoaqUE0izT0njC2zbdXAx8Tyl/+1eTkNfwbl7SJxSb2aAA0REsCxj4JqVPHJDPwCv/PglR37/GfEeM6NIMNBS8qQhEsJ+yvFR/jk06QFo6v0sW3ovU9OBLAuIeAAVIWYpt3Zdz383bKXdlQDYXOlj8yfvMXpqAvUJMS+uZ6EREGBZ572cPvMZ8G8tKLkcJGJkTtWpCFKcNaps71lDuyvRDIFmCCzxJbb3rAFVohlSJONUHUZWYC0/R1MhgikgIW0SsxQDElEwYzptFHnkL5CPmZGIYkDMUkLaLIhjmmOerwMzWnzC+q4e1nVeTSJKmtZRhLcmxjg2U6PsPGXn+eZMjbcmxlCENK2TiLKus8L6rh5afAJ2TnM+/ylZDKxs7eDoP3aAGB/WTvDOye95feJbfpw5xb9GD7P9ujUAvHfyB8bnJsElPNDXz46eG7m9ewVisOHj/XwXGznmYoBFRdRDYDKts7JtKVuvXcXWa1ex5ZqVPPzV/xmfnWLPd5+cpelV5XZe7d/EzhVrz0L8PD9NPYScf+fvIBJBlFq6wPjCGfpaO2haJBFlcMVausttbP/sMPWYs6gsyju3bGVTpZdoRtMiJVHGF2aopQtQLueYizWIgFPHbH2Wo6dOoCJ4UUSEzCID3b08deMGGllKI0t58qZb2FTpJbMIxVoV4eipE8zWZ3HqCvgLigyoY++vx/itMY8TAbNcC2Y8tqqf3iVX0dPeyWOr1hOLOcxwIvzWmGfvr8cKhV+imwYM5xJ+mq7x0vEvch1gCIJhLPElNld6uaPSx1Jfwoq5QK6Dl45/wU/TNZxLCFzEIgwFiSFG01KZ58dGqZRbGVp981kGBDMGuvsIZgSLQC7GRJTdxz/n+bFRtFQmxGiF0PRcAGGyEIc3i0Gdd0998xFjM1NU125gRWsHAP2dFaIZTvKNn1yYZWRslNd++Rp1HrMYEHyBNXmuXV/U7KTezDBzFjKptC3lgd51DHT30uETAGaylCO1cd4Y/5bf588gzhsiwS7R7C7brqWZIsFijEHIP3CFbEKWF1OdqTozJ2qlS7drLcBzm9y26yCn57Yw3xiyLNZiS6LivThfyny5DfUJ6hN8uQ3nS5l4L7ElUctijfnGEKfntrBt10GqVV1M/AqWaSM43UlyGctM0zlCfBsv1StZ5oWmPzyc2yfA4RcHED+ElzsJhXycQmbvY9lu7nriAwCqVWV4OHe4y5r+la4tVlxb5O9fW/4ElHNh+OSqkL8AAAAASUVORK5CYII=",
       "title": "Khan Academy / Kolibri",
       "description": "offline education",
       "kind": "planned",
       "issue": 34,
-      "availability": "planned"
+      "availability": "planned",
+      "setup": {
+        "format": "kolibri",
+        "title": "Khan Academy English (US) — Kolibri",
+        "description": "Unofficial offline access. Note: All Khan Academy content is available for free at www.khanacademy.org",
+        "publisher": "Khan Academy via Learning Equality",
+        "language": "eng",
+        "source_url": "https://studio.learningequality.org/content/databases/c9d7f950ab6b5a1199e3d6c10d7f0103.sqlite3",
+        "kolibri_channel_id": "c9d7f950ab6b5a1199e3d6c10d7f0103",
+        "provenance": "Official public Learning Equality Studio channel; select resources before acquisition. No affiliation or endorsement.",
+        "license": "Khan Academy CC BY-NC-SA where applicable; review per-resource licensing and publisher terms."
+      }
     },
     {
       "source_id": "openstax",

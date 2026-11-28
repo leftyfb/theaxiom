@@ -118,13 +118,17 @@ def _release_revision() -> str | None:
     return revision if re.fullmatch(r"[0-9a-f]{40}", revision) else None
 
 
-FORMAT_ADAPTERS = {"zim": "kiwix", "pmtiles": "pmtiles", "pdf": "pdf", "epub": "epub", "json": "structured", "csv": "structured"}
+FORMAT_ADAPTERS = {"zim": "kiwix", "pmtiles": "pmtiles", "pdf": "pdf", "epub": "epub", "json": "structured", "csv": "structured", "kolibri": "kolibri"}
 
 
 def select_lifecycle(source_id, configuration):
     """Select by format first; candidate configuration never creates trust."""
     format_name = configuration.get("format")
     adapter = FORMAT_ADAPTERS.get(format_name) if isinstance(format_name, str) else None
+    if adapter == "kolibri":
+        valid = bool(re.fullmatch(r"[a-f0-9]{32}", configuration.get("kolibri_channel_id", "")))
+        return dict(adapter=adapter, configuration_valid=valid, artifact=None, actions={},
+                    acquisition_reason="Select educational topics before downloading.")
     if adapter == "epub":
         artifact = None
         try:
@@ -2435,6 +2439,21 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                          structured_source.status(record) if record["configuration"]["format"] in structured_source.FORMATS
                          else pmtiles_source.status(record))
                 verified = bool(state["verified"])
+            native_status = None
+            if record["configuration"].get("format") == "kolibri":
+                try:
+                    native_status = kolibri_admin.status(kolibri_admin.configured(), record)
+                    verified = bool(native_status.get("installed"))
+                    busy = native_status.get("active", False)
+                    if native_status.get("job"):
+                        job = native_status["job"]
+                    if verified:
+                        selected = native_status["installed"]
+                        lifecycles[sid]["artifact"] = {"bytes": selected["media_bytes"]}
+                        installed_edition = str(selected["version"])
+                    state = {"published": native_status.get("published", False), "enabled": False, "serving": False, "ready_for_publication": False, "entry_path": "/kolibri/en/learn/"}
+                except (OSError, ValueError, KeyError, sqlite3.Error):
+                    native_status = {"configured": False, "error": "Native service unavailable"}
             publication_filter = ("unknown" if state and state.get("error") else
                                   "published" if state and state["published"] else "unpublished")
             download_filter = "unknown"
@@ -2453,6 +2472,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 elif not snapshot["stale"] and not busy and (not artifacts[sid]
                         or (job and job.get("state") == "not_started")):
                     download_filter = "not-downloaded"
+            if native_status is not None and not verified and not busy:
+                download_filter = "not-downloaded"
             replacement = candidate = None
             if record["configuration"]["format"] in document_replacement.FORMATS:
                 try:
@@ -2483,7 +2504,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             sources.append(dict(record, **lifecycles[sid], acquisition=_public_acquisition(job), replacement=replacement, replacement_available=replacement_available,
                                 update_check=update_check if discovery["method"] != "manual" else None,
                                 discovery=discovery, automatic_update=automatic,
-                                document_capability=document_capability.status(record),
+                                document_capability=document_capability.status(record), kolibri=native_status,
                                 installed_verified=verified, installed_edition=installed_edition,
                                 publication=state, mutation_blocked=busy,
                                 publication_filter=publication_filter, download_filter=download_filter))
