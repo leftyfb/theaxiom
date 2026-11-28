@@ -311,6 +311,7 @@ def test_replacement_lifecycle_updates_manifest_only_on_activation(disk):
 
 def test_mdwiki_seed_does_not_enter_reader_manifest_without_verified_install(disk):
     from theaxiom import catalog_store
+    (disk / "library" / "zim").mkdir()
     store = catalog_store.CatalogStore(disk / "sources.json")
     row = next(r for r in store.get()["sources"] if r["source_id"] == "mdwiki")
     assert zim_catalog.verified_books([row], {}) == []
