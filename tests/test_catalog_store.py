@@ -456,7 +456,10 @@ def test_mdwiki_seed_upgrade_is_opt_in_and_preserves_operator_changes(tmp_path):
     row = next(r for r in fresh["sources"] if r["source_id"] == "mdwiki")
     config = row["configuration"]
     assert config["format"] == "zim"
-    assert zim_source.candidate(config)[0].endswith("/mdwiki_en_all_maxi_2025-11.zim")
+    assert zim_source.candidate(config) == (
+        "https://lb.download.kiwix.org/zim/other/mdwiki_en_all_maxi_2025-11.zim",
+        2302838768, "ee51df7860dbcab8c628aad32cf9972726ab708d784cdaf3e217d596920edf80",
+    )
     assert config["update_policy"] == "notify"
     assert update_discovery_config.settings(config)["method"] == "kiwix"
     assert row["profile"]["icon_png"]

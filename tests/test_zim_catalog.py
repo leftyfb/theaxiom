@@ -307,3 +307,12 @@ def test_replacement_lifecycle_updates_manifest_only_on_activation(disk):
     zim_jobs.rollback_candidate("ready", updated)
     assert zim_catalog.verified_books([rec], {"ready": True})[0]["path"] == old_path
     assert zim_catalog.source_content_name(rec) == old["filename"][:-4]
+
+
+def test_mdwiki_seed_does_not_enter_reader_manifest_without_verified_install(disk):
+    from theaxiom import catalog_store
+    store = catalog_store.CatalogStore(disk / "sources.json")
+    row = next(r for r in store.get()["sources"] if r["source_id"] == "mdwiki")
+    assert zim_catalog.verified_books([row], {}) == []
+    assert zim_catalog.verified_books([row], {"mdwiki": True}) == []
+    assert ET.fromstring(zim_catalog.render_xml([row], {"mdwiki": True})).find("book") is None

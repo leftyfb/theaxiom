@@ -558,3 +558,33 @@ def test_deleted_update_stays_private_until_a_fresh_scheduled_check(monkeypatch,
     ]) == [{"source_id": sid, "state": "update_available"}]
     assert len(calls) == 4
     assert discovery.cached_checked_source(sid)["candidate_edition"] == "2026-11"
+
+
+def test_mdwiki_update_uses_exact_maxi_family_not_video_or_other_wiki():
+    from theaxiom import source_catalog
+    seed = source_catalog.source_defaults()["mdwiki"]
+    family = "mdwiki_en_all_maxi"
+    root = "https://lb.download.kiwix.org/zim/other/"
+    installed = dict(INSTALLED, family=family, edition=seed["edition"],
+                     source_url=seed["source_url"], sha256=seed["sha256"])
+    calls = []
+
+    def fetch(url, *, kind):
+        calls.append((kind, url))
+        if kind == "catalog":
+            assert url == discovery.kiwix_metadata_transport.catalog_page_url(
+                family="mdwiki_en_all", language="eng", start=0,
+                count=discovery.CATALOG_PAGE_SIZE)
+            return feed(atom("2026-01", family=family),
+                        atom("2026-02", family="mdwiki_en_all"),
+                        atom("2026-03", family="wikipedia_en_medicine_maxi")).replace(
+                            ROOT.encode(), root.encode())
+        assert url == root + family + "_2026-01.zim.meta4"
+        return metalink("2026-01", family=family).replace(ROOT.encode(), root.encode())
+
+    result = discovery.check_kiwix_update(installed, fetch=fetch)
+    assert result["state"] == "update_available"
+    assert result["candidate_edition"] == "2026-01"
+    assert result["candidate_sha256"] == "b" * 64
+    assert result["candidate_bytes"] == 123456
+    assert [kind for kind, _ in calls] == ["catalog", "metalink"]
