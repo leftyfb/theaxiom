@@ -1,0 +1,19 @@
+[Unit]
+Description=Optional native Kolibri offline learning service
+After=network.target
+RequiresMountsFor=/var/lib/kolibri
+
+[Service]
+Type=simple
+User=kolibri
+Group=kolibri
+Environment=KOLIBRI_HOME=/var/lib/kolibri
+ExecStart=/opt/kolibri/venv/bin/kolibri start --foreground
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0022
+
+[Install]
+WantedBy=multi-user.target

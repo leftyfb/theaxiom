@@ -1,0 +1,30 @@
+name: Native Kolibri proof of concept (#34)
+on:
+  push:
+    branches: [kolibri-native-34]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: [self-hosted, Linux, X64, axiom-ci]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Isolated native runtime
+        run: |
+          venv=$(mktemp -d "$RUNNER_TEMP/kolibri-native-XXXXXX")
+          python3 -m venv "$venv"
+          echo "$venv/bin" >> "$GITHUB_PATH"
+          echo "KOLIBRI_PROBE_VENV=$venv" >> "$GITHUB_ENV"
+      - name: Install pinned native package and browser
+        run: |
+          python -m pip install 'kolibri==0.19.5' 'playwright>=1.50,<2'
+          python -m playwright install chromium
+      - name: Verify native scoped import and offline browser
+        run: python scripts/probe_kolibri_native.py
+      - name: Remove isolated runtime
+        if: always()
+        run: |
+          if [ -n "$KOLIBRI_PROBE_VENV" ] && [ -d "$KOLIBRI_PROBE_VENV" ]; then
+            rm -rf -- "$KOLIBRI_PROBE_VENV"
+          fi

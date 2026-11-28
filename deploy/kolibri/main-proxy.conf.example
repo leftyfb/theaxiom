@@ -1,0 +1,25 @@
+# Include INSIDE Axiom's server block only after native integration approval.
+# This prototype does NOT enforce Axiom channel publication; do not expose it
+# to production until the published-content boundary is implemented.
+location = /kolibri { return 308 /kolibri/; }
+location = /kolibri/axiom-navigation.css {
+    alias /opt/theaxiom/app/deploy/kolibri/navigation.css;
+    default_type text/css;
+}
+location ^~ /kolibri/ {
+    proxy_pass http://127.0.0.1:8082;
+    proxy_http_version 1.1;
+    proxy_set_header Host $http_host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host $http_host;
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_set_header Authorization "";
+    proxy_set_header Cookie "kolibri=$cookie_kolibri; kolibri_csrftoken=$cookie_kolibri_csrftoken";
+    proxy_set_header Accept-Encoding "";
+    proxy_cache off;
+    # Only HTML is rewritten; JS bundles, APIs, captions and byte-range media
+    # remain untouched. No hardcoded client host or protocol.
+    sub_filter_once on;
+    sub_filter '</head>' '<link rel="stylesheet" href="/kolibri/axiom-navigation.css"></head>';
+    sub_filter '</body>' '<a class="axiom-library-return" href="/">Back to library</a></body>';
+}

@@ -1,0 +1,14 @@
+.axiom-library-return {
+    position: fixed;
+    z-index: 1000;
+    left: max(8px, env(safe-area-inset-left));
+    bottom: max(8px, env(safe-area-inset-bottom));
+    padding: 8px 12px;
+    border-radius: 5px;
+    background: #18362d;
+    border: 1px solid #176b4d;
+    color: #fff !important;
+    font: 600 14px/1.4 system-ui, sans-serif;
+    text-decoration: none;
+}
+.axiom-library-return:focus-visible { outline: 3px solid #eebf57; }

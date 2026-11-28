@@ -1,0 +1,14 @@
+# Optional native Kolibri service; not enabled by Axiom by default.
+# Copy to the dedicated KOLIBRI_HOME/options.ini after reserving local ports.
+[Deployment]
+LISTEN_ADDRESS = 127.0.0.1
+HTTP_PORT = 8082
+ZIP_CONTENT_PORT = 8083
+URL_PATH_PREFIX = /kolibri/
+ZIP_CONTENT_ORIGIN = 8443
+ZIP_CONTENT_URL_PATH_PREFIX = /
+DISABLE_PING = true
+
+[Paths]
+# Operator-configured library storage, never the application checkout.
+# CONTENT_DIR = /path/to/library/kolibri
