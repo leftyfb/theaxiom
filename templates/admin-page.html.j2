@@ -796,6 +796,7 @@
               <option value="archive">Internet Archive editions (ZIM)</option>
               <option value="builds">Protomaps map builds (PMTiles)</option>
               <option value="head">HTTPS HEAD / ETag (PDF, EPUB)</option>
+              <option value="kolibri">Kolibri channel</option>
               <option value="manual">Manual / unsupported</option>
             </select>
           </div>
@@ -1336,6 +1337,7 @@
             const action=button.dataset.kolibriAction;
             if (action==='select' || action==='update') {
               feedback.textContent='Loading official channel metadata…';
+              if(action==='update') await post('check-update');
               root=await post('refresh'); chosen.clear(); updating=action==='update';
               if (updating) {
                 if (root.channel.version<=status.installed.version) {feedback.textContent='No update available.';return;}
@@ -2204,6 +2206,7 @@
         const endpoint = input('update_endpoint');
         for (const option of method.options) {
           option.disabled = (['kiwix', 'archive'].includes(option.value) && format.value !== 'zim') ||
+            (option.value === 'kolibri' && format.value !== 'kolibri') ||
             (option.value === 'head' && !['pdf', 'epub'].includes(format.value)) || (option.value === 'builds' && format.value !== 'pmtiles');
         }
         if (method.selectedOptions[0]?.disabled) method.value = '';

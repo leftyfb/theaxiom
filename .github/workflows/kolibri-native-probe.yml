@@ -1,7 +1,14 @@
 name: Native Kolibri proof of concept (#34)
 on:
   push:
-    branches: [kolibri-native-34]
+    branches: [main, kolibri-native-34]
+    paths:
+      - 'deploy/kolibri/**'
+      - 'src/theaxiom/kolibri*.py'
+      - 'scripts/probe_kolibri_native.py'
+      - 'tests/test_kolibri*.py'
+      - '.github/workflows/kolibri-native-probe.yml'
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
@@ -21,7 +28,7 @@ jobs:
           python -m pip install -e '.[dev]' 'kolibri==0.19.5' 'playwright>=1.50,<2'
           python -m playwright install chromium
       - name: Native package regression tests
-        run: python -m pytest -q tests/test_kolibri_scope.py tests/test_kolibri_native.py tests/test_kolibri_search.py tests/test_kolibri_publication.py tests/test_kolibri_jobs.py
+        run: python -m pytest -q tests/test_kolibri_scope.py tests/test_kolibri_native.py tests/test_kolibri_search.py tests/test_kolibri_publication.py tests/test_kolibri_jobs.py tests/test_kolibri_admin.py
       - name: Verify native scoped import and offline browser
         run: python scripts/probe_kolibri_native.py
       - name: Remove isolated runtime

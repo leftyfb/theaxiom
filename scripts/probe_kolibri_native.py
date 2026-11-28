@@ -21,7 +21,7 @@ from threading import Thread
 
 from playwright.sync_api import sync_playwright
 from theaxiom import kolibri_native as native, kolibri_scope as scope
-from theaxiom.kolibri_publication import Registry
+from theaxiom.kolibri_publication import Registry, verify_live_scope
 
 CID = "c9d7f950ab6b5a1199e3d6c10d7f0103"
 CONFIG = Path(__file__).resolve().parents[1] / "deploy" / "kolibri"
@@ -90,6 +90,7 @@ def main():
             subprocess.run(command,env=env,check=True,timeout=240)
         print("NATIVE DISK IMPORT COMPLETE",flush=True)
         registry = Registry(root/"private-publications", home/"db.sqlite3")
+        verify_live_scope(registry, db, selection)
         publication_record = {"khan-probe": {"channel_id": CID, "version": channel.version, "manifest_sha256": digest}}
         assert not registry.authorize("/kolibri/en/learn/")
         with registry.transaction() as acknowledge:
@@ -308,6 +309,7 @@ http {{
                 with registry.transaction() as acknowledge:
                     for command in native.import_commands(kolibri,package,selection):
                         subprocess.run(command,env=env,check=True,timeout=240)
+                    verify_live_scope(registry, db, selection)
                     acknowledge(publication_record)
                 assert registry.authorize("/kolibri/en/learn/")
                 search_selected()

@@ -1,0 +1,5 @@
+[Service]
+Environment=THEAXIOM_KOLIBRI_PUBLICATIONS=/var/lib/theaxiom/kolibri/registry
+Environment=THEAXIOM_KOLIBRI_DATABASE=/var/lib/theaxiom/kolibri/home/db.sqlite3
+Environment=THEAXIOM_KOLIBRI_HOME=/var/lib/theaxiom/kolibri/home
+Environment=THEAXIOM_KOLIBRI_EXECUTABLE=/opt/kolibri/venv/bin/kolibri

@@ -15,7 +15,7 @@ import sys
 from threading import Event, Lock, Thread
 from hashlib import sha256
 
-from . import (catalog_store, document_replacement, document_update_discovery, kiwix_update_discovery,
+from . import (catalog_store, document_replacement, document_update_discovery, kiwix_update_discovery, kolibri_admin,
                storage_settings, update_check_store, update_diagnostics,
                update_discovery_config as discovery, update_schedule, zim_jobs)
 
@@ -42,7 +42,9 @@ def _check_source(record, *, manual=False, unattended=None):
     trigger = "manual" if manual else ("automatic" if unattended and discovery.policy(config)[0] == "automatic" else "scheduled")
     with update_diagnostics.attempt(sid, discovery.settings(config),
                                     trigger=trigger) as diagnostic:
-        if config["format"] in {"zim", "pmtiles"}:
+        if config["format"] == "kolibri":
+            outcome = kolibri_admin.check_update(kolibri_admin.configured(), record)
+        elif config["format"] in {"zim", "pmtiles"}:
             options = {"expected_identity": unattended["installed"]} if unattended else {}
             outcome = kiwix_update_discovery.refresh_checked_source(
                 sid, force=manual or bool(unattended), installed_only=True, **options)
@@ -73,7 +75,7 @@ def check_records(records, *, manual=False):
             continue
         sid, config = record.get("source_id"), record.get("configuration")
         if (isinstance(sid, str) and isinstance(config, dict)
-                and config.get("format") in {"zim", "pdf", "epub", "pmtiles"}):
+                and config.get("format") in {"zim", "pdf", "epub", "pmtiles", "kolibri"}):
             selected = discovery.settings(config)
             if selected["periodic"] or (manual and selected["method"] != "manual"):
                 eligible[sid] = record

@@ -2057,3 +2057,20 @@ def test_disabled_policy_removes_cached_update_from_notifications_and_batch(app,
     enabled_again = mutate(request, disabled, "edit", {"update_policy": "notify"}, sid=sid)
     assert enabled_again["available_updates"] == 1
     assert source(enabled_again, sid)["update_check"]["candidate_sha256"] == digest
+
+
+def test_native_education_configured_but_optional_runtime_absent(app, monkeypatch):
+    monkeypatch.delenv("THEAXIOM_KOLIBRI_PUBLICATIONS", raising=False)
+    monkeypatch.delenv("THEAXIOM_KOLIBRI_DATABASE", raising=False)
+    request, _ = app
+    catalog = request("/api/sources")
+    educational = source(catalog, "kolibri")
+    assert educational["adapter"] == "kolibri"
+    assert educational["configuration"]["kolibri_channel_id"] == "c9d7f950ab6b5a1199e3d6c10d7f0103"
+    assert educational["configuration_valid"]
+    assert not educational["installed_verified"]
+    assert not educational["kolibri"]["configured"]
+    assert "Select content" in card(request("/admin/sources"), "kolibri")
+    assert request("/api/kolibri?source_id=kolibri", status=409)["error"]
+    request("/internal/publication/kolibri", status=403)
+    request("/internal/publication/kolibri-alternate", status=403)

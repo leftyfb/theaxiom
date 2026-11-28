@@ -1,0 +1,17 @@
+# Install in nginx http context; no listen address or hostname hardcoded.
+include /opt/theaxiom/app/deploy/kolibri/origin-map.conf.example;
+server {
+    listen 8084;
+    listen [::]:8084;
+    server_name _;
+    include /opt/theaxiom/app/deploy/kolibri/zip-proxy.conf.example;
+}
+server {
+    listen 8443 ssl;
+    listen [::]:8443 ssl;
+    server_name _;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_certificate /etc/theaxiom/tls/server.pem;
+    ssl_certificate_key /etc/theaxiom/tls/server.key;
+    include /opt/theaxiom/app/deploy/kolibri/zip-proxy.conf.example;
+}

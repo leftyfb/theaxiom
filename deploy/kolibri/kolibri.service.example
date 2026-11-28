@@ -1,21 +1,26 @@
 [Unit]
 Description=Optional native Kolibri offline learning service
 After=network.target
-RequiresMountsFor=/var/lib/kolibri
+RequiresMountsFor=/var/lib/theaxiom/kolibri
 
 [Service]
 Type=simple
-User=kolibri
-Group=kolibri
-Environment=KOLIBRI_HOME=/var/lib/kolibri
+User=theaxiom
+Group=theaxiom
+Environment=KOLIBRI_HOME=/var/lib/theaxiom/kolibri/home
 Environment=DJANGO_SETTINGS_MODULE=axiom_kolibri_settings
 Environment=PYTHONPATH=/opt/theaxiom/app/deploy/kolibri
+EnvironmentFile=/etc/theaxiom/server.env
+Environment=AXIOM_KOLIBRI_HTTP_ZIP_PORT=8084
+ExecStartPre=/opt/theaxiom/app/.venv/bin/python -m theaxiom.kolibri_runtime
 ExecStart=/opt/kolibri/venv/bin/kolibri start --foreground
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true
 PrivateTmp=true
-UMask=0022
+UMask=0077
+ProtectHome=true
+ProtectSystem=full
 
 [Install]
 WantedBy=multi-user.target

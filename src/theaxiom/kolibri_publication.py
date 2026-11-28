@@ -93,7 +93,7 @@ class Registry:
             if not records:
                 return {}
             with self._database() as conn:
-                if not self._matches(records, conn) or self.pending.exists():
+                if not self._matches(records, conn) or self.pending.exists() or self.read() != records:
                     return {}
             return records
         except (OSError, ValueError, TypeError, sqlite3.Error):
@@ -152,7 +152,7 @@ class Registry:
             if not alternate and not path.startswith("/kolibri/"):
                 return False
             tail = path.removeprefix(prefix) if path.startswith(prefix) else ""
-            if tail.startswith("databases/"):
+            if path.startswith(prefix) and not tail.startswith(("storage/", "zipcontent/", "static/")):
                 return False
             filename = None
             if tail.startswith("storage/"):
@@ -183,7 +183,7 @@ class Registry:
                         LIMIT 1
                     """, (checksum, extension)).fetchone():
                         return False
-                return not self.pending.exists()
+                return not self.pending.exists() and self.read() == records
         except (OSError, ValueError, TypeError, sqlite3.Error):
             return False
 
@@ -208,3 +208,15 @@ def catalog_acknowledged(records, registry=None):
     if any(configured.get(sid) != artifact["channel_id"] for sid, artifact in active.items()):
         return {}
     return active
+
+
+def verify_live_scope(registry, publisher_database, selection):
+    """Prevent native import from silently widening or omitting selected content."""
+    expected = kolibri_scope.resource_ids(publisher_database, selection.channel_id,
+                                         selection.nodes, allow_full=selection.allow_full)
+    with registry._database() as conn:
+        actual = {row[0] for row in conn.execute(
+            "SELECT id FROM content_contentnode WHERE channel_id=? AND available=1 AND kind!='topic' LIMIT ?",
+            (selection.channel_id, kolibri_scope.MAX_RESOURCES+1))}
+    if actual != expected:
+        raise ValueError("Native runtime content does not match the reviewed lesson selection")

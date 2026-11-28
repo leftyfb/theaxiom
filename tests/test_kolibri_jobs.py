@@ -25,6 +25,7 @@ def test_native_job_lifecycle(tmp_path, monkeypatch):
 
     monkeypatch.setattr(kolibri_native, "acquire", acquire)
     monkeypatch.setattr(kolibri_native, "verify", lambda *args: True)
+    monkeypatch.setattr(kolibri_jobs.kolibri_publication, "verify_live_scope", lambda *args: None)
 
     def runner(command, **kwargs):
         assert registry.pending.exists()

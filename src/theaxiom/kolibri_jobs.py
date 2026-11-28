@@ -18,7 +18,7 @@ import tempfile
 import threading
 import time
 
-from . import catalog_store, kolibri_native as native, kolibri_scope as scope
+from . import catalog_store, kolibri_native as native, kolibri_scope as scope, kolibri_publication
 
 
 class Jobs:
@@ -152,15 +152,32 @@ class Jobs:
 
     def _import(self, sid, artifact):
         self.verify(sid, artifact)
+        self.guard(self._selection(artifact).media_bytes + scope.MAX_DATABASE_BYTES)
         env = dict(os.environ, KOLIBRI_HOME=str(self.home))
         selection = self._selection(artifact)
         for command in native.import_commands(self.executable, self._package(sid, artifact), selection):
             self.runner(command, env=env, check=True, timeout=3600)
+        database = native._database(self._package(sid, artifact), selection.channel_id)
+        kolibri_publication.verify_live_scope(self.registry, database, selection)
 
     def _identity(self, artifact):
         selection = self._selection(artifact)
         return {"channel_id": selection.channel_id, "version": selection.version,
                 "manifest_sha256": artifact["manifest_sha256"]}
+
+    def _acknowledge(self, callback, published):
+        # A shared content checksum can influence native availability in
+        # another channel. Recheck every live reviewed scope before reopening.
+        for sid, identity in published.items():
+            job = self.read(sid)
+            artifact = next((job.get(key) for key in ("installed", "candidate", "previous")
+                             if job.get(key) and self._identity(job[key]) == identity), None)
+            if artifact is None:
+                raise ValueError("Published native package is not in the trusted ledger")
+            selected = self._selection(artifact)
+            database = native._database(self._package(sid, artifact), selected.channel_id)
+            kolibri_publication.verify_live_scope(self.registry, database, selected)
+        callback(published)
 
     def publish(self, sid, enabled):
         with self._operation(sid):
@@ -168,12 +185,13 @@ class Jobs:
             artifact = job.get("installed")
             if not artifact:
                 raise ValueError("Verified educational content required")
-            self.verify(sid, artifact)
+            if enabled:
+                self.verify(sid, artifact)
             with self.registry.transaction() as acknowledge:
                 published = self.registry.read()
                 if enabled:
                     if sid in published:
-                        acknowledge(published)
+                        self._acknowledge(acknowledge, published)
                         return
                     identity = self._identity(artifact)
                     if any(r["channel_id"] == identity["channel_id"] for r in published.values()):
@@ -182,7 +200,7 @@ class Jobs:
                     published[sid] = identity
                 elif sid in published:
                     self._manage("deletechannel", published.pop(sid)["channel_id"])
-                acknowledge(published)
+                self._acknowledge(acknowledge, published)
 
     def switch(self, sid, *, rollback=False):
         """Promote or roll back the selected artifact without replacing learner DBs."""
@@ -205,11 +223,13 @@ class Jobs:
                 job["installed"] = artifact
                 job["candidate" if rollback else "previous"] = old
                 self._write(sid, job)
-                acknowledge(published)
+                self._acknowledge(acknowledge, published)
 
     def delete(self, sid, *, staged=False):
         with self._operation(sid):
             job = self.read(sid)
+            if self.registry.pending.exists():
+                raise ValueError("Resolve pending publication before deleting files")
             if not staged and sid in self.registry.read():
                 raise ValueError("Unpublish educational content before deleting")
             self.guard(0)

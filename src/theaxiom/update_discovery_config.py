@@ -88,7 +88,7 @@ def settings(config):
     periodic = config.get("update_periodic", "")
     archive = archives.internet_archive_identity(download) if isinstance(download, str) else None
     map_build = archives.protomaps_identity(download)
-    if method not in {"auto", "kiwix", "head", "archive", "builds", "manual"} or periodic not in {"", "yes", "no"}:
+    if method not in {"auto", "kiwix", "head", "archive", "builds", "kolibri", "manual"} or periodic not in {"", "yes", "no"}:
         raise ValueError("Invalid update discovery settings")
     if method == "auto":
         if kind == "zim" and (not download or urlsplit(download).hostname in kiwix_opds.DOWNLOAD_HOSTS):
@@ -97,6 +97,8 @@ def settings(config):
             resolved = "builds"
         elif kind == "zim" and archive:
             resolved = "archive"
+        elif kind == "kolibri":
+            resolved = "kolibri"
         elif kind in {"pdf", "epub"} and pdf_source.valid_source_url(endpoint or download):
             resolved = "head"
         else:
@@ -118,6 +120,14 @@ def settings(config):
         if kind != "zim" or not archive or (endpoint and endpoint != archive["endpoint"]):
             raise ValueError("Archive discovery requires the matching dated Internet Archive item")
         endpoint = archive["endpoint"]
+    elif resolved == "kolibri":
+        from . import kolibri_native
+        if kind != "kolibri":
+            raise ValueError("Kolibri discovery requires an educational source")
+        expected = kolibri_native.metadata_url(config.get("kolibri_channel_id"))
+        if endpoint and endpoint != expected:
+            raise ValueError("Kolibri discovery requires the configured official channel endpoint")
+        endpoint = expected
     elif resolved == "head":
         endpoint = endpoint or download
         if not pdf_source.valid_source_url(endpoint):

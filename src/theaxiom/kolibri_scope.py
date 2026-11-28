@@ -194,3 +194,19 @@ def plan_scope(path, channel_id, selected_nodes, *, allow_full=False):
                         sum(item.size for item in files), licenses, missing)
     except sqlite3.Error as exc:
         raise ScopeError("Unsupported channel database schema.") from exc
+
+
+def resource_ids(path, channel_id, selected_nodes, *, allow_full=False):
+    """Return exact leaf IDs from the reviewed metadata scope."""
+    plan = plan_scope(path, channel_id, selected_nodes, allow_full=allow_full)
+    with closing(_connect(path)) as conn:
+        ranges = [conn.execute(
+            "SELECT tree_id,lft,rght FROM content_contentnode WHERE id=? AND channel_id=?",
+            (nid, channel_id)).fetchone() for nid in plan.selected_nodes]
+        where = " OR ".join("(tree_id=? AND lft>=? AND rght<=?)" for _ in ranges)
+        rows = conn.execute("SELECT id FROM content_contentnode WHERE channel_id=? AND kind!='topic' AND (" +
+            where + ") LIMIT ?", (channel_id, *(v for row in ranges for v in row), MAX_RESOURCES+1))
+        result = {_id(row[0]) for row in rows}
+        if len(result) != plan.resource_count:
+            raise ScopeError("Scope resource identity mismatch")
+        return result

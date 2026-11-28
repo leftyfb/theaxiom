@@ -1683,6 +1683,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 action = data.get("action")
                 if action == "refresh":
                     result = kolibri_admin.refresh(manager, record)
+                elif action == "check-update":
+                    result = kolibri_admin.check_update(manager, record) or {"state": "unable_to_determine"}
                 elif action == "plan":
                     _, result = kolibri_admin.selection(manager, record, data.get("nodes"), data.get("allow_full") is True)
                 elif action in {"download", "download-update"}:
@@ -1825,6 +1827,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     raise ValueError("Catalog changed; review the updates again")
                 records = {row["source_id"]: row for row in catalog["sources"]}
                 jobs = []
+                native_accepted = {}
                 pending = {job["source_id"] for job in acquisition_queue.status()
                            if job["state"] in acquisition_queue.PENDING}
                 for sid, digest in selection.items():
@@ -1834,8 +1837,26 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                         if (operation == "download-update"
                                 and update_discovery_config.policy(records[sid]["configuration"])[0] == "disabled"):
                             raise ValueError("Update policy is Disabled; use the individual source controls for a manual update")
+                        if records[sid]["configuration"].get("format") == "kolibri":
+                            manager = kolibri_admin.configured()
+                            if manager is None:
+                                raise ValueError("Native educational service unavailable")
+                            native_job = manager.read(sid)
+                            if operation == "download-update":
+                                installed = native_job["installed"]
+                                old = manager._selection(installed)
+                                selected, review = kolibri_admin.selection(manager, records[sid], list(old.nodes), old.allow_full)
+                                if review["metadata_sha256"] != digest or selected.version <= old.version:
+                                    raise ValueError("Reviewed educational update changed")
+                                kolibri_admin.start_download(manager, records[sid], selected, update=True)
+                            else:
+                                if (native_job.get("candidate") or {}).get("manifest_sha256") != digest:
+                                    raise ValueError("Reviewed educational replacement changed")
+                                manager.switch(sid)
+                            native_accepted[sid] = "native"
+                            continue
                         jobs.append(_publisher_update_job(records[sid], digest, operation))
-                    except (ValueError, OSError) as exc:
+                    except (ValueError, OSError, KeyError, subprocess.SubprocessError) as exc:
                         rejected[sid] = str(exc)
                 accepted = []
                 if jobs:
@@ -1848,7 +1869,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
         except ValueError as exc:
             self._send_json(409, {"error": str(exc)})
             return
-        self._send_json(202, {"queued": dict(zip((job["source_id"] for job in jobs), accepted)),
+        self._send_json(202, {"queued": dict(zip((job["source_id"] for job in jobs), accepted)) | native_accepted,
                               "rejected": rejected})
 
     def _acquisition_preview(self, records, ids, *, exact_selection=False):
@@ -2451,7 +2472,12 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                         selected = native_status["installed"]
                         lifecycles[sid]["artifact"] = {"bytes": selected["media_bytes"]}
                         installed_edition = str(selected["version"])
-                    state = {"published": native_status.get("published", False), "enabled": False, "serving": False, "ready_for_publication": False, "entry_path": "/kolibri/en/learn/"}
+                        if native_status.get("installed_digest"):
+                            update_check = update_check_store.load(sid, native_status["installed_digest"])
+                    state = {"published": native_status.get("published", False),
+                             "enabled": native_status.get("published", False),
+                             "serving": native_status.get("published", False),
+                             "ready_for_publication": verified, "entry_path": "/kolibri/en/learn/"}
                 except (OSError, ValueError, KeyError, sqlite3.Error):
                     native_status = {"configured": False, "error": "Native service unavailable"}
             publication_filter = ("unknown" if state and state.get("error") else
@@ -2475,6 +2501,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             if native_status is not None and not verified and not busy:
                 download_filter = "not-downloaded"
             replacement = candidate = None
+            if native_status and native_status.get("candidate"):
+                replacement = {"state": "verified", "sha256": native_status["candidate_digest"]}
             if record["configuration"]["format"] in document_replacement.FORMATS:
                 try:
                     replacement = document_replacement.status(record)
@@ -3041,6 +3069,16 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     self._send_json(409, {"error": "catalog revision changed"})
                     return
                 record = next((item for item in catalog["sources"] if item["source_id"] == source_id), None)
+                if record is not None and record["configuration"].get("format") == "kolibri":
+                    try:
+                        manager = kolibri_admin.configured()
+                        if manager is None:
+                            raise ValueError("Native educational service unavailable")
+                        manager.publish(source_id, enabled)
+                        self._send_json(200, {"enabled": enabled, "revision": catalog["revision"]})
+                    except (OSError, ValueError, KeyError, sqlite3.Error, subprocess.SubprocessError) as exc:
+                        self._send_json(409, {"error": str(exc)[:300]})
+                    return
                 is_epub = record is not None and self._epub_record(record)
                 is_pdf = record is not None and self._pdf_record(record)
                 is_document = is_pdf or is_epub

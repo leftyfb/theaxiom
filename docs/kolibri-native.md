@@ -82,3 +82,71 @@ rendering. Further acceptance tests must include answering an exercise,
 subtitle display, alternate-origin packaged HTML, global search,
 publication/removal and rollback. No production download or install has
 been authorized by the probe.
+
+## Optional runtime provisioning
+
+The application can be deployed without installing Kolibri. In this state the
+preconfigured educational card remains available to the administrator but no
+reader or downloads are enabled. The optional service has a separate local
+home, native learner database and credential; it uses the existing
+`theaxiom` service identity to permit the authenticated Axiom job coordinator
+to run the official native disk import commands without sudo.
+
+After exact-revision CI and guarded application deployment, an independently
+authorized local operator can run:
+
+```sh
+sudo bash /opt/theaxiom/app/scripts/install_kolibri_optional.sh EXACT_DEPLOYED_SHA
+```
+
+The installer refuses existing native configuration, occupied ports, missing
+TLS material or unresolved acquisitions. It pins Kolibri 0.19.5 in a separate
+virtualenv, uses the configured library mount for live content and retained
+verified packages, and stores native application state privately. It creates
+a separate native administrator and leaves the bootstrap record readable
+only by root. No channel metadata or educational files are acquired and no
+channel is published. The reader is closed on both origins until Axiom has
+acknowledged an exact native publication.
+
+The main proxy is optional. HTTP uses a separate alternate origin on 8084,
+HTTPS on 8443; loopback-only native endpoints are 8082 and 8083. The two
+public alternate listeners use the same host as the browser, with the
+existing certificate for TLS. The pinned vendor settings compatibility
+module restricts browser CSP to those alternate ports. On HTML only, the
+Nginx scheme map changes the vendor's compact alternate port setting;
+the existing CA and TLS files are not rewritten.
+
+The installer is not part of the ordinary guarded deployment runner, which
+does not install new packages, services or public listener configurations.
+Extend that local owner-controlled deployment authorization separately
+before unattended production activation; never route this action through
+a development agent or broaden deployment permissions from an issue comment.
+
+## Lifecycle and search
+
+The source profile contains a generic Kolibri channel ID. The authenticated
+scope picker fetches official metadata only, allows hierarchical selection,
+and estimates exact deduplicated content bytes and license inventory before
+starting a transfer. The version-pinned package retains its manifest digest
+in the private job ledger and is imported via native Kolibri disk commands.
+The retained package is distinct from the live native content store; allow
+additional storage for the native copy and retained rollback package.
+
+Both Nginx reader origins use a fail-closed acknowledgement registry.
+An in-flight or interrupted native publication transaction closes both
+origins, and direct native database export or remote-source selectors are
+not exposed. The verified post-import leaf set must match the reviewed
+selection, including all previously published channels. The local public
+search adapter reads only available nodes from this acknowledged live
+database, searches topic/lesson titles and descriptions, and returns
+native permalink URLs; caption files are native local WebVTT resources.
+Transcript full-text indexing is not enabled in this initial adapter.
+
+Updates compare official channel versions and preserve the exact installed
+selection; a removed or changed node that cannot be resolved into the new
+version is reported for review rather than silently expanding scope.
+The existing metadata sweep and batch update controls use installed
+manifest-bound evidence. Native update promotion and rollback retain the
+same learner database and replace only channel content. Native publication
+and rollback require explicit verified state; a failed transaction deliberately
+keeps the reader closed pending operator recovery.

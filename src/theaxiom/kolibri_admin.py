@@ -7,7 +7,7 @@ import tempfile
 import threading
 
 from . import catalog_store, kolibri_jobs, kolibri_native as native, kolibri_publication
-from . import kolibri_scope as scope, pdf_source, storage_settings
+from . import kolibri_scope as scope, pdf_source, storage_settings, update_check_store
 
 LOCK = threading.RLock()
 _INSTANCE = None
@@ -111,6 +111,8 @@ def status(manager, record):
     return {"configured": True, "active": sid in manager.active,
             "installed": selection, "published": bool(published),
             "candidate": bool(job.get("candidate")), "previous": bool(job.get("previous")),
+            "candidate_digest": (job.get("candidate") or {}).get("manifest_sha256"),
+            "installed_digest": (installed or {}).get("manifest_sha256"),
             "job": {key: job[key] for key in ("state", "active", "downloaded_bytes", "expected_bytes",
                 "sampled_at", "speed_bytes_per_second", "detail") if key in job}}
 
@@ -133,3 +135,33 @@ def start_download(manager, record, selected, *, update=False):
         except BaseException:
             manager.active.remove(sid)
             raise
+
+
+def check_update(manager, record):
+    """Metadata-only check, bound to the installed exact scope and manifest."""
+    if manager is None:
+        return None
+    sid = record["source_id"]
+    artifact = manager.read(sid).get("installed")
+    if not artifact:
+        return None
+    old = manager._selection(artifact)
+    refreshed = refresh(manager, record)
+    item = refreshed["channel"]
+    result = {"installed_edition": str(old.version)}
+    if item["version"] > old.version:
+        try:
+            selected, review = selection(manager, record, list(old.nodes), old.allow_full)
+            if review["missing_license_count"]:
+                raise ValueError("Resource license metadata incomplete")
+            result.update(state="update_available", candidate_edition=str(selected.version),
+                candidate_sha256=review["metadata_sha256"], candidate_bytes=review["total_bytes"],
+                candidate_url=native.metadata_url(old.channel_id, selected.version),
+                evidence="Publisher channel has a newer version for the installed scope.")
+        except (OSError, ValueError):
+            result.update(state="unable_to_determine", evidence="Installed topic scope could not be preserved.")
+    else:
+        result.update(state="up_to_date" if item["version"] == old.version else "older_candidate",
+                      evidence="Compared the current official channel version.")
+    update_check_store.save(sid, artifact["manifest_sha256"], result)
+    return result
