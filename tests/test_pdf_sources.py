@@ -632,3 +632,57 @@ def test_delete_downloaded_documents_preserves_profile_and_unpublishes_first(pdf
     assert not source(result, SID)["installed_verified"]
     install(SID, BytesIO(body))
     assert target.exists()
+
+
+@pytest.mark.parametrize("policy,expected", [("recommend", "notify"), ("disabled", "disabled")])
+def test_download_capability_recommends_without_overriding_explicit_policy(pdf_app, disk, monkeypatch, policy, expected):
+    from io import BytesIO
+    request, _ = pdf_app
+    data = document()
+    tag = '"verified-get"'
+    def probe(url, **kwargs):
+        return {"source_url": url, "reachable": True, "status": 200, "etag": tag}
+    monkeypatch.setattr(admin_api.pdf_transport, "probe_document_metadata", probe)
+    monkeypatch.setattr(admin_api.pdf_transport, "download",
+                        lambda sid, url, **kwargs: (pdf_source.install_stream(sid, BytesIO(data),
+                            **{k:v for k,v in kwargs.items() if k != "capture_validator"}), tag))
+    catalog = mutate(request, request("/api/sources"), "add",
+                     dict(title="Guide", format="pdf", source_url="https://publisher.org/guide.pdf",
+                          update_policy=policy), sid=SID)
+    request("/api/action", {"source_id": SID, "action": "pdf-download", "revision": catalog["revision"]})
+    row = source(request("/api/sources"), SID)
+    assert row["configuration"]["update_policy"] == expected
+    assert row["document_capability"]["recommended_policy"] == "notify"
+    assert not row["publication"]["enabled"]
+    assert not request("/api/acquisition-batch")["jobs"]
+
+
+def test_explicit_capability_recheck_preserves_published_document_and_policy(pdf_app, disk, monkeypatch):
+    from contextlib import contextmanager
+    from io import BytesIO
+    request, _ = pdf_app
+    data = document()
+    tag = '"baseline"'
+    configured = dict(fields(data), update_policy="disabled")
+    catalog = mutate(request, request("/api/sources"), "add", configured, sid=SID)
+    artifact = pdf_source.install_stream(SID, BytesIO(data))
+    request("/api/publication", dict(source_id=SID, enabled=True, revision=catalog["revision"]))
+    monkeypatch.setattr(admin_api.pdf_transport, "probe_document_metadata", lambda url, **kwargs: {
+        "source_url": url, "reachable": True, "status": 200, "etag": tag})
+    @contextmanager
+    def read(url, **kwargs):
+        assert kwargs["required_etag"] == tag and kwargs["limit"] == len(data)
+        stream = BytesIO(data)
+        stream.etag = tag
+        yield stream
+    monkeypatch.setattr(admin_api.pdf_transport, "open_pdf", read)
+    payload = {"source_id": SID, "revision": request("/api/sources")["revision"]}
+    request("/api/document-capability", payload, origin="", status=403)
+    outcome = request("/api/document-capability", payload)
+    assert outcome["reason"] == "baseline_verified"
+    row = source(request("/api/sources"), SID)
+    assert row["configuration"]["update_policy"] == "disabled"
+    assert row["publication"]["enabled"]
+    assert row["artifact"]["sha256"] == artifact["sha256"]
+    assert request(READER + "/document.pdf", raw=True)[0] == data
+    assert not request("/api/acquisition-batch")["jobs"]

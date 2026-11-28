@@ -236,7 +236,7 @@ class CatalogStore:
         discovery = update_discovery_config.settings(config)
         if discovery["method"] != "manual":
             config.update(update_method=discovery["method"], update_endpoint=discovery["endpoint"],
-                          update_policy=update_discovery_config.policy(config)[0])
+                          update_policy=config.get("update_policy") or update_discovery_config.policy(config)[0])
             return True
         return False
 

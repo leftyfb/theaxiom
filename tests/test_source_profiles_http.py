@@ -23,6 +23,7 @@ PIN = source_catalog.WIKIPEDIA_SOURCE
 
 @pytest.fixture
 def app(tmp_path, monkeypatch):
+    monkeypatch.setattr(pdf_transport, "probe_document_metadata", lambda url, **kwargs: {"source_url": url, "reachable": False, "status": 503})
     store = catalog_store.CatalogStore(tmp_path / "sources.json")
     monkeypatch.setattr(admin_api, "SOURCE_CATALOG", store)
     monkeypatch.setattr(storage_settings, "SETTINGS_PATH", tmp_path / "storage.json")

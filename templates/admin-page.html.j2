@@ -806,6 +806,7 @@
           <div><label for="catalog-update-policy">Update policy</label>
             <select id="catalog-update-policy" name="update_policy">
               <option value="notify">Notify only</option>
+              <option value="recommend">Recommend from document capability</option>
               <option value="automatic">Automatic</option><option value="scheduled">Scheduled</option>
               <option value="disabled">Disabled (no periodic checks)</option>
             </select>
@@ -1104,11 +1105,15 @@
           <p class="source-note">Update discovery: {{ {'head': 'HTTPS / ETag', 'kiwix': 'Kiwix OPDS / Metalink', 'archive': 'Internet Archive editions', 'builds': 'Protomaps map builds', 'manual': 'Manual update discovery'}.get(discovery.method, 'Unknown') }}</p>
           {% endif %}
           {% set auto = source.automatic_update %}
-          <p class="source-note" data-field="automatic-update"{% if not auto %} hidden{% endif %}>{% if auto %}Update policy: {{ 'Notify only' if auto.policy == 'notify' else auto.policy|capitalize }}{% if auto.next %} · {{ auto.next }}{% endif %}{% if auto.check %} · {{ auto.check }}{% endif %}{% if auto.attempt %} · Last automatic attempt: {{ auto.attempt }}{% endif %}{% if auto.server_time %} · Server local: {{ auto.server_time }} ({{ auto.time_zone }}){% endif %}{% endif %}</p>
+          <p class="source-note" data-field="automatic-update"{% if not auto %} hidden{% endif %}>{% if auto %}Update policy: {{ 'Recommendation pending (checks disabled)' if source.configuration.update_policy == 'recommend' else 'Notify only' if auto.policy == 'notify' else auto.policy|capitalize }}{% if auto.next %} · {{ auto.next }}{% endif %}{% if auto.check %} · {{ auto.check }}{% endif %}{% if auto.attempt %} · Last automatic attempt: {{ auto.attempt }}{% endif %}{% if auto.server_time %} · Server local: {{ auto.server_time }} ({{ auto.time_zone }}){% endif %}{% endif %}</p>
 
           <p class="source-note" data-field="update-evidence">
             {% if source.update_check %}{{ source.update_check.evidence }}{% endif %}
           </p>
+        {% if document %}
+          <p class="source-note" data-field="document-capability">{% if source.document_capability %}Update capability: {{ source.document_capability.evidence }}{% if source.document_capability.recommended_policy %} · Recommended: {{ 'Notify only' if source.document_capability.recommended_policy == 'notify' else 'Disabled' }}{% endif %}{% endif %}</p>
+          {% if url_managed %}<button type="button" class="button" data-document-capability-check>Recheck update capability</button>{% endif %}
+        {% endif %}
         {% if source.zim_download or (document and url_managed) %}
         <p class="source-note" data-field="update-details"{% if not source.update_check or source.update_check.state != "update_available" and not source.update_check.candidate_token %} hidden{% endif %}>
         {% if source.update_check and (source.update_check.state == "update_available" or source.update_check.candidate_token) %}
@@ -2047,6 +2052,7 @@
       const endpointTest = document.getElementById('test-update-endpoint');
       const endpointFeedback = document.getElementById('update-endpoint-feedback');
       let editorGeneration = 0;
+      let policyTouched = false;
       function discoveryOptions() {
         const structured = ['json','csv'].includes(format.value);
         if (format.value === 'csv') input('data_record_path').value = '';
@@ -2064,13 +2070,16 @@
         const manual = method.value === 'manual';
         const policy = input('update_policy');
         const downloadUrl = input('source_url').value.trim();
-        const supportsDocuments = ['pdf','epub'].includes(format.value) &&
+        const isDocument = ['pdf','epub'].includes(format.value);
+        const supportsDocuments = isDocument &&
           /^https:\/\//.test(downloadUrl) && (!endpoint.value.trim() || endpoint.value.trim() === downloadUrl);
         const supportsUnattended = !manual && (['zim', 'pmtiles'].includes(format.value) || supportsDocuments);
         for (const option of policy.options) {
           if (['automatic', 'scheduled'].includes(option.value)) option.disabled = !supportsUnattended;
+          if (option.value === 'recommend') option.disabled = !isDocument;
         }
-        if (policy.selectedOptions[0]?.disabled) policy.value = 'notify';
+        if (form.dataset.operation === 'add' && !policyTouched) policy.value = isDocument ? 'recommend' : 'disabled';
+        if (policy.selectedOptions[0]?.disabled) policy.value = 'disabled';
         for (const name of ['update_window_start', 'update_window_end']) {
           input(name).required = policy.value === 'scheduled';
         }
@@ -2086,6 +2095,8 @@
         endpointFeedback.textContent = '';
         editorGeneration++;
       }
+      input('update_policy').addEventListener('input', () => { policyTouched = true; });
+      input('update_policy').addEventListener('change', () => { policyTouched = true; });
       for (const field of [format, uploadFile, input('source_url'), input('update_method'), input('update_endpoint'), input('update_policy')]) {
         field.addEventListener('input', discoveryOptions);
         field.addEventListener('change', discoveryOptions);
@@ -2211,6 +2222,7 @@
             field.value = value;
           }
         }
+        policyTouched = !!card;
         if (!card) input('update_policy').value = 'disabled';
         else if (!input('update_policy').value) input('update_policy').value = input('update_method').value ? 'disabled' : 'notify';
         discoveryOptions();
@@ -2489,6 +2501,19 @@
           restoreActionFocus(card, button, hadFocus);
           showFilteredAction();
         }
+      }));
+      document.querySelectorAll('[data-document-capability-check]').forEach(button => button.addEventListener('click', async () => {
+        if (button.disabled) return;
+        const card = button.closest('.source-card');
+        const feedback = card.querySelector('[data-field="document-capability"]');
+        button.disabled = true;
+        card.dataset.capabilityPosting = 'true';
+        feedback.textContent = 'Checking capability (may verify installed bytes against the publisher)…';
+        try {
+          const result = await sourceMutation('/api/document-capability', card, {}, 'Capability check failed');
+          feedback.textContent = 'Update capability: ' + result.evidence + (result.recommended_policy ? ' · Recommended: ' + (result.recommended_policy === 'notify' ? 'Notify only' : 'Disabled') : '');
+        } catch (error) { feedback.textContent = error.message; }
+        finally { delete card.dataset.capabilityPosting; button.disabled = false; window.axiomRefreshSources?.(); }
       }));
       document.querySelectorAll('[data-zim-update-check], [data-document-update-check]').forEach(button => button.addEventListener('click', async () => {
         if (button.disabled) return;
@@ -3267,12 +3292,18 @@
                 update.state === 'update_available' ? '' : description[update.state] || '') :
                 (source?.installed_verified && source?.discovery?.method && source.discovery.method !== 'manual' ? 'No update check recorded' : '');
             }
+            const capabilityDisplay = card.querySelector('[data-field="document-capability"]');
+            if (capabilityDisplay && source && card.dataset.capabilityPosting !== 'true') {
+              const cap = source.document_capability;
+              capabilityDisplay.textContent = cap ? 'Update capability: ' + cap.evidence +
+                (cap.recommended_policy ? ' · Recommended: ' + (cap.recommended_policy === 'notify' ? 'Notify only' : 'Disabled') : '') : '';
+            }
             const automatic = card.querySelector('[data-field="automatic-update"]');
             if (automatic) {
               const auto = source?.automatic_update;
               automatic.hidden = !auto?.policy;
               automatic.textContent = auto?.policy ? [
-                'Update policy: ' + (auto.policy === 'notify' ? 'Notify only' : auto.policy[0].toUpperCase() + auto.policy.slice(1)),
+                'Update policy: ' + (source.configuration?.update_policy === 'recommend' ? 'Recommendation pending (checks disabled)' : auto.policy === 'notify' ? 'Notify only' : auto.policy[0].toUpperCase() + auto.policy.slice(1)),
                 auto.next, auto.check, auto.attempt ? 'Last automatic attempt: ' + auto.attempt : '',
                 auto.server_time ? `Server local: ${auto.server_time} (${auto.time_zone})` : ''
               ].filter(Boolean).join(' · ') : '';

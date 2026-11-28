@@ -16,6 +16,8 @@ def policy(config, method=None):
     """Legacy records never imply permission to acquire content."""
     selected = config.get("update_policy") or (
         "disabled" if config.get("update_method") not in (None, "", "auto") else "notify")
+    if selected == "recommend" and config.get("format") in {"pdf", "epub"}:
+        selected = "disabled"  # pending capability; never authorizes unattended work
     if selected not in POLICIES:
         raise ValueError("Invalid update policy")
     # Legacy explicit opt-outs always win, including contradictory unattended

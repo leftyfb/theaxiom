@@ -44,6 +44,7 @@ pdf_source = importlib.import_module(f"{__package__}.pdf_source" if __package__ 
 epub_source = importlib.import_module(f"{__package__}.epub_source" if __package__ else "theaxiom.epub_source")
 pdf_language = importlib.import_module(f"{__package__}.pdf_language" if __package__ else "theaxiom.pdf_language")
 pdf_transport = importlib.import_module(f"{__package__}.pdf_transport" if __package__ else "theaxiom.pdf_transport")
+document_capability = importlib.import_module(f"{__package__}.document_capability" if __package__ else "theaxiom.document_capability")
 document_origin_evidence = importlib.import_module(f"{__package__}.document_origin_evidence" if __package__ else "theaxiom.document_origin_evidence")
 document_update_discovery = importlib.import_module(f"{__package__}.document_update_discovery" if __package__ else "theaxiom.document_update_discovery")
 document_replacement = importlib.import_module(f"{__package__}.document_replacement" if __package__ else "theaxiom.document_replacement")
@@ -432,8 +433,22 @@ def _acquire_document(sid, record, config, revision, is_epub, fields, *, adding=
             fields[key] = extracted[key]
     if adding and auto_title and extracted.get("title"):
         fields["title"] = extracted["title"]
+    capability_record = {"source_id": sid, "configuration": dict(config, **{
+        "sha256": observed["sha256"], "expected_size_bytes": str(observed["bytes"])})}
+    pin = dict(observed, source_url=url)
+    try:
+        capability = document_capability.inspect(capability_record, installed_etag=installed_etag or "", pin=pin)
+    except (OSError, ValueError, TypeError, KeyError):
+        capability = document_capability.result("unknown", "inspection_unavailable",
+                                                "Capability could not be established; policy unchanged.")
+    if config.get("update_policy") == "recommend" and capability["recommended_policy"]:
+        fields["update_policy"] = capability["recommended_policy"]
     updated = SOURCE_CATALOG.mutate("add" if adding else "edit", sid, fields, revision,
                                     activity_action="downloaded", activity_trigger=activity_trigger)
+    try:
+        document_capability.save(next(row for row in updated["sources"] if row["source_id"] == sid), capability)
+    except (OSError, ValueError):
+        pass
     # Preserve only a strong ETag captured from the actual successful GET,
     # and only after the verified artifact and source catalog both commit.
     # This auxiliary evidence is advisory; failures must never convert an
@@ -2368,6 +2383,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             sources.append(dict(record, **lifecycles[sid], acquisition=_public_acquisition(job), replacement=replacement, replacement_available=replacement_available,
                                 update_check=update_check if discovery["method"] != "manual" else None,
                                 discovery=discovery, automatic_update=automatic,
+                                document_capability=document_capability.status(record),
                                 installed_verified=verified, installed_edition=installed_edition,
                                 publication=state, mutation_blocked=busy,
                                 publication_filter=publication_filter, download_filter=download_filter))
@@ -2604,6 +2620,38 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 self._send_json(400, {"error": str(exc)})
                 return
             self._send_json(200, result)
+        elif self.path == "/api/document-capability":
+            if not self.headers.get("Origin"):
+                self._send_json(403, {"error": "same-origin request required"})
+                return
+            data = self._read_body()
+            if (set(data) != {"source_id", "revision"} or not isinstance(data["source_id"], str)
+                    or not catalog_store.ID_RE.fullmatch(data["source_id"])
+                    or not self._valid_revision(data["revision"])):
+                self._send_json(400, {"error": "invalid capability request"})
+                return
+            try:
+                with publication.LOCK:
+                    catalog = SOURCE_CATALOG.get()
+                    if catalog["revision"] != data["revision"]:
+                        raise catalog_store.RevisionConflict("catalog revision changed")
+                    record = next((row for row in catalog["sources"] if row["source_id"] == data["source_id"]), None)
+                    if not record or record["configuration"].get("format") not in {"pdf", "epub"}:
+                        raise ValueError("Source is not a document")
+                    if _document_pending(data["source_id"]):
+                        raise ValueError("Finish the active document operation first")
+                    with kiwix_update_scheduler.check_lock() as locked:
+                        if not locked:
+                            raise ValueError("Another metadata check is running")
+                        outcome = document_capability.inspect(record, pin=document_replacement.installed(record, verify=True), establish=True)
+                        document_capability.save(record, outcome)
+                        if record["configuration"].get("update_policy") == "recommend" and outcome["recommended_policy"]:
+                            catalog = SOURCE_CATALOG.mutate("edit", data["source_id"], {"update_policy": outcome["recommended_policy"]}, catalog["revision"])
+                self._send_json(200, dict(outcome, revision=catalog["revision"]))
+            except (ValueError, catalog_store.CatalogError) as exc:
+                self._send_json(409, {"error": str(exc)})
+            except OSError:
+                self._send_json(503, {"error": "Capability check unavailable"})
         elif self.path == "/api/update-check":
             # Explicit metadata-only request. No archive transfer, activation,
             # publication mutation or untrusted caller-provided URL.
@@ -2812,7 +2860,16 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                             and fields.get("format", existing["configuration"]["format"]) != existing["configuration"]["format"]):
                         self._guard_published_mutation(operation, sid, fields, revision)
                     try:
+                        if operation == "add" and isinstance(fields, dict) and fields.get("format") in {"pdf", "epub"} and not fields.get("update_policy"):
+                            fields = dict(fields, update_policy="recommend" if fields.get("source_url") else "disabled")
                         result = SOURCE_CATALOG.mutate(operation, sid, fields, revision, busy)
+                        if operation == "add" and isinstance(fields, dict) and fields.get("format") in {"pdf", "epub"}:
+                            added = next(row for row in result["sources"] if row["source_id"] == sid)
+                            try:
+                                capability = document_capability.inspect(added)
+                                document_capability.save(added, capability)
+                            except (OSError, ValueError):
+                                pass
                         if operation == "remove" and is_pdf:
                             document_replacement.forget(sid)
                     except (catalog_store.CatalogError, OSError) as exc:
@@ -3078,6 +3135,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 SOURCE_CATALOG._validate_fields(fields, catalog_store.PROFILE_FIELDS | {"source_url", "license", "update_policy"} | update_discovery_config.FIELDS,
                                                 required={"title"})
                 fields["format"] = requested_format
+                if not fields.get("update_policy") or fields.get("update_policy") == "recommend":
+                    fields["update_policy"] = "disabled"
                 update_discovery_config.settings(fields)
                 if fields.get("source_url") and not pdf_source.valid_source_url(fields["source_url"]):
                     raise ValueError
@@ -3177,6 +3236,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 if not pdf_source.valid_source_url(fields["source_url"]):
                     raise ValueError("A direct HTTPS EPUB URL is required")
                 fields["format"] = "epub"
+                if not fields.get("update_policy"):
+                    fields["update_policy"] = "recommend"
                 update_discovery_config.settings(fields)
             except (ValueError, TypeError):
                 self._send_json(400, {"error": "invalid new EPUB source metadata"})

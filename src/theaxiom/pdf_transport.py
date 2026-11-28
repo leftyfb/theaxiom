@@ -294,7 +294,7 @@ def open_pdf(url, *, format_name="pdf", limit=None, total_seconds=None, offset=0
                     if validator != etag and validator != last_modified:
                         raise ValueError("Publisher changed ZIM identity since partial download")
                 yield _BoundedBody(response, deadline, length, limit - offset,
-                                   etag=etag, last_modified=last_modified, total_size=total_size)
+                                   etag=etag if format_name == "zim" or hop == 0 else None, last_modified=last_modified, total_size=total_size)
                 return
             finally:
                 response.close()
@@ -395,6 +395,7 @@ def _document_metadata_request(url, parsed, address, deadline, method, headers):
                 raise ValueError("Unsolicited conditional response")
             return {"source_url": url, "reachable": True, "status": response.status,
                     "etag": etag, "last_modified": last_modified,
+                    "validator_kind": "strong" if etag else "weak" if etags and etags[0].startswith("W/") else "missing",
                     "content_length": size, "error": ""}
         finally:
             response.close()
