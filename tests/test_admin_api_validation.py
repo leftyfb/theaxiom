@@ -89,7 +89,7 @@ class AdminAPIValidationTests(unittest.TestCase):
             status, saved = self.post_raw(
                 json.dumps(updated).encode(), path="/api/storage-settings"
             )
-            self.assertEqual(status, 200)
+            self.assertEqual(status, 200, saved)
             self.assertEqual(saved, updated)
             with urllib.request.urlopen(
                 f"http://127.0.0.1:{self.port}/api/storage-settings", timeout=5
@@ -275,10 +275,11 @@ class AdminAPIValidationTests(unittest.TestCase):
             before = admin_api.SOURCE_CATALOG.get()
             source = next(item for item in before["sources"] if item["source_id"] == "food-reference")
             self.assertEqual(source["configuration"]["format"], "unspecified")
-            with mock.patch.object(monitor.snapshot, "return_value", {"stale": True, "acquisitions": []}):
-                status, _ = self.post_source({"operation": "edit", "source_id": source["source_id"], "revision": before["revision"], "fields": {"title": "Changed"}})
-                self.assertNotEqual(status, 200)
-                self.assertEqual(admin_api.SOURCE_CATALOG.get(), before)
+            self.addCleanup(setattr, monitor.snapshot, "return_value", monitor.snapshot.return_value)
+            monitor.snapshot.return_value = {"stale": True, "acquisitions": []}
+            status, _ = self.post_source({"operation": "edit", "source_id": source["source_id"], "revision": before["revision"], "fields": {"title": "Changed"}})
+            self.assertNotEqual(status, 200)
+            self.assertEqual(admin_api.SOURCE_CATALOG.get(), before)
 
     def test_published_wikipedia_removal_unpublishes(self):
         from tempfile import TemporaryDirectory
