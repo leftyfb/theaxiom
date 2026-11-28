@@ -21,7 +21,7 @@ jobs:
           python -m pip install -e '.[dev]' 'kolibri==0.19.5' 'playwright>=1.50,<2'
           python -m playwright install chromium
       - name: Native package regression tests
-        run: python -m pytest -q tests/test_kolibri_scope.py tests/test_kolibri_native.py
+        run: python -m pytest -q tests/test_kolibri_scope.py tests/test_kolibri_native.py tests/test_kolibri_search.py
       - name: Verify native scoped import and offline browser
         run: python scripts/probe_kolibri_native.py
       - name: Remove isolated runtime

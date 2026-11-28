@@ -9,7 +9,7 @@ import threading
 import time
 import xml.etree.ElementTree as ET
 
-from . import document_search, publication, structured_source
+from . import document_search, kolibri_search, publication, structured_source
 
 MAX_QUERY = 160
 MAX_RESULTS = 20
@@ -58,6 +58,10 @@ def valid_link(href: str, route: dict) -> bool:
         parsed = urlsplit(href)
         decoded = unquote(parsed.path)
         prefix = route["path"]
+        if route.get("kind") == "kolibri":
+            return (not parsed.scheme and not parsed.netloc and not parsed.fragment
+                    and parsed.path == "/kolibri/viewcontent"
+                    and re.fullmatch(r"node_id=[0-9a-f]{32}", parsed.query) is not None)
         if route.get("kind") == "structured":
             digest = route["snapshot"]["artifact"]["sha256"]
             return (not parsed.scheme and not parsed.netloc and not parsed.query and not parsed.fragment
@@ -234,3 +238,12 @@ KIWIX_ADAPTER = Adapter(KIWIX_CAPABILITY, search_kiwix)
 
 DOCUMENT_ADAPTER = Adapter("Document metadata and text search", document_search.search_document)
 STRUCTURED_ADAPTER = Adapter("Data record search", structured_source.search_records)
+
+
+def search_kolibri(route, query):
+    rows, more = kolibri_search.search_nodes(route["database"], route["channel_id"], query,
+        offset=route.get("offset", 0), limit=MAX_RESULTS, deadline=route.get("deadline"))
+    return Page([Result(*row) for row in rows], has_more=more)
+
+
+KOLIBRI_ADAPTER = Adapter("Educational topic and lesson search", search_kolibri)

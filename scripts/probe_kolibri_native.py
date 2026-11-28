@@ -190,6 +190,7 @@ http {{
                     video.evaluate("(v) => { v.muted=true; return v.play(); }")
                     page.wait_for_function("document.querySelector('video').currentTime > 0",timeout=15000)
                     print("NATIVE OFFLINE VIDEO PLAYBACK PASSED",flush=True)
+                    page.set_viewport_size({"width": 1280, "height": 900})
                     node,title,_=rows["exercise"]
                     page.goto(origin+"/kolibri/viewcontent?node_id="+node,wait_until="domcontentloaded")
                     page.get_by_text(title,exact=True).first.wait_for(timeout=45000)
@@ -215,7 +216,7 @@ http {{
                             choice=page.locator(".perseus-root .perseus [role=radio]:visible, .perseus-root .perseus input[type=radio]:visible")
                             assert choice.count(), "No accessible answer widget"
                             choice.first.click()
-                    page.get_by_role("button",name="Check",exact=True).click()
+                    page.get_by_role("button",name="Check",exact=True).press("Enter")
                     page.get_by_text(re.compile(r"^(Correct!|Try again|Great! Keep going|Try a different question|Try next question)$")).first.wait_for(state="visible",timeout=30000)
                     print("OFFLINE EXERCISE ANSWER CHECK PASSED",flush=True)
                     print("EXTERNAL REQUEST HOSTS BLOCKED",sorted(blocked),flush=True)
