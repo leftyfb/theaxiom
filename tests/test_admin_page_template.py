@@ -3,7 +3,7 @@ from pathlib import Path
 from jinja2 import Environment, FileSystemLoader
 from theaxiom.admin_api import ACTION_LABELS, select_lifecycle
 from theaxiom.source_catalog import WIKIPEDIA_SOURCE
-from theaxiom.catalog_store import EDITABLE
+from theaxiom.catalog_store import EDITABLE, GENERATOR_FIELDS
 from theaxiom import zim_catalog
 
 TEMPLATE = Path(__file__).parents[1] / "templates/admin-page.html.j2"
@@ -17,7 +17,7 @@ def profile(source_id="fixture", title="Fixture", description="", **configuratio
 
 
 def render(sources=(), **overrides):
-    values = dict(catalog=dict(sources=sources, revision=0), editable_fields=sorted(EDITABLE),
+    values = dict(catalog=dict(sources=sources, revision=0), editable_fields=sorted(EDITABLE - GENERATOR_FIELDS),
                   action_labels=ACTION_LABELS)
     values.update(overrides)
     return Environment(loader=FileSystemLoader(TEMPLATE.parent), autoescape=True).get_template(TEMPLATE.name).render(**values)
@@ -106,7 +106,7 @@ def test_catalog_management_form_exposes_metadata_and_confirmation_controls():
     import re
     policy = page.split('id="catalog-update-policy"', 1)[1].split("</select>", 1)[0]
     assert re.findall(r'<option value="([^"]*)"', policy) == ["notify", "recommend", "automatic", "scheduled", "disabled"]
-    for field in (EDITABLE - {"icon_png", "update_periodic"}) | {"source_id"}:
+    for field in (EDITABLE - GENERATOR_FIELDS - {"icon_png", "update_periodic"}) | {"source_id"}:
         assert f'name="{field}"' in page
     assert 'data-catalog-edit="field-guide"' in page
     assert 'data-catalog-source-url="https://example.org/guide?topic=a&amp;part=b"' in page

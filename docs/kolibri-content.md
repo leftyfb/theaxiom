@@ -111,3 +111,12 @@ Production needs zimwriterfs and existing kiwix-serve. No additional web service
 is required for static media. The current implementation still needs validation
 against a real channel export, generated media playback and search, mobile
 selection, update/rollback, and guarded Vancouver deployment before acceptance.
+
+Live upstream metadata probe (2026-11-28 UTC, run 46140803998): US English
+curriculum edition 5, 119615488 metadata bytes, SHA-256
+42e79466478baeade33e1b816db859bc89601b384a3621bbe7cc81952ad89c21.
+18,629 video entries, 9,072 exercises, 6,787 topic nodes, 77,315 unique files;
+66,933,846,231 bytes (~62.3 GiB) before static filtering. No full content was
+acquired. Licenses: CC BY-NC-SA (18,575), CC BY-NC-ND (52), Special
+Permissions (9,074). The source configuration retains the publisher-required
+availability notice rather than hard-coding it into the generic reader.

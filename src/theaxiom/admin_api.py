@@ -2422,7 +2422,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             admin_page=page,
             catalog=self._source_profiles(catalog_snapshot) if page in {"sources", "updates"} else catalog_snapshot if page == "groupings" else None,
             selection_presets={key: value[0] for key, value in library_selection.PRESETS.items()},
-            editable_fields=sorted(catalog_store.EDITABLE - {"update_periodic"}),
+            editable_fields=sorted(catalog_store.EDITABLE - {"update_periodic"} - catalog_store.GENERATOR_FIELDS),
             action_labels=ACTION_LABELS,
             password_change_enabled=bool(getattr(getattr(self.server, "axiom_config", None), "store", None)),
             session_csrf_token=getattr(self, "_session_csrf", None),
@@ -2878,6 +2878,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             try:
                 with publication.LOCK:
                     operation, fields, revision = data["operation"], data["fields"], data["revision"]
+                    if isinstance(fields, dict) and fields.keys() & catalog_store.GENERATOR_FIELDS:
+                        raise catalog_store.CatalogError("Use the educational scope selector for generator settings")
                     catalog = SOURCE_CATALOG.get()
                     existing = next((item for item in catalog["sources"] if item["source_id"] == sid), None)
                     is_pdf = (existing and (self._pdf_record(existing) or self._epub_record(existing))) or (

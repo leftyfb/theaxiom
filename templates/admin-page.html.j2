@@ -795,6 +795,7 @@
               <option value="kiwix">Kiwix OPDS / Metalink (ZIM)</option>
               <option value="archive">Internet Archive editions (ZIM)</option>
               <option value="builds">Protomaps map builds (PMTiles)</option>
+              <option value="kolibri">Kolibri channel metadata (generated ZIM)</option>
               <option value="head">HTTPS HEAD / ETag (PDF, EPUB)</option>
               <option value="manual">Manual / unsupported</option>
             </select>
@@ -2177,7 +2178,7 @@
         const method = input('update_method');
         const endpoint = input('update_endpoint');
         for (const option of method.options) {
-          option.disabled = (['kiwix', 'archive'].includes(option.value) && format.value !== 'zim') ||
+          option.disabled = (['kiwix', 'archive', 'kolibri'].includes(option.value) && format.value !== 'zim') ||
             (option.value === 'head' && !['pdf', 'epub'].includes(format.value)) || (option.value === 'builds' && format.value !== 'pmtiles');
         }
         if (method.selectedOptions[0]?.disabled) method.value = '';
@@ -2188,7 +2189,7 @@
         const isDocument = ['pdf','epub'].includes(format.value);
         const supportsDocuments = isDocument &&
           /^https:\/\//.test(downloadUrl) && (!endpoint.value.trim() || endpoint.value.trim() === downloadUrl);
-        const supportsUnattended = !manual && (['zim', 'pmtiles'].includes(format.value) || supportsDocuments);
+        const supportsUnattended = !manual && method.value !== 'kolibri' && (['zim', 'pmtiles'].includes(format.value) || supportsDocuments);
         for (const option of policy.options) {
           if (['automatic', 'scheduled'].includes(option.value)) option.disabled = !supportsUnattended;
           if (option.value === 'recommend') option.disabled = !isDocument;
