@@ -71,3 +71,43 @@ unavailable lessons from all reader and search routes. Verify representative
 videos and captions offline and do not claim unsupported exercise/transcript
 capabilities. Do not install a service or download a full channel on Vancouver
 until the integration has passed CI and the guarded deployment process.
+
+
+## Scoped static archive implementation (development)
+
+The scope selector fetches the official latest channel metadata and the
+version-specific export, and previews the selected subjects or individual
+lessons. Saving a selection does not initiate media acquisition. The default
+channel is English (US); other public channel IDs and ISO 639-3 language codes
+can be entered before the first download. The local selector supports up to
+15 selected nodes, and refuses the root selection. The resulting estimate
+includes supported selected media; allow approximately twice that size plus
+256 MiB for staging and conversion. The selected edition is pinned by SHA-256
+of its metadata; each acquired media file is checked against the published
+MD5 and exact byte size. The generated ZIM receives a separately measured
+SHA-256 and normal archive verification. Media transfer is tracked in bytes;
+conversion and final checksum are distinct from network acquisition.
+
+The static renderer builds local HTML pages and Kiwix-indexed text using
+zimwriterfs (Ubuntu package zim-tools). It retains topic ancestry and lesson
+titles, descriptions, known license and attribution, and supported local media.
+WebVTT captions and transcript text are included when available. It does not
+execute third-party HTML or package interactive exercises, scoring, accounts,
+or learning-progress features. Those require a native Kolibri service or a
+separate compatible renderer. Unsupported and unlicensed resources are
+omitted, and the count is shown before acquisition. Review item licenses and
+noncommercial/share-alike restrictions before publishing; the official
+Kolibri logo identifies the publisher, not endorsement.
+
+Updates are metadata-only checks of the official versioned channel. The
+same selected node IDs must still exist. A newer edition can be explicitly
+downloaded and published via the ordinary staged replacement workflow;
+automated acquisition is intentionally disabled for this generator. Removing
+a selected node upstream produces an inconclusive check, rather than silently
+expanding the scope. Generated bundles restart from zero after an interrupted
+conversion; they do not pretend to resume a publisher ZIM byte range.
+
+Production needs zimwriterfs and existing kiwix-serve. No additional web service
+is required for static media. The current implementation still needs validation
+against a real channel export, generated media playback and search, mobile
+selection, update/rollback, and guarded Vancouver deployment before acceptance.

@@ -57,6 +57,8 @@ def select(path, channel_id, nodes, *, allow_full=False):
             columns = {r[1] for r in conn.execute("PRAGMA table_info(content_contentnode)")}
             description = "description" if "description" in columns else "''"
             author = "author" if "author" in columns else "''"
+            if "license_owner" in columns:
+                author = "COALESCE(NULLIF(license_owner, ''), " + author + ")"
             rows = conn.execute(
                 "SELECT id,parent_id,title,kind,license_name,tree_id,lft,rght,"
                 + description + "," + author +
@@ -82,7 +84,9 @@ def select(path, channel_id, nodes, *, allow_full=False):
             topics = {}
             used = {}
             for row in candidates:
-                node, parent, title, _, license_name, *_, desc, owner = row
+                node, parent, title, kind, license_name, *_, desc, owner = row
+                if kind not in {"video", "audio", "document", "image", "pdf"}:
+                    continue
                 media = tuple(dict.fromkeys(links[node]))
                 if not license_name or not any(f.extension in PLAYABLE for f in media):
                     continue
@@ -186,7 +190,7 @@ def render(bundle, directory):
             if ext in {"mp4", "webm"}:
                 body += '<video controls preload="metadata" src="' + src + '">'
                 for caption in captions:
-                    body += '<track kind="subtitles" label="Captions" src="' + _media_name(caption) + '">'
+                    body += '<track kind="captions" label="Captions" src="' + _media_name(caption) + '">'
                 body += "</video>"
             elif ext in {"mp3", "ogg", "wav"}:
                 body += '<audio controls preload="metadata" src="' + src + '"></audio>'
@@ -310,7 +314,7 @@ def fields(bundle, nodes, digest, language):
             "generator_metadata_sha256": digest, "generator_transfer_bytes": str(bundle.total_bytes),
             "generator_language": language, "source_url": source_url(bundle.channel.channel_id, bundle.channel.version),
             "expected_size_bytes": "", "sha256": "", "publisher_md5": "", "publisher_sha1": "",
-            "edition": str(bundle.channel.version)}
+            "edition": str(bundle.channel.version), "update_endpoint": source_url(bundle.channel.channel_id)}
 
 
 def generate(config, directory, output, *, progress, guard):

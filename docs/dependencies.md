@@ -194,3 +194,7 @@ local users to rename or remove directory entries, including installed content;
 this can cause disruption even when the file checks reject substituted bytes.
 Use restrictive permissions on untrusted multi-user hosts, but the application
 does not silently change an operator's chosen directory mode.
+
+For scoped educational ZIM generation, install the Ubuntu `zim-tools` package
+(`zimwriterfs`) alongside the existing `kiwix-tools` package. Verify its
+availability and version before enabling the generated archive adapter.

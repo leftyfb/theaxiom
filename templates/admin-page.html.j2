@@ -1119,7 +1119,7 @@
         <details class="source-technical">
           <summary>Technical details</summary>
           {% if discovery %}
-          <p class="source-note">Update discovery: {{ {'head': 'HTTPS / ETag', 'kiwix': 'Kiwix OPDS / Metalink', 'archive': 'Internet Archive editions', 'builds': 'Protomaps map builds', 'manual': 'Manual update discovery'}.get(discovery.method, 'Unknown') }}</p>
+          <p class="source-note">Update discovery: {{ {'head': 'HTTPS / ETag', 'kiwix': 'Kiwix OPDS / Metalink', 'archive': 'Internet Archive editions', 'builds': 'Protomaps map builds', 'kolibri': 'Kolibri channel metadata', 'manual': 'Manual update discovery'}.get(discovery.method, 'Unknown') }}</p>
           {% endif %}
           {% set auto = source.automatic_update %}
           <p class="source-note" data-field="automatic-update"{% if not auto %} hidden{% endif %}>{% if auto %}Update policy: {{ 'Recommendation pending (checks disabled)' if source.configuration.update_policy == 'recommend' else 'Notify only' if auto.policy == 'notify' else auto.policy|capitalize }}{% if auto.next %} · {{ auto.next }}{% endif %}{% if auto.check %} · {{ auto.check }}{% endif %}{% if auto.attempt %} · Last automatic attempt: {{ auto.attempt }}{% endif %}{% if auto.server_time %} · Server local: {{ auto.server_time }} ({{ auto.time_zone }}){% endif %}{% endif %}</p>

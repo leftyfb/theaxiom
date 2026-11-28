@@ -57,3 +57,39 @@ def test_unknown_license_excluded(tmp_path):
         conn.execute("UPDATE content_contentnode SET license_name='All Rights Reserved' WHERE id=?", (LESSON,))
     with pytest.raises(bundle.scope.ScopeError, match="No supported"):
         bundle.select(path,CID,[TOPIC])
+
+
+def test_generated_configuration_requires_scope_and_distinct_identity(tmp_path):
+    path = fixture(tmp_path/"channel.sqlite3")
+    selected = bundle.select(path, CID, [TOPIC])
+    fields = bundle.fields(selected, [TOPIC], "f"*64, "eng")
+    config = fields | {"format":"zim"}
+    assert bundle.configuration(config) == (CID, [TOPIC], 1, "f"*64, len(PAYLOAD), "eng")
+    with pytest.raises(bundle.scope.ScopeError):
+        bundle.configuration(config | {"generator_scope":""})
+    with pytest.raises(bundle.scope.ScopeError):
+        bundle.configuration(config | {"sha256":"f"*64})
+    with pytest.raises(bundle.scope.ScopeError):
+        bundle.configuration(config | {"source_url":"https://example.org/archive.zim"})
+
+
+def test_unsupported_interactive_items_not_rendered(tmp_path):
+    path = fixture(tmp_path/"channel.sqlite3")
+    with sqlite3.connect(path) as conn:
+        conn.execute("UPDATE content_contentnode SET kind='exercise' WHERE id=?", (LESSON,))
+    with pytest.raises(bundle.scope.ScopeError, match="No supported"):
+        bundle.select(path,CID,[TOPIC])
+
+
+def test_upstream_md5_mismatch_fails_before_reader(tmp_path, monkeypatch):
+    from contextlib import contextmanager
+    from io import BytesIO
+    selected = bundle.select(fixture(tmp_path/"channel.sqlite3"),CID,[TOPIC])
+    @contextmanager
+    def fake(*args, **kwargs):
+        yield BytesIO(b"x"*len(PAYLOAD))
+    monkeypatch.setattr(bundle.pdf_transport, "open_pdf", fake)
+    pages = tmp_path/"pages"; pages.mkdir()
+    with pytest.raises(bundle.scope.ScopeError, match="checksum"):
+        bundle.acquire(selected,pages)
+    assert not (pages/"index.html").exists()
