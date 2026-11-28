@@ -186,12 +186,15 @@ def test_epub_public_reader_and_revocation(epub_app, disk):
     base = "/api/library/epub/fixture-book"
     request(base, status=403)
     request(base + "/document.epub", status=403)
+    assert 'id="source-fixture-book"' not in request("/search?q=My+book")
     catalog = request("/api/sources")
     pub = dict(source_id="fixture-book", enabled=True, revision=catalog["revision"])
     request("/api/publication", pub, status=409)
     request("/api/publication", dict(pub, acknowledge_rights=True))
     assert "Open EPUB" in request("/")
-    assert 'id="source-fixture-book"' not in request("/search?q=My+book")
+    results = request("/search?q=My+book")
+    assert 'id="source-fixture-book"' in results
+    assert base + "/chapter/0" in results
     page, headers = request(base, raw=True)
     assert b"Safe chapter" in page and b"Table of contents" in page
     assert b"https://example.org" not in page and b"<script>" not in page
@@ -205,6 +208,7 @@ def test_epub_public_reader_and_revocation(epub_app, disk):
     request(base, status=403)
     request(base + "/document.epub", status=403)
     assert "Open EPUB" not in request("/")
+    assert 'id="source-fixture-book"' not in request("/search?q=My+book")
     assert (disk / "library/epub" / source(catalog, "fixture-book")["artifact"]["filename"]).read_bytes() == data
 
 

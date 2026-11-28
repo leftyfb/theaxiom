@@ -170,7 +170,7 @@ def test_candidate_lifecycle_http_and_dom(app, format_name, complete, adapter, r
 def test_empty_catalog_and_same_candidate_card_after_manual_readd(app):
     request, _ = app
     catalog = request("/api/sources")
-    sid = "internet-archive"
+    sid = "food-reference"
     seed = source(catalog, sid)
     before = card(request("/admin/sources"), sid)
     for item in catalog["sources"]:
@@ -849,8 +849,8 @@ def test_selection_presets_report_missing_planned_and_bounded_configured_sources
     ]
     assert [row["source_id"] for row in emergency["storage"]["sources"]] == ["fema-ready", "epa-water", "amateur-radio"]
     lightweight = request(route, {"preset": "lightweight"})
-    assert [row["source_id"] for row in lightweight["sources"]] == ["epa-water", "cdc", "usda-preservation", "usda-extension", "practical-action", "amateur-radio", "compact-guide"]
-    assert [row["transfer_bytes"] for row in lightweight["storage"]["sources"]] == [754723, 282412, 3794234, 223610, 652708, 355690, 1024]
+    assert [row["source_id"] for row in lightweight["sources"]] == ["epa-water", "cdc", "usda-preservation", "usda-extension", "practical-action", "amateur-radio", "internet-archive", "compact-guide"]
+    assert [row["transfer_bytes"] for row in lightweight["storage"]["sources"]] == [754723, 282412, 3794234, 223610, 652708, 355690, 3904570, 1024]
     assert request("/api/sources")["revision"] == catalog["revision"]
 
 
