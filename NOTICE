@@ -10,3 +10,10 @@ project's Apache-2.0 license. See README.md and docs/dependencies.md.
 
 This notice does not supersede existing third-party copyright or attribution
 requirements. Contributors must have rights to license their contributions.
+
+WikiMed / MDWiki source icon: Wiki Project Med Foundation logo.svg by Isarra,
+https://commons.wikimedia.org/wiki/File:Wiki_Project_Med_Foundation_logo.svg
+(as used at https://mdwiki.org/wiki/File:Wiki_Project_Med_Foundation_logo.svg).
+Licensed CC BY-SA 3.0, https://creativecommons.org/licenses/by-sa/3.0/ .
+Rasterized and resized to 24 x 26 PNG, embedded in src/theaxiom/config.json.
+This asset retains its upstream license; no endorsement is implied.

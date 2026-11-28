@@ -5,6 +5,7 @@ import base64
 import binascii
 import fcntl
 import json
+from hashlib import sha256
 import os
 import re
 import tempfile
@@ -189,9 +190,19 @@ class CatalogStore:
         version = source_catalog.SEED_CATALOG_VERSION
         if previous >= version:
             return False
-        ids = {record["source_id"] for record in state["sources"]}
+        records = {record["source_id"]: record for record in state["sources"]}
+        ids = set(records)
         changed = False
         for entry in source_catalog.builtin_sources():
+            # Only replace an exact previously shipped icon, once per migration.
+            # Never overwrite an administrator-selected icon or restore a deleted source.
+            icon_update = entry.get("icon_update", {})
+            record = records.get(entry["source_id"])
+            if record is not None and previous < icon_update.get("introduced_in", 0) <= version:
+                old_icon = record["profile"].get("icon_png", "")
+                if old_icon and sha256(old_icon.encode("ascii")).hexdigest() == icon_update.get("previous_sha256"):
+                    record["profile"]["icon_png"] = entry["icon_png"]
+                    changed = True
             introduced = entry.get("introduced_in", 0)
             prerequisite = entry.get("add_when_source_present")
             if (previous < introduced <= version and entry["source_id"] not in ids

@@ -445,7 +445,7 @@ def test_hearham_seed_upgrade_preserves_existing_catalog(tmp_path):
     assert [row["source_id"] for row in upgraded["sources"][-2:]] == ["hearham", "mdwiki"]
     removed = store.mutate("remove", "hearham", {}, upgraded["revision"])
     assert store.get() == removed
-    assert json.loads(store.path.read_bytes())["seed_version"] == 6
+    assert json.loads(store.path.read_bytes())["seed_version"] == 7
 
 
 def test_mdwiki_seed_upgrade_is_opt_in_and_preserves_operator_changes(tmp_path):
@@ -479,4 +479,49 @@ def test_mdwiki_seed_upgrade_is_opt_in_and_preserves_operator_changes(tmp_path):
     assert store.get() == edited
     removed = store.mutate("remove", "mdwiki", {}, edited["revision"])
     assert store.get() == removed
-    assert json.loads(store.path.read_bytes())["seed_version"] == 6
+    assert json.loads(store.path.read_bytes())["seed_version"] == 7
+
+
+# Exact placeholder shipped in seed catalog v6 (not a replacement logo).
+_LEGACY_MDWIKI_ICON = "iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAJI0lEQVR4AQEYCef2AAAAAAAAAAAAAAAAAAAAAAAZam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAZam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/wAAAAAAAAAAAAAAAAAAAAAAGWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8AAAAAAAAAAAAZam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8AGWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt//////////////////////8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/ABlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf//////////////////////GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/wAZam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3//////////////////////xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8AGWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt//////////////////////8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/ABlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf//////////////////////GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/wAZam3/GWpt/xlqbf8Zam3/GWpt////////////////////////////////////////////////////////////////////////////GWpt/xlqbf8Zam3/GWpt/xlqbf8AGWpt/xlqbf8Zam3/GWpt/xlqbf///////////////////////////////////////////////////////////////////////////xlqbf8Zam3/GWpt/xlqbf8Zam3/ABlqbf8Zam3/GWpt/xlqbf8Zam3///////////////////////////////////////////////////////////////////////////8Zam3/GWpt/xlqbf8Zam3/GWpt/wAZam3/GWpt/xlqbf8Zam3/GWpt////////////////////////////////////////////////////////////////////////////GWpt/xlqbf8Zam3/GWpt/xlqbf8AGWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt//////////////////////8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/ABlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf//////////////////////GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/wAZam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3//////////////////////xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8AGWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt//////////////////////8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/ABlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf//////////////////////GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/wAZam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8AAAAAAAAAAAAZam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/wAAAAAAAAAAAAAAAAAAAAAAGWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8AAAAAAAAAAAAAAAAAAAAAQoDCDTwkb74AAAAASUVORK5CYII="
+
+
+def test_versioned_icon_replacement_preserves_operator_settings(tmp_path):
+    from hashlib import sha256
+
+    seed = source_catalog.source_defaults()["mdwiki"]
+    assert seed["icon_update"]["previous_sha256"] == sha256(_LEGACY_MDWIKI_ICON.encode("ascii")).hexdigest()
+    assert seed["icon_png"] != _LEGACY_MDWIKI_ICON
+    store = catalog_store.CatalogStore(tmp_path / "sources.json")
+    store.get()
+    saved = json.loads(store.path.read_bytes())
+    saved["seed_version"] = 6
+    row = next(r for r in saved["sources"] if r["source_id"] == "mdwiki")
+    row["profile"]["title"] = "My medical reference"
+    row["profile"]["icon_png"] = _LEGACY_MDWIKI_ICON
+    row["configuration"]["update_policy"] = "disabled"
+    store.path.write_text(json.dumps(saved))
+    upgraded = store.get()
+    row["profile"]["icon_png"] = seed["icon_png"]
+    assert upgraded["sources"] == saved["sources"]
+    assert upgraded["groups"] == saved["groups"]
+    assert upgraded["revision"] == saved["revision"] + 1
+    assert store.get() == upgraded
+    assert json.loads(store.path.read_bytes())["seed_version"] == 7
+
+
+def test_versioned_icon_replacement_preserves_custom_blank_and_deleted_sources(tmp_path):
+    for index, choice in enumerate((source_catalog.READY_GOV_SOURCE["icon_png"], "", None)):
+        store = catalog_store.CatalogStore(tmp_path / str(index) / "sources.json")
+        store.get()
+        saved = json.loads(store.path.read_bytes())
+        saved["seed_version"] = 6
+        if choice is None:
+            saved["sources"] = [r for r in saved["sources"] if r["source_id"] != "mdwiki"]
+        else:
+            row = next(r for r in saved["sources"] if r["source_id"] == "mdwiki")
+            row["profile"]["icon_png"] = choice
+        store.path.write_text(json.dumps(saved))
+        upgraded = store.get()
+        assert upgraded["sources"] == saved["sources"]
+        assert store.get() == upgraded
