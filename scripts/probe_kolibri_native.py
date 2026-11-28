@@ -16,6 +16,8 @@ from urllib.request import urlopen
 from urllib.error import HTTPError
 from urllib.parse import urlencode, urljoin
 import ssl
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from threading import Thread
 
 from playwright.sync_api import sync_playwright
 from theaxiom import kolibri_native as native, kolibri_scope as scope
@@ -99,8 +101,21 @@ def main():
         subprocess.run(["openssl","req","-x509","-newkey","rsa:2048","-nodes","-days","1",
                         "-subj","/CN=localhost","-keyout",str(root/"key.pem"),
                         "-out",str(root/"cert.pem")],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        class Gate(BaseHTTPRequestHandler):
+            def do_GET(self):
+                allowed = registry.authorize(self.headers.get("X-Axiom-Original-URI", ""),
+                    alternate=self.path.endswith("-alternate"))
+                self.send_response(204 if allowed else 403)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+        gate_server = ThreadingHTTPServer(("127.0.0.1", 0), Gate)
+        gate_thread = Thread(target=gate_server.serve_forever, daemon=True)
+        gate_thread.start()
+        gate_port = gate_server.server_address[1]
         main_proxy = (CONFIG / "main-proxy.conf.example").read_text().replace("127.0.0.1:8082",f"127.0.0.1:{port}").replace("/opt/theaxiom/app/deploy/kolibri/navigation.css",str(CONFIG/"navigation.css"))
         zip_proxy = (CONFIG / "zip-proxy.conf.example").read_text().replace("127.0.0.1:8083",f"127.0.0.1:{zip_port}")
+        main_proxy = main_proxy.replace("127.0.0.1:8080",f"127.0.0.1:{gate_port}")
+        zip_proxy = zip_proxy.replace("127.0.0.1:8080",f"127.0.0.1:{gate_port}")
         for name in ("body","proxy","fastcgi","uwsgi","scgi"):
             (root/name).mkdir()
         cert = f"ssl_certificate {root}/cert.pem; ssl_certificate_key {root}/key.pem;"
@@ -149,6 +164,14 @@ http {{
                 else:
                     raise RuntimeError("Kolibri proxy failed to become ready")
                 print("NATIVE HTTPS PROXY READY",flush=True)
+                import kolibri
+                sandbox = (Path(kolibri.__file__).parent/"core/content/build/sandbox_filename").read_text().strip()
+                sandbox_path = "/content/static/sandbox/" + sandbox
+                with urlopen(zip_origin+sandbox_path,context=ssl._create_unverified_context(),timeout=10) as response:
+                    assert response.status == 200 and b"<" in response.read(512)
+                with urlopen(origin+"/kolibri/en/learn/",context=ssl._create_unverified_context(),timeout=10) as response:
+                    assert f"https://*:{zip_https}" in response.headers.get("Content-Security-Policy", "")
+                print("SEPARATE HTTPS SANDBOX ENDPOINT PASSED",flush=True)
                 def public_json(path, params=None):
                     url=origin+"/kolibri/api/public/v2/"+path
                     if params:
@@ -214,20 +237,28 @@ http {{
                     }""",timeout=45000)
                     print("EXERCISE QUESTION",page.locator(".perseus-root .perseus").first.inner_text()[:300],flush=True)
                     print("NATIVE OFFLINE EXERCISE RENDER PASSED",flush=True)
-                    answer=page.locator(".perseus-root .perseus input:visible, .perseus-root .perseus textarea:visible, .perseus-root .perseus [contenteditable=true]:visible")
-                    if answer.count():
-                        answer.first.fill("1")
+                    field=page.locator(".perseus-root .perseus .mq-editable-field:visible")
+                    if field.count():
+                        field.first.click()
+                        page.keyboard.type("1")
                     else:
-                        field=page.locator(".perseus-root .perseus .mq-editable-field:visible")
-                        if field.count():
-                            field.first.click()
+                        answer=page.locator(".perseus-root .perseus input:not([type=radio]):visible, .perseus-root .perseus textarea:visible, .perseus-root .perseus [contenteditable=true]:visible")
+                        if answer.count():
+                            answer.first.click()
                             page.keyboard.type("1")
                         else:
                             choice=page.locator(".perseus-root .perseus [role=radio]:visible, .perseus-root .perseus input[type=radio]:visible")
                             assert choice.count(), "No accessible answer widget"
                             choice.first.click()
-                    page.get_by_role("button",name="Check",exact=True).press("Enter")
-                    page.get_by_text(re.compile(r"^(Correct!|Try again|Great! Keep going|Try a different question|Try next question)$")).first.wait_for(state="visible",timeout=30000)
+                    check=page.get_by_role("button",name="Check",exact=True)
+                    check.focus()
+                    check.press("Space")
+                    try:
+                        page.locator(".current-status").filter(has_text=re.compile(r"(Correct!|Try again|Great! Keep going|Try a different question|Try next question)")).first.wait_for(state="visible",timeout=30000)
+                    except BaseException:
+                        print("EXERCISE BODY",page.locator("body").inner_text()[:3000],flush=True)
+                        print("EXERCISE INPUTS",page.locator(".perseus-root input, .perseus-root textarea").evaluate_all("(els) => els.map(e => ({type:e.type,value:e.value,outer:e.outerHTML.slice(0,500)}))"),flush=True)
+                        raise
                     print("OFFLINE EXERCISE ANSWER CHECK PASSED",flush=True)
                     print("EXTERNAL REQUEST HOSTS BLOCKED",sorted(blocked),flush=True)
                     browser.close()
@@ -243,7 +274,7 @@ http {{
                     try:
                         public_json("contentnode/"+video_node+"/",{"axiom_probe":secrets.token_hex(4)})
                     except HTTPError as exc:
-                        if exc.code==404:
+                        if exc.code==403:
                             break
                         raise
                     time.sleep(.5)
@@ -253,7 +284,14 @@ http {{
                     with urlopen(caption_url,context=ssl._create_unverified_context(),timeout=10) as response:
                         raise AssertionError("Removed channel still serves its unique caption")
                 except HTTPError as exc:
-                    assert exc.code==404,exc.code
+                    assert exc.code==403,exc.code
+                # Both public origins must reject requests after unpublication.
+                for url in (origin+"/kolibri/en/learn/", zip_origin+"/content/static/sandbox/example.html"):
+                    try:
+                        with urlopen(url,context=ssl._create_unverified_context(),timeout=10):
+                            raise AssertionError("Unpublished reader route accessible")
+                    except HTTPError as exc:
+                        assert exc.code==403
                 native.verify(package,selection,digest)
                 print("NATIVE CHANNEL REMOVAL AND PRIVATE PACKAGE PRESERVATION PASSED",flush=True)
                 with registry.transaction() as acknowledge:
@@ -273,6 +311,8 @@ http {{
                     except Exception: pass
                 raise
             finally:
+                gate_server.shutdown()
+                gate_server.server_close()
                 for process in (proxy,server):
                     if process.poll() is None:
                         process.terminate()

@@ -1,12 +1,24 @@
-# Include INSIDE Axiom's server block only after native integration approval.
-# This prototype does NOT enforce Axiom channel publication; do not expose it
-# to production until the published-content boundary is implemented.
+# Include inside Axiom's HTTP/HTTPS server only after installation is verified.
+location = /_publication_kolibri {
+    internal;
+    proxy_pass http://127.0.0.1:8080/internal/publication/kolibri;
+    proxy_pass_request_body off;
+    proxy_set_header Content-Length "";
+    proxy_set_header Host $http_host;
+    proxy_set_header X-Axiom-Original-URI $request_uri;
+    proxy_set_header Authorization "";
+    proxy_set_header Cookie "";
+    proxy_cache off;
+}
 location = /kolibri { return 308 /kolibri/; }
 location = /kolibri/axiom-navigation.css {
     alias /opt/theaxiom/app/deploy/kolibri/navigation.css;
     default_type text/css;
 }
 location ^~ /kolibri/ {
+    auth_request /_publication_kolibri;
+    add_header Cache-Control "no-store" always;
+    add_header X-Content-Type-Options nosniff always;
     proxy_pass http://127.0.0.1:8082;
     proxy_http_version 1.1;
     proxy_set_header Host $http_host;
