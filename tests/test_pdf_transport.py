@@ -304,3 +304,45 @@ def test_reviewed_document_requires_exact_get_validator(monkeypatch):
     with pdf_transport.open_pdf("https://publisher.org/guide.pdf", required_etag='"reviewed"') as body:
         assert body.etag == '"reviewed"'
         assert body.read(10) == b"abc"
+
+
+def test_pool_reuses_only_fully_consumed_response(monkeypatch):
+    created = []
+    monkeypatch.setattr(pdf_transport, "_public_addresses", lambda host: addresses("8.8.8.8"))
+
+    class Socket:
+        def settimeout(self, timeout):
+            assert timeout > 0
+
+    class Connection:
+        def __init__(self, host, address, deadline):
+            self.address = address
+            self.sock = Socket()
+            created.append(self)
+
+        def request(self, method, path, headers):
+            assert headers["Connection"] == "keep-alive"
+
+        def getresponse(self):
+            response = Response(200, [("Content-Length", "3")], b"abc")
+            response.will_close = False
+            return response
+
+        def close(self):
+            self.sock = None
+
+    monkeypatch.setattr(pdf_transport, "_PinnedHTTPS", Connection)
+    with pdf_transport.ConnectionPool() as pool:
+        for _ in range(2):
+            with pdf_transport.open_pdf("https://publisher.org/guide.pdf", pool=pool) as stream:
+                assert stream.read(10) == b"abc"
+                assert stream.read(10) == b""
+        assert len(created) == 1
+        with pdf_transport.open_pdf("https://publisher.org/guide.pdf", pool=pool):
+            pass
+        assert created[0].sock is None
+        with pdf_transport.open_pdf("https://publisher.org/guide.pdf", pool=pool) as stream:
+            stream.read(10)
+            stream.read(10)
+        assert len(created) == 2
+    assert created[1].sock is None

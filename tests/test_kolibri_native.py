@@ -117,3 +117,54 @@ def test_no_unreviewed_full_or_invalid_selection(source,tmp_path):
     with pytest.raises(scope.ScopeError,match="Full-channel"):
         native.acquire(tmp_path/"full",native.Selection(CID,(ROOT,),5,
             selection.metadata_sha256,selection.media_bytes))
+
+
+def test_resume_reuses_verified_resources_and_replaces_corruption(source, tmp_path):
+    selected, urls, requested = source
+    root = tmp_path / "package"
+    digest = native.acquire(root, selected)
+    (root / native.MANIFEST).unlink()
+    corrupt = next(root.rglob("*.perseus"))
+    corrupt.write_bytes(b"?" * corrupt.stat().st_size)
+    requested.clear()
+    progress = []
+    recovered = native.acquire(root, selected, resume=True,
+                               progress=lambda n, t: progress.append(n))
+    assert recovered == digest
+    assert requested == [next(u for u in urls if u.endswith(".perseus"))]
+    assert 0 < progress[0] < selected.media_bytes
+    assert progress == sorted(progress)
+    native.verify(root, selected, recovered)
+
+
+def test_retry_preserves_other_resources_and_progress(source, tmp_path, monkeypatch):
+    selected, urls, requested = source
+    broken = next(u for u in urls if u.endswith(".mp4"))
+    attempts = []
+    original = native.pdf_transport.open_pdf
+
+    @contextmanager
+    def flaky(url, **kwargs):
+        if url == broken:
+            attempts.append(url)
+            if len(attempts) == 1:
+                class Interrupted(io.BytesIO):
+                    def read(self, size):
+                        if self.tell():
+                            raise native.pdf_transport.RetryableDownloadError("temporary")
+                        return super().read(2)
+                yield Interrupted(urls[url])
+                return
+        with original(url, **kwargs) as stream:
+            yield stream
+
+    monkeypatch.setattr(native.pdf_transport, "open_pdf", flaky)
+    monkeypatch.setattr(native.pdf_transport, "RETRY_DELAYS", (0,))
+    progress = []
+    root = tmp_path / "package"
+    digest = native.acquire(root, selected, progress=lambda n,t: progress.append(n))
+    assert len(attempts) == 2
+    assert progress == sorted(progress)
+    assert progress[-1] == selected.media_bytes
+    assert len(requested) == 4
+    native.verify(root, selected, digest)

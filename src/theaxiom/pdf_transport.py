@@ -8,6 +8,7 @@ import re
 import socket
 import ssl
 import time
+import threading
 from typing import Callable, TypeVar
 from urllib.parse import urlsplit, urljoin
 
@@ -109,7 +110,7 @@ def _network_errors():
         raise RetryableDownloadError("Publisher interrupted the TLS connection") from exc
     except ssl.SSLError as exc:
         raise DownloadError("Publisher TLS validation or handshake failed") from exc
-    except (TimeoutError, ConnectionError, http.client.IncompleteRead) as exc:
+    except (TimeoutError, ConnectionError, http.client.IncompleteRead, http.client.RemoteDisconnected) as exc:
         raise RetryableDownloadError("Publisher connection interrupted or timed out") from exc
     except OSError as exc:
         error = (RetryableDownloadError if exc.errno in {
@@ -173,6 +174,7 @@ class _BoundedBody:
         self.deadline = deadline
         self.length = length
         self.count = 0
+        self.finished = False
         self.limit = pdf_source.MAX_BYTES if limit is None else limit
 
     def read(self, size):
@@ -186,11 +188,50 @@ class _BoundedBody:
             raise ValueError("PDF exceeds download limit")
         if not data and self.length is not None and self.count < self.length:
             raise RetryableDownloadError("Publisher response body is incomplete")
+        if not data:
+            self.finished = True
         return data
 
 
+class ConnectionPool:
+    """Acquisition-local, bounded idle connections; never share active sockets."""
+    def __init__(self, maximum=8):
+        self.maximum = maximum
+        self.lock = threading.Lock()
+        self.idle = []
+
+    def take(self, host, addresses, deadline):
+        with self.lock:
+            for index, (origin, connection) in enumerate(self.idle):
+                if origin == host and connection.address in addresses:
+                    self.idle.pop(index)
+                    connection.deadline = deadline
+                    connection.sock.settimeout(min(TIMEOUT, _remaining(deadline)))
+                    return connection
+        return _PinnedHTTPS(host, addresses[0], deadline)
+
+    def release(self, host, connection):
+        with self.lock:
+            if len(self.idle) < self.maximum and connection.sock is not None:
+                self.idle.append((host, connection))
+                return
+        connection.close()
+
+    def close(self):
+        with self.lock:
+            for _, connection in self.idle:
+                connection.close()
+            self.idle.clear()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
+
+
 @contextmanager
-def open_pdf(url, *, format_name="pdf", limit=None, total_seconds=None, offset=0, validator=None, required_etag=None, media_type=None):
+def open_pdf(url, *, format_name="pdf", limit=None, total_seconds=None, offset=0, validator=None, required_etag=None, media_type=None, pool=None):
     if format_name not in {"pdf", "epub", "zim"} or (format_name == "zim" and (limit is None or total_seconds is None)):
         raise ValueError("Unsupported document format")
     if offset and (format_name != "zim" or type(offset) is not int or not 0 < offset < limit
@@ -215,11 +256,13 @@ def open_pdf(url, *, format_name="pdf", limit=None, total_seconds=None, offset=0
             addresses = _public_addresses(canonical.hostname)
             _remaining(deadline)
         # Each hop has its own DNS validation, numeric socket pin and TLS identity.
-        connection = _PinnedHTTPS(canonical.hostname, addresses[0], deadline)
+        connection = (pool.take(canonical.hostname, addresses, deadline) if pool is not None
+                      else _PinnedHTTPS(canonical.hostname, addresses[0], deadline))
+        reusable = False
         try:
             headers = {
                 "Accept": (media_type or {"epub": "application/epub+zip", "pdf": "application/pdf", "zim": "application/octet-stream"}[format_name]) + ", application/octet-stream",
-                "Accept-Encoding": "identity", "Connection": "close",
+                "Accept-Encoding": "identity", "Connection": "keep-alive" if pool is not None else "close",
                 "User-Agent": "The-Axiom PDF acquisition",
             }
             if required_etag is not None:
@@ -293,13 +336,19 @@ def open_pdf(url, *, format_name="pdf", limit=None, total_seconds=None, offset=0
                     length = last - first + 1
                     if validator != etag and validator != last_modified:
                         raise ValueError("Publisher changed ZIM identity since partial download")
-                yield _BoundedBody(response, deadline, length, limit - offset,
+                body = _BoundedBody(response, deadline, length, limit - offset,
                                    etag=etag if format_name == "zim" or hop == 0 else None, last_modified=last_modified, total_size=total_size)
+                yield body
+                reusable = (pool is not None and body.finished and not response.will_close
+                            and (length is not None or transfers == ["chunked"]))
                 return
             finally:
                 response.close()
         finally:
-            connection.close()
+            if reusable:
+                pool.release(canonical.hostname, connection)
+            else:
+                connection.close()
 
 
 def download(source_id, url, *, expected_size=None, expected_sha256=None, capture_validator=False, stop=None):

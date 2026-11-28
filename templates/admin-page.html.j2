@@ -1069,6 +1069,7 @@
           {% if source.adapter == "kolibri" %}
           <section data-kolibri-controls>
             <button class="button" type="button" data-kolibri-action="select">Select content</button>
+            <button class="button" type="button" data-kolibri-action="resume" hidden>Resume download</button>
             <button class="button" type="button" data-kolibri-action="update" hidden>Check for updates</button>
             <button class="button" type="button" data-kolibri-action="publish" hidden>Publish</button>
             <button class="button" type="button" data-kolibri-action="unpublish" hidden>Unpublish</button>
@@ -1276,16 +1277,17 @@
             for (const button of panel.querySelectorAll('[data-kolibri-action]')) {
               const action = button.dataset.kolibriAction;
               button.hidden = !({
-                select: !status.installed, update: !!status.installed && !status.candidate && !status.previous,
+                select: !status.installed && !status.partial, resume: status.partial, update: !!status.installed && !status.candidate && !status.previous && !status.partial,
                 publish: !!status.installed && !status.published, unpublish: status.published,
                 'publish-update': status.candidate, rollback: status.previous,
-                'delete-staged': status.candidate || status.previous, delete: !!status.installed && !status.published, recover:status.recovery_pending
+                'delete-staged': status.candidate || status.previous || status.partial_update, delete: (!!status.installed || status.partial) && !status.published, recover:status.recovery_pending
               })[action];
               button.disabled = active || !status.configured || (status.recovery_pending && action!=='recover');
             }
             panel.querySelector('[data-kolibri-browse]').hidden = !status.published;
             if (status.recovery_pending) feedback.textContent='Previous publication did not complete. Both native reader origins are closed.';
             else if (active) feedback.textContent = 'Educational acquisition in progress.';
+            else if (status.partial) feedback.textContent = job.detail || 'Download interrupted. Resume to retain verified resources.';
             else if (job.state === 'failed') feedback.textContent = job.detail || 'Download failed';
             else if (status.installed) feedback.textContent = 'Installed version '+status.installed.version+' · '+bytes(status.installed.media_bytes);
             else if (!selector.hidden) { /* preserve the active selection status */ }

@@ -8,7 +8,7 @@ from pathlib import Path
 import tempfile
 import threading
 
-from . import catalog_store, kolibri_jobs, kolibri_native as native, kolibri_publication
+from . import kolibri_jobs, kolibri_native as native, kolibri_publication
 from . import kolibri_scope as scope, pdf_source, storage_settings, update_check_store
 
 LOCK = threading.RLock()
@@ -37,7 +37,7 @@ def configured():
             previous, manager = _INSTANCE
             if previous == identity:
                 return manager
-            if manager.active or any(manager.read(path.stem).get("installed") for path in manager.state.glob("*.json")):
+            if manager.active or any(any(manager.read(path.stem).get(key) for key in ("installed", "partial")) for path in manager.state.glob("*.json")):
                 raise ValueError("Existing Kolibri content must be resolved before changing storage")
         def guard(required):
             if storage_settings.load_settings() != settings:
@@ -121,6 +121,8 @@ def status(manager, record):
             "recovery_pending": manager.registry.pending.exists(),
             "installed": selection, "published": bool(published),
             "reviewed": bool(job.get("reviewed")),
+            "partial": bool(job.get("partial")),
+            "partial_update": bool((job.get("partial") or {}).get("update")),
             "candidate": bool(job.get("candidate")), "previous": bool(job.get("previous")),
             "candidate_digest": (job.get("candidate") or {}).get("manifest_sha256"),
             "installed_digest": (installed or {}).get("manifest_sha256"),
@@ -148,6 +150,9 @@ def start_download(manager, record, selected, *, update=False):
                 raise ValueError("Educational updates must preserve the installed scope")
         elif job.get("installed"):
             raise ValueError("Educational content already installed")
+        partial = job.get("partial")
+        if partial and (manager._selection(partial) != selected or partial.get("update") != update):
+            raise ValueError("Delete the interrupted package before changing its selection")
         manager.active.add(sid)
         thread = threading.Thread(target=worker, daemon=True, name="kolibri-"+sid)
         try:
