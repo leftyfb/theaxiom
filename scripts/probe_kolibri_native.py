@@ -36,6 +36,16 @@ def free_ports(count):
         for s in sockets:
             s.close()
 
+def wait_until(predicate, seconds):
+    """Poll an explicit browser observation without page-side eval-based polling."""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if predicate():
+            return
+        time.sleep(.1)
+    raise AssertionError("Timed out waiting for offline browser observation")
+
+
 def main():
     with tempfile.TemporaryDirectory(prefix="axiom-kolibri-native-") as temp:
         root = Path(temp)
@@ -233,7 +243,7 @@ http {{
                     video=page.locator("video").first
                     video.wait_for(state="attached",timeout=30000)
                     video.evaluate("(v) => { v.muted=true; return v.play(); }")
-                    page.wait_for_function("document.querySelector('video').currentTime > 0",timeout=15000)
+                    wait_until(lambda: video.evaluate("(v) => v.currentTime > 0"), 15)
                     print("NATIVE OFFLINE VIDEO PLAYBACK PASSED",flush=True)
                     page.set_viewport_size({"width":1280,"height":900})
                     video.hover()
@@ -252,11 +262,11 @@ http {{
                     # The Perseus container becomes visible before its asynchronous
                     # ZIP/question rendering completes. Wait for actual question UI.
                     page.locator(".perseus-root .perseus").first.wait_for(state="visible",timeout=45000)
-                    page.wait_for_function("""() => {
-                      const el = document.querySelector('.perseus-root .perseus');
-                      return el && el.innerText.trim().length > 0 &&
-                        el.querySelector('input,textarea,[contenteditable=true],button,[role=radio],.mq-editable-field');
-                    }""",timeout=45000)
+                    question = page.locator(".perseus-root .perseus").first
+                    wait_until(lambda: question.evaluate("""(el) =>
+                      el.innerText.trim().length > 0 &&
+                      !!el.querySelector('input,textarea,[contenteditable=true],button,[role=radio],.mq-editable-field')
+                    """), 45)
                     print("EXERCISE QUESTION",page.locator(".perseus-root .perseus").first.inner_text()[:300],flush=True)
                     print("NATIVE OFFLINE EXERCISE RENDER PASSED",flush=True)
                     field=page.locator(".perseus-root .perseus .mq-editable-field:visible")
