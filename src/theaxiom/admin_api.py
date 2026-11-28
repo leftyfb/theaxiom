@@ -126,7 +126,11 @@ def select_lifecycle(source_id, configuration):
     format_name = configuration.get("format")
     adapter = FORMAT_ADAPTERS.get(format_name) if isinstance(format_name, str) else None
     if adapter == "kolibri":
-        valid = bool(re.fullmatch(r"[a-f0-9]{32}", configuration.get("kolibri_channel_id", "")))
+        try:
+            kolibri_admin.native.source_base(configuration)
+            valid = True
+        except ValueError:
+            valid = False
         return dict(adapter=adapter, configuration_valid=valid, artifact=None, actions={},
                     acquisition_reason="Select educational topics before downloading.")
     if adapter == "epub":
@@ -2018,6 +2022,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             *(record["source_id"] for record in catalog["sources"]
               if self._pdf_record(record) or self._epub_record(record)),
             *(record["source_id"] for record in catalog["sources"] if self._archive_record(record)),
+            *(record["source_id"] for record in catalog["sources"] if record["configuration"].get("format") == "kolibri"),
         ]))
         if published_ids is not None and not layout.get("preserve_source_order"):
             memberships = self._library_memberships(catalog)
@@ -2071,12 +2076,17 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                                             symbol="D", category="Data", name=profile["title"],
                                             description=profile.get("description", ""), icon_png=profile.get("icon_png", ""),
                                             language=profile.get("language") or "Unspecified language"))
-            education = kolibri_publication.catalog_acknowledged(catalog["sources"])
+            native_registry = kolibri_publication.configured_registry()
+            education = kolibri_publication.catalog_acknowledged(catalog["sources"], native_registry)
             for record in catalog["sources"]:
                 sid = record["source_id"]
                 if sid in education:
                     profile = record["profile"]
-                    sources.append(dict(source_id=sid, entry_path="/kolibri/en/learn/",
+                    try:
+                        entry_path = native_registry.channel_link(education[sid]["channel_id"])
+                    except (OSError, ValueError, sqlite3.Error):
+                        continue
+                    sources.append(dict(source_id=sid, entry_path=entry_path,
                         symbol="K", category="Education", name=profile["title"],
                         description=profile.get("description", ""), icon_png=profile.get("icon_png", ""),
                         language=profile.get("language") or "Unspecified language"))

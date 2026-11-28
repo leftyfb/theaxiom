@@ -155,3 +155,11 @@ and rollback require explicit verified state; a failed transaction deliberately
 keeps the reader closed pending explicit operator recovery from the verified
 previously acknowledged packages. The saved scope can also be queued through
 Axiom’s shared initial batch download interface.
+
+
+The official version-4 Khan Academy US metadata URL returned HTTP 404 in
+validation; the publisher does not currently expose that prior version at
+the standard versioned endpoint. Multi-version promotion/rollback is
+therefore covered with deterministic versioned fixture packages, while the
+live official probe exercises removal and restoration of the verified
+available version. No unsupported historical metadata is synthesized.

@@ -14,12 +14,12 @@ def fixture(tmp_path):
     db = tmp_path / "db.sqlite3"
     with sqlite3.connect(db) as conn:
         conn.executescript("""
-        CREATE TABLE content_channelmetadata (id, version);
+        CREATE TABLE content_channelmetadata (id, version, root_id);
         CREATE TABLE content_contentnode (id, available);
         CREATE TABLE content_file (local_file_id, contentnode_id);
         CREATE TABLE content_localfile (id, extension, available);
         """)
-        conn.execute("INSERT INTO content_channelmetadata VALUES (?,5)", (CID,))
+        conn.execute("INSERT INTO content_channelmetadata VALUES (?,5,?)", (CID,"f"*32))
         conn.execute("INSERT INTO content_contentnode VALUES ('node',1)")
         conn.execute("INSERT INTO content_file VALUES (?,'node')", (CHECKSUM,))
         conn.execute("INSERT INTO content_localfile VALUES (?,?,1)", (CHECKSUM,"mp4"))
@@ -34,6 +34,7 @@ def test_both_origins_and_transactions(tmp_path):
         acknowledge(SOURCE)
         assert not registry.authorize("/content/static/sandbox/test.html", alternate=True)
     assert registry.acknowledged() == SOURCE
+    assert registry.channel_link(CID) == "/kolibri/viewcontent?node_id="+"f"*32
     assert registry.authorize("/kolibri/en/learn/")
     assert registry.authorize("/content/static/sandbox/test.html", alternate=True)
     assert registry.authorize(f"/kolibri/content/storage/c/c/{CHECKSUM}.mp4")
@@ -42,7 +43,7 @@ def test_both_origins_and_transactions(tmp_path):
     assert not registry.authorize("/kolibri/api/content/contentnode/?no_available_filtering=true")
     assert not registry.authorize("/kolibri/api/content/contentnode/?no_available_%66iltering=true")
     with sqlite3.connect(registry.database) as conn:
-        conn.execute("INSERT INTO content_channelmetadata VALUES ('unacknowledged',5)")
+        conn.execute("INSERT INTO content_channelmetadata VALUES ('unacknowledged',5,'other')")
     assert not registry.authorize("/kolibri/en/learn/")
 
 

@@ -134,6 +134,15 @@ class Registry:
             self.pending.unlink()
             self._sync_dir()
 
+    def channel_link(self, channel_id):
+        """A source card opens its own native channel rather than the full list."""
+        channel_id = kolibri_scope._id(channel_id)
+        with self._database() as conn:
+            row = conn.execute("SELECT root_id FROM content_channelmetadata WHERE id=?", (channel_id,)).fetchone()
+        if not row:
+            raise ValueError("Native channel unavailable")
+        return "/kolibri/viewcontent?node_id="+kolibri_scope._id(row[0])
+
     def authorize(self, uri, *, alternate=False):
         """Allow local reader assets only while a runtime is acknowledged.
 

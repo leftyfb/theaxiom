@@ -2068,6 +2068,7 @@ def test_native_education_configured_but_optional_runtime_absent(app, monkeypatc
     assert educational["adapter"] == "kolibri"
     assert educational["configuration"]["kolibri_channel_id"] == "c9d7f950ab6b5a1199e3d6c10d7f0103"
     assert educational["configuration_valid"]
+    assert "kolibri" in catalog["library_order"]
     assert not educational["installed_verified"]
     assert not educational["kolibri"]["configured"]
     assert "Select content" in card(request("/admin/sources"), "kolibri")

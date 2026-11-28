@@ -343,7 +343,7 @@ class CatalogStore:
             ids.add(sid)
             self._validate_fields(record["profile"], PROFILE_FIELDS, required={"title"})
             self._validate_fields(record["configuration"], CONFIG_FIELDS, required={"format"})
-            if (DISCOVERY_FIELDS | UPDATE_POLICY_FIELDS) & record["configuration"].keys():
+            if record["configuration"].get("format") == "kolibri" or (DISCOVERY_FIELDS | UPDATE_POLICY_FIELDS) & record["configuration"].keys():
                 from . import update_discovery_config
                 try:
                     update_discovery_config.settings(record["configuration"])
