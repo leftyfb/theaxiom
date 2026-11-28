@@ -16,6 +16,7 @@ import re
 import sqlite3
 import struct
 import subprocess
+import tempfile
 import time
 import zlib
 
@@ -261,20 +262,24 @@ def build_zim(bundle, directory, output, *, guard=lambda n: None, language="eng"
     (directory / "illustration.png").write_bytes(_illustration())
     command = ["zimwriterfs", "--welcome=index.html", "--illustration=illustration.png",
                "--language=" + language, "--name=kolibri-" + bundle.channel.channel_id,
-               "--title=" + bundle.channel.name, "--description=Selected offline educational resources",
+               "--title=" + bundle.channel.name[:30], "--description=Selected offline educational resources",
                "--creator=" + bundle.channel.name, "--publisher=Learning Equality / The Axiom",
                str(directory), str(output)]
-    proc = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    try:
-        while proc.poll() is None:
-            guard(0)
-            time.sleep(0.2)
-        if proc.returncode:
-            raise scope.ScopeError("ZIM conversion failed.")
-    finally:
-        if proc.poll() is None:
-            proc.kill()
-            proc.wait()
+    with tempfile.TemporaryFile() as log:
+        proc = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT)
+        try:
+            while proc.poll() is None:
+                guard(0)
+                time.sleep(0.2)
+            if proc.returncode:
+                log.seek(max(0, log.tell() - 4096))
+                diagnostic = log.read().decode("utf-8", errors="replace").strip()
+                raise scope.ScopeError("ZIM conversion failed: " + diagnostic)
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+
 
 
 CONFIG_FIELDS = {"archive_generator", "generator_channel", "generator_scope", "generator_version",
