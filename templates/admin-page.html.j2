@@ -699,6 +699,7 @@
             <option value="failed">Failed / rolled back</option>
             <option value="unknown">Unknown / needs review</option>
             <option value="current">Current</option>
+            <option value="disabled">Disabled</option>
           </select>
         </label>
         <label for="update-filter-search">Search sources
@@ -975,7 +976,7 @@
         <button type="button" data-order-move="1" aria-label="Move {{ source.profile.title }} down">↓</button>
       </div>
       <label class="group-select" hidden><input type="checkbox" data-group-select value="{{ source.source_id }}" aria-label="Select {{ source.profile.title }} for grouping"></label>
-      <details class="source-card" id="source-{{ source.source_id }}" data-source-id="{{ source.source_id }}" data-filter-title="{{ source.profile.title }}" data-filter-format="{{ source.configuration.format }}" data-filter-publication="{{ source.publication_filter|default('unknown') }}" data-filter-download="{{ source.download_filter|default('unknown') }}"{% for name in editable_fields %} data-catalog-{{ name|replace('_', '-') }}="{{ source.profile.get(name, source.configuration.get(name, '')) }}"{% endfor %}>
+      <details class="source-card" id="source-{{ source.source_id }}" data-source-id="{{ source.source_id }}" data-update-policy="{{ (source.automatic_update|default({})).policy|default('') }}" data-filter-title="{{ source.profile.title }}" data-filter-format="{{ source.configuration.format }}" data-filter-publication="{{ source.publication_filter|default('unknown') }}" data-filter-download="{{ source.download_filter|default('unknown') }}"{% for name in editable_fields %} data-catalog-{{ name|replace('_', '-') }}="{{ source.profile.get(name, source.configuration.get(name, '')) }}"{% endfor %}>
         <summary class="source-header">
           <span class="source-symbol">{% from 'source-icon.html.j2' import source_icon %}{{ source_icon(source.profile.title, source.profile.get('icon_png', ''), source.source_id) }}</span>
           <div>
@@ -986,7 +987,7 @@
             <progress data-field="replacement-summary-progress" max="100" aria-label="Replacement update progress" hidden></progress>
             {% if pub %}<span class="compact-publication" data-field="publication-summary">{{ "Published" if pub.published else (pub.publication_reason or "Reader unavailable") if pub.enabled and pub.ready_for_publication else "Reader unavailable" if pub.enabled else "" }}</span>{% endif %}
           </div>
-          <span class="badge enabled" data-field="update-status" role="status"{% if not source.update_check or source.update_check.state != "update_available" and not source.update_check.candidate_token %} hidden{% endif %}>Update available</span>
+          <span class="badge enabled" data-field="update-status" role="status"{% if (source.automatic_update|default({})).policy == "disabled" or not source.update_check or source.update_check.state != "update_available" and not source.update_check.candidate_token %} hidden{% endif %}>Update available</span>
           <span class="badge{% if source.installed_verified %} enabled{% endif %}" data-field="status" role="status">{% if not source.adapter %}Not yet supported{% elif source.installed_verified %}{{ source.artifact.bytes | filesizeformat if source.artifact and source.artifact.bytes is number and source.artifact.bytes > 0 else 'Installed · size unavailable' }}{% elif source.adapter in ('pdf','epub') %}{{ 'Not installed or invalid' if source.artifact else 'Not downloaded' }}{% elif source.acquisition and not catalog.acquisition_stale %}{{ {'downloading':'Downloading','verifying':'Verifying','publishing':'Installing','failed':'Failed','retrying':'Retrying','interrupted':'Interrupted','not_started':'Not downloaded','unavailable':'Service unavailable'}.get(source.acquisition.state,'Waiting for status') }}{% elif catalog.acquisition_stale %}Status unavailable{% elif not source.artifact and not source.mutation_blocked %}Not downloaded{% else %}Waiting for status…{% endif %}</span>
           <span class="badge" data-batch-status role="status" hidden></span>
           <progress class="summary-progress" data-field="summary-progress" max="100" value="0" aria-label="Active download progress" hidden></progress>
@@ -1111,7 +1112,7 @@
         {% if source.zim_download or (document and url_managed) %}
         <p class="source-note" data-field="update-details"{% if not source.update_check or source.update_check.state != "update_available" and not source.update_check.candidate_token %} hidden{% endif %}>
         {% if source.update_check and (source.update_check.state == "update_available" or source.update_check.candidate_token) %}
-          Installed edition: {{ source.update_check.installed_edition }} · Publisher edition: {{ source.update_check.candidate_edition }}
+          {% if (source.automatic_update|default({})).policy == "disabled" %}Saved publisher result (updates disabled) · {% endif %}Installed edition: {{ source.update_check.installed_edition }} · Publisher edition: {{ source.update_check.candidate_edition }}
           {% if source.update_check.candidate_bytes %}
             · Estimated transfer and staging: {{ source.update_check.candidate_bytes | filesizeformat }}
             · Installed and candidate archives together:
@@ -2507,7 +2508,7 @@
           const result = await response.json().catch(() => ({}));
           if (!response.ok) throw new Error(result.error || 'Update check failed');
           const badge = card.querySelector('[data-field="update-status"]');
-          if (badge) badge.hidden = result.state !== 'update_available' && !result.candidate_token;
+          if (badge) badge.hidden = card.dataset.updatePolicy === 'disabled' || (result.state !== 'update_available' && !result.candidate_token);
           feedback.textContent = {
             update_available: 'Update available',
             up_to_date: 'Up to date',
@@ -3289,7 +3290,8 @@
               ].filter(Boolean).join(' · ') : '';
             }
             const hasUpdate = update?.state === "update_available" || !!update?.candidate_token;
-            if (updateBadge) updateBadge.hidden = !hasUpdate;
+            if (source) card.dataset.updatePolicy = source.automatic_update?.policy || "";
+            if (updateBadge) updateBadge.hidden = !hasUpdate || card.dataset.updatePolicy === "disabled";
             if (updateDetails) {
               updateDetails.hidden = !hasUpdate;
               const incoming = update?.candidate_bytes;
@@ -3300,7 +3302,7 @@
                 (Number.isSafeInteger(installed) && installed > 0 && Number.isSafeInteger(installed + incoming) ?
                   size(installed + incoming) : 'unknown') : '';
               updateDetails.textContent = hasUpdate
-                ? (update.candidate_token ? 'Publisher file changed; newer edition not independently verified' : 'Installed edition: ' + (update.installed_edition || 'unknown') +
+                ? (card.dataset.updatePolicy === 'disabled' ? 'Saved publisher result (updates disabled) · ' : '') + (update.candidate_token ? 'Publisher file changed; newer edition not independently verified' : 'Installed edition: ' + (update.installed_edition || 'unknown') +
                   ' · Publisher edition: ' + (update.candidate_edition || 'unknown')) +
                   estimate + ' · Candidate: ' + (update.candidate_url || 'unavailable') +
                   ' · The installed edition remains in service until you publish the verified update.'
@@ -3479,7 +3481,7 @@
       const individualChecks = new Set();
       const individualFeedback = new Map();
       const stateLabels = {available:'Update available', active:'Queued / downloading', staged:'Verified / staged',
-        applied:'Applied', failed:'Failed / needs attention', unknown:'Update status unknown', current:'Up to date'};
+        applied:'Applied', failed:'Failed / needs attention', unknown:'Update status unknown', current:'Up to date', disabled:'Update policy disabled'};
       const currentStates = ['up_to_date','no_newer_edition_listed','older_candidate','representation_unchanged'];
       const failedStates = ['failed','cancelled','interrupted','paused','rolled_back','unavailable'];
       const activeStates = ['queued','running','downloading','retrying','verifying','publishing','activating','cancelling','pausing'];
@@ -3540,9 +3542,10 @@
           const sid = source.source_id, replacement = source.replacement || {}, update = source.update_check || {};
           const job = latest.get(sid), auto = source.automatic_update || {}, discovery = source.discovery || {};
           if (!source.installed_verified && !job && !replacement.state) return [];
+          const disabled = auto.policy === "disabled";
           const pending = job && activeStates.includes(job.state) || activeStates.includes(replacement.state);
           const verified = source.installed_verified && (replacement.state === 'verified' || (['pdf','epub'].includes(source.adapter) && replacement.state === 'rolled_back' && !!replacement.sha256));
-          const available = source.installed_verified && !update.stale && (update.state === 'update_available' || !!update.candidate_token) &&
+          const available = !disabled && source.installed_verified && !update.stale && (update.state === 'update_available' || !!update.candidate_token) &&
             Number.isFinite(update.candidate_bytes) && update.candidate_bytes > 0 &&
             (!replacement.state || replacement.state === 'activated');
           const operation = pending || source.mutation_blocked ? null : verified ? 'publish-update' : available ? 'download-update' : null;
@@ -3558,7 +3561,15 @@
             state = 'failed';
             if (replacement.state === 'rolled_back') label = 'Rolled back';
           } else if (available) { state = 'available'; if (update.candidate_token) label = 'Publisher file changed · ready to download'; }
-          else if (job && failedStates.includes(job.state) || rejected.has(sid)) state = 'failed';
+          else if (job && failedStates.includes(job.state)) state = 'failed';
+          else if (disabled && replacement.state === 'prepared') { state = 'unknown'; label = 'Update prepared · review source'; }
+          else if (disabled) {
+            state = 'disabled';
+            label = 'Update policy disabled' + (update.stale ? ' · Last check stale' :
+              update.state === 'update_available' || update.candidate_token ? ' · Historical update available' :
+              update.state === 'unable_to_determine' ? ' · Last check inconclusive' : '');
+          }
+          else if (rejected.has(sid)) state = 'failed';
           else if (replacement.state === 'activated' || job?.state === 'completed' && ['publish-update','automatic-update'].includes(job.operation)) state = 'applied';
           else if (update.state === 'representation_changed') label = 'Publisher file changed · newer edition unverified';
           else if (!source.installed_verified) label = 'Installed content unavailable';
@@ -3572,7 +3583,7 @@
             state = 'current'; label = 'Manual discovery · not checked automatically';
           } else if (replacement.state === 'prepared') label = 'Update prepared · review source';
           return [{sid, title:source.profile.title, operation, digest, state, label:label || stateLabels[state],
-            key:sid + ':' + operation + ':' + digest, job, replacement,
+            key:sid + ':' + operation + ':' + digest, job, replacement, disabled,
             installed:source.installed_edition || update.installed_edition || 'Unknown',
             edition:verified ? source.configuration.edition || update.candidate_edition : update.candidate_edition,
             bytes:verified ? 0 : update.candidate_bytes,
@@ -3594,7 +3605,7 @@
         byId('updates-count').textContent = ready + ' ready for download or publication · ' + active + ' in progress · ' + attention + ' need review';
         const query = search.value.trim().toLocaleLowerCase();
         const shown = rows.filter(row => (!query || row.title.toLocaleLowerCase().includes(query)) &&
-          (filter.value === 'all' || (filter.value === 'attention' ? ['available','active','staged','failed','unknown'].includes(row.state) : row.state === filter.value)));
+          (filter.value === 'all' || (filter.value === 'disabled' ? row.disabled : filter.value === 'attention' ? ['available','active','staged','failed','unknown'].includes(row.state) : row.state === filter.value)));
         // Keep selection tied to operation and digest across refreshes and filters.
         if (selectOnOpen) for (const row of rows) if (row.operation && row.digest) selectedKeys.add(row.key);
         for (const row of rows) if (row.operation === 'publish-update' && row.digest && acceptedDownloads.delete(row.sid)) selectedKeys.add(row.key);
@@ -3651,7 +3662,7 @@
             'Last check: ' + timeLabel(row.checked),
             row.lastSuccessful ? 'Last successful check: ' + timeLabel(row.lastSuccessful) : ''].filter(Boolean).join(' · '), 'source-note');
           if (row.blocked) line('Update actions blocked by current source activity.');
-          if (row.evidence && ['unknown','failed'].includes(row.state)) line(row.evidence);
+          if (row.evidence && ['unknown','failed','disabled'].includes(row.state)) line(row.evidence);
           if (row.problem || row.job || row.replacement.error) {
             const action = row.job?.operation === 'publish-update' ? 'Publication' : row.job?.operation === 'automatic-update' ? 'Automatic update' : 'Download';
             line([row.problem, row.job ? action + ' ' + row.job.state + (row.job.detail ? ' · ' + row.job.detail : '') : '',

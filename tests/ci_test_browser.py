@@ -1595,6 +1595,33 @@ def exercise_batch_update_journey(browser, viewport):
         expect(review.get_by_text("Verifying update", exact=False)).to_have_count(0)
         check_all.click()
         expect(download).to_have_text("Download 2 updates")
+        # Disabling a source immediately excludes retained discovery from attention and selection.
+        sources[1]["automatic_update"]["policy"] = "disabled"
+        sources[1]["discovery"]["periodic"] = False
+        expect(review.get_by_text("Second archive", exact=True)).to_have_count(0, timeout=12000)
+        expect(download).to_have_text("Download 1 update")
+        filters.select_option("disabled")
+        expect(review.get_by_text("Historical update available", exact=False)).to_be_visible()
+        expect(download).to_be_disabled()
+        expect(review.get_by_role("button", name="Check for updates for Second archive")).to_be_visible()
+        sources[1]["update_check"] = {"state": "unable_to_determine", "evidence": "Historical 403"}
+        expect(review.get_by_text("Historical 403")).to_be_visible(timeout=12000)
+        filters.select_option("attention")
+        expect(review.get_by_text("Second archive", exact=True)).to_have_count(0)
+        sources[1]["replacement"] = {"state": "downloading", "downloaded_bytes": 512, "expected_bytes": 2048}
+        expect(review.get_by_role("progressbar", name="Download progress for Second archive")).to_be_visible(timeout=12000)
+        sources[1]["replacement"] = {"state": "verified", "sha256": digest, "expected_bytes": 2048}
+        expect(review.get_by_text("Second archive", exact=True)).to_be_visible(timeout=12000)
+        expect(review.locator('[data-update-state="staged"] .badge')).to_have_text("Verified / staged")
+        sources[1]["replacement"] = {"state": "failed", "error": "fixture transfer failed"}
+        expect(review.get_by_text("fixture transfer failed")).to_be_visible(timeout=12000)
+        sources[1]["replacement"] = None
+        sources[1]["automatic_update"]["policy"] = "scheduled"
+        sources[1]["discovery"]["periodic"] = True
+        sources[1]["update_check"] = candidate()
+        expect(review.get_by_role("checkbox", name="Second archive")).to_be_visible(timeout=12000)
+        review.get_by_role("checkbox", name="Second archive").check()
+        expect(download).to_have_text("Download 2 updates")
         expect(review.get_by_text("Could not determine update status for 1 source.", exact=False)).to_be_visible()
         review.get_by_text("Inconclusive publisher checks").click()
         expect(review.get_by_text("No strong ETag was saved", exact=False)).to_be_visible()

@@ -264,6 +264,11 @@ def _public_zim_replacement(candidate):
     return result | zim_jobs.current_checksum(candidate) | zim_jobs.current_transfer(candidate)
 
 
+def _update_notifications_disabled(source):
+    """Policy is independent of the retained publisher evidence."""
+    return source.get("automatic_update", {}).get("policy") == "disabled"
+
+
 def _update_stage(source):
     if not source["installed_verified"]:
         return None
@@ -272,7 +277,7 @@ def _update_stage(source):
     if replacement.get("state") == "verified" or (source.get("adapter") in document_replacement.FORMATS
             and replacement.get("state") == "rolled_back" and replacement.get("sha256")):
         return "publish"
-    if ((check.get("state") == "update_available" or check.get("candidate_token")) and check.get("candidate_bytes")
+    if (not _update_notifications_disabled(source) and (check.get("state") == "update_available" or check.get("candidate_token")) and check.get("candidate_bytes")
             and replacement.get("state") in (None, "activated")):
         return "download"
     return None
@@ -284,7 +289,8 @@ def _source_update_summary(sources):
     attention = 0
     for source in sources:
         discovery = source["discovery"]
-        if not source["installed_verified"] or discovery["method"] == "manual":
+        if (not source["installed_verified"] or discovery["method"] == "manual"
+                or _update_notifications_disabled(source)):
             continue
         result = source["update_check"] or {}
         state = result.get("state")
@@ -1733,6 +1739,9 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     try:
                         if sid not in records or sid in pending:
                             raise ValueError("Source is unavailable or already queued")
+                        if (operation == "download-update"
+                                and update_discovery_config.policy(records[sid]["configuration"])[0] == "disabled"):
+                            raise ValueError("Update policy is Disabled; use the individual source controls for a manual update")
                         jobs.append(_publisher_update_job(records[sid], digest, operation))
                     except (ValueError, OSError) as exc:
                         rejected[sid] = str(exc)

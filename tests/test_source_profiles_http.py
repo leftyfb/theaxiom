@@ -2019,3 +2019,40 @@ def test_service_recovery_resumes_without_browser(app, disk, monkeypatch):
     assert calls == [(offset, '"stable"')]
     assert jobs.read(sid)["state"] == "completed"
     assert not partial.exists()
+
+
+def test_disabled_policy_removes_cached_update_from_notifications_and_batch(app, disk, monkeypatch):
+    from io import BytesIO
+    import hashlib
+
+    request, _ = app
+    sid = "policy-fixture"
+    catalog = mutate(request, request("/api/sources"), "add", {
+        "title": "Policy fixture", "format": "zim",
+        "source_url": "https://download.kiwix.org/zim/zimit/policy_2026-10.zim",
+        "edition": "2026-10", "update_policy": "notify",
+    }, sid=sid)
+    config = source(catalog, sid)["configuration"]
+    data = fixture_bytes()
+    artifact = admin_api.zim_source.install_stream(sid, config, BytesIO(data))
+    admin_api.zim_jobs.save(dict(source_id=sid, state="completed", active=False, verified=True,
+                                 configuration=admin_api.zim_jobs.identity(config), artifact=artifact))
+    digest = hashlib.sha256(data + b"replacement").hexdigest()
+    evidence = {"state": "update_available", "installed_edition": "2026-10", "candidate_edition": "2026-11",
+                "candidate_url": config["source_url"].replace("2026-10", "2026-11"),
+                "candidate_sha256": digest, "candidate_bytes": len(data)+11}
+    admin_api.update_check_store.save(sid, artifact["sha256"], evidence)
+    enabled = request("/api/sources")
+    assert enabled["available_updates"] == 1
+    disabled = mutate(request, enabled, "edit", {"update_policy": "disabled"}, sid=sid)
+    assert disabled["available_updates"] == 0
+    assert disabled["update_stages"]["download"] == 0
+    assert source(disabled, sid)["update_check"]["candidate_sha256"] == digest
+    assert "has an update available" not in disabled["update_summary"]
+    result = request("/api/update-batch", {"operation": "download-update", "revision": disabled["revision"],
+                                           "selection": {sid: digest}}, status=202)
+    assert not result["queued"]
+    assert "Disabled" in result["rejected"][sid]
+    enabled_again = mutate(request, disabled, "edit", {"update_policy": "notify"}, sid=sid)
+    assert enabled_again["available_updates"] == 1
+    assert source(enabled_again, sid)["update_check"]["candidate_sha256"] == digest

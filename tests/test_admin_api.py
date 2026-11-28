@@ -143,3 +143,22 @@ def test_initial_and_replacement_use_same_fresh_transfer_projection():
             assert "eta_seconds" not in project(sample | {"expected_bytes": None})
             assert "eta_seconds" not in project(sample | {"downloaded_bytes": 800})
     assert sample["eta_seconds"] == 999
+
+
+def test_disabled_update_policy_preserves_staged_work_but_excludes_discovery_notifications():
+    source = dict(installed_verified=True, adapter="zim", replacement=None,
+                  discovery={"method": "kiwix", "periodic": False},
+                  automatic_update={"policy": "disabled"})
+    for evidence in ({"state": "unable_to_determine", "checked_at": 100},
+                     {"state": "representation_changed", "checked_at": 100},
+                     {"state": "update_available", "candidate_bytes": 10},
+                     {"state": "update_available", "candidate_bytes": 10, "stale": True},
+                     {"candidate_token": "a"*64, "candidate_bytes": 10}, None):
+        row = dict(source, update_check=evidence)
+        assert admin_api._source_update_summary([row]) == ""
+        assert admin_api._update_stage(row) is None
+    available = dict(source, update_check={"state": "update_available", "candidate_bytes": 10})
+    assert admin_api._update_stage(dict(available, automatic_update={"policy": "notify"})) == "download"
+    assert admin_api._source_update_summary([dict(available, automatic_update={"policy": "notify"})])
+    assert admin_api._update_stage(dict(available, replacement={"state": "verified"})) == "publish"
+    assert admin_api._update_stage(dict(available, replacement={"state": "downloading"})) is None
