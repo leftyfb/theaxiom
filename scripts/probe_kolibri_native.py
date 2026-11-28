@@ -34,7 +34,9 @@ def main():
         home = root / "kolibri"
         home.mkdir()
         port, zip_port, https_port, zip_https = free_ports(4)
-        env = dict(os.environ, KOLIBRI_HOME=str(home))
+        env = dict(os.environ, KOLIBRI_HOME=str(home),
+                   DJANGO_SETTINGS_MODULE="axiom_kolibri_settings",
+                   PYTHONPATH=str(CONFIG))
         options = (CONFIG / "options.ini.example").read_text()
         options = options.replace("HTTP_PORT = 8082", f"HTTP_PORT = {port}")
         options = options.replace("ZIP_CONTENT_PORT = 8083", f"ZIP_CONTENT_PORT = {zip_port}")
@@ -135,7 +137,7 @@ http {{
                     ctx.route("**/*",local_only)
                     page=ctx.new_page()
                     page.on("pageerror",lambda e: print("BROWSER ERROR",str(e)[:500],flush=True))
-                    page.goto(origin+"/kolibri/learn/",wait_until="domcontentloaded")
+                    page.goto(origin+"/kolibri/en/learn/",wait_until="domcontentloaded")
                     back=page.get_by_role("link",name="Back to library")
                     back.wait_for(state="visible",timeout=30000)
                     assert back.get_attribute("href")=="/"
@@ -144,7 +146,7 @@ http {{
                     assert "Axiom library" in page.locator("body").inner_text()
                     print("MOBILE BACK TO LIBRARY PASSED",flush=True)
                     node,title,_=rows["video"]
-                    page.goto(origin+"/kolibri/learn/#/topics/c/"+node,wait_until="domcontentloaded")
+                    page.goto(origin+"/kolibri/en/learn/#/topics/c/"+node,wait_until="domcontentloaded")
                     page.get_by_text(title,exact=True).first.wait_for(timeout=45000)
                     video=page.locator("video").first
                     video.wait_for(state="attached",timeout=30000)
@@ -152,7 +154,7 @@ http {{
                     page.wait_for_function("document.querySelector('video').currentTime > 0",timeout=15000)
                     print("NATIVE OFFLINE VIDEO PLAYBACK PASSED",flush=True)
                     node,title,_=rows["exercise"]
-                    page.goto(origin+"/kolibri/learn/#/topics/c/"+node,wait_until="domcontentloaded")
+                    page.goto(origin+"/kolibri/en/learn/#/topics/c/"+node,wait_until="domcontentloaded")
                     page.get_by_text(title,exact=True).first.wait_for(timeout=45000)
                     page.locator(".perseus-root .perseus").first.wait_for(state="visible",timeout=45000)
                     assert page.locator(".perseus-root .perseus").first.inner_text().strip()
