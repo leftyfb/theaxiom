@@ -84,20 +84,23 @@ class Jobs:
         return native.verify(self._package(sid, artifact), self._selection(artifact), artifact["manifest_sha256"])
 
     @contextmanager
-    def _operation(self, sid):
+    def _operation(self, sid, *, reserved=False):
         with self.lock:
-            if sid in self.active:
-                raise ValueError("Educational source is busy")
-            self.active.add(sid)
+            if not reserved:
+                if sid in self.active:
+                    raise ValueError("Educational source is busy")
+                self.active.add(sid)
+            elif sid not in self.active:
+                raise ValueError("Educational reservation missing")
         try:
             yield
         finally:
             with self.lock:
                 self.active.remove(sid)
 
-    def download(self, sid, selection, *, update=False):
+    def download(self, sid, selection, *, update=False, reserved=False):
         """Run a bounded explicit selection; candidate never changes live content."""
-        with self._operation(sid):
+        with self._operation(sid, reserved=reserved):
             job = self.read(sid)
             if update:
                 old = self._selection(job["installed"])

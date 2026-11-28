@@ -15,7 +15,7 @@ from .storage_settings import validate_settings
 
 LOCAL_FILESYSTEMS = {"ext4", "ext3", "ext2", "xfs", "btrfs", "tmpfs", "zfs"}
 NETWORK_FILESYSTEMS = {"nfs", "nfs4"}
-ACQUISITION_FORMATS = frozenset({"zim", "pdf", "epub", "pmtiles", "json", "csv"})
+ACQUISITION_FORMATS = frozenset({"zim", "pdf", "epub", "pmtiles", "json", "csv", "kolibri"})
 
 
 def _decode(field: str) -> str:

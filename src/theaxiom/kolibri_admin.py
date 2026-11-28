@@ -1,0 +1,135 @@
+"""Admin-facing generic native Kolibri orchestration; disabled unless configured."""
+from dataclasses import asdict
+import hashlib
+import os
+from pathlib import Path
+import tempfile
+import threading
+
+from . import catalog_store, kolibri_jobs, kolibri_native as native, kolibri_publication
+from . import kolibri_scope as scope, pdf_source, storage_settings
+
+LOCK = threading.RLock()
+_INSTANCE = None
+_PREVIEWS = threading.RLock()
+
+
+def configured():
+    global _INSTANCE
+    registry = kolibri_publication.configured_registry()
+    executable = os.environ.get("THEAXIOM_KOLIBRI_EXECUTABLE")
+    home = os.environ.get("THEAXIOM_KOLIBRI_HOME")
+    if not registry or not executable or not home:
+        return None
+    executable, home = Path(executable), Path(home)
+    if (not executable.is_absolute() or not home.is_absolute() or not executable.is_file()
+            or registry.database != home/"db.sqlite3"):
+        return None
+    settings = storage_settings.load_settings()
+    if not settings["storage_root"]:
+        return None
+    root = Path(settings["storage_root"])/"library"/"kolibri"
+    identity = (str(root), settings["storage_source"], settings["storage_mount"])
+    with LOCK:
+        if _INSTANCE is not None:
+            previous, manager = _INSTANCE
+            if previous == identity:
+                return manager
+            if manager.active or any(manager.state.glob("*.json")):
+                raise ValueError("Existing Kolibri content must be resolved before changing storage")
+        def guard(required):
+            if storage_settings.load_settings() != settings:
+                raise ValueError("Configured storage changed")
+            with pdf_source._directory("library", writing=True, format_name="kolibri") as (fd, mount, minimum):
+                capacity = os.fstatvfs(fd)
+                if capacity.f_bavail*capacity.f_frsize < minimum+required:
+                    raise ValueError("Insufficient configured storage capacity")
+        manager = kolibri_jobs.Jobs(registry.root/"jobs", root/"packages", registry, executable, home, guard)
+        _INSTANCE = identity, manager
+        return manager
+
+
+def channel(record):
+    config = record["configuration"]
+    if config.get("format") != "kolibri":
+        raise ValueError("Not an educational source")
+    return scope._id(config.get("kolibri_channel_id"))
+
+
+def _preview_path(manager, cid):
+    return manager.registry.root/"previews"/(scope._id(cid)+".sqlite3")
+
+
+def refresh(manager, record):
+    cid = channel(record)
+    path = _preview_path(manager, cid)
+    with _PREVIEWS:
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=path.parent) as folder:
+            temp = Path(folder)/"preview.sqlite3"
+            item, digest, size = native.fetch_metadata(cid, temp)
+            os.replace(temp, path)
+        return {"channel": asdict(item), "metadata_sha256": digest, "metadata_bytes": size,
+                "children": [asdict(child) for child in scope.children(path, cid)]}
+
+
+def browse(manager, record, parent=None):
+    cid = channel(record)
+    with _PREVIEWS:
+        path = _preview_path(manager, cid)
+        item = scope.inspect_channel(path, cid)
+        return {"channel": asdict(item), "children": [asdict(child) for child in scope.children(path, cid, parent)]}
+
+
+def selection(manager, record, nodes, allow_full=False):
+    cid = channel(record)
+    with _PREVIEWS:
+        path = _preview_path(manager, cid)
+        plan = scope.plan_scope(path, cid, nodes, allow_full=allow_full)
+        with path.open("rb") as stream:
+            value = hashlib.sha256()
+            while block := stream.read(1024*1024):
+                value.update(block)
+            digest = value.hexdigest()
+        selected = native.Selection(cid, tuple(plan.selected_nodes), plan.channel.version, digest,
+                                    plan.total_bytes, allow_full)
+        return selected, {"total_bytes": plan.total_bytes, "resources": plan.resource_count,
+                          "licenses": list(plan.licenses), "missing_license_count": plan.missing_license_count,
+                          "version": plan.channel.version, "metadata_sha256": digest}
+
+
+def status(manager, record):
+    if manager is None:
+        return {"configured": False, "active": False}
+    sid = record["source_id"]
+    job = manager.read(sid)
+    installed = job.get("installed")
+    published = manager.registry.acknowledged().get(sid)
+    selection = installed.get("selection") if installed else None
+    if selection and selection["channel_id"] != channel(record):
+        return {"configured": True, "error": "Installed channel does not match profile"}
+    return {"configured": True, "active": sid in manager.active,
+            "installed": selection, "published": bool(published),
+            "candidate": bool(job.get("candidate")), "previous": bool(job.get("previous")),
+            "job": {key: job[key] for key in ("state", "active", "downloaded_bytes", "expected_bytes",
+                "sampled_at", "speed_bytes_per_second", "detail") if key in job}}
+
+
+def start_download(manager, record, selected, *, update=False):
+    sid = record["source_id"]
+    def worker():
+        try:
+            manager.download(sid, selected, update=update, reserved=True)
+        except (OSError, ValueError, RuntimeError):
+            # The private job ledger records terminal failures.
+            pass
+    with manager.lock:
+        if sid in manager.active:
+            raise ValueError("Educational source is busy")
+        manager.active.add(sid)
+        thread = threading.Thread(target=worker, daemon=True, name="kolibri-"+sid)
+        try:
+            thread.start()
+        except BaseException:
+            manager.active.remove(sid)
+            raise

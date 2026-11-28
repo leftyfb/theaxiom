@@ -164,8 +164,8 @@ http {{
                 else:
                     raise RuntimeError("Kolibri proxy failed to become ready")
                 print("NATIVE HTTPS PROXY READY",flush=True)
-                import kolibri
-                sandbox = (Path(kolibri.__file__).parent/"core/content/build/sandbox_filename").read_text().strip()
+                import kolibri as vendor_kolibri
+                sandbox = (Path(vendor_kolibri.__file__).parent/"core/content/build/sandbox_filename").read_text().strip()
                 sandbox_path = "/content/static/sandbox/" + sandbox
                 with urlopen(zip_origin+sandbox_path,context=ssl._create_unverified_context(),timeout=10) as response:
                     assert response.status == 200 and b"<" in response.read(512)
