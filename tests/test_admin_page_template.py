@@ -426,12 +426,14 @@ def test_zim_replacement_controls_render_with_explicit_confirmation():
     actions = [attrs for tag, attrs in parser.tags
                if tag == "button" and "data-zim-replacement" in attrs]
     assert {attrs["data-zim-replacement"] for attrs in actions} == {
-        "prepare", "download", "cancel", "activate", "rollback", "discard"}
+        "prepare", "download", "restart", "cancel", "activate", "rollback", "discard"}
     assert all("hidden" in attrs for attrs in actions)
     page = render([profile("replacement", format="zim",
                            source_url="https://example.org/archive.zim")])
     assert "confirm_restart:true" in page
     assert "action:'zim-replacement-' + operation" in page
+    assert "Restart update from zero?" in page
+    assert "Retry update download" in page
 
 
 def test_pdf_card_has_no_zim_replacement_controls():

@@ -114,3 +114,35 @@ def test_map_worker_asset_version_query_is_bounded():
     assert admin_api._map_asset_path(route + "?v=6.19.0") == route
     assert admin_api._map_asset_path(route + "?v=unknown") is None
     assert admin_api._map_asset_path("/api/map-assets/../admin") is None
+
+
+def test_complete_pmtiles_replacement_verifies_publisher_md5_without_resume(disk, monkeypatch):
+    data = fixture()
+    stage = disk / "staging/zim"
+    stage.mkdir()
+    partial = stage / zim_source.partial_name("map-candidate")
+    partial.write_bytes(data)
+    partial.chmod(0o600)
+    def no_network(*args, **kwargs):
+        pytest.fail("Complete replacement must not open network")
+    monkeypatch.setattr(zim_source.pdf_transport, "open_pdf", no_network)
+    artifact = zim_source.download_resumable("map", config(data), offset=len(data),
+                                             staging_id="map-candidate")
+    assert (disk / "library/pmtiles" / artifact["filename"]).read_bytes() == data
+    assert not partial.exists()
+
+
+def test_oversized_pmtiles_stage_is_preserved(disk, monkeypatch):
+    data = fixture()
+    stage = disk / "staging/zim"
+    stage.mkdir()
+    partial = stage / zim_source.partial_name("map-candidate")
+    partial.write_bytes(data + b"extra")
+    partial.chmod(0o600)
+    def no_network(*args, **kwargs):
+        pytest.fail("Oversized replacement must not open network")
+    monkeypatch.setattr(zim_source.pdf_transport, "open_pdf", no_network)
+    with pytest.raises(ValueError, match="exceeds expected size"):
+        zim_source.download_resumable("map", config(data), offset=len(data)+5,
+                                     validator='"stable"', staging_id="map-candidate")
+    assert partial.read_bytes() == data + b"extra"

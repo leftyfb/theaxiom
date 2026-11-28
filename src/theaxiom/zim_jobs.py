@@ -257,7 +257,7 @@ def acquire_candidate(sid, config):
         return candidate
 
 
-def start_candidate_acquisition(sid, config, *, automatic_job=None, activity_trigger=None, recovering=False):
+def start_candidate_acquisition(sid, config, *, automatic_job=None, activity_trigger=None, recovering=False, restart=False):
     """Queue a replacement download without blocking the HTTP request."""
     configuration = identity(config)
     with LOCK:
@@ -287,10 +287,18 @@ def start_candidate_acquisition(sid, config, *, automatic_job=None, activity_tri
             restart_from = 0
             if recovering and not offset and candidate.get("downloaded_bytes"):
                 raise ValueError("Previously retained replacement bytes are missing")
-            if offset and not validator and candidate["state"] == "failed" and candidate.get("retry_exhausted") and offset == candidate.get("downloaded_bytes"):
+            if restart:
+                if recovering or automatic_job or candidate["state"] not in {"failed", "interrupted", "cancelled"} or not offset or candidate.get("artifact"):
+                    raise ValueError("Restart requires an inactive replacement with retained staging")
+                restart_from, offset, validator = offset, 0, None
+            complete = zim_source.complete_pinned_staging(configuration, offset)
+            expected = int(configuration["expected_size_bytes"] or 0)
+            if expected and offset >= expected and not complete:
+                raise ValueError("Staged archive is complete or oversized but cannot be verified; bytes retained for review")
+            if offset and not validator and not complete and candidate["state"] == "failed" and candidate.get("retry_exhausted") and offset == candidate.get("downloaded_bytes"):
                 restart_from, offset = offset, 0
-            elif offset and not validator:
-                raise ValueError("Cannot safely resume without publisher validator; cancel and discard staging first")
+            elif offset and not validator and not complete:
+                raise ValueError("Cannot safely resume without publisher validator; use Restart update from zero if you accept overwriting the retained bytes")
             if not offset:
                 # A fresh transfer must not inherit validators from an earlier
                 # failed attempt; those headers describe a different response.
@@ -299,7 +307,7 @@ def start_candidate_acquisition(sid, config, *, automatic_job=None, activity_tri
             with (pdf_source._directory("staging", writing=True, format_name="zim") as (sfd, sm, _),
                   pdf_source._directory("library", writing=True, format_name=configuration["format"]) as (_, lm, reserve)):
                 cap = os.fstatvfs(sfd)
-                need = max(zim_source.minimum_bytes(configuration["format"]), int(configuration["expected_size_bytes"] or 0) - offset)
+                need = 0 if complete else max(zim_source.minimum_bytes(configuration["format"]), int(configuration["expected_size_bytes"] or 0) - offset)
                 if sm != lm or cap.f_flag & os.ST_RDONLY or cap.f_bavail * cap.f_frsize < reserve + need:
                     raise ValueError("Insufficient writable archive storage capacity")
             candidate.pop("restart_pending", None)
@@ -361,13 +369,17 @@ def _retry_archive(transfer, staging_id, signal, offset, validator, load, persis
             if retained != job["downloaded_bytes"]:
                 raise ValueError("Staged ZIM size changed during retry backoff")
             stable = pdf_transport.resume_validator(job.get("etag"), job.get("last_modified")) if retained else None
-            if retained and not stable and job.get("restart_recovery"):
+            complete = zim_source.complete_pinned_staging(job["configuration"], retained)
+            expected = int(job["configuration"]["expected_size_bytes"] or 0)
+            if expected and retained >= expected and not complete:
+                raise ValueError("Staged archive is complete or oversized but cannot be verified; bytes retained for review")
+            if retained and not stable and not complete and job.get("restart_recovery"):
                 raise ValueError("Safe resume requires a publisher validator; partial retained")
             job.update(state="downloading", speed_bytes_per_second=0)
             job.pop("retry_delay_seconds", None)
             persist(job)
-        return transfer(retained if stable else 0, stable,
-                        **({"restart_from": retained} if retained and not stable else {}))
+        return transfer(retained if stable or complete else 0, stable,
+                        **({"restart_from": retained} if retained and not stable and not complete else {}))
 
     def on_retry(count, delay, _error):
         nonlocal retrying
@@ -1177,7 +1189,7 @@ def start(sid, config, *, resume=False, restart=False, retry=False, activity_tri
                 if not retained and old.get("restart_previous_bytes"):
                     raise ValueError("Previously retained bytes are missing; automatic restart refused")
                 resume, restart = bool(retained), not retained
-                if retained and not pdf_transport.resume_validator(old.get("etag"), old.get("last_modified")):
+                if retained and not zim_source.complete_pinned_staging(configuration, retained) and not pdf_transport.resume_validator(old.get("etag"), old.get("last_modified")):
                     raise ValueError("Safe resume requires retained bytes and a publisher validator")
             # A changed source URL/checksum must not bypass the installed-content
             # guard: overwriting the completed job would orphan the published
@@ -1202,13 +1214,17 @@ def start(sid, config, *, resume=False, restart=False, retry=False, activity_tri
                     raise ValueError("No matching paused ZIM download")
                 offset = staged_size(sid)
                 validator = pdf_transport.resume_validator(old.get("etag"), old.get("last_modified")) if offset else None
-                if retry and old.get("retry_exhausted") and offset == old.get("downloaded_bytes") and not validator:
+                complete = zim_source.complete_pinned_staging(configuration, offset)
+                expected = int(configuration["expected_size_bytes"] or 0)
+                if expected and offset >= expected and not complete:
+                    raise ValueError("Staged archive is complete or oversized but cannot be verified; bytes retained for review")
+                if retry and old.get("retry_exhausted") and offset == old.get("downloaded_bytes") and not validator and not complete:
                     restart_from, offset = offset, 0
                     old.pop("etag", None)
                     old.pop("last_modified", None)
-                elif not offset or not validator:
+                elif not offset or (not validator and not complete):
                     raise ValueError("Safe resume requires retained bytes and a publisher validator")
-                if old.get("expected_bytes") and offset >= old["expected_bytes"]:
+                if old.get("expected_bytes") and offset > old["expected_bytes"]:
                     raise ValueError("Invalid resumable offset")
                 job = old
             else:
@@ -1229,7 +1245,7 @@ def start(sid, config, *, resume=False, restart=False, retry=False, activity_tri
             with (pdf_source._directory("staging", writing=True, format_name="zim") as (sfd, sm, _),
                   pdf_source._directory("library", writing=True, format_name=configuration["format"]) as (_, lm, reserve)):
                 cap = os.fstatvfs(sfd)
-                need = max(zim_source.minimum_bytes(configuration["format"]), (int(configuration["expected_size_bytes"] or 0) - offset))
+                need = 0 if zim_source.complete_pinned_staging(configuration, offset) else max(zim_source.minimum_bytes(configuration["format"]), (int(configuration["expected_size_bytes"] or 0) - offset))
                 if sm != lm or cap.f_flag & os.ST_RDONLY or cap.f_bavail * cap.f_frsize < reserve + need:
                     raise ValueError("Insufficient writable ZIM storage capacity")
             job.pop("speed_bytes_per_second", None)

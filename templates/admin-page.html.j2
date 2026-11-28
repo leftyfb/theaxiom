@@ -1035,6 +1035,7 @@
           {% if source.zim_download %}<button class="button" type="button" data-zim-download{% if source.installed_verified %} hidden{% endif %}{% if source.mutation_blocked or source.installed_verified %} disabled{% endif %}>Download</button>{% endif %}
           {% if source.zim_download %}
           <button class="button" type="button" data-zim-replacement="download" hidden>Download replacement</button>
+          <button class="button" type="button" data-zim-replacement="restart" hidden>Restart update from zero</button>
           <button class="button" type="button" data-zim-replacement="cancel" hidden>Cancel replacement · keep partial</button>
           <button class="button" type="button" data-zim-replacement="activate" hidden>Publish update</button>
           <button class="button" type="button" data-zim-replacement="rollback" hidden>Roll back replacement</button>
@@ -2581,6 +2582,7 @@
         if (button.disabled) return;
         const card = button.closest('.source-card');
         const operation = button.dataset.zimReplacement;
+        if (operation === 'restart' && !window.confirm('Restart update from zero? Retained replacement bytes will be overwritten once the new transfer starts. The installed edition will be kept.')) return;
         if (['activate','rollback'].includes(operation) &&
             !window.confirm(operation === 'activate' ? 'Switch to the verified update? The source will keep its current publication setting.' : 'Restore the previous verified content?')) return;
         const feedback = card.querySelector('[data-replacement-feedback]');
@@ -2588,7 +2590,7 @@
         card.querySelectorAll('[data-zim-replacement]').forEach(b => b.disabled = true);
         try {
           await sourceMutation('/api/action', card, {action:'zim-replacement-' + operation,
-            ...(['activate','rollback'].includes(operation) ? {confirm_restart:true} : {})}, 'Replacement operation failed', current => {
+            ...(['activate','rollback','restart'].includes(operation) ? {confirm_restart:true} : {})}, 'Replacement operation failed', current => {
               if (['activate','rollback'].includes(operation) && current.replacement?.review_token)
                 return {expected_replacement:current.replacement.review_token};
               return {};
@@ -3146,6 +3148,7 @@
             button.hidden = op === 'prepare' ? !source?.replacement_available || !!replacement ||
               source?.update_check?.state === 'update_available' :
               op === 'download' ? !['prepared','failed','interrupted','cancelled'].includes(replacementState) :
+              op === 'restart' ? replacement?.can_restart !== true :
               op === 'cancel' ? !['downloading','retrying','verifying'].includes(replacementState) :
               op === 'activate' ? !(replacementState === 'verified' || (['pdf','epub'].includes(source?.adapter) && replacementState === 'rolled_back' && !!replacement?.sha256)) :
               op === 'rollback' ? replacementState !== 'activated' :
@@ -3154,6 +3157,7 @@
             // Replacement controls use their own durable state and backend
             // preconditions. A changed catalog URL makes the old acquisition
             // appear unmatched; it must not disable a safe replacement action.
+            if (op === 'download') button.textContent = ['failed','interrupted','cancelled'].includes(replacementState) ? 'Retry update download' : 'Download replacement';
             button.disabled = (['pdf','epub'].includes(source?.adapter) && blocked) || card.dataset.zimReplacementPosting === 'true' ||
               card.dataset.stagedDeletePosting === 'true' ||
               (op === 'prepare' && !source?.replacement_available) ||

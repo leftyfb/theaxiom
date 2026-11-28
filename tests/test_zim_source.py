@@ -343,3 +343,27 @@ def test_publisher_sha1_is_verified_without_replacing_local_sha256(disk):
     assert stage.exists()
     retained = zim_source.revalidate_retained("retained", config, expected_bytes=len(data))
     assert retained["sha256"] == artifact["sha256"]
+
+
+@pytest.mark.parametrize("valid", [True, False])
+def test_complete_pinned_archive_recovered_without_network(disk, monkeypatch, valid):
+    data = fixture_bytes()
+    stage = disk / "staging/zim"
+    stage.mkdir()
+    partial = stage / zim_source.partial_name("ready-candidate")
+    partial.write_bytes(data)
+    partial.chmod(0o600)
+    config = CONFIG | {"expected_size_bytes": str(len(data)),
+                       "sha256": hashlib.sha256(data).hexdigest() if valid else "0" * 64}
+    def no_network(*args, **kwargs):
+        pytest.fail("Complete pinned archive must not request HTTP Range")
+    monkeypatch.setattr(zim_source.pdf_transport, "open_pdf", no_network)
+    if not valid:
+        with pytest.raises(ValueError, match="SHA-256"):
+            zim_source.download_resumable("ready", config, offset=len(data), staging_id="ready-candidate")
+        assert partial.read_bytes() == data
+    else:
+        artifact = zim_source.download_resumable("ready", config, offset=len(data), staging_id="ready-candidate")
+        assert artifact["bytes"] == len(data)
+        assert (disk / "library/zim" / artifact["filename"]).read_bytes() == data
+        assert not partial.exists()

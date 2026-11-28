@@ -210,6 +210,13 @@ def discard_partial(source_id):
         os.fsync(fd)
 
 
+def complete_pinned_staging(config, offset):
+    """A complete, independently pinned snapshot can be verified without HTTP."""
+    _, expected, digest = candidate(config)
+    return bool(expected and offset == expected and
+                (digest or publisher_sha1(config) or publisher_md5(config)))
+
+
 def download_resumable(source_id, config, *, offset=0, validator=None,
                        progress=lambda current, total, metadata: None,
                        stopped=lambda: False, promote_lock=None, promoting=lambda artifact, identity: None,
@@ -221,9 +228,10 @@ def download_resumable(source_id, config, *, offset=0, validator=None,
     """
     url, expected, expected_digest = candidate(config)
     kind = config["format"]
-    if type(offset) is not int or offset < 0 or offset >= byte_limit(kind):
-        raise ValueError("Invalid saved ZIM offset")
-    if offset and not validator:
+    if type(offset) is not int or offset < 0 or offset > byte_limit(kind):
+        raise ValueError("Invalid saved archive offset")
+    complete = complete_pinned_staging(config, offset)
+    if offset and not validator and not complete:
         raise ValueError("Publisher supplied no stable ETag or Last-Modified; cannot safely resume")
     # A replacement shares the published source ID but never its staging inode.
     name = partial_name(staging_id if staging_id is not None else source_id)
@@ -262,8 +270,16 @@ def download_resumable(source_id, config, *, offset=0, validator=None,
                 raise ValueError("Unsafe staged ZIM file")
             if stat.st_size != (restart_from or offset):
                 raise ValueError("Saved ZIM offset disagrees with staged file; manual recovery required")
-            if expected and offset >= expected:
-                raise ValueError("Staged ZIM offset exceeds expected total")
+            if expected and offset > expected:
+                raise ValueError("Staged archive exceeds expected size; partial retained for manual review")
+            if expected and offset == expected and not complete:
+                raise ValueError("Complete staged archive lacks a pinned checksum; manual review required")
+            if complete:
+                return _verify_and_promote(
+                    fd, staging, library, name, source_id, url, offset,
+                    expected_digest, check_mount, available, stopped,
+                    promote_lock, promoting, progress, expected_sha1=publisher_sha1(config),
+                    kind=kind, expected_md5=publisher_md5(config), configuration=config)
             if available() < max(0, (expected or offset + minimum_bytes(kind)) - offset):
                 raise ValueError("Insufficient writable ZIM storage capacity")
             if stopped():

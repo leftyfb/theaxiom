@@ -1916,3 +1916,79 @@ def test_replacement_public_transfer_sample_freshness_and_attempt_offset():
         assert "speed_bytes_per_second" not in _public_zim_replacement(dict(candidate, speed_bytes_per_second=0))
         assert "eta_seconds" not in _public_zim_replacement(dict(candidate, expected_bytes=None))
         assert "eta_seconds" not in _public_zim_replacement(dict(candidate, downloaded_bytes=1000))
+
+
+def test_candidate_retry_verifies_complete_pinned_staging(disk):
+    import hashlib
+    data = fixture_bytes()
+    artifact = zim_source.install_stream("ready", CONFIG, BytesIO(data))
+    live = dict(source_id="ready", state="completed", active=False, verified=True,
+                configuration=zim_jobs.identity(CONFIG), artifact=artifact)
+    zim_jobs.save(live)
+    changed = CONFIG | {"source_url": "https://example.org/replacement.zim",
+                        "expected_size_bytes": str(len(data)), "sha256": hashlib.sha256(data).hexdigest()}
+    zim_jobs.prepare_candidate("ready", changed)
+    candidate = zim_jobs.read_candidate("ready")
+    candidate.update(state="failed", downloaded_bytes=len(data))
+    zim_jobs._save_candidate(candidate)
+    seen = []
+    def download(sid, config, *, offset, validator, **kwargs):
+        seen.append((offset, validator, kwargs.get("restart_from")))
+        return artifact
+    with (patch.object(zim_jobs, "staged_size", return_value=len(data)),
+          patch.object(zim_source, "download_resumable", download)):
+        zim_jobs.start_candidate_acquisition("ready", changed)
+        for thread in threading.enumerate():
+            if thread.name == "zim-replacement":
+                thread.join(5)
+                assert not thread.is_alive()
+    assert seen == [(len(data), None, None)]
+    assert zim_jobs.read_candidate("ready")["state"] == "verified"
+    assert zim_jobs.read("ready") == live
+
+
+def test_candidate_explicit_restart_preserves_partial_until_transfer(disk):
+    data = fixture_bytes()
+    artifact = zim_source.install_stream("ready", CONFIG, BytesIO(data))
+    live = dict(source_id="ready", state="completed", active=False, verified=True,
+                configuration=zim_jobs.identity(CONFIG), artifact=artifact)
+    zim_jobs.save(live)
+    changed = CONFIG | {"source_url": "https://example.org/replacement.zim"}
+    zim_jobs.prepare_candidate("ready", changed)
+    candidate = zim_jobs.read_candidate("ready")
+    candidate.update(state="failed", downloaded_bytes=7)
+    zim_jobs._save_candidate(candidate)
+    seen = []
+    def download(sid, config, *, offset, validator, **kwargs):
+        seen.append((offset, validator, kwargs["restart_from"]))
+        raise ValueError("simulated upstream failure before truncation")
+    with (patch.object(zim_jobs, "staged_size", return_value=7),
+          patch.object(zim_source, "download_resumable", download)):
+        zim_jobs.start_candidate_acquisition("ready", changed, restart=True)
+        for thread in threading.enumerate():
+            if thread.name == "zim-replacement":
+                thread.join(5)
+                assert not thread.is_alive()
+    assert seen == [(0, None, 7)]
+    assert zim_jobs.read("ready") == live
+
+
+def test_initial_retry_verifies_complete_pinned_stage_without_network(disk, monkeypatch):
+    import hashlib
+    data = fixture_bytes()
+    config = CONFIG | {"expected_size_bytes": str(len(data)), "sha256": hashlib.sha256(data).hexdigest()}
+    stage = disk / "staging/zim"
+    stage.mkdir()
+    partial = stage / zim_source.partial_name("ready")
+    partial.write_bytes(data)
+    partial.chmod(0o600)
+    zim_jobs.save(dict(source_id="ready", state="failed", active=False,
+                       configuration=zim_jobs.identity(config), downloaded_bytes=len(data),
+                       expected_bytes=len(data), attempt_history=[]))
+    def no_network(*args, **kwargs):
+        pytest.fail("Complete archive must verify without network")
+    monkeypatch.setattr(zim_source.pdf_transport, "open_pdf", no_network)
+    assert zim_jobs.start("ready", config, retry=True)["accepted"]
+    join_worker()
+    assert zim_jobs.status("ready")["state"] == "completed"
+    assert not partial.exists()

@@ -2342,6 +2342,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     if replacement and replacement["state"] in {"failed", "cancelled", "interrupted"}:
                         # Never offer discard while partial or promoted bytes
                         # remain. Use the same candidate snapshot as the UI.
+                        replacement["can_restart"] = (zim_jobs.staged_present(sid + "-candidate") and not candidate.get("artifact"))
                         replacement["can_discard"] = (
                             not zim_jobs.staged_present(sid + "-candidate")
                             and not candidate.get("artifact")
@@ -2947,7 +2948,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
 
             elif data.get("action") == "zim-replacement-delete-verified":
                 self._delete_staged_update(data)
-            elif data.get("action") in {"zim-download", "zim-resume", "zim-pause", "zim-cancel", "zim-cancel-keep", "zim-restart", "zim-retry", "zim-revalidate", "zim-replacement-prepare", "zim-replacement-discard", "zim-replacement-activate", "zim-replacement-rollback", "zim-replacement-download", "zim-replacement-cancel", "zim-delete-installed"}:
+            elif data.get("action") in {"zim-download", "zim-resume", "zim-pause", "zim-cancel", "zim-cancel-keep", "zim-restart", "zim-retry", "zim-revalidate", "zim-replacement-prepare", "zim-replacement-discard", "zim-replacement-activate", "zim-replacement-rollback", "zim-replacement-download", "zim-replacement-restart", "zim-replacement-cancel", "zim-delete-installed"}:
                 self._start_zim(data)
             elif data.get("action") == "delete-downloaded-files":
                 self._delete_downloaded_files(data)
@@ -3391,7 +3392,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
     def _start_zim(self, data):
         sid = data.get("source_id")
         expected_keys = ({"source_id", "action", "revision", "confirm_restart"}
-                         if data.get("action") in {"zim-restart", "zim-replacement-activate", "zim-replacement-rollback", "zim-delete-installed"}
+                         if data.get("action") in {"zim-restart", "zim-replacement-restart", "zim-replacement-activate", "zim-replacement-rollback", "zim-delete-installed"}
                          else {"source_id", "action", "revision"})
         reviewed = data.get("expected_replacement")
         if "expected_replacement" in data:
@@ -3402,9 +3403,9 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             expected_keys.add("expected_replacement")
         review_kwargs = {"expected_replacement": reviewed} if reviewed is not None else {}
         if (set(data) != expected_keys
-                or (data.get("action") in {"zim-restart", "zim-replacement-activate", "zim-replacement-rollback", "zim-delete-installed"} and data.get("confirm_restart") is not True)
+                or (data.get("action") in {"zim-restart", "zim-replacement-restart", "zim-replacement-activate", "zim-replacement-rollback", "zim-delete-installed"} and data.get("confirm_restart") is not True)
                 or not isinstance(sid, str)
-                or data.get("action") not in {"zim-download", "zim-resume", "zim-pause", "zim-cancel", "zim-cancel-keep", "zim-restart", "zim-retry", "zim-revalidate", "zim-replacement-prepare", "zim-replacement-discard", "zim-replacement-activate", "zim-replacement-rollback", "zim-replacement-download", "zim-replacement-cancel", "zim-delete-installed"}
+                or data.get("action") not in {"zim-download", "zim-resume", "zim-pause", "zim-cancel", "zim-cancel-keep", "zim-restart", "zim-retry", "zim-revalidate", "zim-replacement-prepare", "zim-replacement-discard", "zim-replacement-activate", "zim-replacement-rollback", "zim-replacement-download", "zim-replacement-restart", "zim-replacement-cancel", "zim-delete-installed"}
                 or not catalog_store.ID_RE.fullmatch(sid) or not self._valid_revision(data["revision"])):
             self._send_json(400, {"error": "ZIM control requires a source ID and current revision only"})
             return
@@ -3439,6 +3440,8 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     result = zim_jobs.cancel_candidate_acquisition(sid, record["configuration"])
                 elif operation == "zim-replacement-download":
                     result = zim_jobs.start_candidate_acquisition(sid, record["configuration"])
+                elif operation == "zim-replacement-restart":
+                    result = zim_jobs.start_candidate_acquisition(sid, record["configuration"], restart=True)
                 elif operation == "zim-replacement-activate":
                     result = zim_jobs.activate_candidate(sid, record["configuration"], **review_kwargs)
                 elif operation == "zim-replacement-rollback":
