@@ -1,5 +1,5 @@
 {
-  "version": 5,
+  "version": 6,
   "sources": [
     {
       "source_id": "wikipedia-en",
@@ -488,6 +488,23 @@
         "data_range_labels": "[\"frequency\",\"band\",[[28000000,29700001,\"10m\"],[50000000,54000001,\"6m\"],[144000000,148000001,\"2m\"],[219000000,225000001,\"1.25m\"],[420000000,450000001,\"70cm\"],[902000000,928000001,\"33cm\"],[1240000000,1300000001,\"23cm\"]]]",
         "update_policy": "disabled"
       }
+    },
+    {
+      "source_id": "mdwiki",
+      "title": "WikiMed / MDWiki",
+      "description": "English illustrated medical encyclopedia from Wiki Project Med. Educational reference only; not a substitute for professional medical advice.",
+      "kind": "zim",
+      "filename": "mdwiki_en_all_maxi_2025-11.zim",
+      "source_url": "https://download.kiwix.org/zim/other/mdwiki_en_all_maxi_2025-11.zim",
+      "language": "eng",
+      "publisher": "Wiki Project Med Foundation / MDWiki via Kiwix",
+      "edition": "2025-11",
+      "provenance": "MDWiki publisher https://mdwiki.org/wiki/WikiProjectMed:App; November 2025 illustrated maxi edition listed by Kiwix mirror https://ftp.fau.de/kiwix/zim/other/ (~2.1 GiB). Publisher size and SHA-256 pending metadata-only verification.",
+      "license": "MDWiki text CC BY-SA; see https://www.mdwiki.org/wiki/WikiProjectMed:Copyrights. Retain contributor attribution, license, notices, source links and archive media-specific terms. Medical disclaimer: https://mdwiki.org/wiki/WikiProjectMed:General_disclaimer. No clinical advice or warranty.",
+      "availability": "candidate",
+      "issue": 56,
+      "introduced_in": 6,
+      "icon_png": "iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAJI0lEQVR4AQEYCef2AAAAAAAAAAAAAAAAAAAAAAAZam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAZam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/wAAAAAAAAAAAAAAAAAAAAAAGWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8AAAAAAAAAAAAZam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8AGWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt//////////////////////8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/ABlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf//////////////////////GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/wAZam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3//////////////////////xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8AGWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt//////////////////////8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/ABlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf//////////////////////GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/wAZam3/GWpt/xlqbf8Zam3/GWpt////////////////////////////////////////////////////////////////////////////GWpt/xlqbf8Zam3/GWpt/xlqbf8AGWpt/xlqbf8Zam3/GWpt/xlqbf///////////////////////////////////////////////////////////////////////////xlqbf8Zam3/GWpt/xlqbf8Zam3/ABlqbf8Zam3/GWpt/xlqbf8Zam3///////////////////////////////////////////////////////////////////////////8Zam3/GWpt/xlqbf8Zam3/GWpt/wAZam3/GWpt/xlqbf8Zam3/GWpt////////////////////////////////////////////////////////////////////////////GWpt/xlqbf8Zam3/GWpt/xlqbf8AGWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt//////////////////////8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/ABlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf//////////////////////GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/wAZam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3//////////////////////xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8AGWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt//////////////////////8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/ABlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf//////////////////////GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/wAZam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8AAAAAAAAAAAAZam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/wAAAAAAAAAAAAAAAAAAAAAAGWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8Zam3/GWpt/xlqbf8AAAAAAAAAAAAAAAAAAAAAQoDCDTwkb74AAAAASUVORK5CYII="
     }
   ]
 }

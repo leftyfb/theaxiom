@@ -435,14 +435,45 @@ def test_hearham_seed_upgrade_preserves_existing_catalog(tmp_path):
     store.get()
     saved = json.loads(store.path.read_bytes())
     saved["seed_version"] = 4
-    saved["sources"] = [r for r in saved["sources"] if r["source_id"] != "hearham"]
+    saved["sources"] = [r for r in saved["sources"] if r["source_id"] not in {"hearham", "mdwiki"}]
     saved["sources"][0]["profile"]["title"] = "Operator title"
     store.path.write_text(json.dumps(saved))
     upgraded = store.get()
     assert upgraded["revision"] == saved["revision"] + 1
-    assert upgraded["sources"][:-1] == saved["sources"]
+    assert upgraded["sources"][:-2] == saved["sources"]
     assert upgraded["groups"] == saved["groups"]
-    assert upgraded["sources"][-1]["source_id"] == "hearham"
+    assert [row["source_id"] for row in upgraded["sources"][-2:]] == ["hearham", "mdwiki"]
     removed = store.mutate("remove", "hearham", {}, upgraded["revision"])
     assert store.get() == removed
-    assert json.loads(store.path.read_bytes())["seed_version"] == 5
+    assert json.loads(store.path.read_bytes())["seed_version"] == 6
+
+
+def test_mdwiki_seed_upgrade_is_opt_in_and_preserves_operator_changes(tmp_path):
+    from theaxiom import update_discovery_config, zim_source
+
+    store = catalog_store.CatalogStore(tmp_path / "sources.json")
+    fresh = store.get()
+    row = next(r for r in fresh["sources"] if r["source_id"] == "mdwiki")
+    config = row["configuration"]
+    assert config["format"] == "zim"
+    assert zim_source.candidate(config)[0].endswith("/mdwiki_en_all_maxi_2025-11.zim")
+    assert config["update_policy"] == "notify"
+    assert update_discovery_config.settings(config)["method"] == "kiwix"
+    assert row["profile"]["icon_png"]
+    assert "professional medical advice" in row["profile"]["description"]
+    assert "CC BY-SA" in config["license"]
+    saved = json.loads(store.path.read_bytes())
+    saved["seed_version"] = 5
+    saved["sources"] = [r for r in saved["sources"] if r["source_id"] != "mdwiki"]
+    saved["sources"][0]["profile"]["title"] = "Operator custom title"
+    store.path.write_text(json.dumps(saved))
+    upgraded = store.get()
+    assert upgraded["revision"] == saved["revision"] + 1
+    assert upgraded["sources"][:-1] == saved["sources"]
+    assert upgraded["sources"][-1] == row
+    assert upgraded["groups"] == saved["groups"]
+    edited = store.mutate("edit", "mdwiki", {"title": "My medical reference"}, upgraded["revision"])
+    assert store.get() == edited
+    removed = store.mutate("remove", "mdwiki", {}, edited["revision"])
+    assert store.get() == removed
+    assert json.loads(store.path.read_bytes())["seed_version"] == 6
