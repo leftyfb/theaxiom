@@ -172,7 +172,7 @@ def _caption(path):
     return "\n".join(lines)
 
 
-def render(bundle, directory):
+def render(bundle, directory, *, publisher_notice=""):
     """Render local pages only, retaining hierarchy and source attribution."""
     directory = Path(directory)
     children = defaultdict(list)
@@ -211,7 +211,9 @@ def render(bundle, directory):
         (directory / (node + ".html")).write_text(_page(title, body), encoding="utf-8")
     notice = ("<p>Selected offline materials from Learning Equality Kolibri. "
               "Interactive exercises and unsupported or unlicensed items are omitted. "
-              "All Khan Academy content is available for free at www.khanacademy.org.</p>")
+              "</p>")
+    if publisher_notice:
+        notice += "<p>" + escape(publisher_notice) + "</p>"
     (directory / "index.html").write_text(_page(bundle.channel.name, notice +
         "<ul>" + _link(bundle.channel.root_id, "Browse topics and lessons") + "</ul>"), encoding="utf-8")
 
@@ -224,7 +226,7 @@ def _illustration():
             + chunk(b"IEND", b""))
 
 
-def acquire(bundle, directory, *, progress=lambda n, total: None, guard=lambda n: None):
+def acquire(bundle, directory, *, progress=lambda n, total: None, guard=lambda n: None, publisher_notice=""):
     """Download only the selected media, validating exact upstream MD5 and size."""
     directory = Path(directory)
     (directory / "media").mkdir()
@@ -246,7 +248,7 @@ def acquire(bundle, directory, *, progress=lambda n, total: None, guard=lambda n
         if size != file.size or digest.hexdigest() != file.checksum:
             raise scope.ScopeError("Publisher media checksum or size mismatch.")
         count += size
-    render(bundle, directory)
+    render(bundle, directory, publisher_notice=publisher_notice)
 
 
 def build_zim(bundle, directory, output, *, guard=lambda n: None, language="eng"):
@@ -276,7 +278,7 @@ def build_zim(bundle, directory, output, *, guard=lambda n: None, language="eng"
 
 
 CONFIG_FIELDS = {"archive_generator", "generator_channel", "generator_scope", "generator_version",
-                 "generator_metadata_sha256", "generator_transfer_bytes", "generator_language"}
+                 "generator_metadata_sha256", "generator_transfer_bytes", "generator_language", "generator_notice"}
 MAX_SELECTION = 15
 
 
@@ -321,6 +323,7 @@ def generate(config, directory, output, *, progress, guard):
     channel, nodes, version, digest, size, language = configuration(config)
     directory = Path(directory)
     database = directory / "channel.sqlite3"
+    guard(MAX_METADATA)
     fetch_metadata(channel, database, version=version, digest=digest)
     selected = select(database, channel, nodes, allow_full=True)
     if selected.total_bytes != size:
@@ -328,5 +331,5 @@ def generate(config, directory, output, *, progress, guard):
     pages = directory / "pages"
     pages.mkdir()
     guard(size * 2 + MAX_METADATA)
-    acquire(selected, pages, progress=progress, guard=guard)
+    acquire(selected, pages, progress=progress, guard=guard, publisher_notice=config.get("generator_notice", ""))
     build_zim(selected, pages, output, guard=guard, language=language)

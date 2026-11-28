@@ -1077,7 +1077,7 @@ def identity(config):
         result["publisher_md5"] = publisher_md5
     if config.get("archive_generator"):
         from . import kolibri_bundle
-        result.update({key: config[key] for key in kolibri_bundle.CONFIG_FIELDS})
+        result.update({key: config.get(key, "") for key in kolibri_bundle.CONFIG_FIELDS})
     if config["format"] in zim_source.structured_source.FORMATS:
         result.update({field: config.get(field, "") for field in zim_source.structured_source.CONFIG_FIELDS})
         if config.get("data_range_labels"):

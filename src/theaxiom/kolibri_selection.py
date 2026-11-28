@@ -84,6 +84,10 @@ def review(config, data):
             if data.get("confirmed") is not True or data.get("transfer_bytes") != selected.total_bytes:
                 raise scope.ScopeError("Review the current size and licensing before saving.")
             result["fields"] = bundle.fields(selected, nodes, digest, language)
+            if channel_id != config.get("generator_channel"):
+                result["fields"].update(title=channel.name, generator_notice="",
+                                        license="Item-specific terms; review per-lesson license and attribution.",
+                                        publisher="Learning Equality / Kolibri")
         return result
 
 

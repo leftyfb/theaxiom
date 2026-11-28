@@ -23,7 +23,7 @@ PROFILE_FIELDS = {"title", "description", "publisher", "edition", "language", "a
 CANDIDATE_FIELDS = {"source_url", "expected_size_bytes", "sha256", "publisher_sha1", "publisher_md5", "provenance", "license"}
 DATA_FIELDS = {"data_record_path", "data_columns", "data_title_field", "data_range_labels"}
 GENERATOR_FIELDS = {"archive_generator", "generator_channel", "generator_scope", "generator_version",
-                    "generator_metadata_sha256", "generator_transfer_bytes", "generator_language"}
+                    "generator_metadata_sha256", "generator_transfer_bytes", "generator_language", "generator_notice"}
 ARTIFACT_CONFIG_FIELDS = CANDIDATE_FIELDS | DATA_FIELDS | GENERATOR_FIELDS | {"format"}
 DISCOVERY_FIELDS = {"update_method", "update_endpoint", "update_periodic"}
 UPDATE_POLICY_FIELDS = {"update_policy", "update_window_start", "update_window_end"}
