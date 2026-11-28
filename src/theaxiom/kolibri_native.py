@@ -7,6 +7,8 @@ manifest SHA-256 in its trusted job ledger. No public service is modified here.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from concurrent.futures import ThreadPoolExecutor
+import threading
 import hashlib
 import json
 import os
@@ -162,18 +164,45 @@ def acquire(root, selection, *, progress=lambda n, total: None, guard=lambda n: 
     _, _, metadata_size = fetch_metadata(selection.channel_id, database,
         version=selection.version, digest=selection.metadata_sha256, guard=guard, base_url=selection.base_url)
     plan = _plan(database, selection)
-    records = []
-    done = 0
     total = plan.total_bytes
-    progress(done, total)
-    for item in plan.files:
-        target = _file(root, item)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        digest, size = _download(selection.base_url + "storage/" + item.storage_path, target,
-            item.size, exact=item.size, md5=item.checksum, guard=guard,
-            total_seconds=3600, progress=lambda n: progress(done + n, total))
-        records.append(_record(item, digest))
-        done += size
+    progress(0, total)
+    lock = threading.Lock()
+    stopped = threading.Event()
+    counts = {}
+    done = 0
+
+    def checked_guard(n):
+        if stopped.is_set():
+            raise scope.ScopeError("Concurrent acquisition stopped.")
+        guard(n)
+
+    def fetch(item):
+        nonlocal done
+        try:
+            target = _file(root, item)
+            target.parent.mkdir(parents=True, exist_ok=True)
+
+            def report(n):
+                with lock:
+                    counts[item.storage_path] = n
+                    progress(done + sum(counts.values()), total)
+
+            digest, size = _download(selection.base_url + "storage/" + item.storage_path,
+                target, item.size, exact=item.size, md5=item.checksum,
+                guard=checked_guard, total_seconds=3600, progress=report)
+            with lock:
+                counts.pop(item.storage_path, None)
+                done += size
+                progress(done + sum(counts.values()), total)
+            return _record(item, digest)
+        except BaseException:
+            stopped.set()
+            raise
+
+    # map preserves the reviewed file order for deterministic manifests.
+    # Wait for running workers before the caller can clean up the package.
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        records = list(pool.map(fetch, plan.files))
     data = json.dumps(_manifest(selection, metadata_size, records), sort_keys=True,
                       separators=(",", ":")).encode("utf-8")
     if len(data) > MAX_MANIFEST:
