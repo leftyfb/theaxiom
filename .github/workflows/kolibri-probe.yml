@@ -1,0 +1,14 @@
+name: One-time Kolibri metadata verification (#34)
+on:
+  push:
+    branches: [kolibri-probe-34]
+permissions:
+  contents: read
+jobs:
+  metadata:
+    runs-on: [self-hosted, Linux, X64, axiom-ci]
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v7
+      - name: Inspect official channel export without acquiring media
+        run: PYTHONPATH=src python3 scripts/probe_kolibri_metadata.py
