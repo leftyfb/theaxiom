@@ -167,8 +167,15 @@ http {{
                     node,title,_=rows["exercise"]
                     page.goto(origin+"/kolibri/viewcontent?node_id="+node,wait_until="domcontentloaded")
                     page.get_by_text(title,exact=True).first.wait_for(timeout=45000)
+                    # The Perseus container becomes visible before its asynchronous
+                    # ZIP/question rendering completes. Wait for actual question UI.
                     page.locator(".perseus-root .perseus").first.wait_for(state="visible",timeout=45000)
-                    assert page.locator(".perseus-root .perseus").first.inner_text().strip()
+                    page.wait_for_function("""() => {
+                      const el = document.querySelector('.perseus-root .perseus');
+                      return el && el.innerText.trim().length > 0 &&
+                        el.querySelector('input,textarea,[contenteditable=true],button,[role=radio],.mq-editable-field');
+                    }""",timeout=45000)
+                    print("EXERCISE QUESTION",page.locator(".perseus-root .perseus").first.inner_text()[:300],flush=True)
                     print("NATIVE OFFLINE EXERCISE RENDER PASSED",flush=True)
                     print("EXTERNAL REQUEST HOSTS BLOCKED",sorted(blocked),flush=True)
                     browser.close()
