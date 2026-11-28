@@ -35,6 +35,10 @@ def candidate(config):
         raise ValueError("Expected ZIM size exceeds supported limits")
     if digest and not re.fullmatch(r"[a-fA-F0-9]{64}", digest):
         raise ValueError("Invalid expected ZIM SHA-256")
+    if config.get("archive_generator"):
+        from . import kolibri_bundle
+        kolibri_bundle.configuration(config)
+        return url, None, None
     publisher_sha1(config)
     md5 = publisher_md5(config)
     if config["format"] == "pmtiles" and (not size or not (md5 or digest)):
@@ -261,6 +265,11 @@ def download_resumable(source_id, config, *, offset=0, validator=None,
             return cap.f_bavail * cap.f_frsize - reserve
 
         check_mount()
+        if config.get("archive_generator"):
+            if offset or restart_from:
+                raise ValueError("Generated archives must be rebuilt from zero")
+            return _generate_archive(config, source_id, name, staging, library, url, check_mount,
+                                     available, stopped, promote_lock, promoting, progress, write_lock)
         fd = os.open(name, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600, dir_fd=staging)
         try:
             stat = os.fstat(fd)
@@ -511,5 +520,51 @@ def revalidate_retained(source_id, config, *, expected_bytes, progress=lambda cu
                 fd, staging, library, partial_name(source_id), source_id,
                 url, expected_bytes, expected_digest, check_mount, available,
                 stopped, promote_lock, promoting, progress, expected_sha1=publisher_sha1(config), kind=kind, expected_md5=publisher_md5(config), configuration=config)
+        finally:
+            os.close(fd)
+
+
+def _generate_archive(config, source_id, name, staging, library, url, check_mount,
+                      available, stopped, promote_lock, promoting, progress, write_lock):
+    """Keep generated archives inside checked storage and use normal promotion."""
+    import tempfile
+    from pathlib import Path
+    from . import kolibri_bundle
+
+    def guard(needed):
+        with write_lock():
+            if stopped():
+                raise TransferStopped()
+            check_mount()
+            if available() < needed:
+                raise ValueError("Insufficient storage for generated educational archive")
+
+    guard(0)
+    try:
+        os.stat(name, dir_fd=staging, follow_symlinks=False)
+    except FileNotFoundError:
+        pass
+    else:
+        raise ValueError("Existing staged file; cancel it before rebuilding")
+    parent = Path(f"/proc/{os.getpid()}/fd/{staging}")
+    with tempfile.TemporaryDirectory(prefix=".kolibri-", dir=parent) as workspace:
+        target = Path(workspace) / "archive.zim"
+        kolibri_bundle.generate(config, workspace, target,
+                                progress=lambda n, total: progress(n, total, {}),
+                                guard=guard)
+        guard(0)
+        fd = os.open(target, os.O_RDONLY | os.O_NOFOLLOW)
+        try:
+            count = os.fstat(fd).st_size
+            if not minimum_bytes("zim") <= count <= MAX_BYTES:
+                raise ValueError("Generated archive has an invalid size")
+            os.chmod(target, 0o600)
+            os.link(target, name, dst_dir_fd=staging, follow_symlinks=False)
+            target.unlink()
+            os.fsync(staging)
+            progress(count, count, {})
+            return _verify_and_promote(fd, staging, library, name, source_id, url, count,
+                                       None, check_mount, available, stopped, promote_lock,
+                                       promoting, progress, kind="zim", configuration=config)
         finally:
             os.close(fd)

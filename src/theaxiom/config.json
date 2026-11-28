@@ -327,7 +327,23 @@
       "description": "offline education",
       "kind": "planned",
       "issue": 34,
-      "availability": "planned"
+      "availability": "planned",
+      "setup": {
+        "format": "zim",
+        "title": "Khan Academy / Kolibri",
+        "description": "Choose an official educational channel and selected topics before downloading. Static educational media; interactive exercises excluded.",
+        "publisher": "Learning Equality / Khan Academy",
+        "language": "eng",
+        "source_url": "https://studio.learningequality.org/content/databases/c9d7f950ab6b5a1199e3d6c10d7f0103.sqlite3",
+        "archive_generator": "kolibri",
+        "generator_channel": "c9d7f950ab6b5a1199e3d6c10d7f0103",
+        "generator_language": "eng",
+        "provenance": "Official Kolibri Studio channel metadata and content storage. Versioned metadata SHA-256 and publisher per-file MD5 checked at acquisition. Select and review scope before download.",
+        "license": "Item-specific terms. Khan Academy commonly CC BY-NC-SA; retain attribution and review each item's license. All Khan Academy content is available for free at www.khanacademy.org. https://support.khanacademy.org/hc/en-us/articles/202262954",
+        "update_method": "manual",
+        "update_policy": "disabled",
+        "icon_png": "iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAABmJLR0QA/wD/AP+gvaeTAAAEMUlEQVRIiZ2WW1CUZRjHf++3uyy7y2EFOcpxMG0ExwQGjENEZZaVHWzMDlZDTZmZFs4w4zCdZqqrZmoaZ5xuusmUJGc07CJJcTJwQUZHRQzIxBWBZRloYXdZdmXfLnQ/dhdwy+fu/f+f5/8cvued9xNEMNmJDigFCvGThGASQS8KraIQe6R4saBwGwZ0fABsB9LmcbkJHMPPZ6KU0/8rgezgPgSNwNJIFQISQSNe3hFljIWTyjziVQha/4v4jYm8W0VKNqGjXXZy7x0TyDOUIGgCjJHEj195gX3ndgdDS5Gckp3kBYPqiKSFFDR0AYsjiTf3vUT7wDp2P/gGGnEznO7CyP0iHyeAVoU1fB0Ql1LBjxIS7JvR88nx/Yy60hFCsmdDlcqH+Rfg5iOgDm6PSHbyKLA5IPblqb1csq0JKetPezErkjuoq3qLlamtaBWfyt2YyOPj5gZmpFrvTmnhHjUBfmoDzB/9T5MUM4BeO0XjxR2qyIgrgyTTAOboUVzeeBX/7cpmBhxLKcs+yuHurQE4Cg3bABTZTi6CtQHmaE8NGwv28G37F6xb9j2Hut4DwGJ9nKIlJ0g0DmF3ZSClwuHurZRnHeXgxZ1U5hyhtf8ppFT3ZovsQ6+gYVOgE7cvFoPWydWxAgrTW+gaLmfSa8bjM+H2xZFoHAJgZUor54criNJ4+LXvFdYt24fl+mPkJV7A6lgWSJDIGGsVJKsDyPhUMonGYQYncsk099JtL6Ei+2cGJ3PJNl9Wx7I6/SSXbGuozDlC90gpWfE9DE7kkWS6wZg7ZfbDKVQrwKrA2aBz4vLFYY62Mz6VTIrJivWf5SQYbIy609W46ZlodJpp+sdXkBpzjXFPMosMI7i88RijnMG7UaAAWYFTgsGGbTKTFckdWKzreSSvgdPW9ZgNdlzeeByeRABar22gJPMYzX+9yDP5ezn59/MUprfQYy8iJ6hTBBkKYbe5JKOZc0NVlGc30dTzJvXVrwPwauHnfNP2FQ7PYoYmc8gxX6a2YjsXhipJjrmO0xtPetwV9Fr3rJhEK+QZrEBmAPP4TNQ3H2JXxTYWGUYw6GZb/qWnhgPnd/F++Q6KlxxX/T03DXx6Yj8fPrSFBIMtOMEpBegK7iBa56K++jV0Gm+IOMATy79jxq9laCI3xF9R/NQ98HaoOIDCWQX4iTBLMNhIMg2Ew0xOLyI/xcLv/c/h9sWqeJx+jLTYq3P8ETQoRPEjcH0uO9eiNNM4PItJje1nxJkZyb1RFGFRxCpcKLwMeCNF6LVuNubvITO+J+RezGNtGKm51cRtkx2UIThA0NrepbUgeFYU44CgFRUltOFkOVAL9N6FsAPJuxTzcEAcFnqTJYKzVODnSaAKKCL47QgWhU4kP6DnoFiFK9xhwb+KkIQtaDGRhiALiRYNTvyMU8xVIZB3iv0XnI9z+FaIEm0AAAAASUVORK5CYII="
+      }
     },
     {
       "source_id": "openstax",

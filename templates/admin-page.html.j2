@@ -1019,6 +1019,23 @@
         <progress data-field="replacement-progress" max="100" aria-label="Replacement update progress" hidden></progress>
         <p class="source-note" data-replacement-feedback role="status" aria-live="polite"></p>
         {% endif %}
+        {% if source.configuration.archive_generator == 'kolibri' %}
+        <details data-education-selector {% if source.installed_verified %}hidden{% endif %}>
+          <summary class="button">Choose educational topics</summary>
+          <p class="source-note">Select topics or lessons before any media is downloaded. Static videos, captions, audio, images and PDF only; interactive exercises are omitted.</p>
+          <label>Official Kolibri channel ID <input data-education-channel value="{{ source.configuration.generator_channel }}" maxlength="32"></label>
+          <label>Language (ISO 639-3) <input data-education-language value="{{ source.configuration.generator_language|default('eng') }}" maxlength="3"></label>
+          <div class="source-actions">
+            <button class="button" type="button" data-education-load>Browse channel</button>
+            <button class="button" type="button" data-education-back hidden>Parent topic</button>
+            <button class="button" type="button" data-education-preview disabled>Review selection</button>
+            <button class="button" type="button" data-education-save disabled>Save selection</button>
+          </div>
+          <p data-education-status role="status" aria-live="polite"></p>
+          <div data-education-topics></div>
+          <p data-education-summary></p>
+        </details>
+        {% endif %}
         <div class="source-actions" aria-label="Source actions">
           {# Legacy pinned-action placeholders cannot execute and must not
              masquerade as Download/Re-download/Update controls. #}
@@ -1331,6 +1348,104 @@
         window.location.reload();
       }
 
+      for (const panel of document.querySelectorAll('[data-education-selector]')) {
+        const card = panel.closest('[data-source-id]');
+        const sid = card.dataset.sourceId;
+        const get = name => panel.querySelector('[data-education-' + name + ']');
+        let metadata = null, reviewed = null, stack = [];
+        const selected = new Map();
+        const invalidate = () => {
+          reviewed = null;
+          get('preview').disabled = !selected.size;
+          get('save').disabled = true;
+          get('summary').textContent = selected.size + ' topic(s) or lesson(s) selected.';
+        };
+        async function request(operation, extra = {}) {
+          const snapshot = await freshSnapshot(sid);
+          const response = await acquisitionFetch('/api/education-selection', {
+            method:'POST', headers:{...(window.axiomCsrfHeaders?.() || {}),'Content-Type':'application/json'},
+            body:JSON.stringify({source_id:sid, revision:snapshot.revision, operation,
+              channel_id:get('channel').value.trim(), language:get('language').value.trim(), ...extra})
+          });
+          const result = await response.json().catch(() => ({}));
+          if (!response.ok) throw acquisitionError(response, result, 'Educational metadata unavailable.');
+          return result;
+        }
+        async function browse(parent, refresh = false) {
+          get('status').textContent = 'Loading channel metadata (no lesson downloads)…';
+          const result = await request('browse', {parent_id:parent || '', refresh});
+          if (metadata && metadata.metadata_sha256 !== result.metadata_sha256) {
+            selected.clear(); stack = []; invalidate();
+          }
+          metadata = result;
+          get('status').textContent = result.channel_name + ' · edition ' + result.version;
+          get('back').hidden = !stack.length;
+          const list = get('topics'); list.replaceChildren();
+          for (const item of result.topics) {
+            const row = document.createElement('div');
+            const label = document.createElement('label');
+            const check = document.createElement('input');
+            check.type = 'checkbox'; check.checked = selected.has(item.id);
+            check.addEventListener('change', () => {
+              if (check.checked && selected.size >= 15) {
+                check.checked = false; get('status').textContent = 'Choose at most 15 topics or lessons.'; return;
+              }
+              if (check.checked) selected.set(item.id,item.title); else selected.delete(item.id);
+              invalidate();
+            });
+            label.append(check, document.createTextNode(' ' + item.title));
+            row.append(label);
+            if (item.kind === 'topic') {
+              const open = document.createElement('button');
+              open.type = 'button'; open.className = 'button'; open.textContent = 'Open';
+              open.addEventListener('click', () => run(async () => {
+                const previous = metadata.parent_id; stack.push(previous);
+                try { await browse(item.id); } catch (error) { stack.pop(); throw error; }
+              }));
+              row.append(open);
+            }
+            list.append(row);
+          }
+        }
+        async function run(action) {
+          get('load').disabled = true;
+          get('preview').disabled = true;
+          get('save').disabled = true;
+          get('back').disabled = true;
+          try { await action(); }
+          catch (error) { get('status').textContent = error.message || 'Educational selection failed.'; }
+          finally {
+            get('load').disabled = false;
+            get('back').disabled = false;
+            get('preview').disabled = !selected.size;
+            get('save').disabled = !reviewed;
+          }
+        }
+        get('load').addEventListener('click', () => run(async () => {
+          metadata = null; selected.clear(); stack = []; invalidate(); await browse('', true);
+        }));
+        get('back').addEventListener('click', () => run(async () => {
+          const parent = stack.pop(); if (parent) await browse(parent);
+        }));
+        for (const input of [get('channel'), get('language')]) input.addEventListener('change', () => {
+          metadata = null; selected.clear(); stack = []; get('topics').replaceChildren(); invalidate();
+        });
+        get('preview').addEventListener('click', () => run(async () => {
+          reviewed = null;
+          if (!metadata) throw new Error('Browse the channel first.');
+          reviewed = await request('preview', {metadata_sha256:metadata.metadata_sha256, nodes:[...selected.keys()]});
+          const mib = n => (n/1048576).toLocaleString(undefined,{maximumFractionDigits:1}) + ' MiB';
+          get('summary').textContent = reviewed.lesson_count + ' lessons · ' + mib(reviewed.transfer_bytes) +
+            ' media · estimated peak ' + mib(reviewed.estimated_peak_bytes) + ' · ' + reviewed.omitted +
+            ' unsupported or restricted items omitted · licenses: ' + reviewed.licenses.join(', ');
+        }));
+        get('save').addEventListener('click', () => run(async () => {
+          if (!reviewed || !window.confirm('Save this scope? Review the content licenses and noncommercial restrictions. This saves the selection only; Download is a separate action.')) return;
+          await request('save', {metadata_sha256:reviewed.metadata_sha256, nodes:reviewed.nodes,
+            transfer_bytes:reviewed.transfer_bytes, confirmed:true});
+          reloadSources();
+        }));
+      }
       let lastSourceAction;
       let filteredActionTimer;
       function sourceAction(card, status) {

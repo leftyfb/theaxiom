@@ -2695,6 +2695,46 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 self._send_json(503, {"error": "Metadata check unavailable"})
                 return
             self._send_json(200, dict(source_id=sid, **{key: value for key, value in result.items() if key != "candidate_etag"}))
+        elif self.path == "/api/education-selection":
+            from . import kolibri_selection
+            if not self.headers.get("Origin"):
+                self._send_json(403, {"error": "same-origin request required"})
+                return
+            data = self._read_body()
+            allowed = {"source_id", "revision", "operation", "channel_id", "language", "parent_id",
+                       "refresh", "metadata_sha256", "nodes", "confirmed", "transfer_bytes"}
+            if (not isinstance(data, dict) or set(data) - allowed
+                    or not self._valid_revision(data.get("revision"))):
+                self._send_json(400, {"error": "Invalid educational scope request"})
+                return
+            sid = data.get("source_id")
+            try:
+                catalog_store.CatalogStore._validate_id(sid)
+                catalog = SOURCE_CATALOG.get()
+                if catalog["revision"] != data["revision"]:
+                    raise catalog_store.RevisionConflict("catalog revision changed")
+                record = next((row for row in catalog["sources"] if row["source_id"] == sid), None)
+                if not record or record["configuration"].get("archive_generator") != "kolibri":
+                    raise ValueError("Source does not support educational selection")
+                result = kolibri_selection.review(record["configuration"], data)
+                if data.get("operation") == "save":
+                    with publication.LOCK:
+                        current = SOURCE_CATALOG.get()
+                        if current["revision"] != data["revision"]:
+                            raise catalog_store.RevisionConflict("catalog revision changed")
+                        job = zim_jobs.status(sid)
+                        if job or publication.load().get(sid):
+                            raise ValueError("Remove existing acquisition or installed content before changing scope")
+                        result["revision"] = SOURCE_CATALOG.mutate(
+                            "edit", sid, result.pop("fields"), data["revision"],
+                            source_busy(self._snapshot(), sid))["revision"]
+                self._send_json(200, result)
+            except catalog_store.RevisionConflict as exc:
+                self._send_json(409, {"error": str(exc)})
+            except (ValueError, TypeError) as exc:
+                self._send_json(400, {"error": str(exc)})
+            except OSError:
+                self._send_json(503, {"error": "Official channel metadata unavailable"})
         elif self.path == "/api/upstream-kiwix-catalog":
             if not self.headers.get("Origin"):
                 self._send_json(403, {"error": "same-origin request required"})

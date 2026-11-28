@@ -1075,6 +1075,9 @@ def identity(config):
         result["publisher_sha1"] = publisher_sha1
     if publisher_md5 := zim_source.publisher_md5(config):
         result["publisher_md5"] = publisher_md5
+    if config.get("archive_generator"):
+        from . import kolibri_bundle
+        result.update({key: config[key] for key in kolibri_bundle.CONFIG_FIELDS})
     if config["format"] in zim_source.structured_source.FORMATS:
         result.update({field: config.get(field, "") for field in zim_source.structured_source.CONFIG_FIELDS})
         if config.get("data_range_labels"):
@@ -1100,6 +1103,11 @@ def preview_acquisition(sid, config, *, exact_selection=False):
     if recorded and not replacement and job["configuration"] == intended:
         return dict(state="installed", installed_bytes=recorded, transfer_bytes=0,
                     staging_bytes=0, peak_bytes=recorded)
+    if intended.get("archive_generator"):
+        transfer = int(intended["generator_transfer_bytes"])
+        staging = transfer * 2 + 256 * 1024 * 1024
+        return dict(state="estimated", installed_bytes=recorded, transfer_bytes=transfer,
+                    staging_bytes=staging, peak_bytes=recorded + staging if recorded is not None else None)
     transfer = int(intended["expected_size_bytes"]) if intended["expected_size_bytes"] else None
     # The ZIM worker promotes its staged inode by hard link. Full staging
     # accounts for a transfer even when a reusable partial could reduce it.

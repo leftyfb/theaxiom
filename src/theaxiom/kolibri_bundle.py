@@ -269,3 +269,60 @@ def build_zim(bundle, directory, output, *, guard=lambda n: None, language="eng"
         if proc.poll() is None:
             proc.kill()
             proc.wait()
+
+
+CONFIG_FIELDS = {"archive_generator", "generator_channel", "generator_scope", "generator_version",
+                 "generator_metadata_sha256", "generator_transfer_bytes", "generator_language"}
+MAX_SELECTION = 15
+
+
+def source_url(channel, version=None):
+    suffix = "" if version is None else "-" + str(version)
+    return STUDIO + "databases/" + scope._id(channel) + suffix + ".sqlite3"
+
+
+def configuration(config):
+    """Distinguish the generated artifact from the upstream database identity."""
+    if config.get("archive_generator") != "kolibri" or config.get("format") != "zim":
+        raise scope.ScopeError("Unsupported archive generator.")
+    channel = scope._id(config.get("generator_channel"))
+    nodes = config.get("generator_scope", "").split(",")
+    if not 1 <= len(nodes) <= MAX_SELECTION or any(not scope.ID.fullmatch(n) for n in nodes):
+        raise scope.ScopeError("Select educational topics before downloading.")
+    version = config.get("generator_version", "")
+    digest = config.get("generator_metadata_sha256", "")
+    size = config.get("generator_transfer_bytes", "")
+    language = config.get("generator_language", "")
+    if (not re.fullmatch(r"(0|[1-9][0-9]{0,8})", version)
+            or not re.fullmatch(r"[a-f0-9]{64}", digest)
+            or not re.fullmatch(r"[1-9][0-9]{0,12}", size)
+            or not re.fullmatch(r"[a-z]{3}", language)
+            or config.get("source_url") != source_url(channel, int(version))):
+        raise scope.ScopeError("Review and save a versioned educational selection before downloading.")
+    if any(config.get(key) for key in ("sha256", "publisher_sha1", "publisher_md5", "expected_size_bytes")):
+        raise scope.ScopeError("Publisher database identity is not the generated ZIM checksum.")
+    return channel, nodes, int(version), digest, int(size), language
+
+
+def fields(bundle, nodes, digest, language):
+    return {"archive_generator": "kolibri", "generator_channel": bundle.channel.channel_id,
+            "generator_scope": ",".join(nodes), "generator_version": str(bundle.channel.version),
+            "generator_metadata_sha256": digest, "generator_transfer_bytes": str(bundle.total_bytes),
+            "generator_language": language, "source_url": source_url(bundle.channel.channel_id, bundle.channel.version),
+            "expected_size_bytes": "", "sha256": "", "publisher_md5": "", "publisher_sha1": "",
+            "edition": str(bundle.channel.version)}
+
+
+def generate(config, directory, output, *, progress, guard):
+    channel, nodes, version, digest, size, language = configuration(config)
+    directory = Path(directory)
+    database = directory / "channel.sqlite3"
+    fetch_metadata(channel, database, version=version, digest=digest)
+    selected = select(database, channel, nodes, allow_full=True)
+    if selected.total_bytes != size:
+        raise scope.ScopeError("Selected transfer size changed.")
+    pages = directory / "pages"
+    pages.mkdir()
+    guard(size * 2 + MAX_METADATA)
+    acquire(selected, pages, progress=progress, guard=guard)
+    build_zim(selected, pages, output, guard=guard, language=language)
