@@ -507,13 +507,21 @@ def _batch_available(settings, formats):
     return max(0, sample["free_bytes"] - settings["minimum_free_bytes"])
 
 
-def _reviewed_update_fields(update, reviewed_digest):
+def _reviewed_update_fields(update, reviewed_digest, config=None):
     """Resolve a reviewed publisher digest to its actual algorithm."""
     if (update.get("state") != "update_available" or update.get("stale") or not update.get("candidate_bytes")
             or (update.get("candidate_sha256") or update.get("candidate_sha1") or update.get("candidate_md5")) != reviewed_digest):
         raise ValueError("Update evidence changed; check for updates again")
     fields = {"source_url": update["candidate_url"], "sha256": update.get("candidate_sha256", ""),
               "expected_size_bytes": str(update["candidate_bytes"]), "edition": update["candidate_edition"]}
+    if config and config.get("archive_generator") == "kolibri":
+        fields.update(generator_version=update["candidate_edition"],
+                      generator_metadata_sha256=reviewed_digest,
+                      generator_transfer_bytes=str(update["candidate_bytes"]),
+                      expected_size_bytes="", sha256="", publisher_sha1="", publisher_md5="")
+        from . import kolibri_bundle
+        kolibri_bundle.configuration(config | fields)
+        return fields
     if update.get("candidate_sha1"):
         fields["publisher_sha1"] = update["candidate_sha1"]
     if update.get("candidate_md5"):
@@ -578,10 +586,10 @@ def _publisher_update_job(record, reviewed_digest, operation, *, rollback_retry=
         payload = config
     else:
         catalog_store.CatalogStore._validate_id(sid + "-candidate")
-        if update_discovery_config.settings(config)["method"] not in {"kiwix", "archive", "builds"}:
+        if update_discovery_config.settings(config)["method"] not in {"kiwix", "archive", "builds", "kolibri"}:
             raise ValueError("Source does not use a versioned archive update method")
         update = kiwix_update_discovery.cached_checked_source(sid)
-        fields = _reviewed_update_fields(update, reviewed_digest)
+        fields = _reviewed_update_fields(update, reviewed_digest, config)
         if config.get("update_method") == "archive" and config.get("update_endpoint"):
             fields["update_endpoint"] = update_discovery_config.settings(
                 config | fields | {"update_endpoint": ""})["endpoint"]
@@ -590,6 +598,8 @@ def _publisher_update_job(record, reviewed_digest, operation, *, rollback_retry=
             raise ValueError("No installed archive to replace")
         payload = {"original": config, "fields": fields, "base": live["artifact"]}
         reservation = update["candidate_bytes"]
+        if config.get("archive_generator"):
+            reservation = reservation * 2 + 256 * 1024 * 1024
         if rollback_retry:
             if (_matching_rollback(record, current, reviewed_digest) != rollback_retry
                     or zim_jobs.identity(_queued_update_configuration(payload)) != current["configuration"]):
@@ -3476,10 +3486,10 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 if not record or not self._archive_record(record):
                     raise ValueError("Source does not support archive updates")
                 config = record["configuration"]
-                if update_discovery_config.settings(config)["method"] not in {"kiwix", "archive", "builds"}:
+                if update_discovery_config.settings(config)["method"] not in {"kiwix", "archive", "builds", "kolibri"}:
                     raise ValueError("Source does not use a versioned archive update method")
                 update = kiwix_update_discovery.cached_checked_source(sid)
-                fields = _reviewed_update_fields(update, digest)
+                fields = _reviewed_update_fields(update, digest, config)
                 replacement_config = config | fields
                 current = zim_jobs.candidate_status(sid)
                 if current and current["state"] != "activated":

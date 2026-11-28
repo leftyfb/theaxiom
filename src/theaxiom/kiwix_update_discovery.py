@@ -54,6 +54,9 @@ def check_kiwix_update(installed: dict, *, fetch=None) -> dict:
     never built from the catalog or a user-edited source card. Only the
     transport's pinned TLS, checked DNS and allowlisted endpoints are trusted.
     """
+    if isinstance(installed, dict) and installed.get("publisher") == "kolibri":
+        from . import kolibri_selection
+        return kolibri_selection.check_update(installed)
     if isinstance(installed, dict) and installed.get("publisher") == "protomaps":
         return archives.check_protomaps_update(installed, fetch=fetch)
     if isinstance(installed, dict) and installed.get("publisher") == "archive":
@@ -193,6 +196,15 @@ def installed_identity_from_job(job: dict, artifact: dict) -> dict | None:
     url = config.get("source_url")
     if not isinstance(url, str):
         return None
+    if config.get("archive_generator") == "kolibri":
+        from . import kolibri_bundle
+        try:
+            channel, nodes, version, metadata_digest, _, language = kolibri_bundle.configuration(config)
+        except ValueError:
+            return None
+        return dict(verified=True, sha256=digest, source_url=url, publisher="kolibri",
+                    family=channel, edition=str(version), language=language,
+                    nodes=nodes, metadata_sha256=metadata_digest)
     if config["format"] == "pmtiles":
         map_build = archives.protomaps_identity(url)
         if map_build and re.fullmatch(r"[a-f0-9]{32}", config.get("publisher_md5", "")):

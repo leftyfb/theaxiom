@@ -33,6 +33,8 @@ def policy(config, method=None):
     if selected not in POLICIES:
         raise ValueError("Invalid update policy")
     if selected in UNATTENDED:
+        if config.get("archive_generator"):
+            raise ValueError("Generated educational updates require operator review")
         kind = config.get("format")
         if kind in {"pdf", "epub"}:
             url = config.get("source_url", "")
@@ -88,10 +90,12 @@ def settings(config):
     periodic = config.get("update_periodic", "")
     archive = archives.internet_archive_identity(download) if isinstance(download, str) else None
     map_build = archives.protomaps_identity(download)
-    if method not in {"auto", "kiwix", "head", "archive", "builds", "manual"} or periodic not in {"", "yes", "no"}:
+    if method not in {"auto", "kiwix", "head", "archive", "builds", "kolibri", "manual"} or periodic not in {"", "yes", "no"}:
         raise ValueError("Invalid update discovery settings")
     if method == "auto":
-        if kind == "zim" and (not download or urlsplit(download).hostname in kiwix_opds.DOWNLOAD_HOSTS):
+        if config.get("archive_generator") == "kolibri":
+            resolved = "kolibri"
+        elif kind == "zim" and (not download or urlsplit(download).hostname in kiwix_opds.DOWNLOAD_HOSTS):
             resolved = "kiwix"
         elif kind == "pmtiles" and map_build:
             resolved = "builds"
@@ -106,7 +110,15 @@ def settings(config):
     if ((resolved == "kiwix" and kind != "zim")
             or (resolved == "head" and kind not in {"pdf", "epub"})):
         raise ValueError("Discovery method is incompatible with the source format")
-    if resolved == "kiwix":
+    if resolved == "kolibri":
+        from . import kolibri_bundle
+        if kind != "zim" or config.get("archive_generator") != "kolibri":
+            raise ValueError("Educational discovery requires a matching generator")
+        latest = kolibri_bundle.source_url(config.get("generator_channel"))
+        if endpoint and endpoint != latest:
+            raise ValueError("Select the official channel metadata endpoint")
+        endpoint = latest
+    elif resolved == "kiwix":
         if endpoint and endpoint != OPDS:
             raise ValueError("Select the approved Kiwix OPDS catalog")
         endpoint = OPDS

@@ -85,3 +85,30 @@ def review(config, data):
                 raise scope.ScopeError("Review the current size and licensing before saving.")
             result["fields"] = bundle.fields(selected, nodes, digest, language)
         return result
+
+
+def check_update(installed):
+    """Compare official editions while preserving the exact selected scope."""
+    unknown = {"state": "unable_to_determine", "evidence": "Could not verify selected educational scope"}
+    try:
+        if installed.get("verified") is not True:
+            return unknown
+        channel_id = installed["family"]
+        old_version = int(installed["edition"])
+        with metadata(channel_id, refresh=True) as (path, channel, digest):
+            if channel.version < old_version:
+                return dict(state="older_candidate", installed_edition=str(old_version),
+                            candidate_edition=str(channel.version), evidence="Publisher lists an older channel")
+            if channel.version == old_version:
+                if digest != installed["metadata_sha256"]:
+                    return unknown
+                return dict(state="up_to_date", installed_edition=str(old_version),
+                            evidence="Official channel edition and metadata digest match")
+            selected = bundle.select(path, channel_id, installed["nodes"], allow_full=False)
+            return dict(state="update_available", installed_edition=str(old_version),
+                        candidate_edition=str(channel.version),
+                        candidate_url=bundle.source_url(channel_id, channel.version),
+                        candidate_sha256=digest, candidate_bytes=selected.total_bytes,
+                        evidence="New official channel edition; digest identifies metadata, not generated ZIM")
+    except (OSError, ValueError, KeyError, TypeError):
+        return unknown
