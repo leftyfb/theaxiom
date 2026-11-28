@@ -2072,5 +2072,28 @@ def test_native_education_configured_but_optional_runtime_absent(app, monkeypatc
     assert not educational["kolibri"]["configured"]
     assert "Select content" in card(request("/admin/sources"), "kolibri")
     assert request("/api/kolibri?source_id=kolibri", status=409)["error"]
+    request("/api/kolibri", {"source_id":"kolibri","action":"refresh","revision":catalog["revision"]}, status=409)
     request("/internal/publication/kolibri", status=403)
     request("/internal/publication/kolibri-alternate", status=403)
+
+
+def test_native_education_explicit_scope_actions(app, monkeypatch):
+    from theaxiom.kolibri_native import Selection
+    request, _ = app
+    catalog = request("/api/sources")
+    cid = source(catalog, "kolibri")["configuration"]["kolibri_channel_id"]
+    selected = Selection(cid, ("a"*32,), 5, "b"*64, 500)
+    review = {"metadata_sha256": "b"*64, "total_bytes": 500}
+    manager = Mock()
+    monkeypatch.setattr(admin_api.kolibri_admin, "configured", lambda: manager)
+    monkeypatch.setattr(admin_api.kolibri_admin, "selection", lambda *args: (selected, review))
+    start = Mock()
+    monkeypatch.setattr(admin_api.kolibri_admin, "start_download", start)
+    payload = {"source_id":"kolibri", "revision":catalog["revision"], "nodes":["a"*32]}
+    assert request("/api/kolibri", dict(payload, action="plan")) == review
+    request("/api/kolibri", dict(payload, action="download", **review), status=409)
+    start.assert_not_called()
+    request("/api/kolibri", dict(payload, action="save-selection", acknowledge_rights=True, **review))
+    manager.save_reviewed.assert_called_once_with("kolibri", selected)
+    request("/api/kolibri", dict(payload, action="download", acknowledge_rights=True, **review), status=202)
+    start.assert_called_once()

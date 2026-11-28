@@ -235,6 +235,16 @@ http {{
                     video.evaluate("(v) => { v.muted=true; return v.play(); }")
                     page.wait_for_function("document.querySelector('video').currentTime > 0",timeout=15000)
                     print("NATIVE OFFLINE VIDEO PLAYBACK PASSED",flush=True)
+                    page.set_viewport_size({"width":1280,"height":900})
+                    video.hover()
+                    captions=page.locator(".vjs-captions-button button, button.vjs-captions-button").first
+                    captions.wait_for(state="visible",timeout=15000)
+                    captions.click()
+                    transcript=page.get_by_text("Transcript",exact=True).first
+                    transcript.wait_for(state="visible",timeout=10000)
+                    transcript.click()
+                    page.locator(".media-player-transcript.showing").wait_for(state="visible",timeout=15000)
+                    print("NATIVE OFFLINE CAPTION TRANSCRIPT UI PASSED",flush=True)
                     page.set_viewport_size({"width": 1280, "height": 900})
                     node,title,_=rows["exercise"]
                     page.goto(origin+"/kolibri/viewcontent?node_id="+node,wait_until="domcontentloaded")
@@ -274,6 +284,16 @@ http {{
                     print("OFFLINE EXERCISE ANSWER CHECK PASSED",flush=True)
                     print("EXTERNAL REQUEST HOSTS BLOCKED",sorted(blocked),flush=True)
                     browser.close()
+                manage("shell","-c",f"""
+from kolibri.core.auth.models import FacilityUser
+from kolibri.core.content.models import ContentNode
+from kolibri.core.logger.models import ContentSummaryLog
+from kolibri.utils.time_utils import local_now
+learner=FacilityUser.objects.create_user("probe-learner", password={secrets.token_urlsafe(24)!r}, full_name="Probe Learner")
+node=ContentNode.objects.get(pk={video_node!r})
+ContentSummaryLog.objects.create(user=learner, content_id=node.content_id, channel_id={CID!r},
+    start_timestamp=local_now(), end_timestamp=local_now(), kind="video", progress=.5, time_spent=30)
+""")
                 # Native removal must not expose stale published content or
                 # destroy the independent verified package or learner accounts.
                 with registry.transaction() as acknowledge:
@@ -314,7 +334,13 @@ http {{
                 assert registry.authorize("/kolibri/en/learn/")
                 search_selected()
                 manage("shell","-c",'from kolibri.core.auth.models import FacilityUser; assert FacilityUser.objects.filter(username="probe").exists()')
-                print("NATIVE CHANNEL RESTORE AND LEARNER ACCOUNT PRESERVATION PASSED",flush=True)
+                manage("shell","-c",f"""
+from kolibri.core.auth.models import FacilityUser
+from kolibri.core.logger.models import ContentSummaryLog
+learner=FacilityUser.objects.get(username="probe-learner")
+assert ContentSummaryLog.objects.filter(user=learner, channel_id={CID!r}, progress=.5,time_spent=30).exists()
+""")
+                print("NATIVE CHANNEL RESTORE AND LEARNER ACCOUNT/PROGRESS PRESERVATION PASSED",flush=True)
             except BaseException:
                 print((root/"kolibri.log").read_text(errors="replace")[-12000:],flush=True)
                 if (root/"nginx.log").exists():

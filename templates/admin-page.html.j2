@@ -1016,7 +1016,7 @@
           {% endif %}
         </p>
         <p class="source-note" data-field="discovery-evidence" role="status" aria-live="polite"></p>
-        {% if source.zim_download or (document and url_managed) %}
+        {% if source.zim_download or (document and url_managed) or source.adapter == "kolibri" %}
         <p class="source-note" data-zim-replacement-status role="status" aria-live="polite"></p>
         <progress data-field="replacement-progress" max="100" aria-label="Replacement update progress" hidden></progress>
         <p class="source-note" data-replacement-feedback role="status" aria-live="polite"></p>
@@ -1076,17 +1076,19 @@
             <button class="button" type="button" data-kolibri-action="rollback" hidden>Rollback to installed</button>
             <button class="button" type="button" data-kolibri-action="delete-staged" hidden>Delete staged update files</button>
             <button class="button" type="button" data-kolibri-action="delete" hidden>Delete downloaded files</button>
+            <button class="button" type="button" data-kolibri-action="recover" hidden>Recover native publication</button>
             <a class="button" data-kolibri-browse href="/kolibri/en/learn/" hidden>Browse</a>
             <p class="source-note" data-kolibri-feedback role="status"></p>
-            <progress data-kolibri-progress max="100" hidden></progress>
             <section data-kolibri-selector hidden>
               <button class="button" data-kolibri-root type="button">Channel root</button>
+              <button class="button" data-kolibri-full type="button">Select entire channel</button>
               <p data-kolibri-topic></p>
               <div data-kolibri-topics></div>
               <p data-kolibri-count></p>
               <button class="button" data-kolibri-plan type="button">Estimate selection</button>
               <p data-kolibri-estimate></p>
               <button class="button" data-kolibri-download type="button" hidden>Download selected content</button>
+              <button class="button" data-kolibri-save type="button" hidden>Save selection for batch download</button>
             </section>
           </section>
           {% endif %}
@@ -1247,9 +1249,9 @@
         const count = panel.querySelector('[data-kolibri-count]');
         const estimate = panel.querySelector('[data-kolibri-estimate]');
         const download = panel.querySelector('[data-kolibri-download]');
-        const progress = panel.querySelector('[data-kolibri-progress]');
+        const save = panel.querySelector('[data-kolibri-save]');
         const chosen = new Set();
-        let root = null, reviewed = null, updating = false, working = false, status = null;
+        let root = null, reviewed = null, updating = false, working = false, status = null, allowFull = false;
         const bytes = size => new Intl.NumberFormat(undefined,{maximumFractionDigits:2}).format(size/1073741824)+' GiB';
         const post = async (action, extra={}) => {
           const response = await fetch('/api/kolibri', {method:'POST',
@@ -1265,10 +1267,10 @@
           if (!response.ok) throw new Error(data.error || 'Kolibri unavailable');
           return data;
         };
-        const refreshStatus = async () => {
+        const refreshStatus = async (snapshot = null) => {
           if (working) return;
           try {
-            status = await get();
+            status = snapshot || await get();
             const job = status.job || {};
             const active = status.active;
             for (const button of panel.querySelectorAll('[data-kolibri-action]')) {
@@ -1277,14 +1279,13 @@
                 select: !status.installed, update: !!status.installed && !status.candidate && !status.previous,
                 publish: !!status.installed && !status.published, unpublish: status.published,
                 'publish-update': status.candidate, rollback: status.previous,
-                'delete-staged': status.candidate || status.previous, delete: !!status.installed && !status.published
+                'delete-staged': status.candidate || status.previous, delete: !!status.installed && !status.published, recover:status.recovery_pending
               })[action];
-              button.disabled = active || !status.configured;
+              button.disabled = active || !status.configured || (status.recovery_pending && action!=='recover');
             }
             panel.querySelector('[data-kolibri-browse]').hidden = !status.published;
-            progress.hidden = !active || !job.expected_bytes;
-            if (!progress.hidden) progress.value = 100*job.downloaded_bytes/job.expected_bytes;
-            if (active) feedback.textContent = 'Downloading '+bytes(job.downloaded_bytes || 0)+' / '+bytes(job.expected_bytes || 0);
+            if (status.recovery_pending) feedback.textContent='Previous publication did not complete. Both native reader origins are closed.';
+            else if (active) feedback.textContent = 'Educational acquisition in progress.';
             else if (job.state === 'failed') feedback.textContent = job.detail || 'Download failed';
             else if (status.installed) feedback.textContent = 'Installed version '+status.installed.version+' · '+bytes(status.installed.media_bytes);
             else if (!selector.hidden) { /* preserve the active selection status */ }
@@ -1292,7 +1293,7 @@
           } catch (error) { feedback.textContent = error.message; }
         };
         const invalidate = () => {
-          reviewed = null; download.hidden = true; estimate.textContent = '';
+          reviewed = null; download.hidden = true; save.hidden = true; estimate.textContent = '';
           count.textContent = chosen.size+' selected';
         };
         const render = (items, label) => {
@@ -1303,7 +1304,7 @@
             const checkbox = document.createElement('input'); checkbox.type='checkbox';
             checkbox.checked=chosen.has(item.node_id);
             checkbox.setAttribute('aria-label','Select '+item.title);
-            checkbox.addEventListener('change',()=>{checkbox.checked?chosen.add(item.node_id):chosen.delete(item.node_id); invalidate();});
+            checkbox.addEventListener('change',()=>{if(allowFull){chosen.delete(root.channel.root_id);allowFull=false;} checkbox.checked?chosen.add(item.node_id):chosen.delete(item.node_id); invalidate();});
             const text = document.createElement(item.kind === 'topic' ? 'button' : 'span');
             text.textContent=item.title;
             if (item.kind === 'topic') {
@@ -1315,18 +1316,27 @@
           count.textContent=chosen.size+' selected';
         };
         panel.querySelector('[data-kolibri-root]').addEventListener('click',()=>{if (root) render(root.children,root.channel.name);});
+        panel.querySelector('[data-kolibri-full]').addEventListener('click',()=>{
+          if (!root || !confirm('Select the entire channel? Review the full estimated size before confirming a download.')) return;
+          chosen.clear(); chosen.add(root.channel.root_id); allowFull=true; invalidate();
+        });
         panel.querySelector('[data-kolibri-plan]').addEventListener('click',async()=>{
           try {
-            reviewed=await post('plan',{nodes:[...chosen]});
+            reviewed=await post('plan',{nodes:[...chosen],allow_full:allowFull});
             estimate.textContent=bytes(reviewed.total_bytes)+' · '+reviewed.resources+' resources · '+reviewed.licenses.join(', ');
             download.hidden=reviewed.missing_license_count!==0;
+            save.hidden=updating || reviewed.missing_license_count!==0;
             if (reviewed.missing_license_count) feedback.textContent='Selection contains resources without license metadata.';
           } catch(e){feedback.textContent=e.message;}
+        });
+        save.addEventListener('click',async()=>{
+          if (!reviewed || !confirm('Save this reviewed scope for batch download? Confirm publisher terms.')) return;
+          try { await post('save-selection',{nodes:[...chosen],allow_full:allowFull,total_bytes:reviewed.total_bytes,metadata_sha256:reviewed.metadata_sha256,acknowledge_rights:true}); selector.hidden=true; feedback.textContent='Selection saved for batch download.'; } catch(e){feedback.textContent=e.message;}
         });
         download.addEventListener('click',async()=>{
           if (!reviewed || !confirm('Download this reviewed selection? Confirm you accept the publisher terms.')) return;
           try {
-            await post(updating?'download-update':'download',{nodes:[...chosen],total_bytes:reviewed.total_bytes,
+            await post(updating?'download-update':'download',{nodes:[...chosen],allow_full:allowFull,total_bytes:reviewed.total_bytes,
               metadata_sha256:reviewed.metadata_sha256,acknowledge_rights:true});
             selector.hidden=true; feedback.textContent='Download queued.'; await refreshStatus();
           } catch(e){feedback.textContent=e.message;}
@@ -1338,21 +1348,23 @@
             if (action==='select' || action==='update') {
               feedback.textContent='Loading official channel metadata…';
               if(action==='update') await post('check-update');
-              root=await post('refresh'); chosen.clear(); updating=action==='update';
+              root=await post('refresh'); chosen.clear(); allowFull=false; updating=action==='update';
               if (updating) {
                 if (root.channel.version<=status.installed.version) {feedback.textContent='No update available.';return;}
                 for (const id of status.installed.nodes) chosen.add(id);
+                allowFull=status.installed.allow_full;
               }
               selector.hidden=false; invalidate(); render(root.children,root.channel.name);
             } else {
               if (action.startsWith('delete') && !confirm('Delete the selected downloaded educational files?')) return;
+              if (action==='recover' && !confirm('Restore the previous acknowledged native publications from verified packages?')) return;
               await post(action,{confirm:true});
             }
           } catch(e){feedback.textContent=e.message;}
           finally {working=false; button.disabled=false; if(selector.hidden)await refreshStatus();}
         });
         card.addEventListener('toggle',()=>{if(card.open)refreshStatus();});
-        setInterval(()=>{if(card.open)refreshStatus();},2500);
+        document.addEventListener("axiom-kolibri-status",event=>{if(event.detail.source_id===sid)refreshStatus(event.detail.status);});
       }
       // One authoritative snapshot for the rendered cards and one mutation
       // lane for catalog-revision-sensitive actions. Downloads themselves
@@ -3284,7 +3296,7 @@
         const replacementStatus = card.querySelector('[data-zim-replacement-status]');
         const replacementTransfer = transferStatus(replacement, true);
         const initialTransfer = source?.acquisition?.active === true && !source?.installed_verified &&
-          (source?.zim_download || !acquisitionStale) ? transferStatus(source.acquisition) : null;
+          (source?.zim_download || source?.adapter === "kolibri" || !acquisitionStale) ? transferStatus(source.acquisition) : null;
         const summary = field('transfer-summary');
         if (summary) {
           const text = (replacementTransfer || initialTransfer)?.text || '';
@@ -3395,6 +3407,10 @@
             } else if (['pdf','epub'].includes(source?.adapter)) {
               card.querySelector('[data-field="status"]').textContent = source.installed_verified ? size(source.artifact?.bytes) : (source.artifact ? 'Not installed or invalid' : 'Not downloaded');
               card.querySelector('[data-field="status"]').className = 'badge' + (source.installed_verified ? ' enabled' : '');
+            } else if (source?.adapter === 'kolibri') {
+              if (source.acquisition || source.installed_verified) render(card, source.acquisition, false, source);
+              else card.querySelector('[data-field="status"]').textContent = 'Not downloaded';
+              document.dispatchEvent(new CustomEvent('axiom-kolibri-status', {detail:{source_id:source.source_id,status:source.kolibri}}));
             } else if (source?.installed_verified) {
               render(card, source.acquisition, false, source);
             } else if (source?.zim_download) {

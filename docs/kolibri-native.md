@@ -140,7 +140,10 @@ selection, including all previously published channels. The local public
 search adapter reads only available nodes from this acknowledged live
 database, searches topic/lesson titles and descriptions, and returns
 native permalink URLs; caption files are native local WebVTT resources.
-Transcript full-text indexing is not enabled in this initial adapter.
+Transcript full-text indexing is not enabled in this initial adapter; native
+caption and transcript display is retained. The official Khan Academy website
+favicon identifies the source, not Axiom itself, and is accompanied by the
+publisher free-availability attribution and unofficial-access description.
 
 Updates compare official channel versions and preserve the exact installed
 selection; a removed or changed node that cannot be resolved into the new
@@ -149,4 +152,6 @@ The existing metadata sweep and batch update controls use installed
 manifest-bound evidence. Native update promotion and rollback retain the
 same learner database and replace only channel content. Native publication
 and rollback require explicit verified state; a failed transaction deliberately
-keeps the reader closed pending operator recovery.
+keeps the reader closed pending explicit operator recovery from the verified
+previously acknowledged packages. The saved scope can also be queued through
+Axiom’s shared initial batch download interface.

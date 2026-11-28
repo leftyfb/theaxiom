@@ -124,9 +124,9 @@ def settings(config):
         from . import kolibri_native
         if kind != "kolibri":
             raise ValueError("Kolibri discovery requires an educational source")
-        expected = kolibri_native.metadata_url(config.get("kolibri_channel_id"))
+        expected = kolibri_native.metadata_url(config.get("kolibri_channel_id"), base_url=kolibri_native.source_base(config))
         if endpoint and endpoint != expected:
-            raise ValueError("Kolibri discovery requires the configured official channel endpoint")
+            raise ValueError("Kolibri discovery requires the configured channel endpoint")
         endpoint = expected
     elif resolved == "head":
         endpoint = endpoint or download

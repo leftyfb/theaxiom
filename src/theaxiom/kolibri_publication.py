@@ -100,7 +100,7 @@ class Registry:
             return {}
 
     @contextmanager
-    def transaction(self):
+    def transaction(self, *, recover=False):
         """Yield an acknowledgement callback; failures deliberately remain closed.
 
         The caller must run verified native mutations and verify selected files.
@@ -110,9 +110,13 @@ class Registry:
         self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
         with self.lock.open("a+b") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
-            if self.pending.exists():
+            pending = self.pending.exists()
+            if pending and not recover:
                 raise ValueError("Native publication recovery required")
-            self._write(self.pending, b"pending\n")
+            if not pending and recover:
+                raise ValueError("No native publication recovery pending")
+            if not pending:
+                self._write(self.pending, b"pending\n")
             committed = False
 
             def acknowledge(records):

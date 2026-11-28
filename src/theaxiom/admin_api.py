@@ -320,7 +320,7 @@ def _source_update_summary(sources):
 def _preview_capacity(rows):
     eligible = [row for row in rows if (
         row["format"] in zim_source.ARCHIVE_FORMATS and row["state"] != "unsupported"
-        or row["format"] in {"pdf", "epub"} and row["state"] == "estimated")]
+        or row["format"] in {"pdf", "epub", "kolibri"} and row["state"] == "estimated")]
     staging = [row.get("staging_bytes") for row in eligible]
     if not staging:
         return {"state": "not_applicable"}
@@ -487,6 +487,16 @@ def _batch_job(record, published):
         if pin and adapter.ready(pin, verify=False):
             raise ValueError("Document is already installed")
         operation, reservation = kind, int(size) if size else limit
+    elif kind == "kolibri":
+        manager = kolibri_admin.configured()
+        if manager is None or sid in manager.active:
+            raise ValueError("Native educational service unavailable or busy")
+        selected = manager.reviewed(sid)
+        if selected.channel_id != kolibri_admin.channel(record) or selected.base_url != kolibri_admin.native.source_base(config):
+            raise ValueError("Educational source changed; review the selection again")
+        return dict(source_id=sid, title=record["profile"]["title"], operation="kolibri",
+                    configuration={"format":"kolibri","original":config,"selection":asdict(selected)},
+                    bytes=selected.media_bytes + kolibri_admin.scope.MAX_DATABASE_BYTES)
     elif kind in zim_source.ARCHIVE_FORMATS:
         identity = zim_jobs.identity(config)
         if not size:
@@ -1104,6 +1114,22 @@ def _execute_batch_job(job, stopping, shutdown):
         config = update_discovery_config.migrate_periodic(config)
     kind = config["original"]["format"] if operation == "download-update" else config["format"]
 
+    if operation == "kolibri":
+        settings = storage_settings.load_settings()
+        if settings != json.loads(job["storage"]):
+            raise ValueError("Storage settings changed; review and queue again")
+        record = next((row for row in SOURCE_CATALOG.get()["sources"] if row["source_id"] == sid), None)
+        manager = kolibri_admin.configured()
+        if not record or record["configuration"] != config.get("original") or manager is None:
+            raise ValueError("Educational source configuration changed or runtime unavailable")
+        if recovering:
+            return "interrupted", "Educational transfer stopped; review source before queuing again"
+        reviewed = manager.reviewed(sid)
+        if json.loads(json.dumps(asdict(reviewed))) != config["selection"]:
+            raise ValueError("Reviewed educational selection changed")
+        manager.download(sid, reviewed, stop=lambda: stopping() or shutdown.is_set())
+        return "completed", ""
+
     def stop_document():
         return stopping() or shutdown.is_set()
 
@@ -1655,7 +1681,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 sources = self._source_profiles(SOURCE_CATALOG.get(initialize=False))["sources"]
                 enabled = publication.load()
                 installed = [source for source in sources if source["installed_verified"]]
-                published = sum(bool(enabled.get(source["source_id"])) for source in sources)
+                published = sum(bool(enabled.get(source["source_id"])) or bool(source.get("kolibri") and source["kolibri"].get("published")) for source in sources)
                 archives = {source["artifact"]["filename"]: source["artifact"]["bytes"]
                             for source in installed if source.get("artifact")}
                 self._send_json(200, {
@@ -1665,52 +1691,6 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 })
             except (OSError, ValueError, KeyError, TypeError):
                 self._send_json(503, {"error": "Library overview unavailable"})
-        elif self.path == "/api/kolibri":
-            if not self.headers.get("Origin"):
-                self._send_json(403, {"error": "same-origin request required"})
-                return
-            data = self._read_body()
-            try:
-                catalog = SOURCE_CATALOG.get()
-                if data.get("revision") != catalog["revision"]:
-                    raise ValueError("Catalog revision changed")
-                record = next(r for r in catalog["sources"] if r["source_id"] == data.get("source_id"))
-                manager = kolibri_admin.configured()
-                if manager is None:
-                    raise ValueError("Optional native Kolibri service is not configured")
-                sid = record["source_id"]
-                kolibri_admin.channel(record)
-                action = data.get("action")
-                if action == "refresh":
-                    result = kolibri_admin.refresh(manager, record)
-                elif action == "check-update":
-                    result = kolibri_admin.check_update(manager, record) or {"state": "unable_to_determine"}
-                elif action == "plan":
-                    _, result = kolibri_admin.selection(manager, record, data.get("nodes"), data.get("allow_full") is True)
-                elif action in {"download", "download-update"}:
-                    selected, review = kolibri_admin.selection(manager, record, data.get("nodes"), data.get("allow_full") is True)
-                    if (data.get("metadata_sha256") != review["metadata_sha256"]
-                            or data.get("total_bytes") != review["total_bytes"]
-                            or data.get("acknowledge_rights") is not True):
-                        raise ValueError("Review the exact selection, size and publisher terms before downloading")
-                    kolibri_admin.start_download(manager, record, selected, update=action == "download-update")
-                    result = {"queued": True}
-                elif action in {"publish", "unpublish"}:
-                    manager.publish(sid, action == "publish")
-                    result = kolibri_admin.status(manager, record)
-                elif action in {"publish-update", "rollback"}:
-                    manager.switch(sid, rollback=action == "rollback")
-                    result = kolibri_admin.status(manager, record)
-                elif action in {"delete", "delete-staged"}:
-                    if data.get("confirm") is not True:
-                        raise ValueError("Confirm content deletion")
-                    manager.delete(sid, staged=action == "delete-staged")
-                    result = kolibri_admin.status(manager, record)
-                else:
-                    raise ValueError("Unknown educational source action")
-                self._send_json(202 if action in {"download", "download-update"} else 200, result)
-            except (StopIteration, OSError, ValueError, KeyError, sqlite3.Error, subprocess.SubprocessError) as exc:
-                self._send_json(409, {"error": str(exc)[:300] or "Native educational source unavailable"})
         elif self.path == "/api/update-sweep":
             self._send_json(200, kiwix_update_scheduler.manual_status())
         elif self.path == "/api/automatic-update-pause":
@@ -1885,6 +1865,16 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                         sid, configuration, exact_selection=exact_selection)
                 except (OSError, ValueError, KeyError, TypeError):
                     estimate = {"state": "unavailable"}
+            elif format_name == "kolibri":
+                try:
+                    manager = kolibri_admin.configured()
+                    selected = manager.reviewed(sid) if manager else None
+                    if selected:
+                        size = selected.media_bytes + kolibri_admin.scope.MAX_DATABASE_BYTES
+                        estimate = {"state":"estimated","transfer_bytes":selected.media_bytes,
+                            "staging_bytes":size,"installed_bytes":None,"peak_bytes":2*size}
+                except (OSError, ValueError, KeyError):
+                    estimate = {"state":"unsupported"}
             elif self._pdf_record(record) or self._epub_record(record):
                 limit = pdf_source.MAX_BYTES if format_name == "pdf" else epub_source.MAX_BYTES
                 estimate = _preview_document_acquisition(configuration, byte_limit=limit)
@@ -2470,7 +2460,9 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                         job = native_status["job"]
                     if verified:
                         selected = native_status["installed"]
-                        lifecycles[sid]["artifact"] = {"bytes": selected["media_bytes"]}
+                        lifecycles[sid]["artifact"] = {"bytes": selected["media_bytes"],
+                            "filename": sid+"."+native_status["installed_digest"]+".kolibri",
+                            "sha256": native_status["installed_digest"]}
                         installed_edition = str(selected["version"])
                         if native_status.get("installed_digest"):
                             update_check = update_check_store.load(sid, native_status["installed_digest"])
@@ -2503,6 +2495,10 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             replacement = candidate = None
             if native_status and native_status.get("candidate"):
                 replacement = {"state": "verified", "sha256": native_status["candidate_digest"]}
+            elif native_status and verified and native_status.get("active") and job:
+                replacement = _public_acquisition(job)
+            elif native_status and native_status.get("previous"):
+                replacement = {"state": "activated"}
             if record["configuration"]["format"] in document_replacement.FORMATS:
                 try:
                     replacement = document_replacement.status(record)
@@ -2708,6 +2704,61 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 return
             ADMIN_SESSIONS.clear()  # revoke browser sessions after credential rotation
             self._send_json(200, {"changed": True})
+        elif self.path == "/api/kolibri":
+            if not self.headers.get("Origin"):
+                self._send_json(403, {"error": "same-origin request required"})
+                return
+            data = self._read_body()
+            try:
+                catalog = SOURCE_CATALOG.get()
+                if data.get("revision") != catalog["revision"]:
+                    raise ValueError("Catalog revision changed")
+                record = next(r for r in catalog["sources"] if r["source_id"] == data.get("source_id"))
+                manager = kolibri_admin.configured()
+                if manager is None:
+                    raise ValueError("Optional native Kolibri service is not configured")
+                sid = record["source_id"]
+                kolibri_admin.channel(record)
+                action = data.get("action")
+                if action == "refresh":
+                    result = kolibri_admin.refresh(manager, record)
+                elif action == "check-update":
+                    result = kolibri_admin.check_update(manager, record) or {"state": "unable_to_determine"}
+                elif action == "plan":
+                    _, result = kolibri_admin.selection(manager, record, data.get("nodes"), data.get("allow_full") is True)
+                elif action in {"download", "download-update", "save-selection"}:
+                    selected, review = kolibri_admin.selection(manager, record, data.get("nodes"), data.get("allow_full") is True)
+                    if (data.get("metadata_sha256") != review["metadata_sha256"]
+                            or data.get("total_bytes") != review["total_bytes"]
+                            or data.get("acknowledge_rights") is not True):
+                        raise ValueError("Review the exact selection, size and publisher terms before downloading")
+                    if action == "save-selection":
+                        manager.save_reviewed(sid, selected)
+                        result = {"saved": True}
+                    else:
+                        kolibri_admin.start_download(manager, record, selected, update=action == "download-update")
+                        result = {"queued": True}
+                elif action in {"publish", "unpublish"}:
+                    manager.publish(sid, action == "publish")
+                    result = kolibri_admin.status(manager, record)
+                elif action in {"publish-update", "rollback"}:
+                    manager.switch(sid, rollback=action == "rollback")
+                    result = kolibri_admin.status(manager, record)
+                elif action == "recover":
+                    if data.get("confirm") is not True:
+                        raise ValueError("Confirm recovery of the previously acknowledged native publication")
+                    manager.recover()
+                    result = kolibri_admin.status(manager, record)
+                elif action in {"delete", "delete-staged"}:
+                    if data.get("confirm") is not True:
+                        raise ValueError("Confirm content deletion")
+                    manager.delete(sid, staged=action == "delete-staged")
+                    result = kolibri_admin.status(manager, record)
+                else:
+                    raise ValueError("Unknown educational source action")
+                self._send_json(202 if action in {"download", "download-update"} else 200, result)
+            except (StopIteration, OSError, ValueError, KeyError, sqlite3.Error, subprocess.SubprocessError) as exc:
+                self._send_json(409, {"error": str(exc)[:300] or "Native educational source unavailable"})
         elif self.path == "/api/update-sweep":
             if not self.headers.get("Origin") or self._read_body() != {"confirm": True}:
                 self._send_json(400, {"error": "Confirm the metadata check from Admin"})
@@ -2995,7 +3046,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                                     or sid in manager.registry.read()):
                                 if operation == "remove" or (isinstance(fields, dict) and
                                     any(key in fields and fields[key] != existing["configuration"].get(key)
-                                        for key in ("format", "kolibri_channel_id"))):
+                                        for key in ("format", "kolibri_channel_id", "source_url"))):
                                     raise catalog_store.CatalogError("Unpublish and delete educational content before removing or changing its channel")
                     if operation == "remove":
                         # Validate all preconditions before changing publication.

@@ -39,9 +39,17 @@ def test_native_job_lifecycle(tmp_path, monkeypatch):
                              tmp_path/"home", runner=runner)
     def selection(version, nodes=(NODE,)):
         return kolibri_native.Selection(CID, nodes, version, "f"*64, 100)
+    jobs.save_reviewed("school", selection(1))
+    assert jobs.reviewed("school") == selection(1)
     jobs.download("school", selection(1))
     assert not registry.acknowledged()
     jobs.publish("school", True)
+    assert registry.acknowledged()["school"]["version"] == 1
+    with pytest.raises(RuntimeError):
+        with registry.transaction():
+            raise RuntimeError("Interrupted publication")
+    assert not registry.acknowledged()
+    jobs.recover()
     assert registry.acknowledged()["school"]["version"] == 1
     with pytest.raises(ValueError):
         jobs.download("school", selection(2, ("c"*32,)), update=True)

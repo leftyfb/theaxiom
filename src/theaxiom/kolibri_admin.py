@@ -1,5 +1,7 @@
 """Admin-facing generic native Kolibri orchestration; disabled unless configured."""
+from contextlib import contextmanager
 from dataclasses import asdict
+import fcntl
 import hashlib
 import os
 from pathlib import Path
@@ -56,18 +58,27 @@ def channel(record):
     return scope._id(config.get("kolibri_channel_id"))
 
 
-def _preview_path(manager, cid):
-    return manager.registry.root/"previews"/(scope._id(cid)+".sqlite3")
+def _preview_path(manager, cid, base):
+    publisher = hashlib.sha256(native.validate_base(base).encode()).hexdigest()[:24]
+    return manager.registry.root/"previews"/(scope._id(cid)+"-"+publisher+".sqlite3")
+
+
+@contextmanager
+def _preview_lock(manager, cid, base):
+    path = _preview_path(manager, cid, base)
+    with _PREVIEWS:
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        with os.fdopen(os.open(path.with_suffix(".lock"), os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600), "wb") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            yield path
 
 
 def refresh(manager, record):
     cid = channel(record)
-    path = _preview_path(manager, cid)
-    with _PREVIEWS:
-        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with _preview_lock(manager, cid, native.source_base(record["configuration"])) as path:
         with tempfile.TemporaryDirectory(dir=path.parent) as folder:
             temp = Path(folder)/"preview.sqlite3"
-            item, digest, size = native.fetch_metadata(cid, temp)
+            item, digest, size = native.fetch_metadata(cid, temp, base_url=native.source_base(record["configuration"]))
             os.replace(temp, path)
         return {"channel": asdict(item), "metadata_sha256": digest, "metadata_bytes": size,
                 "children": [asdict(child) for child in scope.children(path, cid)]}
@@ -75,16 +86,14 @@ def refresh(manager, record):
 
 def browse(manager, record, parent=None):
     cid = channel(record)
-    with _PREVIEWS:
-        path = _preview_path(manager, cid)
+    with _preview_lock(manager, cid, native.source_base(record["configuration"])) as path:
         item = scope.inspect_channel(path, cid)
         return {"channel": asdict(item), "children": [asdict(child) for child in scope.children(path, cid, parent)]}
 
 
 def selection(manager, record, nodes, allow_full=False):
     cid = channel(record)
-    with _PREVIEWS:
-        path = _preview_path(manager, cid)
+    with _preview_lock(manager, cid, native.source_base(record["configuration"])) as path:
         plan = scope.plan_scope(path, cid, nodes, allow_full=allow_full)
         with path.open("rb") as stream:
             value = hashlib.sha256()
@@ -92,7 +101,7 @@ def selection(manager, record, nodes, allow_full=False):
                 value.update(block)
             digest = value.hexdigest()
         selected = native.Selection(cid, tuple(plan.selected_nodes), plan.channel.version, digest,
-                                    plan.total_bytes, allow_full)
+                                    plan.total_bytes, allow_full, native.source_base(record["configuration"]))
         return selected, {"total_bytes": plan.total_bytes, "resources": plan.resource_count,
                           "licenses": list(plan.licenses), "missing_license_count": plan.missing_license_count,
                           "version": plan.channel.version, "metadata_sha256": digest}
@@ -109,7 +118,9 @@ def status(manager, record):
     if selection and selection["channel_id"] != channel(record):
         return {"configured": True, "error": "Installed channel does not match profile"}
     return {"configured": True, "active": sid in manager.active,
+            "recovery_pending": manager.registry.pending.exists(),
             "installed": selection, "published": bool(published),
+            "reviewed": bool(job.get("reviewed")),
             "candidate": bool(job.get("candidate")), "previous": bool(job.get("previous")),
             "candidate_digest": (job.get("candidate") or {}).get("manifest_sha256"),
             "installed_digest": (installed or {}).get("manifest_sha256"),
@@ -128,6 +139,15 @@ def start_download(manager, record, selected, *, update=False):
     with manager.lock:
         if sid in manager.active:
             raise ValueError("Educational source is busy")
+        job = manager.read(sid)
+        if update:
+            if not job.get("installed") or job.get("candidate") or job.get("previous"):
+                raise ValueError("Resolve installed, staged or rollback content first")
+            old = manager._selection(job["installed"])
+            if selected.channel_id != old.channel_id or selected.nodes != old.nodes or selected.version <= old.version or selected.allow_full != old.allow_full or selected.base_url != old.base_url:
+                raise ValueError("Educational updates must preserve the installed scope")
+        elif job.get("installed"):
+            raise ValueError("Educational content already installed")
         manager.active.add(sid)
         thread = threading.Thread(target=worker, daemon=True, name="kolibri-"+sid)
         try:
@@ -156,7 +176,7 @@ def check_update(manager, record):
                 raise ValueError("Resource license metadata incomplete")
             result.update(state="update_available", candidate_edition=str(selected.version),
                 candidate_sha256=review["metadata_sha256"], candidate_bytes=review["total_bytes"],
-                candidate_url=native.metadata_url(old.channel_id, selected.version),
+                candidate_url=native.metadata_url(old.channel_id, selected.version, base_url=selected.base_url),
                 evidence="Publisher channel has a newer version for the installed scope.")
         except (OSError, ValueError):
             result.update(state="unable_to_determine", evidence="Installed topic scope could not be preserved.")

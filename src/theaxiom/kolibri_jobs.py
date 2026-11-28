@@ -12,13 +12,14 @@ import json
 import os
 from pathlib import Path
 import secrets
+import stat
 import shutil
 import subprocess
 import tempfile
 import threading
 import time
 
-from . import catalog_store, kolibri_native as native, kolibri_scope as scope, kolibri_publication
+from . import acquisition_queue, catalog_store, kolibri_native as native, kolibri_scope as scope, kolibri_publication
 
 
 class Jobs:
@@ -33,6 +34,7 @@ class Jobs:
         self.runner = runner
         self.lock = threading.RLock()
         self.active = set()
+        self.reservations = {}
 
     def _path(self, sid):
         catalog_store.CatalogStore._validate_id(sid)
@@ -72,7 +74,15 @@ class Jobs:
         catalog_store.CatalogStore._validate_id(sid)
         token = artifact["token"]
         scope._id(token)
-        return self.packages / sid / token
+        base = self.packages
+        for path in (base, base/sid):
+            try:
+                info = path.lstat()
+            except FileNotFoundError:
+                continue
+            if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid():
+                raise ValueError("Native package parent is not an owned directory")
+        return base / sid / token
 
     def _selection(self, artifact):
         fields = dict(artifact["selection"])
@@ -97,15 +107,17 @@ class Jobs:
         finally:
             with self.lock:
                 self.active.remove(sid)
+                self.reservations.pop(sid, None)
 
-    def download(self, sid, selection, *, update=False, reserved=False):
+    def download(self, sid, selection, *, update=False, reserved=False, stop=lambda: False):
         """Run a bounded explicit selection; candidate never changes live content."""
         with self._operation(sid, reserved=reserved):
             job = self.read(sid)
             if update:
                 old = self._selection(job["installed"])
                 if (selection.channel_id != old.channel_id or selection.nodes != old.nodes
-                        or selection.allow_full != old.allow_full or selection.version <= old.version):
+                        or selection.allow_full != old.allow_full or selection.version <= old.version
+                        or selection.base_url != old.base_url):
                     raise ValueError("Updates must preserve the installed selection and advance its version")
                 if job.get("candidate") or job.get("previous"):
                     raise ValueError("Resolve existing staged or rollback package first")
@@ -114,7 +126,10 @@ class Jobs:
             token = secrets.token_hex(16)
             artifact = {"selection": asdict(selection), "token": token}
             target = self._package(sid, artifact)
-            self.guard(selection.media_bytes + scope.MAX_DATABASE_BYTES)
+            with self.lock:
+                required = selection.media_bytes + scope.MAX_DATABASE_BYTES
+                self.guard(required + sum(self.reservations.values()))
+                self.reservations[sid] = required
             target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
             job = dict(job, state="downloading", active=True,
                        downloaded_bytes=0, expected_bytes=selection.media_bytes, detail="")
@@ -131,10 +146,16 @@ class Jobs:
                 self._write(sid, dict(job, downloaded_bytes=done, expected_bytes=total,
                     sampled_at=time.time(), speed_bytes_per_second=done/max(now-started, .1)))
 
+            def checked_guard(required):
+                if stop():
+                    raise acquisition_queue.Cancelled()
+                self.guard(required)
+
             try:
                 artifact["manifest_sha256"] = native.acquire(target, selection,
-                    progress=progress, guard=self.guard)
+                    progress=progress, guard=checked_guard)
                 self.verify(sid, artifact)
+                job.pop("reviewed", None)
                 self._write(sid, dict(job, state="completed", active=False,
                     downloaded_bytes=selection.media_bytes,
                     **{"candidate" if update else "installed": artifact}))
@@ -143,8 +164,21 @@ class Jobs:
                 if target.exists() and not target.is_symlink():
                     self.guard(0)
                     shutil.rmtree(target)
-                self._write(sid, dict(job, state="failed", active=False, detail=str(exc)[:300]))
+                self._write(sid, dict(job, state="cancelled" if isinstance(exc, acquisition_queue.Cancelled) else "failed", active=False, detail=str(exc)[:300]))
                 raise
+
+    def save_reviewed(self, sid, selection):
+        with self._operation(sid):
+            job = self.read(sid)
+            if job.get("installed"):
+                raise ValueError("Educational content already installed")
+            self._write(sid, dict(job, reviewed=asdict(selection)))
+
+    def reviewed(self, sid):
+        job = self.read(sid)
+        if job.get("installed") or not job.get("reviewed"):
+            raise ValueError("Review the educational topic selection first")
+        return self._selection({"selection": job["reviewed"]})
 
     def _manage(self, *args):
         env = dict(os.environ, KOLIBRI_HOME=str(self.home))
@@ -152,7 +186,8 @@ class Jobs:
 
     def _import(self, sid, artifact):
         self.verify(sid, artifact)
-        self.guard(self._selection(artifact).media_bytes + scope.MAX_DATABASE_BYTES)
+        with self.lock:
+            self.guard(self._selection(artifact).media_bytes + scope.MAX_DATABASE_BYTES + sum(self.reservations.values()))
         env = dict(os.environ, KOLIBRI_HOME=str(self.home))
         selection = self._selection(artifact)
         for command in native.import_commands(self.executable, self._package(sid, artifact), selection):
@@ -241,3 +276,39 @@ class Jobs:
                     shutil.rmtree(self._package(sid, artifact))
                     job.pop(field)
             self._write(sid, job if staged else {})
+
+
+    def recover(self):
+        """Reconstruct prior acknowledged publication from verified private packages.
+
+        This is an explicit operator action, not an implicit retry. Learner
+        databases are retained. Any failure keeps both public routes closed.
+        """
+        with self.lock:
+            if self.active:
+                raise ValueError("Wait for educational jobs before recovery")
+            with self.registry.transaction(recover=True) as acknowledge:
+                desired = self.registry.read()
+                restored = {}
+                for sid, identity in desired.items():
+                    job = self.read(sid)
+                    match = next((key for key in ("installed", "candidate", "previous")
+                                  if job.get(key) and self._identity(job[key]) == identity), None)
+                    if match is None:
+                        raise ValueError("Prior acknowledged package is missing")
+                    artifact = job[match]
+                    self.verify(sid, artifact)
+                    restored[sid] = (job, match, artifact)
+                with self.registry._database() as conn:
+                    actual = [scope._id(row[0]) for row in conn.execute(
+                        "SELECT id FROM content_channelmetadata LIMIT 101")]
+                for cid in actual:
+                    self._manage("deletechannel", cid)
+                for sid, (job, match, artifact) in restored.items():
+                    self._import(sid, artifact)
+                    if match != "installed":
+                        previous = job.pop(match)
+                        job[match] = job["installed"]
+                        job["installed"] = previous
+                        self._write(sid, job)
+                self._acknowledge(acknowledge, desired)

@@ -14,7 +14,7 @@ from pathlib import Path
 import re
 import stat
 
-from . import kolibri_scope as scope, pdf_transport
+from . import kolibri_scope as scope, pdf_transport, pdf_source
 
 STUDIO = "https://studio.learningequality.org/content/"
 MANIFEST = "axiom-kolibri-manifest.json"
@@ -31,9 +31,11 @@ class Selection:
     metadata_sha256: str
     media_bytes: int
     allow_full: bool = False
+    base_url: str = STUDIO
 
     def __post_init__(self):
         scope._id(self.channel_id)
+        validate_base(self.base_url)
         if not isinstance(self.nodes, tuple) or not 0 < len(self.nodes) <= scope.MAX_SCOPE_NODES:
             raise scope.ScopeError("Select explicit educational topics.")
         for node in self.nodes:
@@ -50,13 +52,29 @@ class Selection:
             raise scope.ScopeError("Invalid full-channel confirmation.")
 
 
-def metadata_url(channel_id, version=None):
+def validate_base(base_url):
+    if (not isinstance(base_url, str) or not base_url.endswith("/content/")
+            or not pdf_source.valid_source_url(base_url + "databases/example.sqlite3")):
+        raise scope.ScopeError("Use a plain HTTPS Kolibri publisher content endpoint.")
+    return base_url
+
+
+def source_base(config):
+    cid = scope._id(config.get("kolibri_channel_id"))
+    source = config.get("source_url") or STUDIO + "databases/" + cid + ".sqlite3"
+    suffix = "databases/" + cid + ".sqlite3"
+    if not isinstance(source, str) or not source.endswith(suffix):
+        raise scope.ScopeError("Publisher metadata URL must match the configured Kolibri channel ID.")
+    return validate_base(source[:-len(suffix)])
+
+
+def metadata_url(channel_id, version=None, *, base_url=STUDIO):
     suffix = ""
     if version is not None:
         if type(version) is not int or version < 0:
             raise scope.ScopeError("Invalid channel version.")
         suffix = "-" + str(version)
-    return STUDIO + "databases/" + scope._id(channel_id) + suffix + ".sqlite3"
+    return validate_base(base_url) + "databases/" + scope._id(channel_id) + suffix + ".sqlite3"
 
 
 def _download(url, path, limit, *, exact=None, md5=None, guard=lambda n: None,
@@ -86,12 +104,12 @@ def _download(url, path, limit, *, exact=None, md5=None, guard=lambda n: None,
     return sha.hexdigest(), count
 
 
-def fetch_metadata(channel_id, target, *, version=None, digest=None, guard=lambda n: None):
+def fetch_metadata(channel_id, target, *, version=None, digest=None, guard=lambda n: None, base_url=STUDIO):
     """Preview latest metadata or fetch an exact reviewed version."""
     if digest is not None and (not isinstance(digest, str) or not SHA256.fullmatch(digest)):
         raise scope.ScopeError("Invalid pinned channel checksum.")
     target = Path(target)
-    actual, size = _download(metadata_url(channel_id, version), target,
+    actual, size = _download(metadata_url(channel_id, version, base_url=base_url), target,
                              scope.MAX_DATABASE_BYTES, guard=guard)
     if digest is not None and actual != digest:
         raise scope.ScopeError("Channel metadata changed since review.")
@@ -142,7 +160,7 @@ def acquire(root, selection, *, progress=lambda n, total: None, guard=lambda n: 
     database = _database(root, selection.channel_id)
     database.parent.mkdir(parents=True)
     _, _, metadata_size = fetch_metadata(selection.channel_id, database,
-        version=selection.version, digest=selection.metadata_sha256, guard=guard)
+        version=selection.version, digest=selection.metadata_sha256, guard=guard, base_url=selection.base_url)
     plan = _plan(database, selection)
     records = []
     done = 0
@@ -151,7 +169,7 @@ def acquire(root, selection, *, progress=lambda n, total: None, guard=lambda n: 
     for item in plan.files:
         target = _file(root, item)
         target.parent.mkdir(parents=True, exist_ok=True)
-        digest, size = _download(STUDIO + "storage/" + item.storage_path, target,
+        digest, size = _download(selection.base_url + "storage/" + item.storage_path, target,
             item.size, exact=item.size, md5=item.checksum, guard=guard,
             total_seconds=3600, progress=lambda n: progress(done + n, total))
         records.append(_record(item, digest))
