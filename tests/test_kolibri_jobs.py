@@ -95,3 +95,15 @@ def test_interrupted_job_keeps_token(tmp_path, monkeypatch):
     assert attempts[0] == attempts[1]
     assert "partial" not in jobs.read("school")
     assert jobs.read("school")["installed"]
+
+
+def test_edit_subjects_preserves_channel_and_allows_same_edition(tmp_path):
+    jobs = kolibri_jobs.Jobs(tmp_path/"jobs", tmp_path/"packages", None, "/bin/kolibri", tmp_path)
+    original = kolibri_native.Selection(CID, (NODE,), 5, "f"*64, 100)
+    expanded = kolibri_native.Selection(CID, (NODE, "d"*32), 5, "f"*64, 200)
+    jobs.validate_replacement(original, expanded, True)
+    jobs.validate_replacement(expanded, original, True)
+    with pytest.raises(ValueError):
+        jobs.validate_replacement(original, expanded, False)
+    with pytest.raises(ValueError):
+        jobs.validate_replacement(original, original, True)

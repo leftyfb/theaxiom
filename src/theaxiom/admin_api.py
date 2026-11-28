@@ -2736,7 +2736,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     result = kolibri_admin.check_update(manager, record) or {"state": "unable_to_determine"}
                 elif action == "plan":
                     _, result = kolibri_admin.selection(manager, record, data.get("nodes"), data.get("allow_full") is True)
-                elif action in {"download", "download-update", "save-selection"}:
+                elif action in {"download", "download-update", "edit-topics", "save-selection"}:
                     selected, review = kolibri_admin.selection(manager, record, data.get("nodes"), data.get("allow_full") is True)
                     if (data.get("metadata_sha256") != review["metadata_sha256"]
                             or data.get("total_bytes") != review["total_bytes"]
@@ -2746,7 +2746,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                         manager.save_reviewed(sid, selected)
                         result = {"saved": True}
                     else:
-                        kolibri_admin.start_download(manager, record, selected, update=action == "download-update")
+                        kolibri_admin.start_download(manager, record, selected, update=action in {"download-update", "edit-topics"}, edit_topics=action == "edit-topics")
                         result = {"queued": True}
                 elif action == "resume":
                     partial = manager.read(sid).get("partial")
@@ -2756,7 +2756,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                     if (selected.channel_id != kolibri_admin.channel(record)
                             or selected.base_url != kolibri_admin.native.source_base(record["configuration"])):
                         raise ValueError("Educational source changed since review")
-                    kolibri_admin.start_download(manager, record, selected, update=partial["update"])
+                    kolibri_admin.start_download(manager, record, selected, update=partial["update"], edit_topics=partial.get("edit_topics", False))
                     result = {"queued": True}
                 elif action in {"publish", "unpublish"}:
                     manager.publish(sid, action == "publish")

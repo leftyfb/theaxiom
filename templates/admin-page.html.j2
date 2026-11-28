@@ -1070,6 +1070,7 @@
           <section data-kolibri-controls>
             <button class="button" type="button" data-kolibri-action="select">Select content</button>
             <button class="button" type="button" data-kolibri-action="resume" hidden>Resume download</button>
+            <button class="button" type="button" data-kolibri-action="topics" hidden>Edit subjects</button>
             <button class="button" type="button" data-kolibri-action="update" hidden>Check for updates</button>
             <button class="button" type="button" data-kolibri-action="publish" hidden>Publish</button>
             <button class="button" type="button" data-kolibri-action="unpublish" hidden>Unpublish</button>
@@ -1253,7 +1254,7 @@
         const download = panel.querySelector('[data-kolibri-download]');
         const save = panel.querySelector('[data-kolibri-save]');
         const chosen = new Set();
-        let root = null, reviewed = null, updating = false, working = false, status = null, allowFull = false;
+        let root = null, reviewed = null, editingTopics = false, updating = false, working = false, status = null, allowFull = false;
         const bytes = size => new Intl.NumberFormat(undefined,{maximumFractionDigits:2}).format(size/1073741824)+' GiB';
         const post = async (action, extra={}) => {
           const response = await fetch('/api/kolibri', {method:'POST',
@@ -1270,7 +1271,7 @@
           return data;
         };
         const refreshStatus = async (snapshot = null) => {
-          if (working) return;
+          if (working && !snapshot?.publication_phase) return;
           try {
             status = snapshot || await get();
             const job = status.job || {};
@@ -1278,7 +1279,7 @@
             for (const button of panel.querySelectorAll('[data-kolibri-action]')) {
               const action = button.dataset.kolibriAction;
               button.hidden = !({
-                select: !status.installed && !status.partial, resume: status.partial && !active, update: !!status.installed && !status.candidate && !status.previous && !status.partial,
+                topics: !!status.installed && !status.partial && !status.candidate && !status.previous, select: !status.installed && !status.partial, resume: status.partial && !active, update: !!status.installed && !status.candidate && !status.previous && !status.partial,
                 publish: !!status.installed && !status.published, unpublish: status.published,
                 'publish-update': status.candidate, rollback: status.previous,
                 'delete-staged': status.candidate || status.previous || status.partial_update, delete: (!!status.installed || status.partial) && !status.published, recover:status.recovery_pending
@@ -1286,7 +1287,8 @@
               button.disabled = active || !status.configured || (status.recovery_pending && action!=='recover');
             }
             panel.querySelector('[data-kolibri-browse]').hidden = !status.published;
-            if (status.recovery_pending) feedback.textContent='Previous publication did not complete. Both native reader origins are closed.';
+            if (status.publication_phase) feedback.textContent = "Publishing · " + status.publication_phase;
+            else if (status.recovery_pending) feedback.textContent='Previous publication did not complete. Both native reader origins are closed.';
             else if (active) {
               const remaining = job.expected_bytes - job.downloaded_bytes;
               const eta = job.speed_bytes_per_second > 0 && remaining >= 0 ?
@@ -1345,7 +1347,7 @@
         download.addEventListener('click',async()=>{
           if (!reviewed || !confirm('Download this reviewed selection? Confirm you accept the publisher terms.')) return;
           try {
-            await post(updating?'download-update':'download',{nodes:[...chosen],allow_full:allowFull,total_bytes:reviewed.total_bytes,
+            await post(editingTopics?'edit-topics':updating?'download-update':'download',{nodes:[...chosen],allow_full:allowFull,total_bytes:reviewed.total_bytes,
               metadata_sha256:reviewed.metadata_sha256,acknowledge_rights:true});
             selector.hidden=true; feedback.textContent='Download queued.'; await refreshStatus();
           } catch(e){feedback.textContent=e.message;}
@@ -1354,12 +1356,12 @@
           working=true; button.disabled=true;
           try {
             const action=button.dataset.kolibriAction;
-            if (action==='select' || action==='update') {
+            if (action==='select' || action==='update' || action==='topics') {
               feedback.textContent='Loading official channel metadata…';
               if(action==='update') await post('check-update');
-              root=await post('refresh'); chosen.clear(); allowFull=false; updating=action==='update';
+              root=await post('refresh'); chosen.clear(); allowFull=false; editingTopics=action==='topics'; updating=editingTopics || action==='update';
               if (updating) {
-                if (root.channel.version<=status.installed.version) {feedback.textContent='No update available.';return;}
+                if (!editingTopics && root.channel.version<=status.installed.version) {feedback.textContent='No update available.';return;}
                 for (const id of status.installed.nodes) chosen.add(id);
                 allowFull=status.installed.allow_full;
               }

@@ -34,6 +34,7 @@ class Jobs:
         self.lock = threading.RLock()
         self.active = set()
         self.reservations = {}
+        self.publication_phase = {}
 
     def _path(self, sid):
         catalog_store.CatalogStore._validate_id(sid)
@@ -105,19 +106,27 @@ class Jobs:
             yield
         finally:
             with self.lock:
+                self.publication_phase.pop(sid, None)
                 self.active.remove(sid)
                 self.reservations.pop(sid, None)
 
-    def download(self, sid, selection, *, update=False, reserved=False, stop=lambda: False):
+    def validate_replacement(self, old, selected, edit_topics):
+        if old.channel_id != selected.channel_id or old.base_url != selected.base_url:
+            raise ValueError("Channel or publisher changed")
+        if edit_topics:
+            if selected.version < old.version or set(old.nodes) == set(selected.nodes):
+                raise ValueError("Choose a different topic selection")
+        elif (selected.nodes != old.nodes or selected.allow_full != old.allow_full
+                or selected.version <= old.version):
+            raise ValueError("Updates must preserve the installed selection and advance its version")
+
+    def download(self, sid, selection, *, update=False, edit_topics=False, reserved=False, stop=lambda: False):
         """Run a bounded explicit selection; candidate never changes live content."""
         with self._operation(sid, reserved=reserved):
             job = self.read(sid)
             if update:
                 old = self._selection(job["installed"])
-                if (selection.channel_id != old.channel_id or selection.nodes != old.nodes
-                        or selection.allow_full != old.allow_full or selection.version <= old.version
-                        or selection.base_url != old.base_url):
-                    raise ValueError("Updates must preserve the installed selection and advance its version")
+                self.validate_replacement(old, selection, edit_topics)
                 if job.get("candidate") or job.get("previous"):
                     raise ValueError("Resolve existing staged or rollback package first")
             elif job.get("installed"):
@@ -137,7 +146,7 @@ class Jobs:
             target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
             job = dict(job, state="downloading", active=True, speed_bytes_per_second=0,
                        downloaded_bytes=0, expected_bytes=selection.media_bytes, detail="",
-                       partial=dict(artifact, update=update))
+                       partial=dict(artifact, update=update, edit_topics=edit_topics))
             self._write(sid, job)
             started = time.monotonic()
             last = 0
@@ -193,14 +202,17 @@ class Jobs:
         self.runner([str(self.executable), "manage", *args], env=env, check=True, timeout=3600)
 
     def _import(self, sid, artifact):
+        self.publication_phase[sid] = "Verifying selected files"
         self.verify(sid, artifact)
         with self.lock:
             self.guard(self._selection(artifact).media_bytes + scope.MAX_DATABASE_BYTES + sum(self.reservations.values()))
         env = dict(os.environ, KOLIBRI_HOME=str(self.home))
         selection = self._selection(artifact)
         for command in native.import_commands(self.executable, self._package(sid, artifact), selection):
+            self.publication_phase[sid] = ("Importing channel metadata" if command[2] == "importchannel" else "Importing selected lessons")
             self.runner(command, env=env, check=True, timeout=3600)
         database = native._database(self._package(sid, artifact), selection.channel_id)
+        self.publication_phase[sid] = "Checking imported lessons"
         kolibri_publication.verify_live_scope(self.registry, database, selection)
 
     def _identity(self, artifact):
@@ -229,6 +241,7 @@ class Jobs:
             if not artifact:
                 raise ValueError("Verified educational content required")
             if enabled:
+                self.publication_phase[sid] = "Verifying installed package"
                 self.verify(sid, artifact)
             with self.registry.transaction() as acknowledge:
                 published = self.registry.read()
@@ -254,6 +267,7 @@ class Jobs:
             old = job.get("installed")
             if not artifact or not old:
                 raise ValueError("No verified educational replacement")
+            self.publication_phase[sid] = "Verifying staged and installed packages"
             self.verify(sid, artifact)
             self.verify(sid, old)
             with self.registry.transaction() as acknowledge:

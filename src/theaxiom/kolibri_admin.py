@@ -118,6 +118,7 @@ def status(manager, record):
     if selection and selection["channel_id"] != channel(record):
         return {"configured": True, "error": "Installed channel does not match profile"}
     return {"configured": True, "active": sid in manager.active,
+            "publication_phase": manager.publication_phase.get(sid),
             "recovery_pending": manager.registry.pending.exists(),
             "installed": selection, "published": bool(published),
             "reviewed": bool(job.get("reviewed")),
@@ -130,11 +131,11 @@ def status(manager, record):
                 "sampled_at", "speed_bytes_per_second", "detail") if key in job}}
 
 
-def start_download(manager, record, selected, *, update=False):
+def start_download(manager, record, selected, *, update=False, edit_topics=False):
     sid = record["source_id"]
     def worker():
         try:
-            manager.download(sid, selected, update=update, reserved=True)
+            manager.download(sid, selected, update=update, edit_topics=edit_topics, reserved=True)
         except (OSError, ValueError, RuntimeError):
             # The private job ledger records terminal failures.
             pass
@@ -146,8 +147,7 @@ def start_download(manager, record, selected, *, update=False):
             if not job.get("installed") or job.get("candidate") or job.get("previous"):
                 raise ValueError("Resolve installed, staged or rollback content first")
             old = manager._selection(job["installed"])
-            if selected.channel_id != old.channel_id or selected.nodes != old.nodes or selected.version <= old.version or selected.allow_full != old.allow_full or selected.base_url != old.base_url:
-                raise ValueError("Educational updates must preserve the installed scope")
+            manager.validate_replacement(old, selected, edit_topics)
         elif job.get("installed"):
             raise ValueError("Educational content already installed")
         partial = job.get("partial")
