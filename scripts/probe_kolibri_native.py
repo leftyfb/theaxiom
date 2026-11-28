@@ -2,6 +2,8 @@
 Never uses the operator's Kolibri home or Axiom production storage.
 """
 import os
+import json
+import re
 from pathlib import Path
 import secrets
 import shutil
@@ -11,6 +13,8 @@ import subprocess
 import tempfile
 import time
 from urllib.request import urlopen
+from urllib.error import HTTPError
+from urllib.parse import urlencode, urljoin
 import ssl
 
 from playwright.sync_api import sync_playwright
@@ -135,6 +139,28 @@ http {{
                 else:
                     raise RuntimeError("Kolibri proxy failed to become ready")
                 print("NATIVE HTTPS PROXY READY",flush=True)
+                def public_json(path, params=None):
+                    url=origin+"/kolibri/api/public/v2/"+path
+                    if params:
+                        url+="?"+urlencode(params)
+                    with urlopen(url,context=ssl._create_unverified_context(),timeout=10) as response:
+                        raw=response.read(2*1024*1024+1)
+                    assert len(raw)<=2*1024*1024, "Native API response too large"
+                    return json.loads(raw)
+                video_node=rows["video"][0]
+                def search_selected():
+                    answer=public_json("contentnode/",{"channels":CID,"keywords":"Evaluating functions",
+                        "kind":"content","max_results":20})
+                    hits=answer["results"] if isinstance(answer,dict) else answer
+                    assert any(hit.get("id")==video_node for hit in hits),hits[:2]
+                search_selected()
+                video_info=public_json("contentnode/"+video_node+"/")
+                caption=next(f for f in video_info["files"] if f["extension"]=="vtt" and f["available"])
+                caption_url=urljoin(origin+"/kolibri/",caption["storage_url"])
+                assert caption_url.startswith(origin+"/kolibri/")
+                with urlopen(caption_url,context=ssl._create_unverified_context(),timeout=10) as response:
+                    assert response.read(64).lstrip(b"\\xef\\xbb\\xbf").startswith(b"WEBVTT")
+                print("LOCAL PUBLIC API SEARCH AND CAPTION FILE PASSED",flush=True)
                 with sync_playwright() as p:
                     browser=p.chromium.launch(headless=True)
                     ctx=browser.new_context(ignore_https_errors=True,viewport={"width":390,"height":844},service_workers="block")
@@ -177,8 +203,48 @@ http {{
                     }""",timeout=45000)
                     print("EXERCISE QUESTION",page.locator(".perseus-root .perseus").first.inner_text()[:300],flush=True)
                     print("NATIVE OFFLINE EXERCISE RENDER PASSED",flush=True)
+                    answer=page.locator(".perseus-root .perseus input:visible, .perseus-root .perseus textarea:visible, .perseus-root .perseus [contenteditable=true]:visible")
+                    if answer.count():
+                        answer.first.fill("1")
+                    else:
+                        field=page.locator(".perseus-root .perseus .mq-editable-field:visible")
+                        if field.count():
+                            field.first.click()
+                            page.keyboard.type("1")
+                        else:
+                            choice=page.locator(".perseus-root .perseus [role=radio]:visible, .perseus-root .perseus input[type=radio]:visible")
+                            assert choice.count(), "No accessible answer widget"
+                            choice.first.click()
+                    page.get_by_role("button",name="Check",exact=True).click()
+                    page.get_by_text(re.compile(r"^(Correct!|Try again|Great! Keep going|Try a different question|Try next question)$")).first.wait_for(state="visible",timeout=30000)
+                    print("OFFLINE EXERCISE ANSWER CHECK PASSED",flush=True)
                     print("EXTERNAL REQUEST HOSTS BLOCKED",sorted(blocked),flush=True)
                     browser.close()
+                # Native removal must not expose stale published content or
+                # destroy the independent verified package or learner accounts.
+                manage("deletechannel",CID)
+                for _ in range(20):
+                    try:
+                        public_json("contentnode/"+video_node+"/",{"axiom_probe":secrets.token_hex(4)})
+                    except HTTPError as exc:
+                        if exc.code==404:
+                            break
+                        raise
+                    time.sleep(.5)
+                else:
+                    raise AssertionError("Removed channel remains visible in native API")
+                try:
+                    with urlopen(caption_url,context=ssl._create_unverified_context(),timeout=10) as response:
+                        raise AssertionError("Removed channel still serves its unique caption")
+                except HTTPError as exc:
+                    assert exc.code==404,exc.code
+                native.verify(package,selection,digest)
+                print("NATIVE CHANNEL REMOVAL AND PRIVATE PACKAGE PRESERVATION PASSED",flush=True)
+                for command in native.import_commands(kolibri,package,selection):
+                    subprocess.run(command,env=env,check=True,timeout=240)
+                search_selected()
+                manage("shell","-c",'from kolibri.core.auth.models import FacilityUser; assert FacilityUser.objects.filter(username="probe").exists()')
+                print("NATIVE CHANNEL RESTORE AND LEARNER ACCOUNT PRESERVATION PASSED",flush=True)
             except BaseException:
                 print((root/"kolibri.log").read_text(errors="replace")[-12000:],flush=True)
                 if (root/"nginx.log").exists():
