@@ -184,12 +184,23 @@ def acquire(root, selection, *, progress=lambda n, total: None, guard=lambda n: 
 
             def report(n):
                 with lock:
-                    counts[item.storage_path] = n
+                    counts[item.storage_path] = max(n, counts.get(item.storage_path, 0))
                     progress(done + sum(counts.values()), total)
 
-            digest, size = _download(selection.base_url + "storage/" + item.storage_path,
-                target, item.size, exact=item.size, md5=item.checksum,
-                guard=checked_guard, total_seconds=3600, progress=report)
+            for attempt in range(3):
+                try:
+                    digest, size = _download(selection.base_url + "storage/" + item.storage_path,
+                        target, item.size, exact=item.size, md5=item.checksum,
+                        guard=checked_guard, total_seconds=3600, progress=report)
+                    break
+                except pdf_transport.RetryableDownloadError:
+                    checked_guard(0)
+                    target.unlink(missing_ok=True)
+                    if attempt == 2:
+                        raise
+                    # Retain a high-water mark for monotonic displayed progress.
+                    if stopped.wait(2 ** attempt):
+                        raise scope.ScopeError("Concurrent acquisition stopped.")
             with lock:
                 counts.pop(item.storage_path, None)
                 done += size
