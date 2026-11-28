@@ -785,6 +785,7 @@
           <div class="editor-wide"><label for="catalog-url">Download URL</label><input id="catalog-url" name="source_url" type="url" maxlength="512">
             <small>Direct HTTP(S) download URL, if available.</small></div>
           <div><label for="catalog-format">Content format</label><select id="catalog-format" name="format"><option value="unspecified">Auto / not yet specified</option><option value="zim">Kiwix / ZIM</option><option value="pmtiles">PMTiles map</option><option value="pdf">PDF</option><option value="epub">EPUB</option><option value="json">JSON data</option><option value="csv">CSV data</option><option value="kolibri">Kolibri education</option></select></div>
+          <div class="editor-wide" data-kolibri-field hidden><label for="catalog-kolibri-channel-id">Kolibri channel ID (required)</label><input id="catalog-kolibri-channel-id" name="kolibri_channel_id" maxlength="32" pattern="[a-f0-9]{32}" title="Enter the 32-character channel ID using lowercase letters a–f and digits." aria-describedby="kolibri-channel-help"><small id="kolibri-channel-help">Enter the channel ID supplied by the publisher. Select topics from the source card after saving.</small></div>
           <div class="editor-wide"><label for="catalog-description">Description (optional)</label><textarea id="catalog-description" name="description" maxlength="512"></textarea></div>
         </div>
         <fieldset class="editor-grid">
@@ -853,7 +854,6 @@
             <div><label for="catalog-search-enabled">Include in global search</label><select id="catalog-search-enabled" name="search_enabled"><option value="">Default (enabled)</option><option value="yes">Enabled</option><option value="no">Disabled</option></select></div>
             <div class="editor-wide"><label for="catalog-publisher-md5">Publisher MD5 (optional map checksum)</label><input id="catalog-publisher-md5" name="publisher_md5" pattern="[a-fA-F0-9]{32}" maxlength="32"></div>
             <div class="editor-wide"><label for="catalog-publisher-sha1">Publisher SHA-1 (optional ZIM checksum)</label><input id="catalog-publisher-sha1" name="publisher_sha1" pattern="[a-fA-F0-9]{40}" maxlength="40"></div>
-            <div class="editor-wide"><label for="catalog-kolibri-channel-id">Kolibri channel ID (education only)</label><input id="catalog-kolibri-channel-id" name="kolibri_channel_id" maxlength="32" pattern="[a-f0-9]{32}"></div>
             <div class="editor-wide" data-structured-field hidden><label for="catalog-data-record-path">JSON record path (optional)</label><input id="catalog-data-record-path" name="data_record_path" maxlength="512" placeholder="e.g. results.items"><p class="source-note">Leave empty for a top-level array. Use dot-separated object keys.</p></div>
             <div class="editor-wide" data-structured-field hidden><label for="catalog-data-columns">Displayed columns (optional)</label><input id="catalog-data-columns" name="data_columns" maxlength="512" placeholder="name,city,frequency"><p class="source-note">Comma-separated field names in display order; leave empty to discover columns. JSON nested scalar fields may use dot-separated paths.</p></div>
             <div class="editor-wide" data-structured-field hidden><label for="catalog-data-title-field">Record title field (optional)</label><input id="catalog-data-title-field" name="data_title_field" maxlength="512" placeholder="name"><p class="source-note">Use a displayed column for record headings.</p></div>
@@ -2218,6 +2218,9 @@
       let editorGeneration = 0;
       let policyTouched = false;
       function discoveryOptions() {
+        const channelField = input('kolibri_channel_id');
+        channelField.required = format.value === 'kolibri';
+        channelField.closest('[data-kolibri-field]').hidden = !channelField.required;
         const structured = ['json','csv'].includes(format.value);
         if (format.value === 'csv') input('data_record_path').value = '';
         for (const node of form.querySelectorAll('[data-structured-field]')) {
