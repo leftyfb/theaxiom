@@ -320,6 +320,9 @@ def fields(bundle, nodes, digest, language):
 
 
 def generate(config, directory, output, *, progress, guard):
+    import shutil
+    if shutil.which('zimwriterfs') is None:
+        raise scope.ScopeError('Install the zim-tools package (zimwriterfs) before acquiring educational media.')
     channel, nodes, version, digest, size, language = configuration(config)
     directory = Path(directory)
     database = directory / "channel.sqlite3"

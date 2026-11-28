@@ -93,3 +93,34 @@ def test_upstream_md5_mismatch_fails_before_reader(tmp_path, monkeypatch):
     with pytest.raises(bundle.scope.ScopeError, match="checksum"):
         bundle.acquire(selected,pages)
     assert not (pages/"index.html").exists()
+
+
+def test_default_channel_requires_explicit_scope(tmp_path):
+    from theaxiom import catalog_store, zim_source
+    store = catalog_store.CatalogStore(tmp_path/"catalog.json")
+    row = next(r for r in store.get()["sources"] if r["source_id"]=="kolibri")
+    config = row["configuration"]
+    assert config["generator_channel"] == "c9d7f950ab6b5a1199e3d6c10d7f0103"
+    assert config["archive_generator"] == "kolibri"
+    assert config["update_policy"] == "notify"
+    assert row["profile"]["icon_png"]
+    with pytest.raises(ValueError, match="Select educational topics"):
+        zim_source.candidate(config)
+
+
+def test_channel_update_preserves_scope_and_metadata_identity(tmp_path, monkeypatch):
+    from contextlib import contextmanager
+    from theaxiom import kolibri_selection
+    path = fixture(tmp_path/"channel.sqlite3")
+    @contextmanager
+    def fake(channel, refresh=False):
+        assert channel == CID and refresh
+        yield path, bundle.scope.inspect_channel(path,CID), "f"*64
+    monkeypatch.setattr(kolibri_selection,"metadata",fake)
+    installed = dict(verified=True,family=CID,edition="0",nodes=[TOPIC],
+                     metadata_sha256="e"*64)
+    result = kolibri_selection.check_update(installed)
+    assert result["state"] == "update_available"
+    assert result["candidate_sha256"] == "f"*64
+    assert result["candidate_url"] == bundle.source_url(CID,1)
+    assert result["candidate_bytes"] == len(PAYLOAD)

@@ -367,3 +367,41 @@ def test_complete_pinned_archive_recovered_without_network(disk, monkeypatch, va
         assert artifact["bytes"] == len(data)
         assert (disk / "library/zim" / artifact["filename"]).read_bytes() == data
         assert not partial.exists()
+
+
+def test_generated_education_uses_normal_archive_verification_and_promotion(disk, monkeypatch):
+    from pathlib import Path
+    from theaxiom import kolibri_bundle, zim_jobs
+    data = fixture_bytes()
+    config = {
+        "format":"zim", "archive_generator":"kolibri", "generator_channel":"a"*32,
+        "generator_scope":"b"*32, "generator_version":"1",
+        "generator_metadata_sha256":"c"*64, "generator_transfer_bytes":"10",
+        "generator_language":"eng", "generator_notice":"Publisher attribution",
+        "source_url":kolibri_bundle.source_url("a"*32,1),
+    }
+    def fake_generate(configuration, directory, output, *, progress, guard):
+        assert configuration["generator_scope"] == "b"*32
+        guard(10)
+        progress(10,10)
+        Path(output).write_bytes(data)
+    monkeypatch.setattr(kolibri_bundle,"generate",fake_generate)
+    identity = zim_jobs.identity(config)
+    assert identity["generator_scope"] == config["generator_scope"]
+    assert identity["sha256"] == ""
+    samples = []
+    artifact = zim_source.download_resumable("education", identity,
+        progress=lambda current,total,metadata:samples.append((current,total,metadata)))
+    assert artifact["sha256"] == hashlib.sha256(data).hexdigest()
+    assert (disk/"library/zim"/artifact["filename"]).read_bytes() == data
+    assert not list((disk/"staging/zim").iterdir())
+    assert any(sample[2].get("verifying") for sample in samples)
+
+
+def test_generated_education_missing_converter_stops_before_network(tmp_path, monkeypatch):
+    from theaxiom import kolibri_bundle
+    import shutil
+    monkeypatch.setattr(shutil,"which",lambda name:None)
+    with pytest.raises(ValueError,match="zim-tools"):
+        kolibri_bundle.generate({},tmp_path,tmp_path/"out.zim",
+                                progress=lambda n,t:None,guard=lambda n:None)
