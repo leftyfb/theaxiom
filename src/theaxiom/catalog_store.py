@@ -21,8 +21,9 @@ from . import source_catalog, source_activity
 SCHEMA_VERSION = 2
 PROFILE_FIELDS = {"title", "description", "publisher", "edition", "language", "author", "icon_png"}
 CANDIDATE_FIELDS = {"source_url", "expected_size_bytes", "sha256", "publisher_sha1", "publisher_md5", "provenance", "license"}
+KOLIBRI_FIELDS = {"kolibri_channel_id"}
 DATA_FIELDS = {"data_record_path", "data_columns", "data_title_field", "data_range_labels"}
-ARTIFACT_CONFIG_FIELDS = CANDIDATE_FIELDS | DATA_FIELDS | {"format"}
+ARTIFACT_CONFIG_FIELDS = CANDIDATE_FIELDS | DATA_FIELDS | KOLIBRI_FIELDS | {"format"}
 DISCOVERY_FIELDS = {"update_method", "update_endpoint", "update_periodic"}
 UPDATE_POLICY_FIELDS = {"update_policy", "update_window_start", "update_window_end"}
 CONFIG_FIELDS = ARTIFACT_CONFIG_FIELDS | DISCOVERY_FIELDS | UPDATE_POLICY_FIELDS | {"search_enabled"}
@@ -414,6 +415,8 @@ class CatalogStore:
             raise CatalogError("invalid source format")
         if key == "expected_size_bytes" and value and not re.fullmatch(r"[1-9][0-9]{0,19}", value):
             raise CatalogError("expected size must be a positive decimal byte count")
+        if key == "kolibri_channel_id" and value and not re.fullmatch(r"[a-f0-9]{32}", value):
+            raise CatalogError("Kolibri channel ID must contain 32 lowercase hexadecimal characters")
         if key == "publisher_md5" and value and not re.fullmatch(r"[a-fA-F0-9]{32}", value):
             raise CatalogError("Publisher MD5 must contain exactly 32 hexadecimal characters")
         if key == "publisher_sha1" and value and not re.fullmatch(r"[a-fA-F0-9]{40}", value):

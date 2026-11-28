@@ -19,6 +19,7 @@ import ssl
 
 from playwright.sync_api import sync_playwright
 from theaxiom import kolibri_native as native, kolibri_scope as scope
+from theaxiom.kolibri_publication import Registry
 
 CID = "c9d7f950ab6b5a1199e3d6c10d7f0103"
 CONFIG = Path(__file__).resolve().parents[1] / "deploy" / "kolibri"
@@ -86,6 +87,15 @@ def main():
         for command in native.import_commands(kolibri,package,selection):
             subprocess.run(command,env=env,check=True,timeout=240)
         print("NATIVE DISK IMPORT COMPLETE",flush=True)
+        registry = Registry(root/"private-publications", home/"db.sqlite3")
+        publication_record = {"khan-probe": {"channel_id": CID, "version": channel.version, "manifest_sha256": digest}}
+        assert not registry.authorize("/kolibri/en/learn/")
+        with registry.transaction() as acknowledge:
+            acknowledge(publication_record)
+            assert not registry.authorize("/kolibri/en/learn/")
+        assert registry.authorize("/kolibri/en/learn/")
+        assert registry.authorize("/content/static/sandbox/example.html",alternate=True)
+        print("NATIVE PUBLICATION ACKNOWLEDGEMENT PASSED",flush=True)
         subprocess.run(["openssl","req","-x509","-newkey","rsa:2048","-nodes","-days","1",
                         "-subj","/CN=localhost","-keyout",str(root/"key.pem"),
                         "-out",str(root/"cert.pem")],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
@@ -223,7 +233,12 @@ http {{
                     browser.close()
                 # Native removal must not expose stale published content or
                 # destroy the independent verified package or learner accounts.
-                manage("deletechannel",CID)
+                with registry.transaction() as acknowledge:
+                    assert not registry.authorize("/kolibri/en/learn/")
+                    manage("deletechannel",CID)
+                    acknowledge({})
+                assert not registry.authorize("/kolibri/en/learn/")
+                assert not registry.authorize("/content/static/sandbox/example.html",alternate=True)
                 for _ in range(20):
                     try:
                         public_json("contentnode/"+video_node+"/",{"axiom_probe":secrets.token_hex(4)})
@@ -241,8 +256,11 @@ http {{
                     assert exc.code==404,exc.code
                 native.verify(package,selection,digest)
                 print("NATIVE CHANNEL REMOVAL AND PRIVATE PACKAGE PRESERVATION PASSED",flush=True)
-                for command in native.import_commands(kolibri,package,selection):
-                    subprocess.run(command,env=env,check=True,timeout=240)
+                with registry.transaction() as acknowledge:
+                    for command in native.import_commands(kolibri,package,selection):
+                        subprocess.run(command,env=env,check=True,timeout=240)
+                    acknowledge(publication_record)
+                assert registry.authorize("/kolibri/en/learn/")
                 search_selected()
                 manage("shell","-c",'from kolibri.core.auth.models import FacilityUser; assert FacilityUser.objects.filter(username="probe").exists()')
                 print("NATIVE CHANNEL RESTORE AND LEARNER ACCOUNT PRESERVATION PASSED",flush=True)

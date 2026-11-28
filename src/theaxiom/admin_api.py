@@ -50,6 +50,7 @@ document_update_discovery = importlib.import_module(f"{__package__}.document_upd
 document_replacement = importlib.import_module(f"{__package__}.document_replacement" if __package__ else "theaxiom.document_replacement")
 zim_jobs = importlib.import_module(f"{__package__}.zim_jobs" if __package__ else "theaxiom.zim_jobs")
 pmtiles_source = importlib.import_module(f"{__package__ or 'theaxiom'}.pmtiles_source")
+kolibri_publication = importlib.import_module(f"{__package__ or 'theaxiom'}.kolibri_publication")
 structured_source = importlib.import_module(f"{__package__ or 'theaxiom'}.structured_source")
 zim_source = importlib.import_module(f"{__package__}.zim_source" if __package__ else "theaxiom.zim_source")
 zim_catalog = importlib.import_module(f"{__package__}.zim_catalog" if __package__ else "theaxiom.zim_catalog")
@@ -1251,7 +1252,7 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                          or pmtiles_source.ROUTE.fullmatch(self.path) or _map_asset_path(self.path)
                          or structured_source.ROUTE.fullmatch(self.path.split("?", 1)[0])
                          or ZIM_READER_ROUTE.fullmatch(self.path) or PDFJS_ASSET.fullmatch(self.path)
-                         or self.path == "/internal/publication/zim"):
+                         or self.path in {"/internal/publication/zim", "/internal/publication/kolibri", "/internal/publication/kolibri-alternate"}):
             return True
 
         if post and self.path == "/api/update-notifications":
@@ -1592,6 +1593,18 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
             self.send_header("Location", location)
             self.send_header("Content-Length", "0")
             self.end_headers()
+        elif self.path in {"/internal/publication/kolibri", "/internal/publication/kolibri-alternate"}:
+            try:
+                registry = kolibri_publication.configured_registry()
+                records = SOURCE_CATALOG.get()["sources"]
+                allowed = bool(registry and kolibri_publication.catalog_acknowledged(records, registry)
+                    and registry.authorize(self.headers.get("X-Axiom-Original-URI", ""),
+                        alternate=self.path.endswith("-alternate")))
+            except (OSError, ValueError, catalog_store.CatalogError):
+                allowed = False
+            self.send_response(204 if allowed else 403)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
         elif self.path == "/internal/publication/zim":
             uri = self.headers.get("X-Axiom-Original-URI", "")
             try:
@@ -1867,7 +1880,24 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                 targets[sid] = (dict(name=source["name"], kind="structured", snapshot=snapshot,
                                      path=source["entry_path"]), library_search.STRUCTURED_ADAPTER)
 
+        registry = kolibri_publication.configured_registry()
+        def current_kolibri():
+            try:
+                return kolibri_publication.catalog_acknowledged(SOURCE_CATALOG.get()["sources"], registry)
+            except (OSError, ValueError, catalog_store.CatalogError):
+                return {}
+        if registry:
+            education = current_kolibri()
+            for source in sources:
+                sid = source["source_id"]
+                if source["category"] == "Education" and sid in education:
+                    targets[sid] = (dict(name=source["name"], kind="kolibri", path="/kolibri/viewcontent",
+                        database=registry.database, channel_id=education[sid]["channel_id"],
+                        identity=education[sid]), library_search.KOLIBRI_ADAPTER)
+
         def allowed(sid, route):
+            if route.get("kind") == "kolibri":
+                return current_kolibri().get(sid) == route["identity"]
             if route.get("kind") == "structured":
                 return structured_source.current(SOURCE_CATALOG, sid) == route["snapshot"]
             if "artifact" in route:
@@ -1966,6 +1996,15 @@ class AdminAPIHandler(BaseHTTPRequestHandler):
                                             symbol="D", category="Data", name=profile["title"],
                                             description=profile.get("description", ""), icon_png=profile.get("icon_png", ""),
                                             language=profile.get("language") or "Unspecified language"))
+            education = kolibri_publication.catalog_acknowledged(catalog["sources"])
+            for record in catalog["sources"]:
+                sid = record["source_id"]
+                if sid in education:
+                    profile = record["profile"]
+                    sources.append(dict(source_id=sid, entry_path="/kolibri/en/learn/",
+                        symbol="K", category="Education", name=profile["title"],
+                        description=profile.get("description", ""), icon_png=profile.get("icon_png", ""),
+                        language=profile.get("language") or "Unspecified language"))
             search_disabled = {record["source_id"] for record in catalog["sources"]
                                if record["configuration"].get("search_enabled") == "no"}
             for source in sources:
